@@ -82,7 +82,7 @@ class AllRecipeTags {
             RecipeTag(id: "attr_comfort_food", name: "Comfort Food", iconName: "attr_comfort_food", category: .attributes),
             RecipeTag(id: "attr_healthy", name: "Healthy", iconName: "attr_healthy", category: .attributes),
             RecipeTag(id: "attr_make_ahead", name: "Make-Ahead", iconName: "attr_make_ahead", category: .attributes),
-            RecipeTag(id: "attr_beginner_friendly", name: "Beginner Friendly", iconName: "attr_beginner_friendly", category: .attributes)
+            RecipeTag(id: "attr_beginner", name: "Beginner", iconName: "attr_beginner", category: .attributes)
         ]
 
         allTags = cuisineTags + dietaryTags + mealTypeTags + cookingMethodTags + occasionTags + attributesTags
