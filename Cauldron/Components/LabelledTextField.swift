@@ -5,15 +5,20 @@ struct LabelledTextField: View {
     @Binding var text: String
     var keyboardType: UIKeyboardType = .default
     var textContentType: UITextContentType? = nil
+    var placeholder: String = ""
+    var autocapitalization: TextInputAutocapitalization = .never
+    var disableAutocorrection: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption)
                 .foregroundColor(.secondary)
-            TextField("", text: $text)
+            TextField(placeholder, text: $text)
                 .keyboardType(keyboardType)
                 .textContentType(textContentType)
+                .textInputAutocapitalization(autocapitalization)
+                .disableAutocorrection(disableAutocorrection)
         }
     }
 }
@@ -32,4 +37,4 @@ struct LabelledTextField: View {
         }
     }
     return PreviewWrapper()
-} 
+}

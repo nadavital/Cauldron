@@ -74,17 +74,7 @@ struct RecipeDetailView: View {
                             HStack(spacing: 8) {
                                 ForEach(Array(recipe.tags), id: \.self) { tagID in
                                     if let tag = AllRecipeTags.shared.getTag(byId: tagID) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: tag.iconName)
-                                                .font(.caption)
-                                            Text(tag.name)
-                                                .font(.caption)
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(Color.blue.opacity(0.7))
-                                        .foregroundColor(.white)
-                                        .clipShape(Capsule())
+                                        TagChip(tag: tag)
                                     }
                                 }
                             }
