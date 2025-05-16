@@ -36,11 +36,64 @@ struct AddRecipeView: View {
     var body: some View {
         GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 20) {
+                // Image with title overlaid on top (z-axis)
+                ZStack(alignment: .top) {
+                    // Header image at the bottom of the stack
                     ImageHeaderView(name: $name,
-                                    selectedPhoto: $selectedPhoto,
-                                    selectedImageData: $selectedImageData)
+                                   selectedPhoto: $selectedPhoto,
+                                   selectedImageData: $selectedImageData)
+                        .frame(width: geometry.size.width, height: 450)
+                        .clipped()
+                        .ignoresSafeArea(edges: .top)
+                        
+                    // Photo picker button positioned at top-right
+                    VStack {
+                        HStack {
+                            Spacer()
+                            PhotosPicker(selection: $selectedPhoto, matching: .images, photoLibrary: .shared()) {
+                                Image(systemName: selectedImageData != nil ? "photo.fill.on.rectangle.fill" : "plus.viewfinder")
+                                    .font(.title2)
+                                    .foregroundColor(selectedImageData != nil ? .white : .accentColor)
+                                    .padding(10)
+                                    .background(
+                                        Circle()
+                                            .fill(selectedImageData != nil ? Color.black.opacity(0.5) : Color.white.opacity(0.8))
+                                    )
+                            }
+                            .padding(.trailing, 16)
+                            .padding(.top, 16)
+                        }
+                        Spacer()
+                    }
+                    .onChange(of: selectedPhoto) { _ in
+                        Task {
+                            if let data = try? await selectedPhoto?.loadTransferable(type: Data.self) {
+                                selectedImageData = data
+                            }
+                        }
+                    }
+                    
+                    // Title text field overlaid on image
+                    VStack {
+                        Spacer()
+                        ZStack(alignment: .leading) {
+                            if name.isEmpty {
+                                Text("Recipe Name")
+                                    .font(.largeTitle.bold())
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                            
+                            TextField("", text: $name)
+                                .font(.largeTitle.bold())
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                    }
+                }
+                .frame(height: 450)
 
+                VStack(spacing: 20) {
                     TimingServingsView(prepTime: $prepTime,
                                        cookTime: $cookTime,
                                        servings: $servings)
