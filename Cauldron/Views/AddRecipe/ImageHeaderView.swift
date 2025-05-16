@@ -21,9 +21,11 @@ struct ImageHeaderView: View {
                         endPoint: .bottom
                     )
                 )
+                .ignoresSafeArea(edges: .top)
         } else {
             Rectangle()
                 .fill(Color.accentColor.opacity(0.1))
+                .ignoresSafeArea(edges: .top)
         }
     }
 }

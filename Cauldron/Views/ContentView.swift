@@ -38,7 +38,7 @@ struct ContentView: View {
     @State private var isRecipeGridInEditMode: Bool = false
 
     var body: some View {
-        NavigationView {
+        NavigationStack { // Changed from NavigationView to NavigationStack
             RecipeGridView(recipes: $recipes, 
                            isEditMode: isRecipeGridInEditMode, 
                            deleteAction: deleteRecipe)

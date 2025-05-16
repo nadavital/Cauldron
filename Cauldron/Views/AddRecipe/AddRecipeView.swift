@@ -44,7 +44,6 @@ struct AddRecipeView: View {
                                    selectedImageData: $selectedImageData)
                         .frame(width: geometry.size.width, height: 450)
                         .clipped()
-                        .ignoresSafeArea(edges: .top)
                         
                     // Photo picker button positioned at top-right
                     VStack {
@@ -92,6 +91,7 @@ struct AddRecipeView: View {
                     }
                 }
                 .frame(height: 450)
+                .ignoresSafeArea(edges: .top)
 
                 VStack(spacing: 20) {
                     TimingServingsView(prepTime: $prepTime,
