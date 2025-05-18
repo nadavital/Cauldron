@@ -158,14 +158,6 @@ struct RecipeDetailView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
-            
-            // Subtle pattern overlay
-            Image(systemName: "circle.grid.2x2")
-                .resizable(resizingMode: .tile)
-                .foregroundStyle(.white)
-                .opacity(0.05)
-                .ignoresSafeArea()
-                .blendMode(.overlay)
         }
     }
     
@@ -187,14 +179,6 @@ struct RecipeDetailView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
-            
-            // Additional subtle texture
-            Image(systemName: "square.grid.3x3")
-                .resizable(resizingMode: .tile)
-                .foregroundStyle(.white)
-                .opacity(0.04)
-                .ignoresSafeArea()
-                .blendMode(.overlay)
         }
     }
 }

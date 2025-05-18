@@ -86,17 +86,8 @@ struct RecipeCardView: View {
                             .blendMode(.overlay)
                         }
                     } else {
-                        // Light mode - dominant color with pattern overlay
-                        ZStack {
-                            dominantColor.opacity(0.3)
-                            
-                            // Light mode pattern overlay
-                            Image(systemName: "circle.grid.2x2")
-                                .resizable(resizingMode: .tile)
-                                .foregroundStyle(.white)
-                                .opacity(0.05)
-                                .blendMode(.overlay)
-                        }
+                        // Light mode - dominant color with plain background
+                        dominantColor.opacity(0.3)
                     }
                 }
             )
