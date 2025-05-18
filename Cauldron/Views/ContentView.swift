@@ -21,7 +21,8 @@ struct ContentView: View {
                instructions: ["Mix ingredients", "Cook on griddle"], 
                prepTime: 10, cookTime: 15, servings: 4, 
                imageData: nil,
-               tags: ["meal_breakfast", "attr_kid_friendly", "method_quick_easy"]),
+               tags: ["meal_breakfast", "attr_kid_friendly", "method_quick_easy"],
+               description: "Fluffy pancakes perfect for breakfast. Top with syrup or fruit.") ,
         Recipe(name: "Spaghetti Bolognese", 
                ingredients: [
                 Ingredient(name: "Spaghetti", quantity: 500, unit: .grams),
@@ -31,7 +32,8 @@ struct ContentView: View {
                instructions: ["Cook spaghetti", "Brown beef", "Add sauce and simmer"], 
                prepTime: 15, cookTime: 30, servings: 6, 
                imageData: nil,
-               tags: ["cuisine_italian", "meal_dinner"])
+               tags: ["cuisine_italian", "meal_dinner"],
+               description: "Classic Italian pasta with rich meat sauce.")
     ]
 
     @State private var showingAddRecipeView = false

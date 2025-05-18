@@ -41,7 +41,8 @@ struct DeleteButton: View {
                 cookTime: 20,
                 servings: 4,
                 imageData: nil,
-                tags: []
+                tags: [],
+                description: "Sample Description"
             ),
             deleteAction: { _ in print("Delete tapped") }
         )

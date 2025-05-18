@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct AddRecipeView: View {
     @Environment(\.dismiss) var dismiss
@@ -11,6 +12,7 @@ struct AddRecipeView: View {
     @State private var prepTime: String = ""
     @State private var cookTime: String = ""
     @State private var servings: String = ""
+    @State private var description: String = ""
 
     // Image picker related states
     @State private var selectedPhoto: PhotosPickerItem? = nil
@@ -94,6 +96,20 @@ struct AddRecipeView: View {
                 .ignoresSafeArea(edges: .top)
 
                 VStack(spacing: 20) {
+                    RecipeInputCard(title: "Description", systemImage: "text.alignleft") {
+                        AnyView(
+                            DescriptionTextView(text: $description)
+                                .frame(maxWidth: .infinity, minHeight: 100)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 12)
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color(.separator), lineWidth: 0.5)
+                                )
+                        )
+                    }
                     TimingServingsView(prepTime: $prepTime,
                                        cookTime: $cookTime,
                                        servings: $servings)
@@ -217,6 +233,7 @@ struct AddRecipeView: View {
         if recipeToEdit == nil {
             ingredients = [IngredientInput(name: "", quantityString: "", unit: .cups)]
             instructions = [StringInput(value: "", isPlaceholder: false)]
+            description = ""
         } else if let recipe = recipeToEdit {
             name = recipe.name
             prepTime = "\(recipe.prepTime)"
@@ -228,6 +245,7 @@ struct AddRecipeView: View {
                 IngredientInput(id: $0.id, name: $0.name, quantityString: "\($0.quantity)", unit: $0.unit)
             } + [IngredientInput(name: "", quantityString: "", unit: .cups)]
             instructions = recipe.instructions.map { StringInput(value: $0) } + [StringInput(value: "", isPlaceholder: false)]
+            description = recipe.description
         }
     }
 
@@ -254,8 +272,118 @@ struct AddRecipeView: View {
             return Ingredient(name: inp.name, quantity: qty, unit: inp.unit)
         }
         let newInst = instructions.filter { !$0.isPlaceholder && !$0.value.isEmpty }.map { $0.value }
-        let rec = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs)
+        let rec = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs, description: description)
         if let idx = recipes.firstIndex(where: { $0.id == rec.id }) { recipes[idx] = rec }
         else { recipes.append(rec) }
+    }
+}
+
+struct DescriptionTextView: UIViewRepresentable {
+    @Binding var text: String
+    
+    // Add intrinsicContentSize for better sizing
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width - 48 // Account for padding
+        let newSize = uiView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        return CGSize(width: width, height: max(100, newSize.height))
+    }
+    
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        
+        // Configure scrolling behavior
+        tv.isScrollEnabled = true
+        tv.alwaysBounceVertical = true // Helps with scrolling feedback
+        tv.showsHorizontalScrollIndicator = false
+        tv.showsVerticalScrollIndicator = true
+        
+        // Text container setup for proper wrapping
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainer.lineBreakMode = .byWordWrapping
+        tv.textContainer.maximumNumberOfLines = 0
+        tv.textAlignment = .left
+        
+        // Auto-sizing and constraints setup
+        tv.translatesAutoresizingMaskIntoConstraints = false
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tv.setContentCompressionResistancePriority(.required, for: .vertical)
+        
+        // Configure appearance
+        tv.backgroundColor = .clear
+        tv.delegate = context.coordinator
+        tv.font = UIFont.preferredFont(forTextStyle: .body)
+        tv.returnKeyType = .done
+        
+        // Proper insets to ensure text doesn't run to the edge
+        tv.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        
+        // For smoother text entry and scrolling
+        tv.autocorrectionType = .yes
+        tv.keyboardDismissMode = .interactive
+        
+        // Placeholder
+        if text.isEmpty {
+            tv.text = "Add a description..."
+            tv.textColor = UIColor.placeholderText
+        } else {
+            tv.text = text
+            tv.textColor = UIColor.label
+        }
+        
+        return tv
+    }
+    
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text && !(uiView.textColor == UIColor.placeholderText && text.isEmpty) {
+            uiView.text = text
+            uiView.textColor = UIColor.label
+        }
+        
+        if text.isEmpty && !context.coordinator.isEditing {
+            uiView.text = "Add a description..."
+            uiView.textColor = UIColor.placeholderText
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: DescriptionTextView
+        var isEditing = false
+        
+        init(_ parent: DescriptionTextView) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+        
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isEditing = true
+            if textView.textColor == UIColor.placeholderText {
+                textView.text = ""
+                textView.textColor = UIColor.label
+            }
+        }
+        
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isEditing = false
+            if parent.text.isEmpty {
+                textView.text = "Add a description..."
+                textView.textColor = UIColor.placeholderText
+            }
+        }
+        
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text == "\n" {
+                textView.resignFirstResponder()
+                return false
+            }
+            return true
+        }
     }
 }

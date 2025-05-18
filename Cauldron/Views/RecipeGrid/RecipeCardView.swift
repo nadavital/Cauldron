@@ -169,7 +169,8 @@ struct RecipeCardView: View {
                 cookTime: 15, 
                 servings: 4, 
                 imageData: nil, 
-                tags: ["meal_breakfast"]
+                tags: ["meal_breakfast"],
+                description: "Fluffy pancakes perfect for breakfast."
             )
         )
         .frame(width: 180)
@@ -183,7 +184,8 @@ struct RecipeCardView: View {
                 cookTime: 30, 
                 servings: 6, 
                 imageData: UIImage(systemName: "photo")?.pngData(), 
-                tags: ["cuisine_italian"]
+                tags: ["cuisine_italian"],
+                description: "Classic Italian pasta with rich meat sauce."
             )
         )
         .frame(width: 180)

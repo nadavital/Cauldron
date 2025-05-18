@@ -52,13 +52,15 @@ struct RecipeGridView: View {
                instructions: ["Mix & Cook"], 
                prepTime: 10, cookTime: 15, servings: 4, 
                imageData: nil, 
-               tags: ["meal_breakfast", "method_quick_easy"]),
+               tags: ["meal_breakfast", "method_quick_easy"],
+               description: "Fluffy pancakes perfect for breakfast."),
         Recipe(name: "Spaghetti Bolognese", 
                ingredients: [Ingredient(name: "Spaghetti", quantity: 500, unit: .grams)], 
                instructions: ["Cook & Eat"], 
                prepTime: 15, cookTime: 30, servings: 6, 
                imageData: nil, 
-               tags: ["cuisine_italian", "meal_dinner"])
+               tags: ["cuisine_italian", "meal_dinner"],
+               description: "Classic Italian pasta with rich meat sauce.")
     ]
     return NavigationView {
         RecipeGridView(recipes: $sampleRecipes, isEditMode: true, deleteAction: { _ in print("Delete tapped in preview") })

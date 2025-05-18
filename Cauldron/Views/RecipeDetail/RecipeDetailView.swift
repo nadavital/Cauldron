@@ -38,6 +38,20 @@ struct RecipeDetailView: View {
                         
                         // Content sections
                         VStack(spacing: 20) {
+                            // Description Section
+                            if !recipe.description.isEmpty {
+                                SectionContainer {
+                                    VStack(alignment: .leading) {
+                                        SectionHeaderView(title: "Description", iconName: "text.alignleft")
+                                        Text(recipe.description)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                        
                             // Timing & Servings
                             SectionContainer {
                                 VStack(alignment: .leading) {
@@ -218,10 +232,10 @@ struct SectionContainer<Content: View>: View {
     var body: some View {
         content
             .padding()
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .center)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(.thickMaterial)
+                    .fill(Material.regular.opacity(0.9))
                     .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
             )
     }
@@ -268,7 +282,8 @@ struct SectionHeaderView: View {
                   cookTime: 15, 
                   servings: 4, 
                   imageData: SampleImageLoader.breakfastImage, 
-                  tags: ["meal_breakfast", "attr_kid_friendly", "method_quick_easy"])
+                  tags: ["meal_breakfast", "attr_kid_friendly", "method_quick_easy"],
+                  description: "Fluffy pancakes perfect for breakfast.")
         ]
         
         var recipe: Recipe { sampleRecipes[0] }

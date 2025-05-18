@@ -10,6 +10,7 @@ struct Recipe: Identifiable, Equatable {
     var servings: Int
     var imageData: Data? // Stores the actual image data
     var tags: Set<String> // Stores RecipeTag IDs
+    var description: String // New property for recipe description
     // Add more properties as needed, e.g., difficulty, cuisine
     
     static func == (lhs: Recipe, rhs: Recipe) -> Bool {
@@ -21,7 +22,8 @@ struct Recipe: Identifiable, Equatable {
         lhs.cookTime == rhs.cookTime &&
         lhs.servings == rhs.servings &&
         lhs.imageData == rhs.imageData &&
-        lhs.tags == rhs.tags
+        lhs.tags == rhs.tags &&
+        lhs.description == rhs.description
     }
 }
 
