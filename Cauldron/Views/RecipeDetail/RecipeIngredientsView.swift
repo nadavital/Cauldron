@@ -5,16 +5,23 @@ struct RecipeIngredientsView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // No need for section title - handled by parent section view
-            
-            // Ingredients list with dividers
-            ForEach(ingredients.indices, id: \.self) { index in
-                VStack(spacing: 0) {
-                    RecipeIngredientRow(ingredient: ingredients[index])
-                    
-                    if index < ingredients.count - 1 {
-                        Divider()
-                            .padding(.vertical, 8)
+            if ingredients.isEmpty {
+                Text("No ingredients yet.")
+                    .foregroundColor(.secondary)
+                    .italic()
+                    .padding(.vertical, 8)
+            } else {
+                // No need for section title - handled by parent section view
+                
+                // Ingredients list with dividers
+                ForEach(ingredients.indices, id: \.self) { index in
+                    VStack(spacing: 0) {
+                        RecipeIngredientRow(ingredient: ingredients[index])
+                        
+                        if index < ingredients.count - 1 {
+                            Divider()
+                                .padding(.vertical, 8)
+                        }
                     }
                 }
             }

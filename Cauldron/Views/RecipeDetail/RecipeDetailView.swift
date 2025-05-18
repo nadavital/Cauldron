@@ -27,7 +27,7 @@ struct RecipeDetailView: View {
                     VStack(spacing: 0) {
                         // Header with recipe image
                         RecipeHeaderView(
-                            name: recipe.name,
+                            name: recipe.name.isEmpty ? "Untitled Recipe" : recipe.name,
                             imageData: recipe.imageData,
                             height: 400,
                             dominantColor: $dominantColor
@@ -66,13 +66,20 @@ struct RecipeDetailView: View {
                             SectionContainer {
                                 VStack(alignment: .leading) {
                                     SectionHeaderView(title: "Ingredients", iconName: "list.bullet.clipboard")
-                                    
-                                    ForEach(recipe.ingredients) { ingredient in
-                                        RecipeIngredientRow(ingredient: ingredient)
-                                        
-                                        if ingredient != recipe.ingredients.last {
-                                            Divider()
-                                                .padding(.vertical, 4)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if recipe.ingredients.isEmpty {
+                                        Text("No ingredients yet.")
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                            .padding(.vertical, 8)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                    } else {
+                                        ForEach(recipe.ingredients) { ingredient in
+                                            RecipeIngredientRow(ingredient: ingredient)
+                                            if ingredient != recipe.ingredients.last {
+                                                Divider()
+                                                    .padding(.vertical, 4)
+                                            }
                                         }
                                     }
                                 }
@@ -82,13 +89,20 @@ struct RecipeDetailView: View {
                             SectionContainer {
                                 VStack(alignment: .leading) {
                                     SectionHeaderView(title: "Instructions", iconName: "list.number")
-                                    
-                                    ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, instruction in
-                                        RecipeInstructionRow(index: index, instruction: instruction)
-                                        
-                                        if index < recipe.instructions.count - 1 {
-                                            Divider()
-                                                .padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if recipe.instructions.isEmpty {
+                                        Text("No instructions yet.")
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                            .padding(.vertical, 8)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                    } else {
+                                        ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, instruction in
+                                            RecipeInstructionRow(index: index, instruction: instruction)
+                                            if index < recipe.instructions.count - 1 {
+                                                Divider()
+                                                    .padding(.vertical, 8)
+                                            }
                                         }
                                     }
                                 }
@@ -99,11 +113,12 @@ struct RecipeDetailView: View {
                         .padding(.horizontal)
                         .padding(.top, 20)
                         .padding(.bottom, 50)
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
         }
-        .navigationTitle(recipe.name)
+        .navigationTitle(recipe.name.isEmpty ? "Untitled Recipe" : recipe.name)
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -132,7 +147,7 @@ struct RecipeDetailView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Are you sure you want to delete \"\(recipe.name)\"? This action cannot be undone.")
+            Text("Are you sure you want to delete \"\(recipe.name.isEmpty ? "Untitled Recipe" : recipe.name)\"? This action cannot be undone.")
         }
         .sheet(isPresented: $showingEditSheet) {
             AddRecipeView(recipes: $recipes, recipeToEdit: recipe)
@@ -203,6 +218,7 @@ struct SectionContainer<Content: View>: View {
     var body: some View {
         content
             .padding()
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .center)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(.thickMaterial)

@@ -24,7 +24,7 @@ struct RecipeHeaderView: View {
                         .font(.system(size: 60))
                         .foregroundColor(.gray)
                     
-                    Text(name.isEmpty ? "No Image" : name)
+                    Text(name.isEmpty ? "Untitled Recipe" : name)
                         .font(.headline)
                         .foregroundColor(.gray)
                 }

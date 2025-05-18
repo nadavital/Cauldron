@@ -5,11 +5,18 @@ struct RecipeInstructionsView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // No need for title - handled by parent section view
-            
-            // Instructions
-            ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
-                RecipeInstructionRow(index: index, instruction: instruction)
+            if instructions.isEmpty {
+                Text("No instructions yet.")
+                    .foregroundColor(.secondary)
+                    .italic()
+                    .padding(.vertical, 8)
+            } else {
+                // No need for title - handled by parent section view
+                
+                // Instructions
+                ForEach(Array(instructions.enumerated()), id: \.offset) { index, instruction in
+                    RecipeInstructionRow(index: index, instruction: instruction)
+                }
             }
         }
         .accessibilityLabel("Recipe instructions with \(instructions.count) steps")

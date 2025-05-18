@@ -254,7 +254,6 @@ struct AddRecipeView: View {
             return Ingredient(name: inp.name, quantity: qty, unit: inp.unit)
         }
         let newInst = instructions.filter { !$0.isPlaceholder && !$0.value.isEmpty }.map { $0.value }
-        guard !name.isEmpty, !newIngs.isEmpty, !newInst.isEmpty else { return }
         let rec = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs)
         if let idx = recipes.firstIndex(where: { $0.id == rec.id }) { recipes[idx] = rec }
         else { recipes.append(rec) }

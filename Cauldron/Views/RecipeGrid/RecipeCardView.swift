@@ -36,7 +36,7 @@ struct RecipeCardView: View {
             
             // Content area with the dominant color background
             VStack(alignment: .leading, spacing: 8) {
-                Text(recipe.name)
+                Text(recipe.name.isEmpty ? "Untitled Recipe" : recipe.name)
                     .font(.headline)
                     .lineLimit(2)
                 
