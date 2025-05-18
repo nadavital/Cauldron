@@ -64,7 +64,7 @@ struct AddRecipeView: View {
                         }
                         Spacer()
                     }
-                    .onChange(of: selectedPhoto) { _ in
+                    .onChange(of: selectedPhoto) { 
                         Task {
                             if let data = try? await selectedPhoto?.loadTransferable(type: Data.self) {
                                 selectedImageData = data
@@ -205,6 +205,7 @@ struct AddRecipeView: View {
     }
 
     private func startDragIngredient(item: IngredientInput) {
+        print("Starting drag for ingredient: \(item.name)")
         draggedIngredient = item
     }
 

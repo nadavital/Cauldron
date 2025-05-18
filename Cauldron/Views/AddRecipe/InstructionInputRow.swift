@@ -53,9 +53,9 @@ struct InstructionInputRow: View {
                 .fill(Color(.secondarySystemGroupedBackground))
         )
         // Keep internal focus state in sync with external binding
-        .onChange(of: localFocus) { newValue in
+        .onChange(of: localFocus) { 
             DispatchQueue.main.async {
-                isFocused = newValue
+                isFocused = localFocus
             }
         }
         // Remove external focus forcing on text change

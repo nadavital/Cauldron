@@ -75,13 +75,13 @@ struct InstructionsSection: View {
                             stepNumber: (instructions.firstIndex(where: { $0.id == instruction.id }) ?? -1) + 1,
                             isFocused: $instruction.isFocused
                         )
-                        .onChange(of: instruction.isFocused) { focused in
-                            if focused { checkAndAddPlaceholder() }
+                        .onChange(of: instruction.isFocused) {
+                            if instruction.isFocused { checkAndAddPlaceholder() }
                         }
-                        .onChange(of: instruction.value) { new in
-                            if instruction.id == instructions.last?.id && !new.isEmpty {
+                        .onChange(of: instruction.value) {
+                            if instruction.id == instructions.last?.id && !instruction.value.isEmpty {
                                 withAnimation { instructions.append(StringInput(value: "", isPlaceholder: false)) }
-                            } else if new.isEmpty && instruction.id != instructions.last?.id {
+                            } else if instruction.value.isEmpty && instruction.id != instructions.last?.id {
                                 scheduleCleanup()
                             }
                         }
