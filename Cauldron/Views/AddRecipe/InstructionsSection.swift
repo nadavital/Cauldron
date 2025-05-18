@@ -54,13 +54,43 @@ struct InstructionsSection: View {
                             let item = instructions[index]
                             let isLastPlaceholder = index == instructions.count - 1 && (item.value.isEmpty || item.isPlaceholder)
                             
-                            InstructionRowView(
-                                item: item, 
-                                index: index,
-                                stepNumber: index + 1,
-                                isLastPlaceholder: isLastPlaceholder, 
-                                isDragged: draggingItem?.id == item.id && isDragging
-                            )
+                            HStack(alignment: .center) {
+                                // Drag handle without spacers
+                                Image(systemName: "line.3.horizontal")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(isLastPlaceholder ? .gray.opacity(0.3) : .gray)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.gray.opacity(isLastPlaceholder ? 0.05 : 0.1))
+                                    .cornerRadius(8)
+                                
+                                // Use direct binding to ensure changes are saved
+                                InstructionInputRow(
+                                    instruction: $instructions[index].value,
+                                    stepNumber: index + 1,
+                                    isFocused: $instructions[index].isFocused
+                                )
+                                
+                                // Delete button without spacers
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(.red)
+                                    .padding(.leading, 2)
+                                    .opacity(isLastPlaceholder ? 0.3 : 1)
+                                    .onTapGesture {
+                                        if !isLastPlaceholder && instructions.count > 1 {
+                                            withAnimation { 
+                                                instructions.remove(at: index)
+                                                cleanupEmptyRows() 
+                                            }
+                                        }
+                                    }
+                            }
+                            .padding(6)
+                            .background(isLastPlaceholder ? Color.white.opacity(0.3) : Color.white.opacity(0.5))
+                            .cornerRadius(8)
+                            .shadow(color: Color.black.opacity(isDragging && draggingItem?.id == item.id ? 0.3 : 0.1), 
+                                    radius: isDragging && draggingItem?.id == item.id ? 5 : 1)
+                            .scaleEffect(isDragging && draggingItem?.id == item.id ? 1.05 : 1.0)
                             .opacity(draggingItem?.id == item.id && isDragging ? 0 : 1)
                             .offset(y: offsetForItem(at: index))
                             .zIndex(draggingItem?.id == item.id && isDragging ? 1 : 0)
@@ -153,13 +183,33 @@ struct InstructionsSection: View {
                 
                 // Floating dragged item
                 if let item = draggingItem, isDragging, let currentIndex = currentDragIndex {
-                    InstructionRowView(
-                        item: item, 
-                        index: currentIndex,
-                        stepNumber: currentIndex + 1,
-                        isLastPlaceholder: false, 
-                        isDragged: true
-                    )
+                    HStack(alignment: .center) {
+                        // Drag handle
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 18))
+                            .foregroundColor(.gray)
+                            .frame(width: 36, height: 36)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        
+                        // Read-only view for dragging
+                        InstructionInputRow(
+                            instruction: .constant(item.value),
+                            stepNumber: currentIndex + 1,
+                            isFocused: .constant(false)
+                        )
+                        
+                        // Delete button
+                        Image(systemName: "minus.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.red)
+                            .padding(.leading, 2)
+                    }
+                    .padding(6)
+                    .background(Color.white.opacity(0.5))
+                    .cornerRadius(8)
+                    .shadow(color: Color.black.opacity(0.3), radius: 5)
+                    .scaleEffect(1.05)
                     .offset(y: calculateDraggedItemOffset(currentIndex: currentIndex))
                     .zIndex(100)
                     .transition(.identity)
@@ -242,18 +292,14 @@ struct InstructionRowView: View {
     let isDragged: Bool
     
     var body: some View {
-        HStack(alignment: .top) {
-            // Drag handle in a VStack to center it vertically
-            VStack {
-                Spacer()
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 18))
-                    .foregroundColor(isLastPlaceholder ? .gray.opacity(0.3) : .gray)
-                    .frame(width: 36, height: 36)
-                    .background(Color.gray.opacity(isLastPlaceholder ? 0.05 : 0.1))
-                    .cornerRadius(8)
-                Spacer()
-            }
+        HStack(alignment: .center) {
+            // Drag handle without spacers
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 18))
+                .foregroundColor(isLastPlaceholder ? .gray.opacity(0.3) : .gray)
+                .frame(width: 36, height: 36)
+                .background(Color.gray.opacity(isLastPlaceholder ? 0.05 : 0.1))
+                .cornerRadius(8)
             
             InstructionInputRow(
                 instruction: .constant(item.value),
@@ -261,16 +307,12 @@ struct InstructionRowView: View {
                 isFocused: .constant(item.isFocused)
             )
             
-            // Wrap the delete button in a VStack to center it vertically
-            VStack {
-                Spacer()
-                Image(systemName: "minus.circle.fill")
-                    .font(.title3)
-                    .foregroundColor(.red)
-                    .padding(.leading, 2)
-                    .opacity(isLastPlaceholder ? 0.3 : 1)
-                Spacer()
-            }
+            // Delete button without spacers
+            Image(systemName: "minus.circle.fill")
+                .font(.title3)
+                .foregroundColor(.red)
+                .padding(.leading, 2)
+                .opacity(isLastPlaceholder ? 0.3 : 1)
         }
         .padding(6)
         .background(isLastPlaceholder ? Color.white.opacity(0.3) : Color.white.opacity(0.5))

@@ -55,12 +55,44 @@ struct IngredientsSection: View {
                             let item = ingredients[index]
                             let isLastPlaceholder = index == ingredients.count - 1 && (item.name.isEmpty || item.isPlaceholder)
                             
-                            IngredientRowView(
-                                item: item, 
-                                index: index, 
-                                isLastPlaceholder: isLastPlaceholder, 
-                                isDragged: draggingItem?.id == item.id && isDragging
-                            )
+                            HStack {
+                                // Drag handle
+                                Image(systemName: "line.3.horizontal")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(isLastPlaceholder ? .gray.opacity(0.3) : .gray)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.gray.opacity(isLastPlaceholder ? 0.05 : 0.1))
+                                    .cornerRadius(8)
+                                
+                                // Use direct binding to ensure changes are saved
+                                IngredientInputRow(
+                                    name: $ingredients[index].name,
+                                    quantityString: $ingredients[index].quantityString,
+                                    unit: $ingredients[index].unit,
+                                    isFocused: $ingredients[index].isFocused
+                                )
+                                
+                                // Delete button
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.title3)
+                                    .foregroundColor(.red)
+                                    .padding(.leading, 2)
+                                    .opacity(isLastPlaceholder ? 0.3 : 1)
+                                    .onTapGesture {
+                                        if !isLastPlaceholder && ingredients.count > 1 {
+                                            withAnimation { 
+                                                ingredients.remove(at: index)
+                                                cleanupEmptyRows() 
+                                            }
+                                        }
+                                    }
+                            }
+                            .padding(6)
+                            .background(isLastPlaceholder ? Color.white.opacity(0.3) : Color.white.opacity(0.5))
+                            .cornerRadius(8)
+                            .shadow(color: Color.black.opacity(isDragging && draggingItem?.id == item.id ? 0.3 : 0.1), 
+                                    radius: isDragging && draggingItem?.id == item.id ? 5 : 1)
+                            .scaleEffect(isDragging && draggingItem?.id == item.id ? 1.05 : 1.0)
                             .opacity(draggingItem?.id == item.id && isDragging ? 0 : 1)
                             .offset(y: offsetForItem(at: index))
                             .zIndex(draggingItem?.id == item.id && isDragging ? 1 : 0)
@@ -154,12 +186,33 @@ struct IngredientsSection: View {
                 
                 // Floating dragged item
                 if let item = draggingItem, isDragging, let currentIndex = currentDragIndex {
-                    IngredientRowView(
-                        item: item, 
-                        index: currentIndex, 
-                        isLastPlaceholder: false, 
-                        isDragged: true
-                    )
+                    HStack {
+                        // Drag handle
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 18))
+                            .foregroundColor(.gray)
+                            .frame(width: 36, height: 36)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        
+                        // Use the item directly for the floating view
+                        IngredientInputRow(
+                            name: .constant(item.name),
+                            quantityString: .constant(item.quantityString),
+                            unit: .constant(item.unit),
+                            isFocused: .constant(false)
+                        )
+                        
+                        Image(systemName: "minus.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.red)
+                            .padding(.leading, 2)
+                    }
+                    .padding(6)
+                    .background(Color.white.opacity(0.5))
+                    .cornerRadius(8)
+                    .shadow(color: Color.black.opacity(0.3), radius: 5)
+                    .scaleEffect(1.05)
                     .offset(y: calculateDraggedItemOffset(currentIndex: currentIndex))
                     .zIndex(100)
                     .transition(.identity)
