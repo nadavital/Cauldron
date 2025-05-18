@@ -218,10 +218,10 @@ struct IngredientsSection: View {
                     .transition(.identity)
                 }
             }
-            .onChange(of: ingredients) { newIngredients in
+            .onChange(of: ingredients) { 
                 // Update the last placeholder index when ingredients change
-                if let lastIdx = newIngredients.indices.last,
-                   newIngredients[lastIdx].name.isEmpty || newIngredients[lastIdx].isPlaceholder {
+                if let lastIdx = ingredients.indices.last,
+                   ingredients[lastIdx].name.isEmpty || ingredients[lastIdx].isPlaceholder {
                     lastPlaceholderIndex = lastIdx
                 }
             }

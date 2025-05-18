@@ -215,10 +215,10 @@ struct InstructionsSection: View {
                     .transition(.identity)
                 }
             }
-            .onChange(of: instructions) { newInstructions in
+            .onChange(of: instructions) { 
                 // Update the last placeholder index when instructions change
-                if let lastIdx = newInstructions.indices.last,
-                   newInstructions[lastIdx].value.isEmpty || newInstructions[lastIdx].isPlaceholder {
+                if let lastIdx = instructions.indices.last,
+                   instructions[lastIdx].value.isEmpty || instructions[lastIdx].isPlaceholder {
                     lastPlaceholderIndex = lastIdx
                 }
             }
