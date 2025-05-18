@@ -45,33 +45,6 @@ struct IngredientsSection: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.1)))
                         .foregroundColor(.accentColor)
                 }
-                
-                if !isEditMode {
-                    Button(action: {
-                        withAnimation {
-                            if let idx = ingredients.firstIndex(where: { $0.isPlaceholder }) {
-                                ingredients.insert(IngredientInput(name: "", quantityString: "", unit: .cups), at: idx)
-                                DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { 
-                                    if idx < ingredients.count {
-                                        ingredients[idx].isFocused = true 
-                                    }
-                                }
-                            } else {
-                                ingredients.append(IngredientInput(name: "", quantityString: "", unit: .cups))
-                                let newIdx = ingredients.count-1
-                                DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { 
-                                    if newIdx < ingredients.count {
-                                        ingredients[newIdx].isFocused = true 
-                                    }
-                                }
-                            }
-                        }
-                    }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.accentColor)
-                    }
-                }
             }
             
             // Items container

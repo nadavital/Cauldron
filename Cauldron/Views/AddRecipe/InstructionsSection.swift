@@ -44,32 +44,6 @@ struct InstructionsSection: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.1)))
                         .foregroundColor(.accentColor)
                 }
-                if !isEditMode {
-                    Button(action: {
-                        withAnimation {
-                            if let idx = instructions.firstIndex(where: { $0.isPlaceholder }) {
-                                instructions.insert(StringInput(value: "", isPlaceholder: false), at: idx)
-                                DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { 
-                                    if idx < instructions.count {
-                                        instructions[idx].isFocused = true 
-                                    }
-                                }
-                            } else {
-                                instructions.append(StringInput(value: "", isPlaceholder: false))
-                                let newIdx = instructions.count-1
-                                DispatchQueue.main.asyncAfter(deadline: .now()+0.1) { 
-                                    if newIdx < instructions.count {
-                                        instructions[newIdx].isFocused = true 
-                                    }
-                                }
-                            }
-                        }
-                    }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title3)
-                            .foregroundColor(.accentColor)
-                    }
-                }
             }
             
             // Items container
