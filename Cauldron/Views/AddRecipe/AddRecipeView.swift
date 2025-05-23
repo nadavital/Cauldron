@@ -6,6 +6,9 @@ struct AddRecipeView: View {
     @Environment(\.dismiss) var dismiss
     @Binding var recipes: [Recipe]
     var recipeToEdit: Recipe?
+    
+    @StateObject private var authViewModel = AuthViewModel()
+    @StateObject private var firestoreManager = FirestoreManager()
 
     // Recipe properties
     @State private var name: String = ""
@@ -134,8 +137,9 @@ struct AddRecipeView: View {
 
                     SaveButtonView(action: {
                         cleanupEmptyRows()
-                        saveRecipe()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { dismiss() }
+                        Task {
+                            await saveRecipe()
+                        }
                     })
                 }
                 .padding()
@@ -242,24 +246,140 @@ struct AddRecipeView: View {
             selectedImageData = recipe.imageData
             selectedTagIDs = recipe.tags
             ingredients = recipe.ingredients.map {
-                IngredientInput(id: $0.id, name: $0.name, quantityString: "\($0.quantity)", unit: $0.unit)
+                // Convert decimal back to fraction for better UX
+                let quantityDisplay = decimalToFraction($0.quantity)
+                
+                // Save custom unit name to UserDefaults if it exists
+                if let customUnit = $0.customUnitName, !customUnit.isEmpty {
+                    let key = "customUnit_\($0.id.uuidString)"
+                    UserDefaults.standard.set(customUnit, forKey: key)
+                }
+                
+                return IngredientInput(id: $0.id, name: $0.name, quantityString: quantityDisplay, unit: $0.unit)
             } + [IngredientInput(name: "", quantityString: "", unit: .cups)]
             instructions = recipe.instructions.map { StringInput(value: $0) } + [StringInput(value: "", isPlaceholder: false)]
             description = recipe.description
         }
     }
+    
+    // Helper function to convert decimal to fraction for display
+    private func decimalToFraction(_ decimal: Double) -> String {
+        // Handle whole numbers
+        if decimal.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(decimal))"
+        }
+        
+        let whole = Int(decimal)
+        let fractionalPart = decimal - Double(whole)
+        
+        // Check for common fractions with some tolerance
+        let epsilon = 0.001
+        let commonFractions: [(Double, String)] = [
+            (0.125, "⅛"), (0.25, "¼"), (1.0/3.0, "⅓"), (0.375, "⅜"),
+            (0.5, "½"), (0.625, "⅝"), (2.0/3.0, "⅔"), (0.75, "¾"), (0.875, "⅞")
+        ]
+        
+        // Check if the fractional part matches a common fraction
+        for (value, fraction) in commonFractions {
+            if abs(fractionalPart - value) < epsilon {
+                if whole > 0 {
+                    return "\(whole) \(fraction)"
+                } else {
+                    return fraction
+                }
+            }
+        }
+        
+        // Try to find a simple fraction representation
+        let denominators = [2, 3, 4, 5, 6, 8, 16]
+        for denom in denominators {
+            let numerator = round(fractionalPart * Double(denom))
+            if abs(fractionalPart - numerator / Double(denom)) < epsilon {
+                let num = Int(numerator)
+                if num > 0 && num < denom {
+                    if whole > 0 {
+                        return "\(whole) \(num)/\(denom)"
+                    } else {
+                        return "\(num)/\(denom)"
+                    }
+                }
+            }
+        }
+        
+        // Fallback to decimal with reasonable precision
+        if whole > 0 {
+            return String(format: "%.3f", decimal).trimmingCharacters(in: CharacterSet(charactersIn: "0")).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        } else {
+            return String(format: "%.3f", decimal)
+        }
+    }
 
-    private func saveRecipe() {
+    private func saveRecipe() async {
         let p = Int(prepTime) ?? 0
         let c = Int(cookTime) ?? 0
         let s = Int(servings) ?? 1
         let newIngs = ingredients.compactMap { inp -> Ingredient? in
             guard !inp.isPlaceholder && !inp.name.isEmpty else { return nil }
+            
             // parse quantities including fractions...
             var qty: Double = 0
             let str = inp.quantityString
-            if str.isEmpty { qty = 1 }
-            else if str.contains("/") {
+            
+            if str.isEmpty { 
+                qty = 1 
+            } else if str.contains("¼") || str.contains("⅓") || str.contains("½") || str.contains("⅔") || str.contains("¾") {
+                // Handle unicode fractions
+                if str.contains(" ") {
+                    // Mixed number with unicode fraction (e.g. "1 ½")
+                    let parts = str.split(separator: " ")
+                    if parts.count == 2, let whole = Double(parts[0]) {
+                        let fraction = String(parts[1])
+                        if fraction == "¼" {
+                            qty = whole + 0.25
+                        } else if fraction == "⅓" {
+                            qty = whole + 1.0/3.0
+                        } else if fraction == "½" {
+                            qty = whole + 0.5
+                        } else if fraction == "⅔" {
+                            qty = whole + 2.0/3.0
+                        } else if fraction == "¾" {
+                            qty = whole + 0.75
+                        } else if fraction == "⅛" {
+                            qty = whole + 0.125
+                        } else if fraction == "⅜" {
+                            qty = whole + 0.375
+                        } else if fraction == "⅝" {
+                            qty = whole + 0.625
+                        } else if fraction == "⅞" {
+                            qty = whole + 0.875
+                        } else {
+                            qty = whole
+                        }
+                    }
+                } else {
+                    // Just a unicode fraction
+                    if str == "¼" {
+                        qty = 0.25
+                    } else if str == "⅓" {
+                        qty = 1.0/3.0
+                    } else if str == "½" {
+                        qty = 0.5
+                    } else if str == "⅔" {
+                        qty = 2.0/3.0
+                    } else if str == "¾" {
+                        qty = 0.75
+                    } else if str == "⅛" {
+                        qty = 0.125
+                    } else if str == "⅜" {
+                        qty = 0.375
+                    } else if str == "⅝" {
+                        qty = 0.625
+                    } else if str == "⅞" {
+                        qty = 0.875
+                    }
+                }
+            } else if str.contains("/") {
+                // Handle text fractions (e.g. "1/2" or "1 1/2")
                 let parts = str.split(separator: " ")
                 if parts.count == 2, let w = Double(parts[0]), parts[1].contains("/") {
                     let f = parts[1].split(separator: "/").compactMap { Double($0) }
@@ -268,13 +388,50 @@ struct AddRecipeView: View {
                     let f = str.split(separator: "/").compactMap { Double($0) }
                     if f.count == 2 { qty = f[0]/f[1] }
                 }
-            } else { qty = Double(str) ?? 0 }
-            return Ingredient(name: inp.name, quantity: qty, unit: inp.unit)
+            } else { 
+                qty = Double(str) ?? 0 
+            }
+            
+            // Check for custom unit name in UserDefaults (set by QuantityUnitPickerSheet)
+            var customUnitName: String? = nil
+            if inp.unit == .none {
+                // Get the custom unit name for this ingredient
+                let key = "customUnit_\(inp.id.uuidString)"
+                customUnitName = UserDefaults.standard.string(forKey: key)
+            }
+            
+            return Ingredient(name: inp.name, quantity: qty, unit: inp.unit, customUnitName: customUnitName)
         }
         let newInst = instructions.filter { !$0.isPlaceholder && !$0.value.isEmpty }.map { $0.value }
-        let rec = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs, description: description)
-        if let idx = recipes.firstIndex(where: { $0.id == rec.id }) { recipes[idx] = rec }
-        else { recipes.append(rec) }
+        let recipe = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs, description: description)
+        
+        do {
+            // Save to Firebase
+            try await firestoreManager.saveRecipe(recipe)
+            
+            // Update local array
+            await MainActor.run {
+                if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                    recipes[idx] = recipe
+                } else {
+                    recipes.append(recipe)
+                }
+                
+                // Dismiss the view
+                dismiss()
+            }
+        } catch {
+            print("Error saving recipe: \(error)")
+            // Still update local array as fallback
+            await MainActor.run {
+                if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                    recipes[idx] = recipe
+                } else {
+                    recipes.append(recipe)
+                }
+                dismiss()
+            }
+        }
     }
 }
 

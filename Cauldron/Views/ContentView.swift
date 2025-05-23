@@ -8,36 +8,16 @@
 import SwiftUI
 
 struct ContentView: View {
-    // Sample data - replace with actual data management later
-    @State var recipes: [Recipe] = [
-        Recipe(name: "Pancakes", 
-               ingredients: [
-                Ingredient(name: "Flour", quantity: 1.5, unit: .cups),
-                Ingredient(name: "Milk", quantity: 1.25, unit: .cups),
-                Ingredient(name: "Egg", quantity: 1, unit: .pieces),
-                Ingredient(name: "Sugar", quantity: 2, unit: .tbsp),
-                Ingredient(name: "Baking Powder", quantity: 2, unit: .tsp)
-               ], 
-               instructions: ["Mix ingredients", "Cook on griddle"], 
-               prepTime: 10, cookTime: 15, servings: 4, 
-               imageData: nil,
-               tags: ["meal_breakfast", "attr_kid_friendly", "method_quick_easy"],
-               description: "Fluffy pancakes perfect for breakfast. Top with syrup or fruit.") ,
-        Recipe(name: "Spaghetti Bolognese", 
-               ingredients: [
-                Ingredient(name: "Spaghetti", quantity: 500, unit: .grams),
-                Ingredient(name: "Ground Beef", quantity: 500, unit: .grams),
-                Ingredient(name: "Tomato Sauce", quantity: 1, unit: .pieces) // Assuming 'pieces' for can
-               ], 
-               instructions: ["Cook spaghetti", "Brown beef", "Add sauce and simmer"], 
-               prepTime: 15, cookTime: 30, servings: 6, 
-               imageData: nil,
-               tags: ["cuisine_italian", "meal_dinner"],
-               description: "Classic Italian pasta with rich meat sauce.")
-    ]
+    // User's recipe collection - starts empty, will be populated from Firestore
+    @State var recipes: [Recipe] = []
+    
+    @EnvironmentObject var authViewModel: AuthViewModel
+    @StateObject private var firestoreManager = FirestoreManager()
 
     @State private var showingAddRecipeView = false
     @State private var isRecipeGridInEditMode: Bool = false
+    @State private var showingSignOutAlert = false
+    @State private var showingProfileView = false
 
     var body: some View {
         NavigationStack { // Changed from NavigationView to NavigationStack
@@ -47,41 +27,119 @@ struct ContentView: View {
             .navigationTitle("My Recipes")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    if !recipes.isEmpty {
-                        Button(isRecipeGridInEditMode ? "Done" : "Edit") {
-                            isRecipeGridInEditMode.toggle()
+                    HStack {
+                        if !recipes.isEmpty {
+                            Button(isRecipeGridInEditMode ? "Done" : "Edit") {
+                                isRecipeGridInEditMode.toggle()
+                            }
                         }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { 
-                        showingAddRecipeView = true
-                    }) {
-                        Image(systemName: "plus")
+                    HStack(spacing: 16) {
+                        Button(action: { 
+                            showingAddRecipeView = true
+                        }) {
+                            Image(systemName: "plus")
+                        }
+                        
+                        Menu {
+                            Button(action: {
+                                showingProfileView = true
+                            }) {
+                                Label("Profile", systemImage: "person.circle")
+                            }
+                            
+                            Divider()
+                            
+                            Button(action: {
+                                showingSignOutAlert = true
+                            }) {
+                                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
+                        } label: {
+                            Image(systemName: "person.circle")
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showingAddRecipeView, onDismiss: {
-                // Force view refresh when sheet dismisses
-                let _ = recipes
-                print("Sheet dismissed, recipes count: \(recipes.count)")
+                // Reload recipes from Firestore when sheet dismisses
+                Task {
+                    await loadRecipes()
+                }
             }) {
                 AddRecipeView(recipes: $recipes)
+            }
+            .sheet(isPresented: $showingProfileView) {
+                ProfileView()
+            }
+            .alert("Sign Out", isPresented: $showingSignOutAlert) {
+                Button("Sign Out", role: .destructive) {
+                    // Clear local data before signing out
+                    recipes.removeAll()
+                    isRecipeGridInEditMode = false
+                    authViewModel.signOut()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Are you sure you want to sign out?")
             }
             .onChange(of: recipes) { 
                 print("ContentView: recipes array changed, now contains \(recipes.count) recipes")
             }
             .onAppear {
                 print("ContentView appeared with \(recipes.count) recipes")
+                Task {
+                    await loadRecipes()
+                }
             }
         }
     }
 
+    func loadRecipes() async {
+        do {
+            let loadedRecipes = try await firestoreManager.loadRecipes()
+            await MainActor.run {
+                self.recipes = loadedRecipes
+                print("Loaded \(recipes.count) recipes from Firestore")
+            }
+        } catch {
+            print("Error loading recipes: \(error)")
+        }
+    }
+
     func deleteRecipe(at offsets: IndexSet) {
+        for index in offsets {
+            let recipe = recipes[index]
+            
+            // Delete from Firebase
+            Task {
+                do {
+                    try await firestoreManager.deleteRecipe(id: recipe.id)
+                    print("Successfully deleted recipe from Firestore")
+                } catch {
+                    print("Error deleting recipe from Firestore: \(error)")
+                }
+            }
+        }
+        
+        // Remove from local array
         recipes.remove(atOffsets: offsets)
     }
 
     func deleteRecipe(id: UUID) {
+        // Delete from Firebase
+        Task {
+            do {
+                try await firestoreManager.deleteRecipe(id: id)
+                print("Successfully deleted recipe from Firestore")
+            } catch {
+                print("Error deleting recipe from Firestore: \(error)")
+            }
+        }
+        
+        // Remove from local array
         recipes.removeAll { $0.id == id }
         if recipes.isEmpty {
             isRecipeGridInEditMode = false

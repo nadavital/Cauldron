@@ -30,6 +30,9 @@ struct Recipe: Identifiable, Equatable {
 enum MeasurementUnit: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
     
+    // Custom blank/no unit
+    case none = ""
+
     // Volume units
     case cups = "cups"
     case tbsp = "tbsp"
@@ -51,6 +54,9 @@ enum MeasurementUnit: String, CaseIterable, Identifiable {
     
     // Display name with proper pluralization
     func displayName(for quantity: Double) -> String {
+        if self == .none {
+            return "" // no unit
+        }
         switch self {
         case .cups:
             return quantity == 1 ? "cup" : "cups"
@@ -71,11 +77,13 @@ struct Ingredient: Identifiable, Equatable {
     var name: String
     var quantity: Double
     var unit: MeasurementUnit
+    var customUnitName: String? // New property for custom unit display
     
     static func == (lhs: Ingredient, rhs: Ingredient) -> Bool {
         lhs.id == rhs.id &&
         lhs.name == rhs.name &&
         lhs.quantity == rhs.quantity &&
-        lhs.unit == rhs.unit
+        lhs.unit == rhs.unit &&
+        lhs.customUnitName == rhs.customUnitName
     }
-} 
+}

@@ -69,7 +69,8 @@ struct IngredientsSection: View {
                                     name: $ingredients[index].name,
                                     quantityString: $ingredients[index].quantityString,
                                     unit: $ingredients[index].unit,
-                                    isFocused: $ingredients[index].isFocused
+                                    isFocused: $ingredients[index].isFocused,
+                                    ingredientId: ingredients[index].id
                                 )
                                 
                                 // Delete button
@@ -166,7 +167,8 @@ struct IngredientsSection: View {
                                 name: $ingredients[index].name,
                                 quantityString: $ingredients[index].quantityString,
                                 unit: $ingredients[index].unit,
-                                isFocused: $ingredients[index].isFocused
+                                isFocused: $ingredients[index].isFocused,
+                                ingredientId: ingredients[index].id
                             )
                             .onChange(of: ingredients[index].isFocused) {
                                 if ingredients[index].isFocused { checkAndAddPlaceholder() }
@@ -200,7 +202,8 @@ struct IngredientsSection: View {
                             name: .constant(item.name),
                             quantityString: .constant(item.quantityString),
                             unit: .constant(item.unit),
-                            isFocused: .constant(false)
+                            isFocused: .constant(false),
+                            ingredientId: item.id
                         )
                         
                         Image(systemName: "minus.circle.fill")
@@ -307,7 +310,8 @@ struct IngredientRowView: View {
                 name: .constant(item.name),
                 quantityString: .constant(item.quantityString),
                 unit: .constant(item.unit),
-                isFocused: .constant(item.isFocused)
+                isFocused: .constant(item.isFocused),
+                ingredientId: item.id
             )
             
             Image(systemName: "minus.circle.fill")
