@@ -40,7 +40,7 @@ struct AddRecipeView: View {
 
     // Focus states for keyboard dismissal
     @FocusState private var isDescriptionFocused: Bool
-    @State private var focusedInstructionIndex: Int?
+    @State private var focusedInstructionID: UUID?
 
     var body: some View {
         GeometryReader { geometry in
@@ -148,7 +148,7 @@ struct AddRecipeView: View {
                     InstructionsSection(instructions: $instructions,
                                         isEditMode: $isInstructionsEditMode,
                                         draggedInstruction: $draggedInstruction,
-                                        focusedIndex: $focusedInstructionIndex,
+                                        focusedIndex: $focusedInstructionID,
                                         cleanupEmptyRows: cleanupEmptyRows,
                                         scheduleCleanup: scheduleCleanup,
                                         checkAndAddPlaceholder: checkAndAddInstructionPlaceholder,
@@ -178,7 +178,7 @@ struct AddRecipeView: View {
         }
         .safeAreaInset(edge: .bottom) {
             // Floating Done button when any field is focused
-            if isDescriptionFocused || focusedInstructionIndex != nil {
+            if isDescriptionFocused || focusedInstructionID != nil {
                 HStack {
                     Spacer()
                     Button("Done") {
@@ -556,7 +556,7 @@ struct AddRecipeView: View {
 
     private func hideKeyboard() {
         isDescriptionFocused = false
-        focusedInstructionIndex = nil
+        focusedInstructionID = nil
     }
 }
 

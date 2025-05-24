@@ -4,7 +4,7 @@ struct InstructionsSection: View {
     @Binding var instructions: [StringInput]
     @Binding var isEditMode: Bool
     @Binding var draggedInstruction: StringInput?
-    @Binding var focusedIndex: Int?
+    @Binding var focusedIndex: UUID?
     let cleanupEmptyRows: () -> Void
     let scheduleCleanup: () -> Void
     let checkAndAddPlaceholder: () -> Void
@@ -69,9 +69,15 @@ struct InstructionsSection: View {
                                     instruction: $instructions[index].value,
                                     stepNumber: index + 1,
                                     isFocused: Binding(
-                                        get: { focusedIndex == index },
+                                        get: { 
+                                            focusedIndex == instructions[index].id
+                                        },
                                         set: { newValue in
-                                            focusedIndex = newValue ? index : nil
+                                            if newValue {
+                                                focusedIndex = instructions[index].id
+                                            } else if focusedIndex == instructions[index].id {
+                                                focusedIndex = nil
+                                            }
                                         }
                                     )
                                 )
@@ -170,19 +176,25 @@ struct InstructionsSection: View {
                                 instruction: $instructions[index].value,
                                 stepNumber: index + 1,
                                 isFocused: Binding(
-                                    get: { focusedIndex == index },
+                                    get: { 
+                                        focusedIndex == instructions[index].id
+                                    },
                                     set: { newValue in
-                                        focusedIndex = newValue ? index : nil
+                                        if newValue {
+                                            focusedIndex = instructions[index].id
+                                        } else if focusedIndex == instructions[index].id {
+                                            focusedIndex = nil
+                                        }
                                     }
                                 )
                             )
-                            .onChange(of: focusedIndex == index) {
-                                if focusedIndex == index { checkAndAddPlaceholder() }
+                            .onChange(of: focusedIndex == instructions[index].id) {
+                                if focusedIndex == instructions[index].id { checkAndAddPlaceholder() }
                             }
                             .onChange(of: instructions[index].value) {
                                 if index == instructions.count - 1 && !instructions[index].value.isEmpty {
                                     withAnimation { 
-                                        instructions.append(StringInput(value: "", isPlaceholder: false)) 
+                                        instructions.append(StringInput(value: "", isPlaceholder: false))
                                     }
                                 } else if instructions[index].value.isEmpty && index != instructions.count - 1 {
                                     scheduleCleanup()
@@ -231,6 +243,14 @@ struct InstructionsSection: View {
                 if let lastIdx = instructions.indices.last,
                    instructions[lastIdx].value.isEmpty || instructions[lastIdx].isPlaceholder {
                     lastPlaceholderIndex = lastIdx
+                }
+                
+                // Ensure focusedIndex is still valid after array changes
+                if let currentFocusID = focusedIndex {
+                    let stillExists = instructions.contains { $0.id == currentFocusID }
+                    if !stillExists {
+                        focusedIndex = nil
+                    }
                 }
             }
         }

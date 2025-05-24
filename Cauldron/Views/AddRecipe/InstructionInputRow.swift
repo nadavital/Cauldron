@@ -61,11 +61,11 @@ struct InstructionInputRow: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemGroupedBackground))
         )
-        .onChange(of: isFocused) { newValue in
-            localFocus = newValue
+        .onChange(of: isFocused) {
+            localFocus = isFocused
         }
-        .onChange(of: localFocus) { newValue in
-            isFocused = newValue
+        .onChange(of: localFocus) { 
+            isFocused = localFocus
         }
     }
 }
