@@ -72,7 +72,8 @@ struct AddRecipeView: View {
                     .onChange(of: selectedPhoto) { 
                         Task {
                             if let data = try? await selectedPhoto?.loadTransferable(type: Data.self) {
-                                selectedImageData = data
+                                // Compress the image immediately for better UX
+                                selectedImageData = compressImageForDisplay(data)
                             }
                         }
                     }
@@ -156,6 +157,49 @@ struct AddRecipeView: View {
     }
 
     // MARK: - Helper Methods
+    
+    /// Compress image for display and storage
+    private func compressImageForDisplay(_ imageData: Data) -> Data? {
+        guard let uiImage = UIImage(data: imageData) else { return imageData }
+        
+        // More aggressive compression for Firestore compatibility
+        // Target ~650KB to account for base64 encoding overhead
+        let maxFileSize = 650_000
+        let maxDimensions: [CGFloat] = [600, 500, 400, 300]
+        
+        for maxDimension in maxDimensions {
+            let resizedImage = resizeImageForDisplay(uiImage, maxDimension: maxDimension)
+            
+            // Try progressively lower quality
+            let qualities: [CGFloat] = [0.7, 0.5, 0.3, 0.2]
+            
+            for quality in qualities {
+                if let compressedData = resizedImage.jpegData(compressionQuality: quality),
+                   compressedData.count <= maxFileSize {
+                    print("Display image compressed from \(imageData.count) bytes to \(compressedData.count) bytes at \(maxDimension)px")
+                    return compressedData
+                }
+            }
+        }
+        
+        print("Using original image data - may require further compression when saving")
+        return imageData
+    }
+    
+    /// Resize image while maintaining aspect ratio
+    private func resizeImageForDisplay(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        let scale = min(maxDimension / size.width, maxDimension / size.height)
+        
+        if scale >= 1.0 { return image }
+        
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+    
     // Schedule a delayed cleanup to remove empty rows
     private func scheduleCleanup() {
         cleanupTimer?.invalidate()
@@ -422,14 +466,48 @@ struct AddRecipeView: View {
             }
         } catch {
             print("Error saving recipe: \(error)")
-            // Still update local array as fallback
-            await MainActor.run {
-                if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
-                    recipes[idx] = recipe
-                } else {
-                    recipes.append(recipe)
+            
+            // Check if it's an image size error and provide specific feedback
+            let errorDescription = error.localizedDescription
+            if errorDescription.contains("longer than") && errorDescription.contains("bytes") {
+                print("Image still too large after compression. Consider removing the image or using a smaller one.")
+                // Still save without image as fallback
+                var recipeWithoutImage = recipe
+                recipeWithoutImage.imageData = nil
+                
+                do {
+                    try await firestoreManager.saveRecipe(recipeWithoutImage)
+                    await MainActor.run {
+                        if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                            recipes[idx] = recipeWithoutImage
+                        } else {
+                            recipes.append(recipeWithoutImage)
+                        }
+                        print("Recipe saved without image due to size constraints")
+                        dismiss()
+                    }
+                } catch {
+                    print("Failed to save recipe even without image: \(error)")
+                    // Still update local array as final fallback
+                    await MainActor.run {
+                        if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                            recipes[idx] = recipe
+                        } else {
+                            recipes.append(recipe)
+                        }
+                        dismiss()
+                    }
                 }
-                dismiss()
+            } else {
+                // Other error - still update local array as fallback
+                await MainActor.run {
+                    if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                        recipes[idx] = recipe
+                    } else {
+                        recipes.append(recipe)
+                    }
+                    dismiss()
+                }
             }
         }
     }

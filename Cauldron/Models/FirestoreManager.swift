@@ -1,10 +1,74 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
+import UIKit
 
 @MainActor
 class FirestoreManager: ObservableObject {
     private let db = Firestore.firestore()
+    
+    // MARK: - Image Processing
+    
+    /// Compress and resize image data to fit within Firestore's 1MB limit
+    private func processImageData(_ imageData: Data) -> Data? {
+        guard let uiImage = UIImage(data: imageData) else { return nil }
+        
+        // Target size - must account for base64 encoding overhead (~33% increase)
+        // Firestore limit is ~1MB, so target ~650KB to leave buffer after base64 encoding
+        let maxFileSize = 650_000 // 650KB to account for base64 overhead
+        
+        // Start with more conservative dimensions
+        let maxDimensions: [CGFloat] = [600, 500, 400, 300]
+        
+        for maxDimension in maxDimensions {
+            let resizedImage = resizeImage(uiImage, maxDimension: maxDimension)
+            
+            // Try different compression qualities
+            let qualities: [CGFloat] = [0.7, 0.5, 0.3, 0.2, 0.1]
+            
+            for quality in qualities {
+                if let compressedData = resizedImage.jpegData(compressionQuality: quality),
+                   compressedData.count <= maxFileSize {
+                    print("Successfully compressed to \(compressedData.count) bytes at \(maxDimension)px with \(Int(quality * 100))% quality")
+                    return compressedData
+                }
+            }
+        }
+        
+        // If still too large, try extremely aggressive compression
+        let tinyImage = resizeImage(uiImage, maxDimension: 200)
+        if let finalAttempt = tinyImage.jpegData(compressionQuality: 0.1),
+           finalAttempt.count <= maxFileSize {
+            print("Used extremely aggressive compression: \(finalAttempt.count) bytes at 200px")
+            return finalAttempt
+        }
+        
+        print("Failed to compress image below \(maxFileSize) bytes, removing image")
+        return nil
+    }
+    
+    /// Resize image to fit within maximum dimension while maintaining aspect ratio
+    private func resizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+        let size = image.size
+        
+        // Calculate the scaling factor
+        let scale = min(maxDimension / size.width, maxDimension / size.height)
+        
+        // If image is already smaller than max dimension, return original
+        if scale >= 1.0 {
+            return image
+        }
+        
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        
+        // Create the resized image
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let resizedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        
+        return resizedImage
+    }
     
     // MARK: - Recipe CRUD Operations
     
@@ -14,13 +78,42 @@ class FirestoreManager: ObservableObject {
             throw FirestoreError.notAuthenticated
         }
         
-        let recipeData = try recipe.toFirestore()
+        // Process the recipe to compress images if needed
+        let processedRecipe = await processRecipeForFirestore(recipe)
+        let recipeData = try processedRecipe.toFirestore()
         
         try await db.collection("users")
             .document(userId)
             .collection("recipes")
             .document(recipe.id.uuidString)
             .setData(recipeData)
+    }
+    
+    /// Process recipe to compress images before saving
+    private func processRecipeForFirestore(_ recipe: Recipe) async -> Recipe {
+        var processedRecipe = recipe
+        
+        // Process image data if present
+        if let imageData = recipe.imageData {
+            if let compressedData = processImageData(imageData) {
+                // Verify base64 size will be under limit
+                let base64String = compressedData.base64EncodedString()
+                let base64Size = base64String.count
+                
+                if base64Size <= 1_048_487 { // Firestore's actual limit
+                    processedRecipe.imageData = compressedData
+                    print("✅ Image compressed from \(imageData.count) bytes to \(compressedData.count) bytes (base64: \(base64Size) bytes)")
+                } else {
+                    print("❌ Base64 encoded image still too large (\(base64Size) bytes), removing image")
+                    processedRecipe.imageData = nil
+                }
+            } else {
+                print("❌ Failed to compress image, removing image data")
+                processedRecipe.imageData = nil
+            }
+        }
+        
+        return processedRecipe
     }
     
     /// Load all recipes for the current user
