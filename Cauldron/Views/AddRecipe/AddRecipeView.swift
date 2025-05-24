@@ -38,6 +38,10 @@ struct AddRecipeView: View {
     @State private var draggedIngredient: IngredientInput?
     @State private var draggedInstruction: StringInput?
 
+    // Focus states for keyboard dismissal
+    @FocusState private var isDescriptionFocused: Bool
+    @State private var focusedInstructionIndex: Int?
+
     var body: some View {
         GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: true) {
@@ -102,16 +106,29 @@ struct AddRecipeView: View {
                 VStack(spacing: 20) {
                     RecipeInputCard(title: "Description", systemImage: "text.alignleft") {
                         AnyView(
-                            DescriptionTextView(text: $description)
-                                .frame(maxWidth: .infinity, minHeight: 100)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 12)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(10)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color(.separator), lineWidth: 0.5)
-                                )
+                            ZStack(alignment: .topLeading) {
+                                TextEditor(text: $description)
+                                    .frame(maxWidth: .infinity, minHeight: 100)
+                                    .focused($isDescriptionFocused)
+                                    .scrollContentBackground(.hidden)
+                                
+                                // Placeholder text
+                                if description.isEmpty {
+                                    Text("Add a description...")
+                                        .foregroundColor(.secondary)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 8)
+                                        .allowsHitTesting(false)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color(.separator), lineWidth: 0.5)
+                            )
                         )
                     }
                     TimingServingsView(prepTime: $prepTime,
@@ -131,6 +148,7 @@ struct AddRecipeView: View {
                     InstructionsSection(instructions: $instructions,
                                         isEditMode: $isInstructionsEditMode,
                                         draggedInstruction: $draggedInstruction,
+                                        focusedIndex: $focusedInstructionIndex,
                                         cleanupEmptyRows: cleanupEmptyRows,
                                         scheduleCleanup: scheduleCleanup,
                                         checkAndAddPlaceholder: checkAndAddInstructionPlaceholder,
@@ -154,6 +172,30 @@ struct AddRecipeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { setupInitialData() }
         .onDisappear { cleanupTimer?.invalidate() }
+        .onTapGesture {
+            // Dismiss keyboard when tapping outside
+            hideKeyboard()
+        }
+        .safeAreaInset(edge: .bottom) {
+            // Floating Done button when any field is focused
+            if isDescriptionFocused || focusedInstructionIndex != nil {
+                HStack {
+                    Spacer()
+                    Button("Done") {
+                        hideKeyboard()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(25)
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+                .background(Color.clear)
+            }
+        }
     }
 
     // MARK: - Helper Methods
@@ -511,114 +553,13 @@ struct AddRecipeView: View {
             }
         }
     }
+
+    private func hideKeyboard() {
+        isDescriptionFocused = false
+        focusedInstructionIndex = nil
+    }
 }
 
-struct DescriptionTextView: UIViewRepresentable {
-    @Binding var text: String
-    
-    // Add intrinsicContentSize for better sizing
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? UIScreen.main.bounds.width - 48 // Account for padding
-        let newSize = uiView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
-        return CGSize(width: width, height: max(100, newSize.height))
-    }
-    
-    func makeUIView(context: Context) -> UITextView {
-        let tv = UITextView()
-        
-        // Configure scrolling behavior
-        tv.isScrollEnabled = true
-        tv.alwaysBounceVertical = true // Helps with scrolling feedback
-        tv.showsHorizontalScrollIndicator = false
-        tv.showsVerticalScrollIndicator = true
-        
-        // Text container setup for proper wrapping
-        tv.textContainer.lineFragmentPadding = 0
-        tv.textContainer.lineBreakMode = .byWordWrapping
-        tv.textContainer.maximumNumberOfLines = 0
-        tv.textAlignment = .left
-        
-        // Auto-sizing and constraints setup
-        tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        tv.setContentCompressionResistancePriority(.required, for: .vertical)
-        
-        // Configure appearance
-        tv.backgroundColor = .clear
-        tv.delegate = context.coordinator
-        tv.font = UIFont.preferredFont(forTextStyle: .body)
-        tv.returnKeyType = .done
-        
-        // Proper insets to ensure text doesn't run to the edge
-        tv.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-        
-        // For smoother text entry and scrolling
-        tv.autocorrectionType = .yes
-        tv.keyboardDismissMode = .interactive
-        
-        // Placeholder
-        if text.isEmpty {
-            tv.text = "Add a description..."
-            tv.textColor = UIColor.placeholderText
-        } else {
-            tv.text = text
-            tv.textColor = UIColor.label
-        }
-        
-        return tv
-    }
-    
-    func updateUIView(_ uiView: UITextView, context: Context) {
-        if uiView.text != text && !(uiView.textColor == UIColor.placeholderText && text.isEmpty) {
-            uiView.text = text
-            uiView.textColor = UIColor.label
-        }
-        
-        if text.isEmpty && !context.coordinator.isEditing {
-            uiView.text = "Add a description..."
-            uiView.textColor = UIColor.placeholderText
-        }
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, UITextViewDelegate {
-        var parent: DescriptionTextView
-        var isEditing = false
-        
-        init(_ parent: DescriptionTextView) {
-            self.parent = parent
-        }
-        
-        func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
-        }
-        
-        func textViewDidBeginEditing(_ textView: UITextView) {
-            isEditing = true
-            if textView.textColor == UIColor.placeholderText {
-                textView.text = ""
-                textView.textColor = UIColor.label
-            }
-        }
-        
-        func textViewDidEndEditing(_ textView: UITextView) {
-            isEditing = false
-            if parent.text.isEmpty {
-                textView.text = "Add a description..."
-                textView.textColor = UIColor.placeholderText
-            }
-        }
-        
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            if text == "\n" {
-                textView.resignFirstResponder()
-                return false
-            }
-            return true
-        }
-    }
+#Preview {
+    AddRecipeView(recipes: .constant([Recipe(id: UUID(), name: "Sample Recipe", ingredients: [Ingredient(name: "Ingredient 1", quantity: 1.5, unit: .cups)], instructions: ["Instruction 1"], prepTime: 10, cookTime: 20, servings: 4, imageData: nil, tags: [], description: "A sample recipe description.")]), recipeToEdit: nil)
 }

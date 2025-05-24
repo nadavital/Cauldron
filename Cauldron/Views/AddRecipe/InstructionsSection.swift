@@ -4,6 +4,7 @@ struct InstructionsSection: View {
     @Binding var instructions: [StringInput]
     @Binding var isEditMode: Bool
     @Binding var draggedInstruction: StringInput?
+    @Binding var focusedIndex: Int?
     let cleanupEmptyRows: () -> Void
     let scheduleCleanup: () -> Void
     let checkAndAddPlaceholder: () -> Void
@@ -67,7 +68,12 @@ struct InstructionsSection: View {
                                 InstructionInputRow(
                                     instruction: $instructions[index].value,
                                     stepNumber: index + 1,
-                                    isFocused: $instructions[index].isFocused
+                                    isFocused: Binding(
+                                        get: { focusedIndex == index },
+                                        set: { newValue in
+                                            focusedIndex = newValue ? index : nil
+                                        }
+                                    )
                                 )
                                 
                                 // Delete button without spacers
@@ -163,10 +169,15 @@ struct InstructionsSection: View {
                             InstructionInputRow(
                                 instruction: $instructions[index].value,
                                 stepNumber: index + 1,
-                                isFocused: $instructions[index].isFocused
+                                isFocused: Binding(
+                                    get: { focusedIndex == index },
+                                    set: { newValue in
+                                        focusedIndex = newValue ? index : nil
+                                    }
+                                )
                             )
-                            .onChange(of: instructions[index].isFocused) {
-                                if instructions[index].isFocused { checkAndAddPlaceholder() }
+                            .onChange(of: focusedIndex == index) {
+                                if focusedIndex == index { checkAndAddPlaceholder() }
                             }
                             .onChange(of: instructions[index].value) {
                                 if index == instructions.count - 1 && !instructions[index].value.isEmpty {
