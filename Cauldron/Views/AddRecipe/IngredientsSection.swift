@@ -50,9 +50,9 @@ struct IngredientsSection: View {
             // Items container
             ZStack(alignment: .top) {
                 VStack(spacing: isEditMode ? 5 : 10) {
-                    ForEach(Array($ingredients.enumerated()), id: \.[1].id) { index, $ingredient in
+                    ForEach(ingredients.indices, id: \.self) { index in
                         if isEditMode {
-                            let item = $ingredient.wrappedValue
+                            let item = ingredients[index]
                             let isLastPlaceholder = index == ingredients.count - 1 && (item.name.isEmpty || item.isPlaceholder)
                             
                             HStack {
@@ -66,11 +66,11 @@ struct IngredientsSection: View {
                                 
                                 // Use direct binding to ensure changes are saved
                                 IngredientInputRow(
-                                    name: $ingredient.name,
-                                    quantityString: $ingredient.quantityString,
-                                    unit: $ingredient.unit,
-                                    isFocused: $ingredient.isFocused,
-                                    ingredientId: $ingredient.id
+                                    name: $ingredients[index].name,
+                                    quantityString: $ingredients[index].quantityString,
+                                    unit: $ingredients[index].unit,
+                                    isFocused: $ingredients[index].isFocused,
+                                    ingredientId: ingredients[index].id
                                 )
                                 
                                 // Delete button
@@ -164,21 +164,21 @@ struct IngredientsSection: View {
                             )
                         } else {
                             IngredientInputRow(
-                                name: $ingredient.name,
-                                quantityString: $ingredient.quantityString,
-                                unit: $ingredient.unit,
-                                isFocused: $ingredient.isFocused,
-                                ingredientId: $ingredient.id
+                                name: $ingredients[index].name,
+                                quantityString: $ingredients[index].quantityString,
+                                unit: $ingredients[index].unit,
+                                isFocused: $ingredients[index].isFocused,
+                                ingredientId: ingredients[index].id
                             )
-                            .onChange(of: $ingredient.isFocused) {
-                                if $ingredient.isFocused { checkAndAddPlaceholder() }
+                            .onChange(of: ingredients[index].isFocused) {
+                                if ingredients[index].isFocused { checkAndAddPlaceholder() }
                             }
-                            .onChange(of: $ingredient.name) {
-                                if index == ingredients.count - 1 && !$ingredient.name.isEmpty {
+                            .onChange(of: ingredients[index].name) {
+                                if index == ingredients.count - 1 && !ingredients[index].name.isEmpty {
                                     withAnimation {
                                         ingredients.append(IngredientInput(name: "", quantityString: "", unit: .cups))
                                     }
-                                } else if $ingredient.name.isEmpty && index != ingredients.count - 1 {
+                                } else if ingredients[index].name.isEmpty && index != ingredients.count - 1 {
                                     scheduleCleanup()
                                 }
                             }

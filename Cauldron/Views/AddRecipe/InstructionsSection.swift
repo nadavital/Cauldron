@@ -4,7 +4,6 @@ struct InstructionsSection: View {
     @Binding var instructions: [StringInput]
     @Binding var isEditMode: Bool
     @Binding var draggedInstruction: StringInput?
-    @Binding var focusedIndex: UUID?
     let cleanupEmptyRows: () -> Void
     let scheduleCleanup: () -> Void
     let checkAndAddPlaceholder: () -> Void
@@ -50,9 +49,9 @@ struct InstructionsSection: View {
             // Items container
             ZStack(alignment: .top) {
                 VStack(spacing: isEditMode ? 5 : 10) {
-                    ForEach(Array($instructions.enumerated()), id: \.[1].id) { index, $instruction in
+                    ForEach(instructions.indices, id: \.self) { index in
                         if isEditMode {
-                            let item = $instruction.wrappedValue
+                            let item = instructions[index]
                             let isLastPlaceholder = index == instructions.count - 1 && (item.value.isEmpty || item.isPlaceholder)
                             
                             HStack(alignment: .center) {
@@ -66,20 +65,9 @@ struct InstructionsSection: View {
                                 
                                 // Use direct binding to ensure changes are saved
                                 InstructionInputRow(
-                                    instruction: $instruction.value,
+                                    instruction: $instructions[index].value,
                                     stepNumber: index + 1,
-                                    isFocused: Binding(
-                                        get: {
-                                            focusedIndex == $instruction.id
-                                        },
-                                        set: { newValue in
-                                            if newValue {
-                                                focusedIndex = $instruction.id
-                                            } else if focusedIndex == $instruction.id {
-                                                focusedIndex = nil
-                                            }
-                                        }
-                                    )
+                                    isFocused: $instructions[index].isFocused
                                 )
                                 
                                 // Delete button without spacers
@@ -173,30 +161,19 @@ struct InstructionsSection: View {
                             )
                         } else {
                             InstructionInputRow(
-                                instruction: $instruction.value,
+                                instruction: $instructions[index].value,
                                 stepNumber: index + 1,
-                                isFocused: Binding(
-                                    get: {
-                                        focusedIndex == $instruction.id
-                                    },
-                                    set: { newValue in
-                                        if newValue {
-                                            focusedIndex = $instruction.id
-                                        } else if focusedIndex == $instruction.id {
-                                            focusedIndex = nil
-                                        }
-                                    }
-                                )
+                                isFocused: $instructions[index].isFocused
                             )
-                            .onChange(of: focusedIndex == $instruction.id) {
-                                if focusedIndex == $instruction.id { checkAndAddPlaceholder() }
+                            .onChange(of: instructions[index].isFocused) {
+                                if instructions[index].isFocused { checkAndAddPlaceholder() }
                             }
-                            .onChange(of: $instruction.value) {
-                                if index == instructions.count - 1 && !$instruction.value.isEmpty {
-                                    withAnimation {
+                            .onChange(of: instructions[index].value) {
+                                if index == instructions.count - 1 && !instructions[index].value.isEmpty {
+                                    withAnimation { 
                                         instructions.append(StringInput(value: "", isPlaceholder: false))
                                     }
-                                } else if $instruction.value.isEmpty && index != instructions.count - 1 {
+                                } else if instructions[index].value.isEmpty && index != instructions.count - 1 {
                                     scheduleCleanup()
                                 }
                             }
@@ -243,14 +220,6 @@ struct InstructionsSection: View {
                 if let lastIdx = instructions.indices.last,
                    instructions[lastIdx].value.isEmpty || instructions[lastIdx].isPlaceholder {
                     lastPlaceholderIndex = lastIdx
-                }
-                
-                // Ensure focusedIndex is still valid after array changes
-                if let currentFocusID = focusedIndex {
-                    let stillExists = instructions.contains { $0.id == currentFocusID }
-                    if !stillExists {
-                        focusedIndex = nil
-                    }
                 }
             }
         }
