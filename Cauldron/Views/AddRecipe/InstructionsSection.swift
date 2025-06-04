@@ -50,9 +50,9 @@ struct InstructionsSection: View {
             // Items container
             ZStack(alignment: .top) {
                 VStack(spacing: isEditMode ? 5 : 10) {
-                    ForEach(instructions.indices, id: \.self) { index in
+                    ForEach(Array($instructions.enumerated()), id: \.[1].id) { index, $instruction in
                         if isEditMode {
-                            let item = instructions[index]
+                            let item = $instruction.wrappedValue
                             let isLastPlaceholder = index == instructions.count - 1 && (item.value.isEmpty || item.isPlaceholder)
                             
                             HStack(alignment: .center) {
@@ -66,16 +66,16 @@ struct InstructionsSection: View {
                                 
                                 // Use direct binding to ensure changes are saved
                                 InstructionInputRow(
-                                    instruction: $instructions[index].value,
+                                    instruction: $instruction.value,
                                     stepNumber: index + 1,
                                     isFocused: Binding(
-                                        get: { 
-                                            focusedIndex == instructions[index].id
+                                        get: {
+                                            focusedIndex == $instruction.id
                                         },
                                         set: { newValue in
                                             if newValue {
-                                                focusedIndex = instructions[index].id
-                                            } else if focusedIndex == instructions[index].id {
+                                                focusedIndex = $instruction.id
+                                            } else if focusedIndex == $instruction.id {
                                                 focusedIndex = nil
                                             }
                                         }
@@ -90,9 +90,9 @@ struct InstructionsSection: View {
                                     .opacity(isLastPlaceholder ? 0.3 : 1)
                                     .onTapGesture {
                                         if !isLastPlaceholder && instructions.count > 1 {
-                                            withAnimation { 
+                                            withAnimation {
                                                 instructions.remove(at: index)
-                                                cleanupEmptyRows() 
+                                                cleanupEmptyRows()
                                             }
                                         }
                                     }
@@ -173,30 +173,30 @@ struct InstructionsSection: View {
                             )
                         } else {
                             InstructionInputRow(
-                                instruction: $instructions[index].value,
+                                instruction: $instruction.value,
                                 stepNumber: index + 1,
                                 isFocused: Binding(
-                                    get: { 
-                                        focusedIndex == instructions[index].id
+                                    get: {
+                                        focusedIndex == $instruction.id
                                     },
                                     set: { newValue in
                                         if newValue {
-                                            focusedIndex = instructions[index].id
-                                        } else if focusedIndex == instructions[index].id {
+                                            focusedIndex = $instruction.id
+                                        } else if focusedIndex == $instruction.id {
                                             focusedIndex = nil
                                         }
                                     }
                                 )
                             )
-                            .onChange(of: focusedIndex == instructions[index].id) {
-                                if focusedIndex == instructions[index].id { checkAndAddPlaceholder() }
+                            .onChange(of: focusedIndex == $instruction.id) {
+                                if focusedIndex == $instruction.id { checkAndAddPlaceholder() }
                             }
-                            .onChange(of: instructions[index].value) {
-                                if index == instructions.count - 1 && !instructions[index].value.isEmpty {
-                                    withAnimation { 
+                            .onChange(of: $instruction.value) {
+                                if index == instructions.count - 1 && !$instruction.value.isEmpty {
+                                    withAnimation {
                                         instructions.append(StringInput(value: "", isPlaceholder: false))
                                     }
-                                } else if instructions[index].value.isEmpty && index != instructions.count - 1 {
+                                } else if $instruction.value.isEmpty && index != instructions.count - 1 {
                                     scheduleCleanup()
                                 }
                             }
