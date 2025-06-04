@@ -110,20 +110,8 @@ struct IngredientInputRow: View {
         if quantityString.isEmpty {
             return "Add quantity"
         } else {
-            // Check for custom unit name in UserDefaults when unit is .none
-            var unitDisplayName: String
-            if unit == .none {
-                let key = "customUnit_\(ingredientId.uuidString)"
-                if let customUnitName = UserDefaults.standard.string(forKey: key), !customUnitName.isEmpty {
-                    unitDisplayName = customUnitName
-                } else {
-                    unitDisplayName = unit.displayName(for: Double(quantityString) ?? 0)
-                }
-            } else {
-                unitDisplayName = unit.displayName(for: Double(quantityString) ?? 0)
-            }
-            
-            return "\(quantityString) \(unitDisplayName)"
+            // Use the displayName method to properly format
+            return "\(quantityString) \(unit.displayName(for: Double(quantityString) ?? 0))"
         }
     }
 }

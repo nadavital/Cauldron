@@ -11,13 +11,11 @@ struct ContentView: View {
     // User's recipe collection - starts empty, will be populated from Firestore
     @State var recipes: [Recipe] = []
     
-    @EnvironmentObject var authViewModel: AuthViewModel
+    @StateObject private var authViewModel = AuthViewModel()
     @StateObject private var firestoreManager = FirestoreManager()
 
     @State private var showingAddRecipeView = false
     @State private var isRecipeGridInEditMode: Bool = false
-    @State private var showingSignOutAlert = false
-    @State private var showingProfileView = false
 
     var body: some View {
         NavigationStack { // Changed from NavigationView to NavigationStack
@@ -27,39 +25,17 @@ struct ContentView: View {
             .navigationTitle("My Recipes")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    HStack {
-                        if !recipes.isEmpty {
-                            Button(isRecipeGridInEditMode ? "Done" : "Edit") {
-                                isRecipeGridInEditMode.toggle()
-                            }
+                    if !recipes.isEmpty {
+                        Button(isRecipeGridInEditMode ? "Done" : "Edit") {
+                            isRecipeGridInEditMode.toggle()
                         }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button(action: { 
-                            showingAddRecipeView = true
-                        }) {
-                            Image(systemName: "plus")
-                        }
-                        
-                        Menu {
-                            Button(action: {
-                                showingProfileView = true
-                            }) {
-                                Label("Profile", systemImage: "person.circle")
-                            }
-                            
-                            Divider()
-                            
-                            Button(action: {
-                                showingSignOutAlert = true
-                            }) {
-                                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                            }
-                        } label: {
-                            Image(systemName: "person.circle")
-                        }
+                    Button(action: { 
+                        showingAddRecipeView = true
+                    }) {
+                        Image(systemName: "plus")
                     }
                 }
             }
@@ -70,20 +46,6 @@ struct ContentView: View {
                 }
             }) {
                 AddRecipeView(recipes: $recipes)
-            }
-            .sheet(isPresented: $showingProfileView) {
-                ProfileView()
-            }
-            .alert("Sign Out", isPresented: $showingSignOutAlert) {
-                Button("Sign Out", role: .destructive) {
-                    // Clear local data before signing out
-                    recipes.removeAll()
-                    isRecipeGridInEditMode = false
-                    authViewModel.signOut()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("Are you sure you want to sign out?")
             }
             .onChange(of: recipes) { 
                 print("ContentView: recipes array changed, now contains \(recipes.count) recipes")

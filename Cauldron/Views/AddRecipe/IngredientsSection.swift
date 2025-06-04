@@ -289,46 +289,6 @@ struct IngredientsSection: View {
     }
 }
 
-// Extracted view for ingredient row
-struct IngredientRowView: View {
-    let item: IngredientInput
-    let index: Int
-    let isLastPlaceholder: Bool
-    let isDragged: Bool
-    
-    var body: some View {
-        HStack {
-            // Drag handle
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 18))
-                .foregroundColor(isLastPlaceholder ? .gray.opacity(0.3) : .gray)
-                .frame(width: 36, height: 36)
-                .background(Color.gray.opacity(isLastPlaceholder ? 0.05 : 0.1))
-                .cornerRadius(8)
-            
-            IngredientInputRow(
-                name: .constant(item.name),
-                quantityString: .constant(item.quantityString),
-                unit: .constant(item.unit),
-                isFocused: .constant(item.isFocused),
-                ingredientId: item.id
-            )
-            
-            Image(systemName: "minus.circle.fill")
-                .font(.title3)
-                .foregroundColor(.red)
-                .padding(.leading, 2)
-                .opacity(isLastPlaceholder ? 0.3 : 1)
-        }
-        .padding(6)
-        .background(isLastPlaceholder ? Color.white.opacity(0.3) : Color.white.opacity(0.5))
-        .cornerRadius(8)
-        .shadow(color: Color.black.opacity(isDragged ? 0.3 : 0.1), 
-                radius: isDragged ? 5 : 1)
-        .scaleEffect(isDragged ? 1.05 : 1.0)
-    }
-}
-
 // Helper preference keys for layout and positioning
 struct ViewSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero

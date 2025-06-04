@@ -38,10 +38,6 @@ struct AddRecipeView: View {
     @State private var draggedIngredient: IngredientInput?
     @State private var draggedInstruction: StringInput?
 
-    // Focus states for keyboard dismissal
-    @FocusState private var isDescriptionFocused: Bool
-    @State private var focusedInstructionID: UUID?
-
     var body: some View {
         GeometryReader { geometry in
             ScrollView(.vertical, showsIndicators: true) {
@@ -76,8 +72,7 @@ struct AddRecipeView: View {
                     .onChange(of: selectedPhoto) { 
                         Task {
                             if let data = try? await selectedPhoto?.loadTransferable(type: Data.self) {
-                                // Compress the image immediately for better UX
-                                selectedImageData = compressImageForDisplay(data)
+                                selectedImageData = data
                             }
                         }
                     }
@@ -106,29 +101,16 @@ struct AddRecipeView: View {
                 VStack(spacing: 20) {
                     RecipeInputCard(title: "Description", systemImage: "text.alignleft") {
                         AnyView(
-                            ZStack(alignment: .topLeading) {
-                                TextEditor(text: $description)
-                                    .frame(maxWidth: .infinity, minHeight: 100)
-                                    .focused($isDescriptionFocused)
-                                    .scrollContentBackground(.hidden)
-                                
-                                // Placeholder text
-                                if description.isEmpty {
-                                    Text("Add a description...")
-                                        .foregroundColor(.secondary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 8)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
-                            .background(Color(.secondarySystemGroupedBackground))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color(.separator), lineWidth: 0.5)
-                            )
+                            DescriptionTextView(text: $description)
+                                .frame(maxWidth: .infinity, minHeight: 100)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 12)
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .cornerRadius(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color(.separator), lineWidth: 0.5)
+                                )
                         )
                     }
                     TimingServingsView(prepTime: $prepTime,
@@ -148,7 +130,6 @@ struct AddRecipeView: View {
                     InstructionsSection(instructions: $instructions,
                                         isEditMode: $isInstructionsEditMode,
                                         draggedInstruction: $draggedInstruction,
-                                        focusedIndex: $focusedInstructionID,
                                         cleanupEmptyRows: cleanupEmptyRows,
                                         scheduleCleanup: scheduleCleanup,
                                         checkAndAddPlaceholder: checkAndAddInstructionPlaceholder,
@@ -172,76 +153,9 @@ struct AddRecipeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { setupInitialData() }
         .onDisappear { cleanupTimer?.invalidate() }
-        .onTapGesture {
-            // Dismiss keyboard when tapping outside
-            hideKeyboard()
-        }
-        .safeAreaInset(edge: .bottom) {
-            // Floating Done button when any field is focused
-            if isDescriptionFocused || focusedInstructionID != nil {
-                HStack {
-                    Spacer()
-                    Button("Done") {
-                        hideKeyboard()
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(25)
-                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 10)
-                .background(Color.clear)
-            }
-        }
     }
 
     // MARK: - Helper Methods
-    
-    /// Compress image for display and storage
-    private func compressImageForDisplay(_ imageData: Data) -> Data? {
-        guard let uiImage = UIImage(data: imageData) else { return imageData }
-        
-        // More aggressive compression for Firestore compatibility
-        // Target ~650KB to account for base64 encoding overhead
-        let maxFileSize = 650_000
-        let maxDimensions: [CGFloat] = [600, 500, 400, 300]
-        
-        for maxDimension in maxDimensions {
-            let resizedImage = resizeImageForDisplay(uiImage, maxDimension: maxDimension)
-            
-            // Try progressively lower quality
-            let qualities: [CGFloat] = [0.7, 0.5, 0.3, 0.2]
-            
-            for quality in qualities {
-                if let compressedData = resizedImage.jpegData(compressionQuality: quality),
-                   compressedData.count <= maxFileSize {
-                    print("Display image compressed from \(imageData.count) bytes to \(compressedData.count) bytes at \(maxDimension)px")
-                    return compressedData
-                }
-            }
-        }
-        
-        print("Using original image data - may require further compression when saving")
-        return imageData
-    }
-    
-    /// Resize image while maintaining aspect ratio
-    private func resizeImageForDisplay(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
-        let size = image.size
-        let scale = min(maxDimension / size.width, maxDimension / size.height)
-        
-        if scale >= 1.0 { return image }
-        
-        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: newSize)
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: newSize))
-        }
-    }
-    
     // Schedule a delayed cleanup to remove empty rows
     private func scheduleCleanup() {
         cleanupTimer?.invalidate()
@@ -332,71 +246,10 @@ struct AddRecipeView: View {
             selectedImageData = recipe.imageData
             selectedTagIDs = recipe.tags
             ingredients = recipe.ingredients.map {
-                // Convert decimal back to fraction for better UX
-                let quantityDisplay = decimalToFraction($0.quantity)
-                
-                // Save custom unit name to UserDefaults if it exists
-                if let customUnit = $0.customUnitName, !customUnit.isEmpty {
-                    let key = "customUnit_\($0.id.uuidString)"
-                    UserDefaults.standard.set(customUnit, forKey: key)
-                }
-                
-                return IngredientInput(id: $0.id, name: $0.name, quantityString: quantityDisplay, unit: $0.unit)
+                IngredientInput(id: $0.id, name: $0.name, quantityString: "\($0.quantity)", unit: $0.unit)
             } + [IngredientInput(name: "", quantityString: "", unit: .cups)]
             instructions = recipe.instructions.map { StringInput(value: $0) } + [StringInput(value: "", isPlaceholder: false)]
             description = recipe.description
-        }
-    }
-    
-    // Helper function to convert decimal to fraction for display
-    private func decimalToFraction(_ decimal: Double) -> String {
-        // Handle whole numbers
-        if decimal.truncatingRemainder(dividingBy: 1) == 0 {
-            return "\(Int(decimal))"
-        }
-        
-        let whole = Int(decimal)
-        let fractionalPart = decimal - Double(whole)
-        
-        // Check for common fractions with some tolerance
-        let epsilon = 0.001
-        let commonFractions: [(Double, String)] = [
-            (0.125, "⅛"), (0.25, "¼"), (1.0/3.0, "⅓"), (0.375, "⅜"),
-            (0.5, "½"), (0.625, "⅝"), (2.0/3.0, "⅔"), (0.75, "¾"), (0.875, "⅞")
-        ]
-        
-        // Check if the fractional part matches a common fraction
-        for (value, fraction) in commonFractions {
-            if abs(fractionalPart - value) < epsilon {
-                if whole > 0 {
-                    return "\(whole) \(fraction)"
-                } else {
-                    return fraction
-                }
-            }
-        }
-        
-        // Try to find a simple fraction representation
-        let denominators = [2, 3, 4, 5, 6, 8, 16]
-        for denom in denominators {
-            let numerator = round(fractionalPart * Double(denom))
-            if abs(fractionalPart - numerator / Double(denom)) < epsilon {
-                let num = Int(numerator)
-                if num > 0 && num < denom {
-                    if whole > 0 {
-                        return "\(whole) \(num)/\(denom)"
-                    } else {
-                        return "\(num)/\(denom)"
-                    }
-                }
-            }
-        }
-        
-        // Fallback to decimal with reasonable precision
-        if whole > 0 {
-            return String(format: "%.3f", decimal).trimmingCharacters(in: CharacterSet(charactersIn: "0")).trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        } else {
-            return String(format: "%.3f", decimal)
         }
     }
 
@@ -406,66 +259,11 @@ struct AddRecipeView: View {
         let s = Int(servings) ?? 1
         let newIngs = ingredients.compactMap { inp -> Ingredient? in
             guard !inp.isPlaceholder && !inp.name.isEmpty else { return nil }
-            
             // parse quantities including fractions...
             var qty: Double = 0
             let str = inp.quantityString
-            
-            if str.isEmpty { 
-                qty = 1 
-            } else if str.contains("¼") || str.contains("⅓") || str.contains("½") || str.contains("⅔") || str.contains("¾") {
-                // Handle unicode fractions
-                if str.contains(" ") {
-                    // Mixed number with unicode fraction (e.g. "1 ½")
-                    let parts = str.split(separator: " ")
-                    if parts.count == 2, let whole = Double(parts[0]) {
-                        let fraction = String(parts[1])
-                        if fraction == "¼" {
-                            qty = whole + 0.25
-                        } else if fraction == "⅓" {
-                            qty = whole + 1.0/3.0
-                        } else if fraction == "½" {
-                            qty = whole + 0.5
-                        } else if fraction == "⅔" {
-                            qty = whole + 2.0/3.0
-                        } else if fraction == "¾" {
-                            qty = whole + 0.75
-                        } else if fraction == "⅛" {
-                            qty = whole + 0.125
-                        } else if fraction == "⅜" {
-                            qty = whole + 0.375
-                        } else if fraction == "⅝" {
-                            qty = whole + 0.625
-                        } else if fraction == "⅞" {
-                            qty = whole + 0.875
-                        } else {
-                            qty = whole
-                        }
-                    }
-                } else {
-                    // Just a unicode fraction
-                    if str == "¼" {
-                        qty = 0.25
-                    } else if str == "⅓" {
-                        qty = 1.0/3.0
-                    } else if str == "½" {
-                        qty = 0.5
-                    } else if str == "⅔" {
-                        qty = 2.0/3.0
-                    } else if str == "¾" {
-                        qty = 0.75
-                    } else if str == "⅛" {
-                        qty = 0.125
-                    } else if str == "⅜" {
-                        qty = 0.375
-                    } else if str == "⅝" {
-                        qty = 0.625
-                    } else if str == "⅞" {
-                        qty = 0.875
-                    }
-                }
-            } else if str.contains("/") {
-                // Handle text fractions (e.g. "1/2" or "1 1/2")
+            if str.isEmpty { qty = 1 }
+            else if str.contains("/") {
                 let parts = str.split(separator: " ")
                 if parts.count == 2, let w = Double(parts[0]), parts[1].contains("/") {
                     let f = parts[1].split(separator: "/").compactMap { Double($0) }
@@ -474,19 +272,8 @@ struct AddRecipeView: View {
                     let f = str.split(separator: "/").compactMap { Double($0) }
                     if f.count == 2 { qty = f[0]/f[1] }
                 }
-            } else { 
-                qty = Double(str) ?? 0 
-            }
-            
-            // Check for custom unit name in UserDefaults (set by QuantityUnitPickerSheet)
-            var customUnitName: String? = nil
-            if inp.unit == .none {
-                // Get the custom unit name for this ingredient
-                let key = "customUnit_\(inp.id.uuidString)"
-                customUnitName = UserDefaults.standard.string(forKey: key)
-            }
-            
-            return Ingredient(name: inp.name, quantity: qty, unit: inp.unit, customUnitName: customUnitName)
+            } else { qty = Double(str) ?? 0 }
+            return Ingredient(name: inp.name, quantity: qty, unit: inp.unit, customUnitName: nil)
         }
         let newInst = instructions.filter { !$0.isPlaceholder && !$0.value.isEmpty }.map { $0.value }
         let recipe = Recipe(id: recipeToEdit?.id ?? UUID(), name: name, ingredients: newIngs, instructions: newInst, prepTime: p, cookTime: c, servings: s, imageData: selectedImageData, tags: selectedTagIDs, description: description)
@@ -508,58 +295,125 @@ struct AddRecipeView: View {
             }
         } catch {
             print("Error saving recipe: \(error)")
-            
-            // Check if it's an image size error and provide specific feedback
-            let errorDescription = error.localizedDescription
-            if errorDescription.contains("longer than") && errorDescription.contains("bytes") {
-                print("Image still too large after compression. Consider removing the image or using a smaller one.")
-                // Still save without image as fallback
-                var recipeWithoutImage = recipe
-                recipeWithoutImage.imageData = nil
-                
-                do {
-                    try await firestoreManager.saveRecipe(recipeWithoutImage)
-                    await MainActor.run {
-                        if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
-                            recipes[idx] = recipeWithoutImage
-                        } else {
-                            recipes.append(recipeWithoutImage)
-                        }
-                        print("Recipe saved without image due to size constraints")
-                        dismiss()
-                    }
-                } catch {
-                    print("Failed to save recipe even without image: \(error)")
-                    // Still update local array as final fallback
-                    await MainActor.run {
-                        if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
-                            recipes[idx] = recipe
-                        } else {
-                            recipes.append(recipe)
-                        }
-                        dismiss()
-                    }
+            // Still update local array as fallback
+            await MainActor.run {
+                if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
+                    recipes[idx] = recipe
+                } else {
+                    recipes.append(recipe)
                 }
-            } else {
-                // Other error - still update local array as fallback
-                await MainActor.run {
-                    if let idx = recipes.firstIndex(where: { $0.id == recipe.id }) {
-                        recipes[idx] = recipe
-                    } else {
-                        recipes.append(recipe)
-                    }
-                    dismiss()
-                }
+                dismiss()
             }
         }
     }
-
-    private func hideKeyboard() {
-        isDescriptionFocused = false
-        focusedInstructionID = nil
-    }
 }
 
-#Preview {
-    AddRecipeView(recipes: .constant([Recipe(id: UUID(), name: "Sample Recipe", ingredients: [Ingredient(name: "Ingredient 1", quantity: 1.5, unit: .cups)], instructions: ["Instruction 1"], prepTime: 10, cookTime: 20, servings: 4, imageData: nil, tags: [], description: "A sample recipe description.")]), recipeToEdit: nil)
+struct DescriptionTextView: UIViewRepresentable {
+    @Binding var text: String
+    
+    // Add intrinsicContentSize for better sizing
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIScreen.main.bounds.width - 48 // Account for padding
+        let newSize = uiView.sizeThatFits(CGSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        return CGSize(width: width, height: max(100, newSize.height))
+    }
+    
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        
+        // Configure scrolling behavior
+        tv.isScrollEnabled = true
+        tv.alwaysBounceVertical = true // Helps with scrolling feedback
+        tv.showsHorizontalScrollIndicator = false
+        tv.showsVerticalScrollIndicator = true
+        
+        // Text container setup for proper wrapping
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainer.lineBreakMode = .byWordWrapping
+        tv.textContainer.maximumNumberOfLines = 0
+        tv.textAlignment = .left
+        
+        // Auto-sizing and constraints setup
+        tv.translatesAutoresizingMaskIntoConstraints = false
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tv.setContentCompressionResistancePriority(.required, for: .vertical)
+        
+        // Configure appearance
+        tv.backgroundColor = .clear
+        tv.delegate = context.coordinator
+        tv.font = UIFont.preferredFont(forTextStyle: .body)
+        tv.returnKeyType = .done
+        
+        // Proper insets to ensure text doesn't run to the edge
+        tv.textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        
+        // For smoother text entry and scrolling
+        tv.autocorrectionType = .yes
+        tv.keyboardDismissMode = .interactive
+        
+        // Placeholder
+        if text.isEmpty {
+            tv.text = "Add a description..."
+            tv.textColor = UIColor.placeholderText
+        } else {
+            tv.text = text
+            tv.textColor = UIColor.label
+        }
+        
+        return tv
+    }
+    
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text && !(uiView.textColor == UIColor.placeholderText && text.isEmpty) {
+            uiView.text = text
+            uiView.textColor = UIColor.label
+        }
+        
+        if text.isEmpty && !context.coordinator.isEditing {
+            uiView.text = "Add a description..."
+            uiView.textColor = UIColor.placeholderText
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: DescriptionTextView
+        var isEditing = false
+        
+        init(_ parent: DescriptionTextView) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+        
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isEditing = true
+            if textView.textColor == UIColor.placeholderText {
+                textView.text = ""
+                textView.textColor = UIColor.label
+            }
+        }
+        
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isEditing = false
+            if parent.text.isEmpty {
+                textView.text = "Add a description..."
+                textView.textColor = UIColor.placeholderText
+            }
+        }
+        
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text == "\n" {
+                textView.resignFirstResponder()
+                return false
+            }
+            return true
+        }
+    }
 }

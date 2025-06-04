@@ -10,9 +10,8 @@ struct QuantityUnitPickerSheet: View {
     // Group units by category for better organization
     let volumeUnits: [MeasurementUnit] = [.cups, .tbsp, .tsp, .ml, .liters]
     let weightUnits: [MeasurementUnit] = [.grams, .kg, .ounce, .pound, .mg]
-    let moreUnits: [MeasurementUnit] = [.pieces, .pinch, .dash]
+    let moreUnits: [MeasurementUnit] = [.pieces, .pinch, .dash, .none]
     @State private var customUnit: String = ""
-    @State private var isCustomSelected: Bool = false
     
     // For segmenting the unit picker
     @State private var selectedCategoryIndex = 0
@@ -35,27 +34,26 @@ struct QuantityUnitPickerSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 // Simple, direct quantity input section
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Quantity")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(.secondary)
+                        .font(.headline)
+                        .foregroundColor(.primary)
                         .padding(.horizontal)
                     
-                    TextField("Enter quantity", text: $quantityInput)
+                    TextField("Enter whole number or decimal", text: $quantityInput)
                         .keyboardType(.decimalPad)
                         .focused($quantityFocus)
-                        .font(.title2)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                        .font(.title3)
+                        .padding()
                         .background(Color(.systemGray6))
-                        .cornerRadius(12)
+                        .cornerRadius(10)
                         .padding(.horizontal)
                 }
-                .padding(.top, 16)
-                .padding(.bottom, 12)
+                .padding(.top, 20)
+                .padding(.bottom, 5)
                 
-                // Quick fraction buttons - make them smaller and more compact
-                HStack(spacing: 8) {
+                // Quick fraction buttons
+                HStack(spacing: 10) {
                     ForEach(fractions, id: \.self) { fraction in
                         Button {
                             if let existingNumber = Double(quantityInput), existingNumber.truncatingRemainder(dividingBy: 1) == 0 {
@@ -67,8 +65,7 @@ struct QuantityUnitPickerSheet: View {
                             }
                         } label: {
                             Text(fraction)
-                                .font(.subheadline.weight(.medium))
-                                .frame(width: 32, height: 32)
+                                .frame(minWidth: 40, minHeight: 40)
                                 .background(
                                     Circle()
                                         .fill(quantityInput == fraction ? Color.accentColor.opacity(0.2) : Color(.systemGray6))
@@ -80,19 +77,19 @@ struct QuantityUnitPickerSheet: View {
                     Spacer()
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 16)
+                .padding(.bottom, 20)
                 
                 Divider()
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 15)
                 
                 // Unit section with integrated category selector
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Unit")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(.secondary)
+                        .font(.headline)
+                        .foregroundColor(.primary)
                         .padding(.horizontal)
                     
-                    // Category selector - make it more compact
+                    // Category selector right above units
                     Picker("Unit Category", selection: $selectedCategoryIndex) {
                         Text("Volume").tag(0)
                         Text("Weight").tag(1)
@@ -100,79 +97,77 @@ struct QuantityUnitPickerSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 10)
                     
-                    // Units grid - include Custom button in More category
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 70, maximum: 100))], spacing: 8) {
+                    // Units grid
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80, maximum: 120))], spacing: 12) {
                         ForEach(selectedCategory, id: \.self) { unitOption in
                             Button {
                                 unit = unitOption
-                                isCustomSelected = false
                                 // Clear custom unit when selecting a predefined unit
                                 if unitOption != .none {
                                     customUnit = ""
                                 }
                             } label: {
                                 Text(unitOption.displayName(for: Double(quantityInput) ?? 0))
-                                    .font(.subheadline)
-                                    .padding(.vertical, 8)
+                                    .padding(.vertical, 12)
                                     .frame(maxWidth: .infinity)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(unit == unitOption && !isCustomSelected ? Color.accentColor.opacity(0.2) : Color(.systemGray6))
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(unit == unitOption ? Color.accentColor.opacity(0.2) : Color(.systemGray6))
                                     )
-                                    .foregroundColor(unit == unitOption && !isCustomSelected ? .accentColor : .primary)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        
-                        // Add Custom button only in More category
-                        if selectedCategoryIndex == 2 {
-                            Button {
-                                isCustomSelected = true
-                                unit = .none
-                            } label: {
-                                Text("Custom")
-                                    .font(.subheadline)
-                                    .padding(.vertical, 8)
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(isCustomSelected ? Color.accentColor.opacity(0.2) : Color(.systemGray6))
-                                    )
-                                    .foregroundColor(isCustomSelected ? .accentColor : .primary)
+                                    .foregroundColor(unit == unitOption ? .accentColor : .primary)
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
                     }
                     .padding(.horizontal)
                     
-                    // Custom unit text field - only show when Custom is selected
-                    if selectedCategoryIndex == 2 && isCustomSelected {
-                        VStack(spacing: 8) {
-                            TextField("Enter custom unit", text: $customUnit)
-                                .font(.subheadline)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
+                    // Custom unit section - only show in More section
+                    if selectedCategoryIndex == 2 {
+                        // Custom unit input field
+                        VStack {
+                            TextField("Custom unit", text: $customUnit)
+                                .padding()
                                 .background(Color(.systemGray6))
-                                .cornerRadius(8)
+                                .cornerRadius(10)
                                 .padding(.horizontal)
+                                .padding(.bottom, 8)
+                            
+                            Button {
+                                // Use custom unit
+                                if !customUnit.isEmpty {
+                                    unit = .none
+                                }
+                            } label: {
+                                Text("Use Custom: \(customUnit)")
+                                    .padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(!customUnit.isEmpty && unit == .none ? Color.accentColor.opacity(0.2) : Color(.systemGray6))
+                                    )
+                                    .foregroundColor(!customUnit.isEmpty ? .accentColor : .gray)
+                            }
+                            .disabled(customUnit.isEmpty)
+                            .buttonStyle(PlainButtonStyle())
+                            .padding(.horizontal)
                         }
                         .padding(.top, 8)
                     }
                 }
                 
-                Spacer(minLength: 16)
+                Spacer()
                 
-                // Preview of selection - make it more subtle
+                // Preview of selection
                 HStack {
                     Spacer()
                     
-                    let displayUnit = isCustomSelected && !customUnit.isEmpty ? customUnit : unit.displayName(for: Double(quantityInput) ?? 0)
+                    let displayUnit = unit == .none && !customUnit.isEmpty ? customUnit : unit.displayName(for: Double(quantityInput) ?? 0)
                     Text("\(quantityInput) \(displayUnit)")
                         .font(.headline)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 24)
                         .background(
                             Capsule()
                                 .fill(Color.accentColor.opacity(0.1))
@@ -180,8 +175,9 @@ struct QuantityUnitPickerSheet: View {
                         .foregroundColor(.accentColor)
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 16)
+                .padding(.bottom, 10)
             }
+            .padding(.bottom, 20)
             .navigationTitle("Quantity & Unit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -193,58 +189,71 @@ struct QuantityUnitPickerSheet: View {
                 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        // Keep fractions as fractions for better UX
+                        // Fixed fraction handling logic
                         var finalQuantity = quantityInput
                         
                         if !quantityInput.isEmpty {
-                            // Convert common text fractions to unicode fractions
-                            if quantityInput == "1/4" {
-                                finalQuantity = "¼"
-                            } else if quantityInput == "1/3" {
-                                finalQuantity = "⅓"
-                            } else if quantityInput == "1/2" {
-                                finalQuantity = "½"
-                            } else if quantityInput == "2/3" {
-                                finalQuantity = "⅔"
-                            } else if quantityInput == "3/4" {
-                                finalQuantity = "¾"
-                            } else if quantityInput == "1/8" {
-                                finalQuantity = "⅛"
-                            } else if quantityInput == "3/8" {
-                                finalQuantity = "⅜"
-                            } else if quantityInput == "5/8" {
-                                finalQuantity = "⅝"
-                            } else if quantityInput == "7/8" {
-                                finalQuantity = "⅞"
-                            } else if quantityInput.contains(" ") && quantityInput.contains("/") {
-                                // Handle mixed numbers with text fractions (e.g., "2 1/4")
+                            // Handle unicode fractions first
+                            if quantityInput.contains("¼") || quantityInput.contains("⅓") || quantityInput.contains("½") || quantityInput.contains("⅔") || quantityInput.contains("¾") {
                                 let parts = quantityInput.split(separator: " ")
-                                if parts.count == 2, let whole = Int(parts[0]), parts[1].contains("/") {
+                                if parts.count == 2, let whole = Double(parts[0]) {
+                                    // Mixed number with fraction (e.g., "1 ½")
                                     let fraction = String(parts[1])
-                                    let unicodeFraction: String
+                                    var fractionValue: Double = 0
                                     switch fraction {
-                                    case "1/4": unicodeFraction = "¼"
-                                    case "1/3": unicodeFraction = "⅓"
-                                    case "1/2": unicodeFraction = "½"
-                                    case "2/3": unicodeFraction = "⅔"
-                                    case "3/4": unicodeFraction = "¾"
-                                    case "1/8": unicodeFraction = "⅛"
-                                    case "3/8": unicodeFraction = "⅜"
-                                    case "5/8": unicodeFraction = "⅝"
-                                    case "7/8": unicodeFraction = "⅞"
-                                    default: unicodeFraction = fraction
+                                    case "¼": fractionValue = 0.25
+                                    case "⅓": fractionValue = 1.0/3.0
+                                    case "½": fractionValue = 0.5
+                                    case "⅔": fractionValue = 2.0/3.0
+                                    case "¾": fractionValue = 0.75
+                                    case "⅛": fractionValue = 0.125
+                                    case "⅜": fractionValue = 0.375
+                                    case "⅝": fractionValue = 0.625
+                                    case "⅞": fractionValue = 0.875
+                                    default: fractionValue = 0
                                     }
-                                    finalQuantity = "\(whole) \(unicodeFraction)"
+                                    finalQuantity = "\(whole + fractionValue)"
+                                } else if parts.count == 1 {
+                                    // Just a unicode fraction
+                                    let fraction = quantityInput
+                                    switch fraction {
+                                    case "¼": finalQuantity = "0.25"
+                                    case "⅓": finalQuantity = "\(1.0/3.0)"
+                                    case "½": finalQuantity = "0.5"
+                                    case "⅔": finalQuantity = "\(2.0/3.0)"
+                                    case "¾": finalQuantity = "0.75"
+                                    case "⅛": finalQuantity = "0.125"
+                                    case "⅜": finalQuantity = "0.375"
+                                    case "⅝": finalQuantity = "0.625"
+                                    case "⅞": finalQuantity = "0.875"
+                                    default: break
+                                    }
+                                }
+                            } else if quantityInput.contains("/") {
+                                // Handle text fractions (e.g., "1/2" or "1 1/2")
+                                let parts = quantityInput.split(separator: " ")
+                                if parts.count == 2, let whole = Double(parts[0]), parts[1].contains("/") {
+                                    // Mixed number with text fraction
+                                    let fractionParts = parts[1].split(separator: "/")
+                                    if fractionParts.count == 2, let num = Double(fractionParts[0]), let den = Double(fractionParts[1]), den != 0 {
+                                        finalQuantity = "\(whole + num/den)"
+                                    }
+                                } else if parts.count == 1 && quantityInput.contains("/") {
+                                    // Just a text fraction
+                                    let fractionParts = quantityInput.split(separator: "/")
+                                    if fractionParts.count == 2, let num = Double(fractionParts[0]), let den = Double(fractionParts[1]), den != 0 {
+                                        finalQuantity = "\(num/den)"
+                                    }
                                 }
                             }
-                            // If it's already a unicode fraction, decimal, or other format, keep it as is
+                            // If it's already a decimal or whole number, keep it as is
                         }
                         
                         quantity = finalQuantity
                         
                         // Save custom unit to UserDefaults and pass it to callback
                         var customUnitName: String? = nil
-                        if isCustomSelected && !customUnit.isEmpty {
+                        if unit == .none && !customUnit.isEmpty {
                             customUnitName = customUnit
                             // Save to UserDefaults for persistence
                             let key = "customUnit_\(ingredientId.uuidString)"
@@ -260,13 +269,10 @@ struct QuantityUnitPickerSheet: View {
                 // Initialize the input field with current quantity
                 quantityInput = quantity
                 
-                // Load custom unit if it exists and set states accordingly
+                // Load custom unit if it exists
                 if unit == .none {
                     let key = "customUnit_\(ingredientId.uuidString)"
-                    if let loadedCustomUnit = UserDefaults.standard.string(forKey: key), !loadedCustomUnit.isEmpty {
-                        customUnit = loadedCustomUnit
-                        isCustomSelected = true
-                    }
+                    customUnit = UserDefaults.standard.string(forKey: key) ?? ""
                 }
                 
                 // Set the initial category based on the current unit
@@ -279,6 +285,6 @@ struct QuantityUnitPickerSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium])
     }
 } 
