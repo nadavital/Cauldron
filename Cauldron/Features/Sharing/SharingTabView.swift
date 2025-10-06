@@ -1,0 +1,182 @@
+//
+//  SharingTabView.swift
+//  Cauldron
+//
+//  Created by Nadav Avital on 10/5/25.
+//
+
+import SwiftUI
+import os
+
+/// Main sharing tab view showing shared recipes
+struct SharingTabView: View {
+    @StateObject private var viewModel: SharingTabViewModel
+    @StateObject private var userSession = CurrentUserSession.shared
+    @State private var showingEditProfile = false
+    
+    init(dependencies: DependencyContainer) {
+        _viewModel = StateObject(wrappedValue: SharingTabViewModel(dependencies: dependencies))
+    }
+    
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoading {
+                    ProgressView("Loading shared recipes...")
+                } else if viewModel.sharedRecipes.isEmpty {
+                    emptyState
+                } else {
+                    recipesList
+                }
+            }
+            .navigationTitle("Shared Recipes")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
+                        Label("Connections", systemImage: "person.2")
+                    }
+                }
+                
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if let user = userSession.currentUser {
+                            Button {
+                                showingEditProfile = true
+                            } label: {
+                                Label("Edit Profile (@\(user.username))", systemImage: "person.circle")
+                            }
+                            
+                            Divider()
+                        }
+                        
+                        Button {
+                            Task {
+                                await viewModel.createDemoUsers()
+                            }
+                        } label: {
+                            Label("Create Demo Users", systemImage: "person.2.fill")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            .task {
+                await viewModel.loadSharedRecipes()
+            }
+            .refreshable {
+                await viewModel.loadSharedRecipes()
+            }
+            .sheet(isPresented: $showingEditProfile) {
+                EditProfileView(dependencies: viewModel.dependencies)
+            }
+            .alert("Success", isPresented: $viewModel.showSuccessAlert) {
+                Button("OK") { }
+            } message: {
+                Text(viewModel.alertMessage)
+            }
+            .alert("Error", isPresented: $viewModel.showErrorAlert) {
+                Button("OK") { }
+            } message: {
+                Text(viewModel.alertMessage)
+            }
+        }
+    }
+    
+    private var emptyState: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 60))
+                .foregroundColor(.gray)
+            
+            Text("No Shared Recipes")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("Recipes shared with you will appear here")
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Text("Tap the menu to create demo users for testing")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.top, 8)
+        }
+        .padding()
+    }
+    
+    private var recipesList: some View {
+        List {
+            ForEach(viewModel.sharedRecipes) { sharedRecipe in
+                NavigationLink(destination: SharedRecipeDetailView(
+                    sharedRecipe: sharedRecipe,
+                    dependencies: viewModel.dependencies,
+                    onCopy: {
+                        await viewModel.copyToPersonalCollection(sharedRecipe)
+                    },
+                    onRemove: {
+                        await viewModel.removeSharedRecipe(sharedRecipe)
+                    }
+                )) {
+                    SharedRecipeRowView(sharedRecipe: sharedRecipe)
+                }
+            }
+        }
+    }
+}
+
+/// Row view for a shared recipe
+struct SharedRecipeRowView: View {
+    let sharedRecipe: SharedRecipe
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(sharedRecipe.recipe.title)
+                    .font(.headline)
+                
+                Spacer()
+                
+                if let time = sharedRecipe.recipe.displayTime {
+                    Label(time, systemImage: "clock")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            HStack {
+                Label("Shared by \(sharedRecipe.sharedBy.displayName)", systemImage: "person.fill")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Text(sharedRecipe.sharedAt.formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            if !sharedRecipe.recipe.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(sharedRecipe.recipe.tags, id: \.name) { tag in
+                            Text(tag.name)
+                                .font(.caption2)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.cauldronOrange.opacity(0.2))
+                                .foregroundColor(.cauldronOrange)
+                                .cornerRadius(6)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+#Preview {
+    SharingTabView(dependencies: .preview())
+}
