@@ -1,0 +1,70 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
+  },
+  "groups" : [
+    {
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "extended-gray:0.75000,1.00000"
+          },
+          "image-name" : "ChatGPT Image Oct 4, 2025 at 07_01_47 PM.png",
+          "name" : "Steam",
+          "position" : {
+            "scale" : 0.4,
+            "translation-in-points" : [
+              0,
+              -320
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "extended-gray:0.00000,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
+              }
+            }
+          ],
+          "image-name" : "ChatGPT Image Oct 4, 2025 at 06_40_30 PM.png",
+          "name" : "Cauldron",
+          "position" : {
+            "scale" : 0.79,
+            "translation-in-points" : [
+              0,
+              100
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
