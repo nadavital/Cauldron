@@ -14,62 +14,120 @@ import Combine
 @MainActor
 class CurrentUserSession: ObservableObject {
     static let shared = CurrentUserSession()
-    
+
     @Published var currentUser: User?
     @Published var isInitialized = false
     @Published var needsOnboarding = false
-    
+    @Published var needsiCloudSignIn = false
+    @Published var cloudKitAccountStatus: CloudKitAccountStatus?
+
     private let userIdKey = "currentUserId"
     private let usernameKey = "currentUsername"
     private let displayNameKey = "currentDisplayName"
+    private let hasCompletedLocalOnboardingKey = "hasCompletedLocalOnboarding"
     private let logger = Logger(subsystem: "com.cauldron", category: "UserSession")
-    
+
     var userId: UUID? {
         currentUser?.id
     }
-    
+
+    var isCloudSyncAvailable: Bool {
+        cloudKitAccountStatus?.isAvailable ?? false
+    }
+
     private init() {}
     
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
         logger.info("Initializing user session...")
-        
-        // Check if we have a stored user ID
+
+        // Step 1: Check iCloud account status
+        let accountStatus = await dependencies.cloudKitService.checkAccountStatus()
+        cloudKitAccountStatus = accountStatus
+        logger.info("iCloud account status: \(String(describing: accountStatus))")
+
+        // Step 2: Try to fetch existing user from CloudKit if available
+        if accountStatus.isAvailable {
+            do {
+                if let cloudUser = try await dependencies.cloudKitService.fetchCurrentUserProfile() {
+                    // Found existing user in CloudKit - use it
+                    logger.info("Found existing user in CloudKit: \(cloudUser.username)")
+                    currentUser = cloudUser
+                    saveUserToDefaults(cloudUser)
+                    isInitialized = true
+                    needsOnboarding = false
+                    needsiCloudSignIn = false
+                    return
+                }
+            } catch {
+                logger.error("Failed to fetch CloudKit user: \(error.localizedDescription)")
+                // Continue to check local storage
+            }
+        }
+
+        // Step 3: Check local storage for existing user
         if let userIdString = UserDefaults.standard.string(forKey: userIdKey),
            let userId = UUID(uuidString: userIdString),
            let username = UserDefaults.standard.string(forKey: usernameKey),
            let displayName = UserDefaults.standard.string(forKey: displayNameKey) {
-            
-            logger.info("Found existing user session: \(username)")
-            
-            // Recreate user object
+
+            logger.info("Found existing local user: \(username)")
+
+            // Recreate user object from local storage
             currentUser = User(
                 id: userId,
                 username: username,
                 displayName: displayName
             )
-            
-            // Try to sync with CloudKit
-            do {
-                let cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
-                    username: username,
-                    displayName: displayName
-                )
-                currentUser = cloudUser
-                logger.info("Synced with CloudKit successfully")
-            } catch {
-                logger.warning("CloudKit sync failed (ok if not enabled): \(error.localizedDescription)")
-                // Continue with local user - CloudKit may not be enabled
+
+            // If iCloud is available, try to sync
+            if accountStatus.isAvailable {
+                do {
+                    let cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
+                        username: username,
+                        displayName: displayName
+                    )
+                    currentUser = cloudUser
+                    saveUserToDefaults(cloudUser)
+                    logger.info("Synced local user to CloudKit successfully")
+                } catch {
+                    logger.warning("CloudKit sync failed: \(error.localizedDescription)")
+                    // Continue with local user
+                }
             }
-            
+
             isInitialized = true
             needsOnboarding = false
+            needsiCloudSignIn = false
         } else {
-            // No existing user - needs onboarding
-            logger.info("No existing user found - needs onboarding")
-            isInitialized = true
-            needsOnboarding = true
+            // Step 4: No existing user - determine what to show
+            if accountStatus.isAvailable {
+                // iCloud available but no user profile - show onboarding
+                logger.info("No existing user - showing onboarding")
+                isInitialized = true
+                needsOnboarding = true
+                needsiCloudSignIn = false
+            } else if accountStatus == .noAccount {
+                // Not signed into iCloud - show iCloud sign-in prompt
+                logger.info("Not signed into iCloud - showing sign-in prompt")
+                isInitialized = true
+                needsOnboarding = false
+                needsiCloudSignIn = true
+            } else {
+                // iCloud has issues - allow local-only mode
+                logger.warning("iCloud unavailable (\(String(describing: accountStatus))) - allowing local mode")
+                isInitialized = true
+                needsOnboarding = true
+                needsiCloudSignIn = false
+            }
         }
+    }
+
+    /// Save user data to UserDefaults
+    private func saveUserToDefaults(_ user: User) {
+        UserDefaults.standard.set(user.id.uuidString, forKey: userIdKey)
+        UserDefaults.standard.set(user.username, forKey: usernameKey)
+        UserDefaults.standard.set(user.displayName, forKey: displayNameKey)
     }
     
     /// Create and save a new user during onboarding
@@ -97,15 +155,14 @@ class CurrentUserSession: ObservableObject {
             username: username,
             displayName: displayName
         )
-        
+
         // Save to UserDefaults
-        UserDefaults.standard.set(user.id.uuidString, forKey: userIdKey)
-        UserDefaults.standard.set(user.username, forKey: usernameKey)
-        UserDefaults.standard.set(user.displayName, forKey: displayNameKey)
-        
+        saveUserToDefaults(user)
+
         currentUser = user
         needsOnboarding = false
-        
+        needsiCloudSignIn = false
+
         logger.info("User session created successfully")
     }
     
@@ -131,27 +188,44 @@ class CurrentUserSession: ObservableObject {
         } catch {
             logger.warning("CloudKit update failed (ok if not enabled): \(error.localizedDescription)")
         }
-        
+
         // Save to UserDefaults
-        UserDefaults.standard.set(updatedUser.username, forKey: usernameKey)
-        UserDefaults.standard.set(updatedUser.displayName, forKey: displayNameKey)
-        
+        saveUserToDefaults(updatedUser)
+
         self.currentUser = updatedUser
-        
+
         logger.info("User profile updated successfully")
     }
     
+    /// Perform initial recipe sync after user authentication
+    func performInitialSync(dependencies: DependencyContainer) async {
+        guard let userId = userId, isCloudSyncAvailable else {
+            logger.info("Skipping initial sync - user not authenticated or CloudKit unavailable")
+            return
+        }
+
+        logger.info("Performing initial recipe sync...")
+
+        do {
+            try await dependencies.recipeSyncService.performFullSync(for: userId)
+            logger.info("Initial sync completed successfully")
+        } catch {
+            logger.error("Initial sync failed: \(error.localizedDescription)")
+            // Don't throw - sync failure shouldn't block app usage
+        }
+    }
+
     /// Sign out and clear user session
     func signOut() {
         logger.info("Signing out user")
-        
+
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: displayNameKey)
-        
+
         currentUser = nil
         needsOnboarding = true
-        
+
         logger.info("User signed out")
     }
 }

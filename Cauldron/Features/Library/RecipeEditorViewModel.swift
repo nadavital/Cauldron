@@ -212,19 +212,18 @@ class RecipeEditorViewModel: ObservableObject {
             } else {
                 try await dependencies.recipeRepository.create(recipe)
             }
-            
-            // Sync to CloudKit if not private
-            if recipe.visibility != .privateRecipe, let ownerId = recipe.ownerId {
-                do {
-                    try await dependencies.cloudKitService.saveRecipe(recipe, ownerId: ownerId)
-                    AppLogger.general.info("Recipe synced to CloudKit: \(recipe.title)")
-                } catch {
-                    // Don't fail the save if CloudKit sync fails
-                    AppLogger.general.warning("CloudKit sync failed (continuing): \(error.localizedDescription)")
-                }
+
+            AppLogger.general.info("Recipe saved locally: \(recipe.title)")
+
+            // Sync to CloudKit using RecipeSyncService
+            do {
+                try await dependencies.recipeSyncService.syncRecipeToCloud(recipe)
+                AppLogger.general.info("Recipe synced to CloudKit: \(recipe.title)")
+            } catch {
+                // Don't fail the save if CloudKit sync fails
+                AppLogger.general.warning("CloudKit sync failed (continuing): \(error.localizedDescription)")
             }
-            
-            AppLogger.general.info("Recipe saved: \(recipe.title)")
+
             return true
             
         } catch {

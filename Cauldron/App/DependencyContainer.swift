@@ -31,17 +31,18 @@ class DependencyContainer: ObservableObject {
     let foundationModelsService: FoundationModelsService
     let sharingService: SharingService
     let cloudKitService: CloudKitService
-    
+    let recipeSyncService: RecipeSyncService
+
     // UI Services (MainActor)
     let timerManager: TimerManager
-    
+
     // Parsers
     let htmlParser: HTMLRecipeParser
     let textParser: TextRecipeParser
-    
+
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
-        
+
         // Initialize repositories
         self.recipeRepository = RecipeRepository(modelContainer: modelContainer)
         self.pantryRepository = PantryRepository(modelContainer: modelContainer)
@@ -49,28 +50,33 @@ class DependencyContainer: ObservableObject {
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
         self.connectionRepository = ConnectionRepository(modelContainer: modelContainer)
-        
+
         // Initialize services
         self.unitsService = UnitsService()
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
         self.timerManager = TimerManager()
         self.cloudKitService = CloudKitService()
-        
+
         self.groceryService = GroceryService(
             pantryRepo: pantryRepository,
             unitsService: unitsService
         )
-        
+
         self.recommender = Recommender(
             pantryRepo: pantryRepository
         )
-        
+
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
             recipeRepository: recipeRepository
         )
-        
+
+        self.recipeSyncService = RecipeSyncService(
+            cloudKitService: cloudKitService,
+            recipeRepository: recipeRepository
+        )
+
         // Initialize parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()

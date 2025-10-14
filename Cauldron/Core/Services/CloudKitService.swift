@@ -9,6 +9,36 @@ import Foundation
 import CloudKit
 import os
 
+/// Account status for iCloud/CloudKit
+enum CloudKitAccountStatus {
+    case available
+    case noAccount
+    case restricted
+    case couldNotDetermine
+    case temporarilyUnavailable
+
+    init(from ckStatus: CKAccountStatus) {
+        switch ckStatus {
+        case .available:
+            self = .available
+        case .noAccount:
+            self = .noAccount
+        case .restricted:
+            self = .restricted
+        case .couldNotDetermine:
+            self = .couldNotDetermine
+        case .temporarilyUnavailable:
+            self = .temporarilyUnavailable
+        @unknown default:
+            self = .couldNotDetermine
+        }
+    }
+
+    var isAvailable: Bool {
+        self == .available
+    }
+}
+
 /// Service for syncing data with CloudKit
 /// Note: CloudKit capability must be enabled in Xcode for this to work
 actor CloudKitService {
@@ -17,13 +47,14 @@ actor CloudKitService {
     private let publicDatabase: CKDatabase?
     private let logger = Logger(subsystem: "com.cauldron", category: "CloudKitService")
     private let isEnabled: Bool
-    
+    private var cachedAccountStatus: CloudKitAccountStatus?
+
     // Record type names
     private let userRecordType = "User"
     private let recipeRecordType = "Recipe"
     private let connectionRecordType = "Connection"
     private let sharedRecipeRecordType = "SharedRecipe"
-    
+
     init() {
         // Try to initialize CloudKit, but don't crash if it fails
         do {
@@ -41,6 +72,43 @@ actor CloudKitService {
             self.publicDatabase = nil
             self.isEnabled = false
         }
+    }
+
+    // MARK: - Account Status
+
+    /// Check if the user is signed into iCloud and has CloudKit access
+    func checkAccountStatus() async -> CloudKitAccountStatus {
+        guard isEnabled, let container = container else {
+            logger.warning("CloudKit not enabled")
+            return .couldNotDetermine
+        }
+
+        do {
+            let status = try await container.accountStatus()
+            let accountStatus = CloudKitAccountStatus(from: status)
+            cachedAccountStatus = accountStatus
+
+            logger.info("iCloud account status: \(String(describing: accountStatus))")
+
+            return accountStatus
+        } catch {
+            logger.error("Failed to check account status: \(error.localizedDescription)")
+            return .couldNotDetermine
+        }
+    }
+
+    /// Get cached account status or check if not cached
+    func getAccountStatus() async -> CloudKitAccountStatus {
+        if let cached = cachedAccountStatus {
+            return cached
+        }
+        return await checkAccountStatus()
+    }
+
+    /// Check if CloudKit is available and user is signed in
+    func isCloudKitAvailable() async -> Bool {
+        let status = await checkAccountStatus()
+        return status.isAvailable
     }
     
     // MARK: - Helper
@@ -78,10 +146,42 @@ actor CloudKitService {
         return try await container.userRecordID()
     }
     
+    /// Fetch existing user profile from CloudKit (returns nil if not found)
+    func fetchCurrentUserProfile() async throws -> User? {
+        // First check account status
+        let accountStatus = await checkAccountStatus()
+        guard accountStatus.isAvailable else {
+            throw CloudKitError.accountNotAvailable(accountStatus)
+        }
+
+        let userRecordID = try await getCurrentUserRecordID()
+
+        do {
+            let db = try getPrivateDatabase()
+            let record = try await db.record(for: userRecordID)
+            let user = try userFromRecord(record)
+            logger.info("Fetched existing user profile: \(user.username)")
+            return user
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                // User profile doesn't exist yet
+                logger.info("No existing user profile found in CloudKit")
+                return nil
+            }
+            throw error
+        }
+    }
+
     /// Fetch or create current user profile
     func fetchOrCreateCurrentUser(username: String, displayName: String) async throws -> User {
+        // First check account status
+        let accountStatus = await checkAccountStatus()
+        guard accountStatus.isAvailable else {
+            throw CloudKitError.accountNotAvailable(accountStatus)
+        }
+
         let userRecordID = try await getCurrentUserRecordID()
-        
+
         // Try to fetch existing user record
         do {
             let db = try getPrivateDatabase()
@@ -263,6 +363,78 @@ actor CloudKitService {
         return recipes
     }
     
+    /// Delete recipe from CloudKit
+    func deleteRecipe(_ recipe: Recipe) async throws {
+        guard let cloudRecordName = recipe.cloudRecordName else {
+            logger.warning("Cannot delete recipe from CloudKit: no cloud record name")
+            return
+        }
+
+        let recordID = CKRecord.ID(recordName: cloudRecordName)
+        let database = try recipe.visibility == .publicRecipe ? getPublicDatabase() : getPrivateDatabase()
+
+        do {
+            try await database.deleteRecord(withID: recordID)
+            logger.info("Deleted recipe from CloudKit: \(recipe.title)")
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                // Recipe doesn't exist in CloudKit - that's okay
+                logger.info("Recipe not found in CloudKit (already deleted): \(recipe.title)")
+                return
+            }
+            throw error
+        }
+    }
+
+    /// Sync all recipes for a user - fetch from CloudKit and return for local merge
+    func syncUserRecipes(ownerId: UUID) async throws -> [Recipe] {
+        logger.info("Syncing recipes from CloudKit for owner: \(ownerId)")
+
+        // Check account status first
+        let accountStatus = await checkAccountStatus()
+        guard accountStatus.isAvailable else {
+            throw CloudKitError.accountNotAvailable(accountStatus)
+        }
+
+        // Fetch from both private and public databases
+        var allRecipes: [Recipe] = []
+
+        // Fetch private recipes
+        do {
+            let privateRecipes = try await fetchUserRecipes(ownerId: ownerId)
+            allRecipes.append(contentsOf: privateRecipes)
+            logger.info("Fetched \(privateRecipes.count) private recipes from CloudKit")
+        } catch {
+            logger.error("Failed to fetch private recipes: \(error.localizedDescription)")
+            throw error
+        }
+
+        // Fetch public recipes owned by this user
+        do {
+            let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
+                                       ownerId.uuidString,
+                                       RecipeVisibility.publicRecipe.rawValue)
+            let query = CKQuery(recordType: recipeRecordType, predicate: predicate)
+
+            let db = try getPublicDatabase()
+            let results = try await db.records(matching: query)
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let recipe = try? recipeFromRecord(record) {
+                    allRecipes.append(recipe)
+                }
+            }
+            logger.info("Fetched \(results.matchResults.count) public recipes from CloudKit")
+        } catch {
+            logger.error("Failed to fetch public recipes: \(error.localizedDescription)")
+            // Don't fail completely if public fetch fails
+        }
+
+        logger.info("Total recipes synced from CloudKit: \(allRecipes.count)")
+        return allRecipes
+    }
+
     private func recipeFromRecord(_ record: CKRecord) throws -> Recipe {
         guard let recipeIdString = record["recipeId"] as? String,
               let recipeId = UUID(uuidString: recipeIdString),
@@ -275,33 +447,33 @@ actor CloudKitService {
               let updatedAt = record["updatedAt"] as? Date else {
             throw CloudKitError.invalidRecord
         }
-        
+
         let decoder = JSONDecoder()
-        
+
         let ingredients: [Ingredient]
         if let ingredientsData = record["ingredientsData"] as? Data {
             ingredients = (try? decoder.decode([Ingredient].self, from: ingredientsData)) ?? []
         } else {
             ingredients = []
         }
-        
+
         let steps: [CookStep]
         if let stepsData = record["stepsData"] as? Data {
             steps = (try? decoder.decode([CookStep].self, from: stepsData)) ?? []
         } else {
             steps = []
         }
-        
+
         let tags: [Tag]
         if let tagsData = record["tagsData"] as? Data {
             tags = (try? decoder.decode([Tag].self, from: tagsData)) ?? []
         } else {
             tags = []
         }
-        
+
         let yields = record["yields"] as? String ?? "4 servings"
         let totalMinutes = record["totalMinutes"] as? Int
-        
+
         return Recipe(
             id: recipeId,
             title: title,
@@ -317,7 +489,7 @@ actor CloudKitService {
             updatedAt: updatedAt
         )
     }
-    
+
     // MARK: - Connections
     
     /// Send a connection request
@@ -440,7 +612,11 @@ enum CloudKitError: LocalizedError {
     case notAuthenticated
     case permissionDenied
     case notEnabled
-    
+    case accountNotAvailable(CloudKitAccountStatus)
+    case networkError
+    case quotaExceeded
+    case syncConflict
+
     var errorDescription: String? {
         switch self {
         case .invalidRecord:
@@ -451,6 +627,40 @@ enum CloudKitError: LocalizedError {
             return "Permission denied"
         case .notEnabled:
             return "CloudKit is not enabled. Please enable CloudKit capability in Xcode project settings."
+        case .accountNotAvailable(let status):
+            switch status {
+            case .noAccount:
+                return "Please sign in to iCloud in Settings to use cloud features"
+            case .restricted:
+                return "iCloud access is restricted on this device"
+            case .temporarilyUnavailable:
+                return "iCloud is temporarily unavailable. Please try again later"
+            default:
+                return "Could not verify iCloud account status"
+            }
+        case .networkError:
+            return "Network connection error. Please check your internet connection"
+        case .quotaExceeded:
+            return "iCloud storage is full. Please free up space in Settings"
+        case .syncConflict:
+            return "Sync conflict detected. Your changes may need to be merged manually"
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .accountNotAvailable(.noAccount):
+            return "Go to Settings > [Your Name] > iCloud to sign in"
+        case .accountNotAvailable(.restricted):
+            return "Check Settings > Screen Time > Content & Privacy Restrictions"
+        case .notEnabled:
+            return "This is a developer configuration issue"
+        case .quotaExceeded:
+            return "Go to Settings > [Your Name] > iCloud > Manage Storage"
+        case .networkError:
+            return "Check your Wi-Fi or cellular connection"
+        default:
+            return nil
         }
     }
 }

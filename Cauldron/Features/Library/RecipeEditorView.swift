@@ -272,9 +272,21 @@ struct RecipeEditorView: View {
     
     private func deleteRecipe() {
         Task {
-            guard let recipeId = viewModel.existingRecipe?.id else { return }
+            guard let recipe = viewModel.existingRecipe else { return }
             do {
-                try await viewModel.dependencies.recipeRepository.delete(id: recipeId)
+                // Delete from local database
+                try await viewModel.dependencies.recipeRepository.delete(id: recipe.id)
+
+                // Delete from CloudKit if it was synced
+                if recipe.cloudRecordName != nil {
+                    do {
+                        try await viewModel.dependencies.recipeSyncService.deleteRecipeFromCloud(recipe)
+                        AppLogger.general.info("Recipe deleted from CloudKit: \(recipe.title)")
+                    } catch {
+                        AppLogger.general.warning("Failed to delete from CloudKit (continuing): \(error.localizedDescription)")
+                    }
+                }
+
                 dismiss()
             } catch {
                 AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
