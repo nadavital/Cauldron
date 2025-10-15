@@ -11,9 +11,11 @@ import SwiftData
 /// Thread-safe repository for Recipe operations
 actor RecipeRepository {
     private let modelContainer: ModelContainer
-    
-    init(modelContainer: ModelContainer) {
+    private let cloudKitService: CloudKitService
+
+    init(modelContainer: ModelContainer, cloudKitService: CloudKitService) {
         self.modelContainer = modelContainer
+        self.cloudKitService = cloudKitService
     }
     
     /// Create a new recipe
@@ -22,6 +24,37 @@ actor RecipeRepository {
         let model = try RecipeModel.from(recipe)
         context.insert(model)
         try context.save()
+
+        // Automatically sync to CloudKit in background
+        Task.detached { [cloudKitService] in
+            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
+        }
+    }
+
+    /// Sync a recipe to CloudKit in the background (best effort)
+    private func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+        // Only sync if we have an owner ID and CloudKit is available
+        guard let ownerId = recipe.ownerId else {
+            return
+        }
+
+        // Check if CloudKit is available
+        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        guard isAvailable else {
+            return
+        }
+
+        // Only sync non-private recipes
+        guard recipe.visibility != .privateRecipe else {
+            return
+        }
+
+        do {
+            try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
+        } catch {
+            // Log but don't throw - sync failures shouldn't block local operations
+            print("Background CloudKit sync failed for recipe \(recipe.title): \(error.localizedDescription)")
+        }
     }
     
     /// Fetch a recipe by ID
@@ -83,11 +116,11 @@ actor RecipeRepository {
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.id == recipe.id }
         )
-        
+
         guard let model = try context.fetch(descriptor).first else {
             throw RepositoryError.notFound
         }
-        
+
         // Update fields
         let encoder = JSONEncoder()
         model.title = recipe.title
@@ -101,9 +134,16 @@ actor RecipeRepository {
         model.sourceTitle = recipe.sourceTitle
         model.notes = recipe.notes
         model.imageURL = recipe.imageURL?.absoluteString
+        model.cloudRecordName = recipe.cloudRecordName  // Preserve CloudKit metadata
+        model.ownerId = recipe.ownerId  // Preserve owner ID
         model.updatedAt = Date()
-        
+
         try context.save()
+
+        // Automatically sync to CloudKit in background
+        Task.detached { [cloudKitService] in
+            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
+        }
     }
     
     /// Delete a recipe
@@ -112,13 +152,32 @@ actor RecipeRepository {
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.id == id }
         )
-        
+
         guard let model = try context.fetch(descriptor).first else {
             throw RepositoryError.notFound
         }
-        
+
+        // Get the recipe before deletion for CloudKit sync
+        let recipe = try model.toDomain()
+
         context.delete(model)
         try context.save()
+
+        // Automatically delete from CloudKit in background
+        Task.detached { [cloudKitService] in
+            // Only try to delete if CloudKit is available
+            let isAvailable = await cloudKitService.isCloudKitAvailable()
+            guard isAvailable else {
+                return
+            }
+
+            do {
+                try await cloudKitService.deleteRecipe(recipe)
+            } catch {
+                // Log but don't throw - sync failures shouldn't block local operations
+                print("Background CloudKit deletion failed for recipe \(recipe.title): \(error.localizedDescription)")
+            }
+        }
     }
     
     /// Fetch recent recipes

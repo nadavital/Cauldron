@@ -30,14 +30,18 @@ struct OnboardingView: View {
                 
                 // Welcome illustration
                 VStack(spacing: 16) {
-                    Image(systemName: "flame.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.cauldronOrange)
-                    
+                    // App icon
+                    Image("LaunchIcon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 120, height: 120)
+                        .cornerRadius(24)
+                        .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
+
                     Text("Welcome to Cauldron")
                         .font(.largeTitle)
                         .fontWeight(.bold)
-                    
+
                     Text("Let's set up your profile")
                         .font(.title3)
                         .foregroundColor(.secondary)

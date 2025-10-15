@@ -345,10 +345,12 @@ struct RecipeImportPreviewView: View {
     private func saveRecipe() async {
         isSaving = true
         defer { isSaving = false }
-        
+
         do {
-            // Add source URL to notes if it exists
+            // Add source URL to notes and ownerId for CloudKit sync
             var recipeToSave = editedRecipe
+            let userId = CurrentUserSession.shared.userId
+
             if let sourceURL = editedRecipe.sourceURL {
                 let sourceNote = "\n\nSource: \(sourceURL.absoluteString)"
                 if let existingNotes = recipeToSave.notes {
@@ -366,6 +368,7 @@ struct RecipeImportPreviewView: View {
                         notes: existingNotes + sourceNote,
                         imageURL: recipeToSave.imageURL,
                         isFavorite: recipeToSave.isFavorite,
+                        ownerId: userId,  // Add ownerId for CloudKit sync
                         createdAt: recipeToSave.createdAt,
                         updatedAt: recipeToSave.updatedAt
                     )
@@ -384,21 +387,43 @@ struct RecipeImportPreviewView: View {
                         notes: "Source: \(sourceURL.absoluteString)",
                         imageURL: recipeToSave.imageURL,
                         isFavorite: recipeToSave.isFavorite,
+                        ownerId: userId,  // Add ownerId for CloudKit sync
                         createdAt: recipeToSave.createdAt,
                         updatedAt: recipeToSave.updatedAt
                     )
                 }
+            } else if userId != nil {
+                // No source URL but still need to add ownerId
+                recipeToSave = Recipe(
+                    id: recipeToSave.id,
+                    title: recipeToSave.title,
+                    ingredients: recipeToSave.ingredients,
+                    steps: recipeToSave.steps,
+                    yields: recipeToSave.yields,
+                    totalMinutes: recipeToSave.totalMinutes,
+                    tags: recipeToSave.tags,
+                    nutrition: recipeToSave.nutrition,
+                    sourceURL: recipeToSave.sourceURL,
+                    sourceTitle: recipeToSave.sourceTitle,
+                    notes: recipeToSave.notes,
+                    imageURL: recipeToSave.imageURL,
+                    isFavorite: recipeToSave.isFavorite,
+                    ownerId: userId,
+                    createdAt: recipeToSave.createdAt,
+                    updatedAt: recipeToSave.updatedAt
+                )
             }
-            
+
+            // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
-            
+
             // Call the callback to notify parent view
             onSave()
-            
+
             // Dismiss this view
             dismiss()
-            
+
         } catch {
             AppLogger.parsing.error("Failed to save recipe: \(error.localizedDescription)")
         }

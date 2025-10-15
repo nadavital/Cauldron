@@ -43,20 +43,22 @@ class DependencyContainer: ObservableObject {
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
 
-        // Initialize repositories
-        self.recipeRepository = RecipeRepository(modelContainer: modelContainer)
+        // Initialize services that repositories depend on
+        self.cloudKitService = CloudKitService()
+
+        // Initialize repositories (now with CloudKit service)
+        self.recipeRepository = RecipeRepository(modelContainer: modelContainer, cloudKitService: cloudKitService)
         self.pantryRepository = PantryRepository(modelContainer: modelContainer)
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
         self.connectionRepository = ConnectionRepository(modelContainer: modelContainer)
 
-        // Initialize services
+        // Initialize other services
         self.unitsService = UnitsService()
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
         self.timerManager = TimerManager()
-        self.cloudKitService = CloudKitService()
 
         self.groceryService = GroceryService(
             pantryRepo: pantryRepository,
@@ -80,6 +82,9 @@ class DependencyContainer: ObservableObject {
         // Initialize parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
+
+        // Start periodic sync after initialization
+        self.recipeSyncService.startPeriodicSync()
     }
     
     /// Create container with in-memory storage (for previews/testing)

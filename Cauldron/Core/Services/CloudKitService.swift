@@ -186,22 +186,44 @@ actor CloudKitService {
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        let userRecordID = try await getCurrentUserRecordID()
+        let db = try getPrivateDatabase()
+        let systemUserRecordID = try await getCurrentUserRecordID()
+
+        // Try to fetch using the custom record name pattern we use
+        let customRecordName = "user_\(systemUserRecordID.recordName)"
 
         do {
-            let db = try getPrivateDatabase()
-            let record = try await db.record(for: userRecordID)
+            let record = try await db.record(for: CKRecord.ID(recordName: customRecordName))
             let user = try userFromRecord(record)
             logger.info("Fetched existing user profile: \(user.username)")
             return user
-        } catch let error as CKError {
-            if error.code == .unknownItem {
-                // User profile doesn't exist yet
-                logger.info("No existing user profile found in CloudKit")
-                return nil
-            }
-            throw error
+        } catch let error as CKError where error.code == .unknownItem {
+            logger.info("No user record found with custom record ID")
+            // Continue to fallback
+        } catch {
+            logger.warning("Error fetching user by custom ID: \(error.localizedDescription)")
         }
+
+        // Fallback: Try the old system record ID (for backwards compatibility)
+        do {
+            let record = try await db.record(for: systemUserRecordID)
+            // Check if this record has valid User fields
+            if record["userId"] != nil {
+                let user = try userFromRecord(record)
+                logger.info("Fetched existing user profile from system ID: \(user.username)")
+                return user
+            } else {
+                logger.info("Found record at system ID but it's invalid (missing userId)")
+            }
+        } catch let error as CKError where error.code == .unknownItem {
+            logger.info("No user record found with system record ID")
+        } catch {
+            logger.warning("Error fetching user by system ID: \(error.localizedDescription)")
+        }
+
+        // No valid user profile found
+        logger.info("No existing user profile found in CloudKit")
+        return nil
     }
 
     /// Fetch or create current user profile
@@ -212,37 +234,43 @@ actor CloudKitService {
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        let userRecordID = try await getCurrentUserRecordID()
-
-        // Try to fetch existing user record
-        do {
-            let db = try getPrivateDatabase()
-            let record = try await db.record(for: userRecordID)
-            return try userFromRecord(record)
-        } catch {
-            // User doesn't exist, create new one
-            logger.info("Creating new user profile")
-            let user = User(
-                username: username,
-                displayName: displayName,
-                cloudRecordName: userRecordID.recordName
-            )
-            try await saveUser(user)
-            return user
+        // Try to fetch existing user record using the comprehensive fetch method
+        if let existingUser = try await fetchCurrentUserProfile() {
+            logger.info("Found existing user profile: \(existingUser.username)")
+            return existingUser
         }
+
+        // No valid user exists, create new one with a custom record name
+        // Use a predictable record name based on the system user record ID
+        // but with a prefix to avoid conflicts
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let customRecordName = "user_\(systemUserRecordID.recordName)"
+
+        logger.info("Creating new user profile with custom record ID")
+        let user = User(
+            username: username,
+            displayName: displayName,
+            cloudRecordName: customRecordName
+        )
+        try await saveUser(user)
+        return user
     }
     
     // MARK: - Users
     
     /// Save user to CloudKit
     func saveUser(_ user: User) async throws {
-        let recordID: CKRecord.ID
+        // Use custom record name if provided, otherwise create one
+        let recordName: String
         if let cloudRecordName = user.cloudRecordName {
-            recordID = CKRecord.ID(recordName: cloudRecordName)
+            recordName = cloudRecordName
         } else {
-            recordID = try await getCurrentUserRecordID()
+            // Create a custom record name to avoid conflicts with system records
+            let systemUserRecordID = try await getCurrentUserRecordID()
+            recordName = "user_\(systemUserRecordID.recordName)"
         }
-        
+
+        let recordID = CKRecord.ID(recordName: recordName)
         let record = CKRecord(recordType: userRecordType, recordID: recordID)
         record["userId"] = user.id.uuidString as CKRecordValue
         record["username"] = user.username as CKRecordValue
@@ -251,7 +279,7 @@ actor CloudKitService {
             record["email"] = email as CKRecordValue
         }
         record["createdAt"] = user.createdAt as CKRecordValue
-        
+
         let db = try getPrivateDatabase()
         _ = try await db.save(record)
         logger.info("Saved user: \(user.username)")
@@ -294,13 +322,14 @@ actor CloudKitService {
         guard let userIdString = record["userId"] as? String,
               let userId = UUID(uuidString: userIdString),
               let username = record["username"] as? String,
-              let displayName = record["displayName"] as? String,
-              let createdAt = record["createdAt"] as? Date else {
+              let displayName = record["displayName"] as? String else {
+            logger.error("Invalid user record - missing required fields. Record: \(record)")
             throw CloudKitError.invalidRecord
         }
-        
+
         let email = record["email"] as? String
-        
+        let createdAt = record["createdAt"] as? Date ?? Date()
+
         return User(
             id: userId,
             username: username,

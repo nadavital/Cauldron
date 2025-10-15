@@ -36,7 +36,47 @@ class CurrentUserSession: ObservableObject {
     }
 
     private init() {}
-    
+
+    /// Fetch CloudKit user with retry logic for network reliability
+    private func fetchCloudUserWithRetry(dependencies: DependencyContainer, maxAttempts: Int = 3) async throws -> User? {
+        var lastError: Error?
+
+        for attempt in 1...maxAttempts {
+            do {
+                logger.info("Attempting to fetch CloudKit user profile (attempt \(attempt)/\(maxAttempts))")
+                let user = try await dependencies.cloudKitService.fetchCurrentUserProfile()
+                if user != nil {
+                    logger.info("Successfully fetched CloudKit user on attempt \(attempt)")
+                }
+                return user
+            } catch {
+                lastError = error
+                logger.warning("Failed to fetch CloudKit user (attempt \(attempt)/\(maxAttempts)): \(error.localizedDescription)")
+
+                // Don't retry if it's a definitive "no account" error
+                if let cloudKitError = error as? CloudKitError,
+                   case .accountNotAvailable = cloudKitError {
+                    logger.info("Account not available - no need to retry")
+                    return nil
+                }
+
+                // Wait before retrying (exponential backoff)
+                if attempt < maxAttempts {
+                    let delay = UInt64(pow(2.0, Double(attempt - 1)) * 500_000_000) // 0.5s, 1s, 2s
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+            }
+        }
+
+        // All retries failed
+        if let error = lastError {
+            logger.error("All CloudKit fetch attempts failed: \(error.localizedDescription)")
+            throw error
+        }
+
+        return nil
+    }
+
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
         logger.info("Initializing user session...")
@@ -46,22 +86,19 @@ class CurrentUserSession: ObservableObject {
         cloudKitAccountStatus = accountStatus
         logger.info("iCloud account status: \(String(describing: accountStatus))")
 
-        // Step 2: Try to fetch existing user from CloudKit if available
+        // Step 2: Try to fetch existing user from CloudKit if available (with retries)
         if accountStatus.isAvailable {
-            do {
-                if let cloudUser = try await dependencies.cloudKitService.fetchCurrentUserProfile() {
-                    // Found existing user in CloudKit - use it
-                    logger.info("Found existing user in CloudKit: \(cloudUser.username)")
-                    currentUser = cloudUser
-                    saveUserToDefaults(cloudUser)
-                    isInitialized = true
-                    needsOnboarding = false
-                    needsiCloudSignIn = false
-                    return
-                }
-            } catch {
-                logger.error("Failed to fetch CloudKit user: \(error.localizedDescription)")
-                // Continue to check local storage
+            if let cloudUser = try? await fetchCloudUserWithRetry(dependencies: dependencies) {
+                // Found existing user in CloudKit - use it
+                logger.info("Found existing user in CloudKit: \(cloudUser.username)")
+                currentUser = cloudUser
+                saveUserToDefaults(cloudUser)
+                isInitialized = true
+                needsOnboarding = false
+                needsiCloudSignIn = false
+                return
+            } else {
+                logger.info("No existing CloudKit user profile found after retries")
             }
         }
 

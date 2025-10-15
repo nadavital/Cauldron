@@ -31,6 +31,7 @@ actor RecipeSyncService {
 
     private var lastSyncDate: Date?
     private let lastSyncKey = "lastRecipeSyncDate"
+    private var autoSyncTask: Task<Void, Never>?
 
     init(cloudKitService: CloudKitService, recipeRepository: RecipeRepository) {
         self.cloudKitService = cloudKitService
@@ -39,6 +40,40 @@ actor RecipeSyncService {
         // Load last sync date
         if let timestamp = UserDefaults.standard.object(forKey: lastSyncKey) as? Date {
             self.lastSyncDate = timestamp
+        }
+    }
+
+    /// Start automatic background sync every hour - call this after initialization
+    nonisolated func startPeriodicSync() {
+        Task {
+            await startPeriodicSyncInternal()
+        }
+    }
+
+    /// Start automatic background sync every hour (internal)
+    private func startPeriodicSyncInternal() {
+        autoSyncTask?.cancel()
+        autoSyncTask = Task {
+            while !Task.isCancelled {
+                // Wait 1 hour
+                try? await Task.sleep(nanoseconds: 3_600_000_000_000) // 1 hour
+
+                guard !Task.isCancelled else { break }
+
+                // Perform sync if needed
+                if shouldAutoSync() {
+                    logger.info("Performing automatic periodic sync")
+                    // Get current user ID from session
+                    if let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) {
+                        do {
+                            try await performFullSync(for: userId)
+                            logger.info("Automatic periodic sync completed")
+                        } catch {
+                            logger.warning("Automatic periodic sync failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -120,19 +155,85 @@ actor RecipeSyncService {
             if let localRecipe = localRecipesByID[cloudRecipe.id] {
                 // Recipe exists both locally and in cloud - check which is newer
                 if cloudRecipe.updatedAt > localRecipe.updatedAt {
-                    // Cloud version is newer - update local
+                    // Cloud version is newer - update local (preserve local-only fields like isFavorite)
                     logger.info("Updating local recipe from cloud: \(cloudRecipe.title)")
-                    try await recipeRepository.update(cloudRecipe)
+                    let mergedRecipe = Recipe(
+                        id: cloudRecipe.id,
+                        title: cloudRecipe.title,
+                        ingredients: cloudRecipe.ingredients,
+                        steps: cloudRecipe.steps,
+                        yields: cloudRecipe.yields,
+                        totalMinutes: cloudRecipe.totalMinutes,
+                        tags: cloudRecipe.tags,
+                        nutrition: cloudRecipe.nutrition,
+                        sourceURL: cloudRecipe.sourceURL,
+                        sourceTitle: cloudRecipe.sourceTitle,
+                        notes: cloudRecipe.notes,
+                        imageURL: cloudRecipe.imageURL,
+                        isFavorite: localRecipe.isFavorite,  // Preserve local favorite status
+                        visibility: cloudRecipe.visibility,
+                        ownerId: cloudRecipe.ownerId,
+                        cloudRecordName: cloudRecipe.cloudRecordName,
+                        createdAt: cloudRecipe.createdAt,
+                        updatedAt: cloudRecipe.updatedAt
+                    )
+                    try await recipeRepository.update(mergedRecipe)
                     updated += 1
                 } else if localRecipe.updatedAt > cloudRecipe.updatedAt {
-                    // Local version is newer - push to cloud
+                    // Local version is newer - push to cloud (preserve CloudKit metadata)
                     logger.info("Updating cloud recipe from local: \(localRecipe.title)")
                     if let ownerId = localRecipe.ownerId {
-                        try await cloudKitService.saveRecipe(localRecipe, ownerId: ownerId)
+                        let cloudSyncRecipe = Recipe(
+                            id: localRecipe.id,
+                            title: localRecipe.title,
+                            ingredients: localRecipe.ingredients,
+                            steps: localRecipe.steps,
+                            yields: localRecipe.yields,
+                            totalMinutes: localRecipe.totalMinutes,
+                            tags: localRecipe.tags,
+                            nutrition: localRecipe.nutrition,
+                            sourceURL: localRecipe.sourceURL,
+                            sourceTitle: localRecipe.sourceTitle,
+                            notes: localRecipe.notes,
+                            imageURL: localRecipe.imageURL,
+                            isFavorite: localRecipe.isFavorite,
+                            visibility: localRecipe.visibility,
+                            ownerId: ownerId,
+                            cloudRecordName: cloudRecipe.cloudRecordName ?? localRecipe.cloudRecordName,  // Preserve CloudKit record name
+                            createdAt: localRecipe.createdAt,
+                            updatedAt: localRecipe.updatedAt
+                        )
+                        try await cloudKitService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
+
+                        // Update local to preserve cloud record name
+                        try await recipeRepository.update(cloudSyncRecipe)
                     }
                     updated += 1
                 } else {
-                    // Same timestamp - no update needed
+                    // Same timestamp - ensure CloudKit metadata is preserved locally
+                    if localRecipe.cloudRecordName != cloudRecipe.cloudRecordName {
+                        let updated = Recipe(
+                            id: localRecipe.id,
+                            title: localRecipe.title,
+                            ingredients: localRecipe.ingredients,
+                            steps: localRecipe.steps,
+                            yields: localRecipe.yields,
+                            totalMinutes: localRecipe.totalMinutes,
+                            tags: localRecipe.tags,
+                            nutrition: localRecipe.nutrition,
+                            sourceURL: localRecipe.sourceURL,
+                            sourceTitle: localRecipe.sourceTitle,
+                            notes: localRecipe.notes,
+                            imageURL: localRecipe.imageURL,
+                            isFavorite: localRecipe.isFavorite,
+                            visibility: localRecipe.visibility,
+                            ownerId: localRecipe.ownerId,
+                            cloudRecordName: cloudRecipe.cloudRecordName,  // Update CloudKit metadata
+                            createdAt: localRecipe.createdAt,
+                            updatedAt: localRecipe.updatedAt
+                        )
+                        try await recipeRepository.update(updated)
+                    }
                     skipped += 1
                 }
             } else {
@@ -176,5 +277,11 @@ actor RecipeSyncService {
         // Auto-sync if last sync was more than 1 hour ago
         let oneHourAgo = Date().addingTimeInterval(-3600)
         return lastSync < oneHourAgo
+    }
+
+    /// Stop periodic sync (call on deinit if needed)
+    func stopPeriodicSync() {
+        autoSyncTask?.cancel()
+        autoSyncTask = nil
     }
 }

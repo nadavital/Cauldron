@@ -13,10 +13,12 @@ struct CookTabView: View {
     @StateObject private var viewModel: CookTabViewModel
     @State private var showingImporter = false
     @State private var showingEditor = false
+    @State private var showingAIGenerator = false
     @State private var showingCookMode = false
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
+    @State private var isAIAvailable = false
     
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies))
@@ -55,8 +57,21 @@ struct CookTabView: View {
             }) {
                 ImporterView(dependencies: viewModel.dependencies)
             }
-            .sheet(isPresented: $showingEditor) {
+            .sheet(isPresented: $showingEditor, onDismiss: {
+                // Refresh data when editor is dismissed
+                Task {
+                    await viewModel.loadData()
+                }
+            }) {
                 RecipeEditorView(dependencies: viewModel.dependencies, recipe: selectedRecipe)
+            }
+            .sheet(isPresented: $showingAIGenerator, onDismiss: {
+                // Refresh data when AI generator is dismissed
+                Task {
+                    await viewModel.loadData()
+                }
+            }) {
+                AIRecipeGeneratorView(dependencies: viewModel.dependencies)
             }
             .sheet(isPresented: $showingCookMode) {
                 if let recipe = selectedRecipe {
@@ -77,6 +92,8 @@ struct CookTabView: View {
                 if viewModel.allRecipes.isEmpty {
                     await viewModel.loadData()
                 }
+                // Check if Apple Intelligence is available
+                isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
             }
             .refreshable {
                 // Force sync when user pulls to refresh
@@ -214,32 +231,49 @@ struct CookTabView: View {
             Image(systemName: "book.closed")
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
-            
+
             Text("No Recipes Yet")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
+
             Text("Add your first recipe to get started")
                 .foregroundColor(.secondary)
-            
-            HStack(spacing: 16) {
-                Button {
-                    showingEditor = true
-                } label: {
-                    Label("Create", systemImage: "square.and.pencil")
+
+            VStack(spacing: 12) {
+                // AI Generation button (if available)
+                if isAIAvailable {
+                    Button {
+                        showingAIGenerator = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "apple.intelligence")
+                            Text("Generate with AI")
+                        }
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.cauldronOrange)
-                
-                Button {
-                    showingImporter = true
-                } label: {
-                    Label("Import", systemImage: "arrow.down.doc")
-                        .frame(maxWidth: .infinity)
+
+                HStack(spacing: 16) {
+                    Button {
+                        showingEditor = true
+                    } label: {
+                        Label("Create", systemImage: "square.and.pencil")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cauldronOrange)
+
+                    Button {
+                        showingImporter = true
+                    } label: {
+                        Label("Import", systemImage: "arrow.down.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cauldronOrange)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.cauldronOrange)
             }
             .padding(.horizontal, 40)
         }
@@ -248,12 +282,21 @@ struct CookTabView: View {
     
     private var addRecipeMenu: some View {
         Menu {
+            // AI Generation option (only show if available)
+            if isAIAvailable {
+                Button {
+                    showingAIGenerator = true
+                } label: {
+                    Label("Generate with AI", systemImage: "apple.intelligence")
+                }
+            }
+
             Button {
                 showingEditor = true
             } label: {
                 Label("Create Manually", systemImage: "square.and.pencil")
             }
-            
+
             Button {
                 showingImporter = true
             } label: {

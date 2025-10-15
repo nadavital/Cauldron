@@ -206,23 +206,14 @@ class RecipeEditorViewModel: ObservableObject {
                 recipe = recipe.withImageURL(imageURL)
             }
             
-            // Save to local database
+            // Save to local database (CloudKit sync happens automatically in repository)
             if isEditing {
                 try await dependencies.recipeRepository.update(recipe)
             } else {
                 try await dependencies.recipeRepository.create(recipe)
             }
 
-            AppLogger.general.info("Recipe saved locally: \(recipe.title)")
-
-            // Sync to CloudKit using RecipeSyncService
-            do {
-                try await dependencies.recipeSyncService.syncRecipeToCloud(recipe)
-                AppLogger.general.info("Recipe synced to CloudKit: \(recipe.title)")
-            } catch {
-                // Don't fail the save if CloudKit sync fails
-                AppLogger.general.warning("CloudKit sync failed (continuing): \(error.localizedDescription)")
-            }
+            AppLogger.general.info("Recipe saved: \(recipe.title)")
 
             return true
             

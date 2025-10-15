@@ -32,7 +32,12 @@ final class RecipeModel {
     var notes: String?
     var imageURL: String?
     var isFavorite: Bool = false
-    
+
+    // CloudKit sync fields
+    var visibility: String = "private"  // RecipeVisibility rawValue
+    var ownerId: UUID?
+    var cloudRecordName: String?
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -47,6 +52,9 @@ final class RecipeModel {
         notes: String? = nil,
         imageURL: String? = nil,
         isFavorite: Bool = false,
+        visibility: String = "private",
+        ownerId: UUID? = nil,
+        cloudRecordName: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -63,6 +71,9 @@ final class RecipeModel {
         self.notes = notes
         self.imageURL = imageURL
         self.isFavorite = isFavorite
+        self.visibility = visibility
+        self.ownerId = ownerId
+        self.cloudRecordName = cloudRecordName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -90,6 +101,9 @@ final class RecipeModel {
             notes: recipe.notes,
             imageURL: recipe.imageURL?.absoluteString,
             isFavorite: recipe.isFavorite,
+            visibility: recipe.visibility.rawValue,
+            ownerId: recipe.ownerId,
+            cloudRecordName: recipe.cloudRecordName,
             createdAt: recipe.createdAt,
             updatedAt: recipe.updatedAt
         )
@@ -118,6 +132,9 @@ final class RecipeModel {
             notes: notes,
             imageURL: imageURL.flatMap { URL(string: $0) },
             isFavorite: isFavorite,
+            visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
