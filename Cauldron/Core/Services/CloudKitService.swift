@@ -10,7 +10,7 @@ import CloudKit
 import os
 
 /// Account status for iCloud/CloudKit
-enum CloudKitAccountStatus {
+enum CloudKitAccountStatus: CustomStringConvertible {
     case available
     case noAccount
     case restricted
@@ -36,6 +36,21 @@ enum CloudKitAccountStatus {
 
     var isAvailable: Bool {
         self == .available
+    }
+
+    var description: String {
+        switch self {
+        case .available:
+            return "available"
+        case .noAccount:
+            return "noAccount"
+        case .restricted:
+            return "restricted"
+        case .couldNotDetermine:
+            return "couldNotDetermine"
+        case .temporarilyUnavailable:
+            return "temporarilyUnavailable"
+        }
     }
 }
 
@@ -342,21 +357,30 @@ actor CloudKitService {
     
     // MARK: - Recipes
     
-    /// Save recipe to CloudKit
+    /// Save recipe to CloudKit (always uses custom zone for sharing support)
+    /// Note: ALL recipes are saved to iCloud regardless of visibility.
+    /// Visibility controls social sharing/discovery, not cloud storage.
     func saveRecipe(_ recipe: Recipe, ownerId: UUID) async throws {
+        logger.info("📤 Starting CloudKit save for recipe: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
+
+        // Ensure custom zone exists (required for sharing and proper sync)
+        let zone = try await ensureCustomZone()
+        logger.info("Using custom zone: \(zone.zoneID.zoneName)")
+
+        // Always use custom zone for recipes to support sharing
         let recordID: CKRecord.ID
         if let cloudRecordName = recipe.cloudRecordName {
-            recordID = CKRecord.ID(recordName: cloudRecordName)
+            recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zone.zoneID)
         } else {
-            recordID = CKRecord.ID(recordName: recipe.id.uuidString)
+            recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zone.zoneID)
         }
-        
+
         let record = CKRecord(recordType: recipeRecordType, recordID: recordID)
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
         record["title"] = recipe.title as CKRecordValue
-        record["visibility"] = recipe.visibility.rawValue as CKRecordValue
-        
+        record["visibility"] = recipe.visibility.rawValue as CKRecordValue  // Controls social sharing, not storage
+
         // Encode complex data as JSON
         let encoder = JSONEncoder()
         if let ingredientsData = try? encoder.encode(recipe.ingredients) {
@@ -368,19 +392,27 @@ actor CloudKitService {
         if let tagsData = try? encoder.encode(recipe.tags) {
             record["tagsData"] = tagsData as CKRecordValue
         }
-        
+
         record["yields"] = recipe.yields as CKRecordValue
         if let totalMinutes = recipe.totalMinutes {
             record["totalMinutes"] = totalMinutes as CKRecordValue
         }
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
-        
-        // Save to appropriate database based on visibility
-        let database = try recipe.visibility == .publicRecipe ? getPublicDatabase() : getPrivateDatabase()
-        _ = try await database.save(record)
-        
-        logger.info("Saved recipe: \(recipe.title) with visibility: \(recipe.visibility.rawValue)")
+
+        // All recipes save to private database (visibility controls who can query/share them)
+        let db = try getPrivateDatabase()
+
+        logger.info("Saving recipe to CloudKit private database...")
+        do {
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Successfully saved recipe to CloudKit: \(recipe.title)")
+            logger.info("Record ID: \(savedRecord.recordID.recordName), Zone: \(savedRecord.recordID.zoneID.zoneName)")
+        } catch let error as CKError {
+            logger.error("❌ CloudKit save failed: \(error.localizedDescription)")
+            logger.error("Error code: \(error.code.rawValue), User info: \(error.userInfo)")
+            throw error
+        }
     }
     
     /// Fetch user's recipes from CloudKit
@@ -449,47 +481,46 @@ actor CloudKitService {
 
     /// Sync all recipes for a user - fetch from CloudKit and return for local merge
     func syncUserRecipes(ownerId: UUID) async throws -> [Recipe] {
-        logger.info("Syncing recipes from CloudKit for owner: \(ownerId)")
+        logger.info("🔄 Syncing recipes from CloudKit for owner: \(ownerId)")
 
         // Check account status first
         let accountStatus = await checkAccountStatus()
         guard accountStatus.isAvailable else {
+            logger.error("CloudKit account not available: \(accountStatus)")
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        // Fetch from both private and public databases
+        // Ensure custom zone exists
+        let zone = try await ensureCustomZone()
+        logger.info("Using custom zone for sync: \(zone.zoneID.zoneName)")
+
         var allRecipes: [Recipe] = []
+        let db = try getPrivateDatabase()
 
-        // Fetch private recipes
+        // Fetch all recipes from the custom zone (they're all in private database now)
         do {
-            let privateRecipes = try await fetchUserRecipes(ownerId: ownerId)
-            allRecipes.append(contentsOf: privateRecipes)
-            logger.info("Fetched \(privateRecipes.count) private recipes from CloudKit")
-        } catch {
-            logger.error("Failed to fetch private recipes: \(error.localizedDescription)")
-            throw error
-        }
-
-        // Fetch public recipes owned by this user
-        do {
-            let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
-                                       ownerId.uuidString,
-                                       RecipeVisibility.publicRecipe.rawValue)
+            let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
             let query = CKQuery(recordType: recipeRecordType, predicate: predicate)
 
-            let db = try getPublicDatabase()
-            let results = try await db.records(matching: query)
+            // Fetch from custom zone
+            let results = try await db.records(matching: query, inZoneWith: zone.zoneID)
 
             for (_, result) in results.matchResults {
-                if let record = try? result.get(),
-                   let recipe = try? recipeFromRecord(record) {
-                    allRecipes.append(recipe)
+                if let record = try? result.get() {
+                    do {
+                        let recipe = try recipeFromRecord(record)
+                        allRecipes.append(recipe)
+                    } catch {
+                        logger.error("Failed to decode recipe from record: \(error.localizedDescription)")
+                    }
                 }
             }
-            logger.info("Fetched \(results.matchResults.count) public recipes from CloudKit")
-        } catch {
-            logger.error("Failed to fetch public recipes: \(error.localizedDescription)")
-            // Don't fail completely if public fetch fails
+
+            logger.info("✅ Fetched \(allRecipes.count) recipes from CloudKit custom zone")
+        } catch let error as CKError {
+            logger.error("❌ Failed to fetch recipes from CloudKit: \(error.localizedDescription)")
+            logger.error("Error code: \(error.code.rawValue)")
+            throw error
         }
 
         logger.info("Total recipes synced from CloudKit: \(allRecipes.count)")

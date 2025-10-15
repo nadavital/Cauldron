@@ -17,6 +17,7 @@ class DependencyContainer: ObservableObject {
     
     // Repositories (actors - thread-safe)
     let recipeRepository: RecipeRepository
+    let deletedRecipeRepository: DeletedRecipeRepository
     let pantryRepository: PantryRepository
     let groceryRepository: GroceryRepository
     let cookingHistoryRepository: CookingHistoryRepository
@@ -47,7 +48,12 @@ class DependencyContainer: ObservableObject {
         self.cloudKitService = CloudKitService()
 
         // Initialize repositories (now with CloudKit service)
-        self.recipeRepository = RecipeRepository(modelContainer: modelContainer, cloudKitService: cloudKitService)
+        self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
+        self.recipeRepository = RecipeRepository(
+            modelContainer: modelContainer,
+            cloudKitService: cloudKitService,
+            deletedRecipeRepository: deletedRecipeRepository
+        )
         self.pantryRepository = PantryRepository(modelContainer: modelContainer)
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
@@ -76,7 +82,8 @@ class DependencyContainer: ObservableObject {
 
         self.recipeSyncService = RecipeSyncService(
             cloudKitService: cloudKitService,
-            recipeRepository: recipeRepository
+            recipeRepository: recipeRepository,
+            deletedRecipeRepository: deletedRecipeRepository
         )
 
         // Initialize parsers
@@ -91,6 +98,7 @@ class DependencyContainer: ObservableObject {
     nonisolated static func preview() -> DependencyContainer {
         let schema = Schema([
             RecipeModel.self,
+            DeletedRecipeModel.self,
             PantryItemModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
@@ -110,6 +118,7 @@ class DependencyContainer: ObservableObject {
     nonisolated static func persistent() throws -> DependencyContainer {
         let schema = Schema([
             RecipeModel.self,
+            DeletedRecipeModel.self,
             PantryItemModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
@@ -118,26 +127,37 @@ class DependencyContainer: ObservableObject {
             SharedRecipeModel.self,
             ConnectionModel.self
         ])
-        
+
         // Ensure Application Support directory exists
         let fileManager = FileManager.default
         let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         if !fileManager.fileExists(atPath: appSupportURL.path) {
             try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true, attributes: nil)
         }
-        
-        let config = ModelConfiguration(schema: schema)
-        
+
+        // Use migration plan to allow automatic migration
+        let config = ModelConfiguration(schema: schema, allowsSave: true)
+
         do {
             let container = try ModelContainer(for: schema, configurations: [config])
             return DependencyContainer(modelContainer: container)
         } catch {
+            print("⚠️ Database migration failed: \(error.localizedDescription)")
+            print("🗑️ Deleting old database and starting fresh...")
+
             // If migration fails, delete the old database and start fresh
             // NOTE: Database deletion on migration failure is temporary beta behavior.
             // TODO: Implement proper migration strategy before v1.0 production release.
             // Current approach will cause data loss when users upgrade between TestFlight builds.
             let storeURL = appSupportURL.appendingPathComponent("default.store")
+            let shmURL = appSupportURL.appendingPathComponent("default.store-shm")
+            let walURL = appSupportURL.appendingPathComponent("default.store-wal")
+
             try? fileManager.removeItem(at: storeURL)
+            try? fileManager.removeItem(at: shmURL)
+            try? fileManager.removeItem(at: walURL)
+
+            print("✅ Old database deleted, creating fresh database...")
 
             // Try again with fresh database
             let container = try ModelContainer(for: schema, configurations: [config])
@@ -150,7 +170,17 @@ class DependencyContainer: ObservableObject {
 
 private struct DependencyContainerKey: EnvironmentKey {
     static let defaultValue: DependencyContainer = {
-        try! DependencyContainer.persistent()
+        do {
+            return try DependencyContainer.persistent()
+        } catch {
+            fatalError("""
+                Failed to initialize DependencyContainer: \(error.localizedDescription)
+
+                This is usually caused by database migration issues.
+                The app will now attempt to recover by deleting the database.
+                Please restart the app.
+                """)
+        }
     }()
 }
 

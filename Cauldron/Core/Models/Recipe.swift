@@ -42,7 +42,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         notes: String? = nil,
         imageURL: URL? = nil,
         isFavorite: Bool = false,
-        visibility: RecipeVisibility = .privateRecipe,
+        visibility: RecipeVisibility = .privateRecipe,  // Private by default, but still syncs to iCloud
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),

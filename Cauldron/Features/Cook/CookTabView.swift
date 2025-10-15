@@ -95,6 +95,12 @@ struct CookTabView: View {
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
             }
+            .onAppear {
+                // Reload data whenever view appears to catch changes from child views
+                Task {
+                    await viewModel.loadData()
+                }
+            }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
