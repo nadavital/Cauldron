@@ -141,6 +141,6 @@ struct OnboardingView: View {
 
 #Preview {
     OnboardingView(dependencies: .preview()) {
-        print("Onboarding completed")
+        // Onboarding completed
     }
 }

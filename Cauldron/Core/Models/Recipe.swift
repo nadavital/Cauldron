@@ -132,4 +132,28 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             updatedAt: Date()
         )
     }
+
+    /// Create a copy with a new owner (for saving shared recipes)
+    func withOwner(_ userId: UUID) -> Recipe {
+        Recipe(
+            id: UUID(), // New ID for the copy
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: false, // Reset favorite status
+            visibility: .privateRecipe, // Make it private by default
+            ownerId: userId,
+            cloudRecordName: nil, // Clear cloud record name for new copy
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
 }

@@ -44,43 +44,49 @@ struct RecipeRowView: View {
                     Text(recipe.title)
                         .font(.headline)
                         .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    
+                        .truncationMode(.tail)
+
                     if recipe.isFavorite {
                         Image(systemName: "star.fill")
                             .font(.caption)
                             .foregroundColor(.yellow)
+                            .fixedSize()
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                
-                HStack {
+
+                HStack(spacing: 8) {
                     if let time = recipe.displayTime {
                         Label(time, systemImage: "clock")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
-                    
+
                     Text(recipe.yields)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    
-                    Spacer()
-                    
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
                     if !recipe.tags.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(recipe.tags.prefix(2)) { tag in
                                 Text(tag.name)
                                     .font(.caption2)
+                                    .lineLimit(1)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
                                     .background(Color.cauldronOrange.opacity(0.2))
                                     .cornerRadius(4)
                             }
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minHeight: 68)
         .padding(.vertical, 4)

@@ -39,42 +39,43 @@ struct RecipeDetailView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Hero Image
-                if let imageURL = recipe.imageURL,
-                   let image = loadImage(filename: imageURL.lastPathComponent) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 300)
-                        .clipped()
-                        .cornerRadius(16)
-                        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Hero Image
+                    if let imageURL = recipe.imageURL,
+                       let image = loadImage(filename: imageURL.lastPathComponent) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geometry.size.width - 32, height: 300)
+                            .clipped()
+                            .cornerRadius(16)
+                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    }
+
+                    // Header
+                    headerSection
+
+                    // Ingredients
+                    ingredientsSection
+
+                    // Steps
+                    stepsSection
+
+                    // Nutrition
+                    if let nutrition = recipe.nutrition, nutrition.hasData {
+                        nutritionSection(nutrition)
+                    }
+
+                    // Notes
+                    if let notes = recipe.notes, !notes.isEmpty {
+                        notesSection(notes)
+                    }
                 }
-                
-                // Header
-                headerSection
-                
-                // Ingredients
-                ingredientsSection
-                
-                // Steps
-                stepsSection
-                
-                // Nutrition
-                if let nutrition = recipe.nutrition, nutrition.hasData {
-                    nutritionSection(nutrition)
-                }
-                
-                // Notes
-                if let notes = recipe.notes, !notes.isEmpty {
-                    notesSection(notes)
-                }
+                .frame(width: geometry.size.width - 32, alignment: .leading)
+                .padding(.horizontal, 16)
             }
-            .frame(maxWidth: .infinity)
-            .padding()
         }
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.large)
@@ -209,7 +210,9 @@ struct RecipeDetailView: View {
                                 .cornerRadius(8)
                         }
                     }
+                    .padding(.trailing, 1)
                 }
+                .frame(height: 30)
             }
             
             // Scale picker
@@ -260,7 +263,7 @@ struct RecipeDetailView: View {
             Text("Ingredients")
                 .font(.title2)
                 .fontWeight(.bold)
-            
+
             ForEach(scaledRecipe.ingredients) { ingredient in
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "circle.fill")
@@ -268,13 +271,13 @@ struct RecipeDetailView: View {
                         .foregroundColor(.cauldronOrange)
                         .padding(.top, 6)
                         .fixedSize()
-                    
+
                     Text(ingredient.displayString)
                         .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(nil)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 2)
             }
         }
@@ -288,7 +291,7 @@ struct RecipeDetailView: View {
             Text("Instructions")
                 .font(.title2)
                 .fontWeight(.bold)
-            
+
             ForEach(recipe.steps) { step in
                 HStack(alignment: .top, spacing: 12) {
                     Text("\(step.index + 1)")
@@ -297,31 +300,36 @@ struct RecipeDetailView: View {
                         .frame(width: 30, height: 30)
                         .background(Color.cauldronOrange)
                         .clipShape(Circle())
-                    
+                        .fixedSize()
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text(step.text)
                             .font(.body)
-                            .fixedSize(horizontal: false, vertical: true)
-                        
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+
                         if !step.timers.isEmpty {
-                            HStack {
-                                ForEach(step.timers) { timer in
-                                    Label(timer.displayDuration, systemImage: "timer")
-                                        .font(.caption)
-                                        .foregroundColor(.cauldronOrange)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.cauldronOrange.opacity(0.1))
-                                        .cornerRadius(6)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(step.timers) { timer in
+                                        Label(timer.displayDuration, systemImage: "timer")
+                                            .font(.caption)
+                                            .foregroundColor(.cauldronOrange)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.cauldronOrange.opacity(0.1))
+                                            .cornerRadius(6)
+                                    }
                                 }
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
     }

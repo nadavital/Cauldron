@@ -72,10 +72,15 @@ struct CookTabView: View {
                 Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
             }
             .task {
-                await viewModel.loadData()
+                // Only load if we don't have data yet (viewModel loads eagerly on init)
+                // This prevents double-loading on first appearance
+                if viewModel.allRecipes.isEmpty {
+                    await viewModel.loadData()
+                }
             }
             .refreshable {
-                await viewModel.loadData()
+                // Force sync when user pulls to refresh
+                await viewModel.loadData(forceSync: true)
             }
         }
     }

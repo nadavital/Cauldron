@@ -128,10 +128,12 @@ class DependencyContainer: ObservableObject {
             return DependencyContainer(modelContainer: container)
         } catch {
             // If migration fails, delete the old database and start fresh
-            // This is acceptable for development/beta - for production, implement proper migration
+            // NOTE: Database deletion on migration failure is temporary beta behavior.
+            // TODO: Implement proper migration strategy before v1.0 production release.
+            // Current approach will cause data loss when users upgrade between TestFlight builds.
             let storeURL = appSupportURL.appendingPathComponent("default.store")
             try? fileManager.removeItem(at: storeURL)
-            
+
             // Try again with fresh database
             let container = try ModelContainer(for: schema, configurations: [config])
             return DependencyContainer(modelContainer: container)
