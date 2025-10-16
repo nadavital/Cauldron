@@ -374,18 +374,21 @@ class ShareRecipeViewModel: ObservableObject {
             )
             generatedURL = iCloudURL
 
-            // Generate custom deep link for local testing
+            // Generate custom deep link for sharing
             // Format: cauldron://share?url={encoded_icloud_url}
             if let encodedURL = iCloudURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
                let customDeepLink = URL(string: "cauldron://share?url=\(encodedURL)") {
                 deepLinkURL = customDeepLink
                 AppLogger.general.info("🔗 Generated custom deep link: \(customDeepLink.absoluteString)")
-            }
 
-            // For now, share the iCloud URL (will work in TestFlight/production)
-            // Users can manually test with custom deep link via debug button
-            shareURL = IdentifiableURL(value: iCloudURL)
-            AppLogger.general.info("☁️ Generated iCloud share link: \(iCloudURL)")
+                // Use deep link for sharing (works from Messages!)
+                shareURL = IdentifiableURL(value: customDeepLink)
+                AppLogger.general.info("✅ Sharing custom deep link: \(customDeepLink.absoluteString)")
+            } else {
+                // Fallback to iCloud URL if deep link generation fails
+                shareURL = IdentifiableURL(value: iCloudURL)
+                AppLogger.general.info("⚠️ Fallback to iCloud URL: \(iCloudURL)")
+            }
         } catch let error as CKError {
             AppLogger.general.error("☁️ CloudKit error generating share link: \(error.localizedDescription)")
 

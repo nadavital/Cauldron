@@ -64,6 +64,7 @@ struct CauldronApp: App {
                             recipe: recipeData.recipe,
                             existingRecipeId: recipeData.existingRecipeId
                         )
+                        .environmentObject(sharedRecipeHandler)
                     }
                 }
                 .alert("Share Error", isPresented: $sharedRecipeHandler.showError) {
@@ -503,5 +504,109 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppDelegate.pendingShareMetadata = nil
             AppDelegate.pendingShareURL = nil
         }
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        AppLogger.general.info("🔵 AppDelegate: configurationForConnecting scene")
+
+        // Log if there's a user activity
+        if let userActivity = options.userActivities.first {
+            AppLogger.general.info("🔵 Scene connecting with user activity: \(userActivity.activityType)")
+            AppLogger.general.info("🔵 User activity URL: \(userActivity.webpageURL?.absoluteString ?? "nil")")
+        }
+
+        // Log if there's a URL context
+        for urlContext in options.urlContexts {
+            AppLogger.general.info("🔵 Scene connecting with URL: \(urlContext.url.absoluteString)")
+        }
+
+        let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = SceneDelegate.self
+        return configuration
+    }
+}
+
+// Scene Delegate for handling URLs in SwiftUI lifecycle
+class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        AppLogger.general.info("🟣 SceneDelegate: willConnectTo")
+
+        // Handle user activity (Universal Links)
+        if let userActivity = connectionOptions.userActivities.first {
+            AppLogger.general.info("🟣 SceneDelegate: Got user activity: \(userActivity.activityType)")
+            handleUserActivity(userActivity)
+        }
+
+        // Handle URL contexts
+        for urlContext in connectionOptions.urlContexts {
+            AppLogger.general.info("🟣 SceneDelegate: Got URL context: \(urlContext.url.absoluteString)")
+            handleURL(urlContext.url)
+        }
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        AppLogger.general.info("🟣 SceneDelegate: continue userActivity: \(userActivity.activityType)")
+        handleUserActivity(userActivity)
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        AppLogger.general.info("🟣 SceneDelegate: openURLContexts called with \(URLContexts.count) URLs")
+        for context in URLContexts {
+            AppLogger.general.info("🟣 SceneDelegate: Opening URL: \(context.url.absoluteString)")
+            handleURL(context.url)
+        }
+    }
+
+    private func handleUserActivity(_ userActivity: NSUserActivity) {
+        AppLogger.general.info("🟣 SceneDelegate: handleUserActivity type: \(userActivity.activityType)")
+
+        if userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+           let url = userActivity.webpageURL {
+            AppLogger.general.info("🟣 SceneDelegate: Got web URL: \(url.absoluteString)")
+
+            // Check if it's an iCloud share URL
+            if url.host == "www.icloud.com" || url.host == "icloud.com" {
+                AppLogger.general.info("🟣 SceneDelegate: Detected iCloud share URL, processing...")
+
+                Task {
+                    do {
+                        let container = CKContainer.default()
+                        let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in
+                            container.fetchShareMetadata(with: url) { metadata, error in
+                                if let error = error {
+                                    continuation.resume(throwing: error)
+                                } else if let metadata = metadata {
+                                    continuation.resume(returning: metadata)
+                                } else {
+                                    continuation.resume(throwing: CloudKitError.invalidRecord)
+                                }
+                            }
+                        }
+
+                        AppLogger.general.info("🟣 SceneDelegate: Successfully fetched share metadata")
+                        await MainActor.run {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("AcceptCloudKitShare"),
+                                object: metadata
+                            )
+                        }
+                    } catch {
+                        AppLogger.general.error("🟣 SceneDelegate: Failed to fetch share metadata: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleURL(_ url: URL) {
+        AppLogger.general.info("🟣 SceneDelegate: handleURL: \(url.absoluteString)")
+        NotificationCenter.default.post(
+            name: NSNotification.Name("TestOpenURL"),
+            object: url
+        )
     }
 }

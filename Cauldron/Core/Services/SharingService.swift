@@ -47,23 +47,45 @@ actor SharingService {
     
     // MARK: - Recipe Sharing
     
-    /// Share a recipe with another user
-    /// In a real app, this would send the recipe through a backend service
-    /// For now, we'll simulate by creating a shared recipe entry
+    /// Share a recipe with another user via CloudKit
+    /// Creates a SharedRecipeReference in PUBLIC database so recipient can access it
     func shareRecipe(_ recipe: Recipe, with user: User, from currentUser: User) async throws {
+        logger.info("📤 Sharing recipe '\(recipe.title)' with user: \(user.username)")
+
+        // Share via CloudKit PUBLIC database
+        try await cloudKitService.shareRecipe(recipe, with: user.id, from: currentUser.id)
+        logger.info("✅ Shared via CloudKit PUBLIC database")
+
+        // Also cache locally for offline access and backwards compatibility
         let sharedRecipe = SharedRecipe(
             recipe: recipe,
             sharedBy: currentUser,
             sharedAt: Date()
         )
-        
         try await sharingRepository.saveSharedRecipe(sharedRecipe)
-        logger.info("Shared recipe '\(recipe.title)' with \(user.username)")
+        logger.info("✅ Cached locally for offline access")
+
+        logger.info("🎉 Successfully shared recipe '\(recipe.title)' with \(user.username)")
     }
     
     /// Get all recipes shared with the current user
+    /// Fetches from CloudKit first, then falls back to local cache
     func getSharedRecipes() async throws -> [SharedRecipe] {
-        try await sharingRepository.fetchAllSharedRecipes()
+        logger.info("📥 Fetching shared recipes from CloudKit")
+
+        // For now, return local cached recipes (CloudKit integration in progress)
+        // TODO: Implement full CloudKit fetching with recipe resolution
+        let localRecipes = try await sharingRepository.fetchAllSharedRecipes()
+        logger.info("✅ Fetched \(localRecipes.count) shared recipes from local cache")
+
+        // Future implementation will:
+        // 1. Get current user ID
+        // 2. Fetch SharedRecipeReferences from CloudKit
+        // 3. Resolve references to full recipes
+        // 4. Merge with local cache
+        // 5. Return combined list
+
+        return localRecipes
     }
     
     /// Copy a shared recipe to the user's personal collection

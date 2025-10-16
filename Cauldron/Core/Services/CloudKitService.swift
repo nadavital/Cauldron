@@ -73,6 +73,7 @@ actor CloudKitService {
     private let recipeRecordType = "Recipe"
     private let connectionRecordType = "Connection"
     private let sharedRecipeRecordType = "SharedRecipe"
+    private let sharedRecipeReferenceRecordType = "SharedRecipeReference"
 
     init() {
         // Try to initialize CloudKit, but don't crash if it fails
@@ -667,30 +668,37 @@ actor CloudKitService {
 
     /// Create a shareable iCloud link for a recipe
     func createShareLink(for recipe: Recipe, ownerId: UUID) async throws -> URL {
-        logger.info("Creating share link for recipe: \(recipe.title)")
+        logger.info("🔗 Creating share link for recipe: \(recipe.title)")
+        logger.info("📍 Recipe ID: \(recipe.id), Owner ID: \(ownerId)")
 
         // Ensure custom zone exists (required for sharing)
+        logger.info("📦 Ensuring custom zone exists...")
         let zone = try await ensureCustomZone()
+        logger.info("✅ Custom zone ready: \(zone.zoneID.zoneName)")
 
         // Determine the record ID in the custom zone
         let recordID: CKRecord.ID
         if let cloudRecordName = recipe.cloudRecordName {
             recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zone.zoneID)
+            logger.info("📝 Using existing CloudKit record name: \(cloudRecordName)")
         } else {
             recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zone.zoneID)
+            logger.info("📝 Using recipe ID as record name: \(recipe.id.uuidString)")
         }
 
         let db = try getPrivateDatabase()
+        logger.info("🔒 Using PRIVATE database for recipe storage")
 
         // Fetch or create the recipe record
         let recipeRecord: CKRecord
         do {
             // Try to fetch existing record first
+            logger.info("🔍 Checking for existing recipe record in CloudKit...")
             recipeRecord = try await db.record(for: recordID)
-            logger.info("Fetched existing recipe record for sharing")
+            logger.info("✅ Fetched existing recipe record for sharing")
         } catch let error as CKError where error.code == .unknownItem {
             // Record doesn't exist, create it
-            logger.info("Recipe not in CloudKit yet, creating new record in custom zone")
+            logger.info("⚠️ Recipe not in CloudKit yet, creating new record in custom zone")
             recipeRecord = CKRecord(recordType: recipeRecordType, recordID: recordID)
             recipeRecord["recipeId"] = recipe.id.uuidString as CKRecordValue
             recipeRecord["ownerId"] = ownerId.uuidString as CKRecordValue
@@ -715,47 +723,70 @@ actor CloudKitService {
             }
             recipeRecord["createdAt"] = recipe.createdAt as CKRecordValue
             recipeRecord["updatedAt"] = recipe.updatedAt as CKRecordValue
+            logger.info("📋 Populated recipe record with all fields")
         }
 
         // Check if share already exists
         if let shareReference = recipeRecord.share {
-            logger.info("Share already exists for this recipe, fetching it")
+            logger.info("🔍 Found existing share reference on recipe record")
             do {
                 let shareRecord = try await db.record(for: shareReference.recordID)
                 if let existingShare = shareRecord as? CKShare,
                    let shareURL = existingShare.url {
-                    logger.info("Returning existing share URL: \(shareURL)")
+                    logger.info("✅ Returning existing share URL: \(shareURL.absoluteString)")
+
+                    // Create or update SharedRecipeReference for tracking
+                    let reference = SharedRecipeReference.linkShare(
+                        recipeId: recipe.id,
+                        ownerId: ownerId,
+                        shareURL: shareURL,
+                        recipeTitle: recipe.title,
+                        recipeTags: recipe.tags.map { $0.name }
+                    )
+                    do {
+                        try await saveSharedRecipeReference(reference)
+                        logger.info("✅ Updated SharedRecipeReference for existing link share")
+                    } catch {
+                        logger.warning("⚠️ Failed to save SharedRecipeReference: \(error.localizedDescription)")
+                    }
+
                     return shareURL
                 }
             } catch {
-                logger.warning("Failed to fetch existing share, will create new one: \(error.localizedDescription)")
+                logger.warning("⚠️ Failed to fetch existing share, will create new one: \(error.localizedDescription)")
                 // Continue to create new share
             }
         }
 
         // Create CKShare
+        logger.info("🆕 Creating new CKShare object...")
         let share = CKShare(rootRecord: recipeRecord)
         share[CKShare.SystemFieldKey.title] = recipe.title as CKRecordValue
         share.publicPermission = .readOnly
+        logger.info("✅ CKShare configured with public read-only permission")
 
         // Save both the share and the record using modern async API
         let savedShare: CKShare
         do {
+            logger.info("💾 Saving recipe record and share to CloudKit...")
             let savedRecords = try await db.modifyRecords(
                 saving: [recipeRecord, share],
                 deleting: [],
                 savePolicy: .changedKeys
             )
-            logger.info("Successfully created share for recipe, saved \(savedRecords.saveResults.count) records")
+            logger.info("✅ Successfully created share for recipe, saved \(savedRecords.saveResults.count) records")
 
             // Log all saved record IDs and check for errors
             var hasErrors = false
             for (recordID, result) in savedRecords.saveResults {
                 switch result {
                 case .success(let savedRecord):
-                    logger.info("Saved record: \(recordID.recordName), type: \(savedRecord.recordType)")
+                    logger.info("  ✓ Saved record: \(recordID.recordName), type: \(savedRecord.recordType)")
                 case .failure(let error):
-                    logger.error("Failed to save record \(recordID.recordName): \(error.localizedDescription)")
+                    logger.error("  ✗ Failed to save record \(recordID.recordName): \(error.localizedDescription)")
+                    if let ckError = error as? CKError {
+                        logger.error("    CKError code: \(ckError.code.rawValue)")
+                    }
                     hasErrors = true
                 }
             }
@@ -770,85 +801,134 @@ actor CloudKitService {
             for (recordID, result) in savedRecords.saveResults {
                 if case .success(let savedRecord) = result,
                    let shareRecord = savedRecord as? CKShare {
-                    logger.info("Found saved share with ID: \(recordID.recordName)")
+                    logger.info("✅ Found saved share with ID: \(recordID.recordName)")
                     foundShare = shareRecord
                     break
                 }
             }
 
             guard let shareRecord = foundShare else {
-                logger.error("Could not find CKShare in save results")
+                logger.error("❌ Could not find CKShare in save results")
                 throw CloudKitError.invalidRecord
             }
             savedShare = shareRecord
         } catch {
-            logger.error("Failed to save share: \(error.localizedDescription)")
+            logger.error("❌ Failed to save share: \(error.localizedDescription)")
+            if let ckError = error as? CKError {
+                logger.error("CKError code: \(ckError.code.rawValue)")
+            }
             throw error
         }
 
         // Now get the URL from the saved share
         guard let shareURL = savedShare.url else {
-            logger.error("Share was saved but URL is still nil")
+            logger.error("❌ Share was saved but URL is still nil")
             throw CloudKitError.invalidRecord
         }
 
-        logger.info("Share URL created: \(shareURL)")
+        logger.info("🎉 Share URL created successfully: \(shareURL.absoluteString)")
+
+        // Create SharedRecipeReference for tracking
+        let reference = SharedRecipeReference.linkShare(
+            recipeId: recipe.id,
+            ownerId: ownerId,
+            shareURL: shareURL,
+            recipeTitle: recipe.title,
+            recipeTags: recipe.tags.map { $0.name }
+        )
+
+        do {
+            try await saveSharedRecipeReference(reference)
+            logger.info("✅ Created SharedRecipeReference for link share tracking")
+        } catch {
+            logger.warning("⚠️ Failed to save SharedRecipeReference (non-critical): \(error.localizedDescription)")
+            // Non-critical error - link still works
+        }
+
         return shareURL
     }
 
     /// Accept a shared recipe from a CKShare URL
     func acceptSharedRecipe(from metadata: CKShare.Metadata) async throws -> Recipe {
-        logger.info("Accepting shared recipe")
+        logger.info("📥 Accepting shared recipe from CKShare metadata")
+        logger.info("📍 Root record ID: \(metadata.rootRecordID.recordName)")
+        logger.info("📍 Zone: \(metadata.rootRecordID.zoneID.zoneName)")
+        logger.info("👤 Participant role: \(metadata.participantRole == .owner ? "owner" : "participant")")
 
         guard let container = container else {
+            logger.error("❌ CloudKit not enabled")
             throw CloudKitError.notEnabled
         }
 
         // Check if the user is the owner of the share
         let isOwner = metadata.participantRole == .owner
         if isOwner {
-            logger.info("User is the owner of this share, fetching from private database instead")
+            logger.info("👤 User is the owner of this share, fetching from PRIVATE database")
 
             // Owner doesn't need to accept - just fetch from their private database
             let db = try getPrivateDatabase()
             let rootRecordID = metadata.rootRecordID
 
             do {
+                logger.info("🔍 Fetching own recipe from PRIVATE database...")
                 let record = try await db.record(for: rootRecordID)
                 let recipe = try recipeFromRecord(record)
-                logger.info("Successfully fetched own recipe: \(recipe.title)")
+                logger.info("✅ Successfully fetched own recipe: \(recipe.title)")
                 return recipe
             } catch {
-                logger.error("Failed to fetch own recipe: \(error.localizedDescription)")
+                logger.error("❌ Failed to fetch own recipe: \(error.localizedDescription)")
+                if let ckError = error as? CKError {
+                    logger.error("CKError code: \(ckError.code.rawValue)")
+                }
                 throw error
             }
         }
 
         // Accept the share first (for non-owners)
+        logger.info("🤝 Accepting CloudKit share (non-owner participant)...")
         do {
             let acceptedShare = try await container.accept(metadata)
-            logger.info("Successfully accepted share: \(acceptedShare.recordID.recordName)")
+            logger.info("✅ Successfully accepted share: \(acceptedShare.recordID.recordName)")
         } catch let error as CKError {
             // If already accepted, that's okay - continue
             if error.code == .serverRecordChanged {
-                logger.info("Share already accepted, continuing...")
+                logger.info("ℹ️ Share already accepted, continuing...")
             } else {
-                logger.error("Failed to accept share: \(error.localizedDescription)")
+                logger.error("❌ Failed to accept share: \(error.localizedDescription)")
+                logger.error("CKError code: \(error.code.rawValue)")
                 throw error
             }
         }
 
         // Fetch the root record from the shared database
+        logger.info("🗄️ Fetching recipe from SHARED CloudKit database...")
         let sharedDatabase = container.sharedCloudDatabase
         let rootRecordID = metadata.rootRecordID
 
         do {
             let record = try await sharedDatabase.record(for: rootRecordID)
+            logger.info("✅ Fetched recipe record from shared database")
             let recipe = try recipeFromRecord(record)
-            logger.info("Successfully fetched shared recipe: \(recipe.title)")
+            logger.info("🎉 Successfully accepted and fetched shared recipe: \(recipe.title)")
+            logger.info("📊 Recipe has \(recipe.ingredients.count) ingredients and \(recipe.steps.count) steps")
             return recipe
         } catch {
-            logger.error("Failed to fetch shared recipe: \(error.localizedDescription)")
+            logger.error("❌ Failed to fetch shared recipe from shared database: \(error.localizedDescription)")
+            if let ckError = error as? CKError {
+                logger.error("CKError code: \(ckError.code.rawValue)")
+                switch ckError.code {
+                case .unknownItem:
+                    logger.error("💡 Recipe not found - may have been deleted by owner")
+                case .networkFailure, .networkUnavailable:
+                    logger.error("💡 Network issue - check internet connection")
+                case .notAuthenticated:
+                    logger.error("💡 Not signed into iCloud")
+                case .permissionFailure:
+                    logger.error("💡 Permission denied - share may have been revoked")
+                default:
+                    logger.error("💡 Unknown CloudKit error")
+                }
+            }
             throw error
         }
     }
@@ -1015,28 +1095,285 @@ actor CloudKitService {
         }
     }
 
+    /// Subscribe to shared recipe notifications
+    /// This sets up a CloudKit subscription so the user gets notified when someone shares a recipe with them
+    func subscribeToSharedRecipes(forUserId userId: UUID) async throws {
+        logger.info("🔔 Setting up push notifications for shared recipes")
+        let subscriptionID = "shared-recipes-\(userId.uuidString)"
+
+        // Check if subscription already exists
+        let db = try getPublicDatabase()
+        do {
+            _ = try await db.subscription(for: subscriptionID)
+            logger.info("Shared recipe subscription already exists")
+            return
+        } catch {
+            // Subscription doesn't exist, create it
+        }
+
+        // Create predicate: sharedWithUserId == current user AND shareType == direct
+        let predicate = NSPredicate(
+            format: "sharedWithUserId == %@ AND shareType == %@",
+            userId.uuidString,
+            ShareType.direct.rawValue
+        )
+
+        // Create query subscription
+        let subscription = CKQuerySubscription(
+            recordType: sharedRecipeReferenceRecordType,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordCreation]
+        )
+
+        // Configure notification
+        let notification = CKSubscription.NotificationInfo()
+        notification.alertBody = "A friend shared a recipe with you!"
+        notification.soundName = "default"
+        notification.shouldBadge = true
+        notification.shouldSendContentAvailable = true
+
+        subscription.notificationInfo = notification
+
+        // Save subscription
+        do {
+            _ = try await db.save(subscription)
+            logger.info("✅ Successfully subscribed to shared recipe notifications")
+        } catch {
+            logger.error("Failed to save shared recipe subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Unsubscribe from shared recipe notifications
+    func unsubscribeFromSharedRecipes(forUserId userId: UUID) async throws {
+        let subscriptionID = "shared-recipes-\(userId.uuidString)"
+        let db = try getPublicDatabase()
+
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Unsubscribed from shared recipes")
+        } catch {
+            logger.warning("Failed to unsubscribe from shared recipes: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Share Recipe
 
-    /// Share a recipe with another user
+    /// Share a recipe with another user (direct friend-to-friend sharing)
+    /// Creates a SharedRecipeReference in PUBLIC database so recipient can access it
     func shareRecipe(_ recipe: Recipe, with userId: UUID, from ownerId: UUID) async throws {
-        let sharedRecipe = SharedRecipe(
-            recipe: recipe,
-            sharedBy: User(id: ownerId, username: "", displayName: ""),
-            sharedAt: Date()
+        logger.info("📤 Sharing recipe '\(recipe.title)' with user: \(userId)")
+        logger.info("📍 Recipe ID: \(recipe.id), Owner: \(ownerId)")
+
+        // Create SharedRecipeReference pointing to the original recipe
+        let reference = SharedRecipeReference.directShare(
+            recipeId: recipe.id,
+            ownerId: ownerId,
+            sharedWithUserId: userId,
+            sharedByUserId: ownerId,
+            recipeTitle: recipe.title,
+            recipeTags: recipe.tags.map { $0.name }
         )
-        
-        let recordID = CKRecord.ID(recordName: sharedRecipe.id.uuidString)
-        let record = CKRecord(recordType: sharedRecipeRecordType, recordID: recordID)
-        
-        record["sharedRecipeId"] = sharedRecipe.id.uuidString as CKRecordValue
-        record["recipeId"] = recipe.id.uuidString as CKRecordValue
-        record["sharedWithUserId"] = userId.uuidString as CKRecordValue
-        record["sharedByUserId"] = ownerId.uuidString as CKRecordValue
-        record["sharedAt"] = sharedRecipe.sharedAt as CKRecordValue
-        
-        let db = try getPrivateDatabase()
+
+        // Save reference to PUBLIC database (recipient can query this!)
+        try await saveSharedRecipeReference(reference)
+
+        logger.info("✅ Successfully shared recipe with friend via PUBLIC database")
+        logger.info("📋 SharedRecipeReference ID: \(reference.id)")
+    }
+
+    // MARK: - Shared Recipe References
+
+    /// Save a shared recipe reference to PUBLIC database
+    /// This creates a lightweight pointer to the original recipe instead of duplicating it
+    func saveSharedRecipeReference(_ reference: SharedRecipeReference) async throws {
+        logger.info("💾 Saving shared recipe reference: \(reference.recipeTitle) (type: \(reference.shareType.rawValue))")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: reference.id.uuidString)
+        let record = CKRecord(recordType: sharedRecipeReferenceRecordType, recordID: recordID)
+
+        // Core fields
+        record["referenceId"] = reference.id.uuidString as CKRecordValue
+        record["originalRecipeId"] = reference.originalRecipeId.uuidString as CKRecordValue
+        record["originalOwnerId"] = reference.originalOwnerId.uuidString as CKRecordValue
+        record["sharedByUserId"] = reference.sharedByUserId.uuidString as CKRecordValue
+        record["sharedAt"] = reference.sharedAt as CKRecordValue
+        record["shareType"] = reference.shareType.rawValue as CKRecordValue
+
+        // Optional recipient (for direct shares)
+        if let sharedWithUserId = reference.sharedWithUserId {
+            record["sharedWithUserId"] = sharedWithUserId.uuidString as CKRecordValue
+        }
+
+        // Optional share URL (for link shares)
+        if let shareURL = reference.shareURL {
+            record["shareURL"] = shareURL.absoluteString as CKRecordValue
+        }
+
+        // Cached metadata for display without fetching full recipe
+        record["recipeTitle"] = reference.recipeTitle as CKRecordValue
+        if !reference.recipeTags.isEmpty {
+            record["recipeTags"] = reference.recipeTags as CKRecordValue
+        }
+
         _ = try await db.save(record)
-        logger.info("Shared recipe: \(recipe.title)")
+        logger.info("✅ Saved shared recipe reference to PUBLIC database")
+    }
+
+    /// Fetch shared recipe references for a user
+    /// This fetches all recipes shared with this user via direct shares, friends-only, or public
+    func fetchSharedRecipeReferences(forUserId userId: UUID, includePublic: Bool = true) async throws -> [SharedRecipeReference] {
+        logger.info("📥 Fetching shared recipe references for user: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Build predicate to get:
+        // 1. Direct shares to this user
+        // 2. Friends-only recipes (if user has connections - we'll filter client-side)
+        // 3. Public recipes (if includePublic is true)
+        var predicates: [NSPredicate] = []
+
+        // Direct shares
+        predicates.append(NSPredicate(format: "sharedWithUserId == %@", userId.uuidString))
+
+        // Friends-only recipes (we'll filter by connection on client side)
+        predicates.append(NSPredicate(format: "shareType == %@", ShareType.friendsOnly.rawValue))
+
+        // Public recipes
+        if includePublic {
+            predicates.append(NSPredicate(format: "shareType == %@", ShareType.publicRecipe.rawValue))
+        }
+
+        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: predicates)
+        let query = CKQuery(recordType: sharedRecipeReferenceRecordType, predicate: compoundPredicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "sharedAt", ascending: false)]
+
+        let results = try await db.records(matching: query)
+
+        var references: [SharedRecipeReference] = []
+        for (_, result) in results.matchResults {
+            switch result {
+            case .success(let record):
+                if let reference = try? sharedRecipeReferenceFromRecord(record) {
+                    references.append(reference)
+                } else {
+                    logger.warning("Failed to parse shared recipe reference from record: \(record.recordID.recordName)")
+                }
+            case .failure(let error):
+                logger.error("Failed to fetch record: \(error.localizedDescription)")
+            }
+        }
+
+        logger.info("✅ Fetched \(references.count) shared recipe references")
+        return references
+    }
+
+    /// Fetch shared recipe references that this user has shared with others
+    /// Useful for showing "My Shared Recipes"
+    func fetchOutgoingSharedRecipeReferences(forUserId userId: UUID) async throws -> [SharedRecipeReference] {
+        logger.info("📤 Fetching outgoing shared recipe references for user: \(userId)")
+
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(format: "sharedByUserId == %@", userId.uuidString)
+        let query = CKQuery(recordType: sharedRecipeReferenceRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "sharedAt", ascending: false)]
+
+        let results = try await db.records(matching: query)
+
+        var references: [SharedRecipeReference] = []
+        for (_, result) in results.matchResults {
+            switch result {
+            case .success(let record):
+                if let reference = try? sharedRecipeReferenceFromRecord(record) {
+                    references.append(reference)
+                }
+            case .failure(let error):
+                logger.error("Failed to fetch record: \(error.localizedDescription)")
+            }
+        }
+
+        logger.info("✅ Fetched \(references.count) outgoing shared recipe references")
+        return references
+    }
+
+    /// Delete a shared recipe reference
+    func deleteSharedRecipeReference(_ referenceId: UUID) async throws {
+        logger.info("🗑️ Deleting shared recipe reference: \(referenceId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: referenceId.uuidString)
+
+        try await db.deleteRecord(withID: recordID)
+        logger.info("✅ Deleted shared recipe reference")
+    }
+
+    /// Delete all shared recipe references for a specific recipe
+    /// Useful when a user deletes their recipe or changes visibility to private
+    func deleteAllReferencesForRecipe(recipeId: UUID, ownerId: UUID) async throws {
+        logger.info("🗑️ Deleting all references for recipe: \(recipeId)")
+
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(
+            format: "originalRecipeId == %@ AND originalOwnerId == %@",
+            recipeId.uuidString,
+            ownerId.uuidString
+        )
+        let query = CKQuery(recordType: sharedRecipeReferenceRecordType, predicate: predicate)
+
+        let results = try await db.records(matching: query)
+        var recordIDsToDelete: [CKRecord.ID] = []
+
+        for (recordID, result) in results.matchResults {
+            if case .success = result {
+                recordIDsToDelete.append(recordID)
+            }
+        }
+
+        if !recordIDsToDelete.isEmpty {
+            let deleteResults = try await db.modifyRecords(saving: [], deleting: recordIDsToDelete)
+            logger.info("✅ Deleted \(deleteResults.deleteResults.count) recipe references")
+        } else {
+            logger.info("No references found to delete")
+        }
+    }
+
+    // MARK: - Private Helpers for SharedRecipeReference
+
+    private func sharedRecipeReferenceFromRecord(_ record: CKRecord) throws -> SharedRecipeReference {
+        guard let referenceIdString = record["referenceId"] as? String,
+              let referenceId = UUID(uuidString: referenceIdString),
+              let originalRecipeIdString = record["originalRecipeId"] as? String,
+              let originalRecipeId = UUID(uuidString: originalRecipeIdString),
+              let originalOwnerIdString = record["originalOwnerId"] as? String,
+              let originalOwnerId = UUID(uuidString: originalOwnerIdString),
+              let sharedByUserIdString = record["sharedByUserId"] as? String,
+              let sharedByUserId = UUID(uuidString: sharedByUserIdString),
+              let sharedAt = record["sharedAt"] as? Date,
+              let shareTypeString = record["shareType"] as? String,
+              let shareType = ShareType(rawValue: shareTypeString),
+              let recipeTitle = record["recipeTitle"] as? String else {
+            throw CloudKitError.invalidRecord
+        }
+
+        // Optional fields
+        let sharedWithUserId = (record["sharedWithUserId"] as? String).flatMap { UUID(uuidString: $0) }
+        let shareURL = (record["shareURL"] as? String).flatMap { URL(string: $0) }
+        let recipeTags = (record["recipeTags"] as? [String]) ?? []
+
+        return SharedRecipeReference(
+            id: referenceId,
+            originalRecipeId: originalRecipeId,
+            originalOwnerId: originalOwnerId,
+            sharedWithUserId: sharedWithUserId,
+            sharedByUserId: sharedByUserId,
+            sharedAt: sharedAt,
+            shareType: shareType,
+            shareURL: shareURL,
+            recipeTitle: recipeTitle,
+            recipeTags: recipeTags
+        )
     }
 }
 

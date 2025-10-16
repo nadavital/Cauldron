@@ -208,13 +208,23 @@ class CurrentUserSession: ObservableObject {
         logger.info("User session created successfully")
     }
 
-    /// Set up CloudKit push notification subscription for connection requests
+    /// Set up CloudKit push notification subscriptions for connection requests and shared recipes
     private func setupNotificationSubscription(for userId: UUID, dependencies: DependencyContainer) async {
+        // Subscribe to connection requests
         do {
             try await dependencies.cloudKitService.subscribeToConnectionRequests(forUserId: userId)
-            logger.info("Successfully set up push notification subscription")
+            logger.info("Successfully set up connection request notifications")
         } catch {
-            logger.warning("Failed to set up push notifications: \(error.localizedDescription)")
+            logger.warning("Failed to set up connection request notifications: \(error.localizedDescription)")
+            // Don't block user flow if subscription fails
+        }
+
+        // Subscribe to shared recipes
+        do {
+            try await dependencies.cloudKitService.subscribeToSharedRecipes(forUserId: userId)
+            logger.info("Successfully set up shared recipe notifications")
+        } catch {
+            logger.warning("Failed to set up shared recipe notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
         }
     }
