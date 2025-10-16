@@ -93,6 +93,10 @@ class CurrentUserSession: ObservableObject {
                 logger.info("Found existing user in CloudKit: \(cloudUser.username)")
                 currentUser = cloudUser
                 saveUserToDefaults(cloudUser)
+
+                // Set up push notification subscription for connection requests
+                await setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
+
                 isInitialized = true
                 needsOnboarding = false
                 needsiCloudSignIn = false
@@ -126,6 +130,10 @@ class CurrentUserSession: ObservableObject {
                     )
                     currentUser = cloudUser
                     saveUserToDefaults(cloudUser)
+
+                    // Set up push notification subscription
+                    await setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
+
                     logger.info("Synced local user to CloudKit successfully")
                 } catch {
                     logger.warning("CloudKit sync failed: \(error.localizedDescription)")
@@ -144,18 +152,12 @@ class CurrentUserSession: ObservableObject {
                 isInitialized = true
                 needsOnboarding = true
                 needsiCloudSignIn = false
-            } else if accountStatus == .noAccount {
-                // Not signed into iCloud - show iCloud sign-in prompt
-                logger.info("Not signed into iCloud - showing sign-in prompt")
+            } else {
+                // iCloud not available - show iCloud sign-in prompt (required for Cauldron)
+                logger.info("iCloud not available - showing sign-in prompt (status: \(String(describing: accountStatus)))")
                 isInitialized = true
                 needsOnboarding = false
                 needsiCloudSignIn = true
-            } else {
-                // iCloud has issues - allow local-only mode
-                logger.warning("iCloud unavailable (\(String(describing: accountStatus))) - allowing local mode")
-                isInitialized = true
-                needsOnboarding = true
-                needsiCloudSignIn = false
             }
         }
     }
@@ -200,7 +202,21 @@ class CurrentUserSession: ObservableObject {
         needsOnboarding = false
         needsiCloudSignIn = false
 
+        // Set up push notification subscription for new user
+        await setupNotificationSubscription(for: user.id, dependencies: dependencies)
+
         logger.info("User session created successfully")
+    }
+
+    /// Set up CloudKit push notification subscription for connection requests
+    private func setupNotificationSubscription(for userId: UUID, dependencies: DependencyContainer) async {
+        do {
+            try await dependencies.cloudKitService.subscribeToConnectionRequests(forUserId: userId)
+            logger.info("Successfully set up push notification subscription")
+        } catch {
+            logger.warning("Failed to set up push notifications: \(error.localizedDescription)")
+            // Don't block user flow if subscription fails
+        }
     }
     
     /// Update user profile

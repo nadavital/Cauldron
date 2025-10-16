@@ -244,49 +244,61 @@ struct UserSearchRowView: View {
     
     @ViewBuilder
     private var connectionButton: some View {
-        switch connectionStatus {
-        case .none:
-            Button {
-                Task {
-                    await sendConnectionRequest()
-                }
-            } label: {
-                if isProcessing {
-                    ProgressView()
-                } else {
-                    Text("Connect")
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.cauldronOrange)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                }
-            }
-            .disabled(isProcessing)
-            
-        case .pending:
-            Text("Pending")
+        // Don't show connection button for your own profile
+        if user.id == currentUserId {
+            Text("You")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            
-        case .connected:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            
-        case .pendingReceived:
-            Text("Respond")
-                .font(.caption)
-                .foregroundColor(.cauldronOrange)
+                .italic()
+        } else {
+            switch connectionStatus {
+            case .none:
+                Button {
+                    Task {
+                        await sendConnectionRequest()
+                    }
+                } label: {
+                    if isProcessing {
+                        ProgressView()
+                    } else {
+                        Text("Connect")
+                            .font(.caption)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.cauldronOrange)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                    }
+                }
+                .disabled(isProcessing)
+
+            case .pending:
+                Text("Pending")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+            case .connected:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+
+            case .pendingReceived:
+                Text("Respond")
+                    .font(.caption)
+                    .foregroundColor(.cauldronOrange)
+            }
         }
     }
     
     private func checkConnectionStatus() async {
         do {
-            if let connection = try await dependencies.connectionRepository.fetchConnection(
-                fromUserId: currentUserId,
-                toUserId: user.id
-            ) {
+            // Fetch connections from CloudKit PUBLIC database
+            let connections = try await dependencies.cloudKitService.fetchConnections(forUserId: currentUserId)
+
+            // Find connection with this user
+            if let connection = connections.first(where: { conn in
+                (conn.fromUserId == currentUserId && conn.toUserId == user.id) ||
+                (conn.fromUserId == user.id && conn.toUserId == currentUserId)
+            }) {
                 if connection.isAccepted {
                     connectionStatus = .connected
                 } else if connection.fromUserId == currentUserId {
@@ -305,14 +317,17 @@ struct UserSearchRowView: View {
     private func sendConnectionRequest() async {
         isProcessing = true
         defer { isProcessing = false }
-        
+
         do {
-            let connection = Connection(
-                fromUserId: currentUserId,
-                toUserId: user.id,
-                status: .pending
+            // Send connection request via CloudKit to PUBLIC database
+            let connection = try await dependencies.cloudKitService.sendConnectionRequest(
+                from: currentUserId,
+                to: user.id
             )
-            try await dependencies.connectionRepository.save(connection)
+
+            // Also save locally for offline access
+            try? await dependencies.connectionRepository.save(connection)
+
             connectionStatus = .pending
             await onConnectionChanged()
         } catch {

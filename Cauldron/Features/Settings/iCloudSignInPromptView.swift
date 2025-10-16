@@ -11,7 +11,6 @@ import SwiftUI
 struct iCloudSignInPromptView: View {
     let accountStatus: CloudKitAccountStatus
     let onRetry: () async -> Void
-    let onContinueWithoutCloud: (() -> Void)?
 
     @State private var isRetrying = false
 
@@ -86,17 +85,6 @@ struct iCloudSignInPromptView: View {
                         .cornerRadius(12)
                     }
                     .disabled(isRetrying)
-
-                    if let continueAction = onContinueWithoutCloud {
-                        Button {
-                            continueAction()
-                        } label: {
-                            Text("Continue Without Cloud Sync")
-                                .fontWeight(.medium)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 8)
-                    }
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
@@ -145,13 +133,13 @@ struct iCloudSignInPromptView: View {
     private var statusMessage: String {
         switch accountStatus {
         case .noAccount:
-            return "Cauldron uses iCloud to sync your recipes across devices and share them with friends. Please sign in to iCloud to continue."
+            return "Cauldron requires iCloud to sync and back up your recipes across all your devices. Please sign in to iCloud to use Cauldron."
         case .restricted:
-            return "iCloud access is restricted on this device. This may be due to parental controls or device management settings."
+            return "iCloud access is restricted on this device. Cauldron requires iCloud to function. This may be due to parental controls or device management settings."
         case .temporarilyUnavailable:
-            return "iCloud services are temporarily unavailable. Please try again in a few moments."
+            return "iCloud services are temporarily unavailable. Cauldron requires iCloud to sync your recipes. Please try again in a few moments."
         default:
-            return "We're having trouble connecting to iCloud. Please check your settings and try again."
+            return "We're having trouble connecting to iCloud. Cauldron requires iCloud to sync and back up your recipes. Please check your settings and try again."
         }
     }
 
@@ -174,9 +162,6 @@ struct iCloudSignInPromptView: View {
         accountStatus: .noAccount,
         onRetry: {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-        },
-        onContinueWithoutCloud: {
-            // Preview action
         }
     )
 }
@@ -186,7 +171,6 @@ struct iCloudSignInPromptView: View {
         accountStatus: .restricted,
         onRetry: {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-        },
-        onContinueWithoutCloud: nil
+        }
     )
 }

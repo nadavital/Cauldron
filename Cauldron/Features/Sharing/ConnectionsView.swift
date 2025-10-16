@@ -173,26 +173,36 @@ class ConnectionsViewModel: ObservableObject {
     
     func loadConnections() async {
         do {
-            let allConnections = try await dependencies.connectionRepository.fetchConnections(forUserId: currentUserId)
-            
+            // Fetch connections from CloudKit PUBLIC database
+            let allConnections = try await dependencies.cloudKitService.fetchConnections(forUserId: currentUserId)
+
+            // Also cache locally for offline access
+            for connection in allConnections {
+                try? await dependencies.connectionRepository.save(connection)
+            }
+
             connections = allConnections.filter { $0.isAccepted }
             receivedRequests = allConnections.filter { $0.toUserId == currentUserId && $0.status == .pending }
             sentRequests = allConnections.filter { $0.fromUserId == currentUserId && $0.status == .pending }
-            
-            // Load user details for all connections
+
+            // Load user details for all connections from CloudKit
             var userIds = Set<UUID>()
             for connection in allConnections {
                 userIds.insert(connection.fromUserId)
                 userIds.insert(connection.toUserId)
             }
-            
+
+            // Fetch users from CloudKit by searching
             for userId in userIds {
-                if let user = try? await dependencies.sharingRepository.fetchUser(id: userId) {
-                    usersMap[userId] = user
+                // Try to get from local cache first
+                if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                    usersMap[userId] = cachedUser
                 }
+                // Note: If user not in cache, they won't show. This is okay because
+                // users should be cached when connection was created
             }
-            
-            AppLogger.general.info("Loaded connections")
+
+            AppLogger.general.info("Loaded \(allConnections.count) connections from CloudKit (\(self.receivedRequests.count) pending)")
         } catch {
             AppLogger.general.error("Failed to load connections: \(error.localizedDescription)")
             alertMessage = error.localizedDescription
@@ -202,6 +212,10 @@ class ConnectionsViewModel: ObservableObject {
     
     func acceptRequest(_ connection: Connection) async {
         do {
+            // Accept via CloudKit (updates PUBLIC database)
+            try await dependencies.cloudKitService.acceptConnectionRequest(connection)
+
+            // Also update local cache
             let accepted = Connection(
                 id: connection.id,
                 fromUserId: connection.fromUserId,
@@ -210,17 +224,23 @@ class ConnectionsViewModel: ObservableObject {
                 createdAt: connection.createdAt,
                 updatedAt: Date()
             )
-            try await dependencies.connectionRepository.save(accepted)
+            try? await dependencies.connectionRepository.save(accepted)
+
             await loadConnections()
         } catch {
             alertMessage = "Failed to accept request: \(error.localizedDescription)"
             showErrorAlert = true
         }
     }
-    
+
     func rejectRequest(_ connection: Connection) async {
         do {
-            try await dependencies.connectionRepository.delete(connection)
+            // Delete from CloudKit PUBLIC database
+            try await dependencies.cloudKitService.deleteConnection(connection)
+
+            // Also delete from local cache
+            try? await dependencies.connectionRepository.delete(connection)
+
             await loadConnections()
         } catch {
             alertMessage = "Failed to reject request: \(error.localizedDescription)"

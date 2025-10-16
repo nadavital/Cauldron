@@ -23,11 +23,6 @@ struct ContentView: View {
                         onRetry: {
                             // Re-check iCloud status
                             await userSession.initialize(dependencies: dependencies)
-                        },
-                        onContinueWithoutCloud: {
-                            // Allow user to continue without cloud sync
-                            userSession.needsiCloudSignIn = false
-                            userSession.needsOnboarding = true
                         }
                     )
                     .transition(.opacity)

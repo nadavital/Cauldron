@@ -201,7 +201,8 @@ actor CloudKitService {
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        let db = try getPrivateDatabase()
+        // Fetch from PUBLIC database since that's where user profiles are stored
+        let db = try getPublicDatabase()
         let systemUserRecordID = try await getCurrentUserRecordID()
 
         // Try to fetch using the custom record name pattern we use
@@ -213,7 +214,7 @@ actor CloudKitService {
             logger.info("Fetched existing user profile: \(user.username)")
             return user
         } catch let error as CKError where error.code == .unknownItem {
-            logger.info("No user record found with custom record ID")
+            logger.info("No user record found with custom record ID in PUBLIC database")
             // Continue to fallback
         } catch {
             logger.warning("Error fetching user by custom ID: \(error.localizedDescription)")
@@ -231,13 +232,63 @@ actor CloudKitService {
                 logger.info("Found record at system ID but it's invalid (missing userId)")
             }
         } catch let error as CKError where error.code == .unknownItem {
-            logger.info("No user record found with system record ID")
+            logger.info("No user record found with system record ID in PUBLIC database")
         } catch {
             logger.warning("Error fetching user by system ID: \(error.localizedDescription)")
         }
 
         // No valid user profile found
-        logger.info("No existing user profile found in CloudKit")
+        logger.info("No existing user profile found in CloudKit PUBLIC database")
+        return nil
+    }
+
+    /// Migrate user from PRIVATE database to PUBLIC database (backward compatibility)
+    private func migrateUserFromPrivateToPublic() async throws -> User? {
+        logger.info("Checking for user in PRIVATE database (migration)...")
+
+        let privateDB = try getPrivateDatabase()
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let customRecordName = "user_\(systemUserRecordID.recordName)"
+
+        // Try custom record name first
+        do {
+            let record = try await privateDB.record(for: CKRecord.ID(recordName: customRecordName))
+            if let user = try? userFromRecord(record) {
+                logger.info("Found user in PRIVATE database, migrating to PUBLIC: \(user.username)")
+
+                // Save to PUBLIC database
+                try await saveUser(user)
+
+                // Delete from PRIVATE database
+                try? await privateDB.deleteRecord(withID: record.recordID)
+                logger.info("Migration complete: \(user.username) now in PUBLIC database")
+
+                return user
+            }
+        } catch let error as CKError where error.code == .unknownItem {
+            // Not found with custom name, try system ID
+        }
+
+        // Try system record ID
+        do {
+            let record = try await privateDB.record(for: systemUserRecordID)
+            if record["userId"] != nil, let user = try? userFromRecord(record) {
+                logger.info("Found user at system ID in PRIVATE database, migrating to PUBLIC: \(user.username)")
+
+                // Save to PUBLIC database
+                try await saveUser(user)
+
+                // Delete from PRIVATE database
+                try? await privateDB.deleteRecord(withID: record.recordID)
+                logger.info("Migration complete: \(user.username) now in PUBLIC database")
+
+                return user
+            }
+        } catch let error as CKError where error.code == .unknownItem {
+            // Not found in private database
+        }
+
+        logger.info("No user found in PRIVATE database to migrate")
         return nil
     }
 
@@ -249,10 +300,16 @@ actor CloudKitService {
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        // Try to fetch existing user record using the comprehensive fetch method
+        // Try to fetch existing user record from PUBLIC database
         if let existingUser = try await fetchCurrentUserProfile() {
-            logger.info("Found existing user profile: \(existingUser.username)")
+            logger.info("Found existing user profile in PUBLIC database: \(existingUser.username)")
             return existingUser
+        }
+
+        // Check if user exists in PRIVATE database (old location) and migrate
+        if let migratedUser = try await migrateUserFromPrivateToPublic() {
+            logger.info("Successfully migrated user from PRIVATE to PUBLIC database")
+            return migratedUser
         }
 
         // No valid user exists, create new one with a custom record name
@@ -261,7 +318,7 @@ actor CloudKitService {
         let systemUserRecordID = try await getCurrentUserRecordID()
         let customRecordName = "user_\(systemUserRecordID.recordName)"
 
-        logger.info("Creating new user profile with custom record ID")
+        logger.info("Creating new user profile in PUBLIC database with custom record ID")
         let user = User(
             username: username,
             displayName: displayName,
@@ -295,28 +352,52 @@ actor CloudKitService {
         }
         record["createdAt"] = user.createdAt as CKRecordValue
 
-        let db = try getPrivateDatabase()
+        // Save to PUBLIC database so other users can discover this user
+        let db = try getPublicDatabase()
         _ = try await db.save(record)
-        logger.info("Saved user: \(user.username)")
+        logger.info("Saved user: \(user.username) to PUBLIC database")
     }
     
     /// Search for users by username (public search)
+    /// Note: CloudKit has limited predicate support. We use BEGINSWITH for prefix matching.
+    /// For better UX, we search both fields separately and combine results.
     func searchUsers(query: String) async throws -> [User] {
-        let predicate = NSPredicate(format: "username CONTAINS[c] %@ OR displayName CONTAINS[c] %@", query, query)
-        let query = CKQuery(recordType: userRecordType, predicate: predicate)
-        
         let db = try getPublicDatabase()
-        let results = try await db.records(matching: query)
-        
+        let lowercaseQuery = query.lowercased()
+
+        // CloudKit doesn't support CONTAINS, so we use BEGINSWITH on both fields
+        // We need to search both username and displayName separately
+        let usernamePredicate = NSPredicate(format: "username BEGINSWITH %@", lowercaseQuery)
+        let usernameQuery = CKQuery(recordType: userRecordType, predicate: usernamePredicate)
+
+        let displayNamePredicate = NSPredicate(format: "displayName BEGINSWITH %@", query)
+        let displayNameQuery = CKQuery(recordType: userRecordType, predicate: displayNamePredicate)
+
         var users: [User] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get() {
-                if let user = try? userFromRecord(record) {
-                    users.append(user)
-                }
+        var userIds = Set<UUID>() // To avoid duplicates
+
+        // Search by username
+        let usernameResults = try await db.records(matching: usernameQuery)
+        for (_, result) in usernameResults.matchResults {
+            if let record = try? result.get(),
+               let user = try? userFromRecord(record),
+               !userIds.contains(user.id) {
+                users.append(user)
+                userIds.insert(user.id)
             }
         }
-        
+
+        // Search by displayName
+        let displayNameResults = try await db.records(matching: displayNameQuery)
+        for (_, result) in displayNameResults.matchResults {
+            if let record = try? result.get(),
+               let user = try? userFromRecord(record),
+               !userIds.contains(user.id) {
+                users.append(user)
+                userIds.insert(user.id)
+            }
+        }
+
         return users
     }
     
@@ -800,32 +881,34 @@ actor CloudKitService {
         try await saveConnection(accepted)
     }
     
-    /// Save connection to CloudKit
+    /// Save connection to CloudKit PUBLIC database
     private func saveConnection(_ connection: Connection) async throws {
         let recordID = CKRecord.ID(recordName: connection.id.uuidString)
         let record = CKRecord(recordType: connectionRecordType, recordID: recordID)
-        
+
         record["connectionId"] = connection.id.uuidString as CKRecordValue
         record["fromUserId"] = connection.fromUserId.uuidString as CKRecordValue
         record["toUserId"] = connection.toUserId.uuidString as CKRecordValue
         record["status"] = connection.status.rawValue as CKRecordValue
         record["createdAt"] = connection.createdAt as CKRecordValue
         record["updatedAt"] = connection.updatedAt as CKRecordValue
-        
-        let db = try getPrivateDatabase()
+
+        // Save to PUBLIC database so both users can see the connection
+        let db = try getPublicDatabase()
         _ = try await db.save(record)
-        logger.info("Saved connection: \(connection.id)")
+        logger.info("Saved connection to PUBLIC database: \(connection.id)")
     }
     
-    /// Fetch connections for a user
+    /// Fetch connections for a user from CloudKit PUBLIC database
     func fetchConnections(forUserId userId: UUID) async throws -> [Connection] {
-        let predicate = NSPredicate(format: "fromUserId == %@ OR toUserId == %@", 
+        let predicate = NSPredicate(format: "fromUserId == %@ OR toUserId == %@",
                                    userId.uuidString, userId.uuidString)
         let query = CKQuery(recordType: connectionRecordType, predicate: predicate)
-        
-        let db = try getPrivateDatabase()
+
+        // Fetch from PUBLIC database where connections are stored
+        let db = try getPublicDatabase()
         let results = try await db.records(matching: query)
-        
+
         var connections: [Connection] = []
         for (_, result) in results.matchResults {
             if let record = try? result.get() {
@@ -834,10 +917,20 @@ actor CloudKitService {
                 }
             }
         }
-        
+
+        logger.info("Fetched \(connections.count) connections for user from PUBLIC database")
         return connections
     }
     
+    /// Delete a connection from CloudKit PUBLIC database
+    func deleteConnection(_ connection: Connection) async throws {
+        let recordID = CKRecord.ID(recordName: connection.id.uuidString)
+        let db = try getPublicDatabase()
+
+        try await db.deleteRecord(withID: recordID)
+        logger.info("Deleted connection from PUBLIC database: \(connection.id)")
+    }
+
     private func connectionFromRecord(_ record: CKRecord) throws -> Connection {
         guard let connectionIdString = record["connectionId"] as? String,
               let connectionId = UUID(uuidString: connectionIdString),
@@ -851,7 +944,7 @@ actor CloudKitService {
               let updatedAt = record["updatedAt"] as? Date else {
             throw CloudKitError.invalidRecord
         }
-        
+
         return Connection(
             id: connectionId,
             fromUserId: fromUserId,
@@ -862,8 +955,68 @@ actor CloudKitService {
         )
     }
     
+    // MARK: - Push Notifications & Subscriptions
+
+    /// Subscribe to connection requests for push notifications
+    /// This sets up a CloudKit subscription so the user gets notified when someone sends them a connection request
+    func subscribeToConnectionRequests(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-requests-\(userId.uuidString)"
+
+        // Check if subscription already exists
+        let db = try getPublicDatabase()
+        do {
+            _ = try await db.subscription(for: subscriptionID)
+            logger.info("Connection request subscription already exists")
+            return
+        } catch {
+            // Subscription doesn't exist, create it
+        }
+
+        // Create predicate: toUserId == current user AND status == pending
+        let predicate = NSPredicate(format: "toUserId == %@ AND status == %@", userId.uuidString, "pending")
+
+        // Create query subscription
+        let subscription = CKQuerySubscription(
+            recordType: connectionRecordType,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordCreation]
+        )
+
+        // Configure notification
+        let notification = CKSubscription.NotificationInfo()
+        notification.alertBody = "You have a new connection request!"
+        notification.soundName = "default"
+        notification.shouldBadge = true
+        notification.shouldSendContentAvailable = true
+
+        subscription.notificationInfo = notification
+
+        // Save subscription
+        do {
+            _ = try await db.save(subscription)
+            logger.info("Successfully subscribed to connection requests")
+        } catch {
+            logger.error("Failed to save connection request subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Unsubscribe from connection request notifications
+    func unsubscribeFromConnectionRequests(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-requests-\(userId.uuidString)"
+        let db = try getPublicDatabase()
+
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Unsubscribed from connection requests")
+        } catch {
+            logger.warning("Failed to unsubscribe: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Share Recipe
-    
+
     /// Share a recipe with another user
     func shareRecipe(_ recipe: Recipe, with userId: UUID, from ownerId: UUID) async throws {
         let sharedRecipe = SharedRecipe(

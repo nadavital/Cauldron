@@ -77,7 +77,8 @@ class DependencyContainer: ObservableObject {
 
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
-            recipeRepository: recipeRepository
+            recipeRepository: recipeRepository,
+            cloudKitService: cloudKitService
         )
 
         self.recipeSyncService = RecipeSyncService(

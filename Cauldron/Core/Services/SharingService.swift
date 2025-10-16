@@ -12,11 +12,13 @@ import os
 actor SharingService {
     private let sharingRepository: SharingRepository
     private let recipeRepository: RecipeRepository
+    private let cloudKitService: CloudKitService
     private let logger = Logger(subsystem: "com.cauldron", category: "SharingService")
-    
-    init(sharingRepository: SharingRepository, recipeRepository: RecipeRepository) {
+
+    init(sharingRepository: SharingRepository, recipeRepository: RecipeRepository, cloudKitService: CloudKitService) {
         self.sharingRepository = sharingRepository
         self.recipeRepository = recipeRepository
+        self.cloudKitService = cloudKitService
     }
     
     // MARK: - User Management
@@ -26,12 +28,16 @@ actor SharingService {
         try await sharingRepository.fetchAllUsers()
     }
     
-    /// Search for users by username or display name
+    /// Search for users by username or display name via CloudKit
     func searchUsers(_ query: String) async throws -> [User] {
         guard !query.isEmpty else {
-            return try await getAllUsers()
+            return []
         }
-        return try await sharingRepository.searchUsers(query)
+
+        // Search CloudKit PUBLIC database for users
+        let users = try await cloudKitService.searchUsers(query: query)
+        logger.info("Found \(users.count) users matching '\(query)' in CloudKit")
+        return users
     }
     
     /// Create or update a user (for demo purposes)
