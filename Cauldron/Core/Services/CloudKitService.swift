@@ -874,20 +874,14 @@ actor CloudKitService {
         logger.info("✅ Connection accepted and saved: \(connection.id) - new status: \(accepted.status.rawValue)")
     }
 
-    /// Reject a connection request by updating its status to rejected
+    /// Reject a connection request by deleting it
     /// This makes it invisible to both users and allows the sender to try again
     func rejectConnectionRequest(_ connection: Connection) async throws {
-        let rejected = Connection(
-            id: connection.id,
-            fromUserId: connection.fromUserId,
-            toUserId: connection.toUserId,
-            status: .rejected,
-            createdAt: connection.createdAt,
-            updatedAt: Date()
-        )
+        logger.info("🔄 Rejecting connection request: \(connection.id) from \(connection.fromUserId) to \(connection.toUserId)")
 
-        try await saveConnection(rejected)
-        logger.info("Rejected connection request: \(connection.id)")
+        // Delete the connection entirely - cleaner than marking as rejected
+        try await deleteConnection(connection)
+        logger.info("✅ Connection request rejected and deleted: \(connection.id)")
     }
 
     /// Save connection to CloudKit PUBLIC database

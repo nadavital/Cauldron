@@ -184,7 +184,7 @@ struct UserProfileView: View {
     }
 
     private var pendingText: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             HStack {
                 ProgressView()
                     .scaleEffect(0.8)
@@ -195,6 +195,23 @@ struct UserProfileView: View {
             Text("Waiting for \(user.displayName) to respond")
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .padding(.bottom, 4)
+
+            Button(role: .destructive) {
+                Task {
+                    await viewModel.cancelConnectionRequest()
+                }
+            } label: {
+                Label("Cancel Request", systemImage: "xmark.circle")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .background(Color.red.opacity(0.1))
+                    .foregroundColor(.red)
+                    .cornerRadius(8)
+            }
+            .disabled(viewModel.isProcessing)
         }
         .padding()
     }

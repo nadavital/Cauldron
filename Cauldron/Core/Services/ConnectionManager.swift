@@ -68,7 +68,6 @@ enum ConnectionError: LocalizedError {
 /// Operation types for the sync queue
 private enum OperationType {
     case accept(Connection)
-    case reject(Connection)
     case create(Connection)
 }
 
@@ -81,7 +80,7 @@ private struct PendingOperation {
 
     var connection: Connection {
         switch type {
-        case .accept(let conn), .reject(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn):
             return conn
         }
     }
@@ -165,7 +164,7 @@ class ConnectionManager: ObservableObject {
         await queueOperation(.accept(acceptedConnection))
     }
 
-    /// Reject a connection request (optimistic update)
+    /// Reject a connection request (optimistic delete)
     func rejectConnection(_ connection: Connection) async throws {
         logger.info("❌ Rejecting connection: \(connection.id)")
 
@@ -173,27 +172,20 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
-        // Create rejected connection
-        let rejectedConnection = Connection(
-            id: connection.id,
-            fromUserId: connection.fromUserId,
-            toUserId: connection.toUserId,
-            status: .rejected,
-            createdAt: connection.createdAt,
-            updatedAt: Date()
-        )
+        // Remove from local state immediately (optimistic) - rejection = deletion
+        connections.removeValue(forKey: connection.id)
 
-        // Update local state immediately (optimistic)
-        connections[connection.id] = ManagedConnection(
-            connection: rejectedConnection,
-            syncState: .syncing
-        )
+        // Delete from local cache immediately
+        try? await dependencies.connectionRepository.delete(connection)
 
-        // Save to local cache immediately
-        try? await dependencies.connectionRepository.save(rejectedConnection)
-
-        // Queue CloudKit sync in background
-        await queueOperation(.reject(rejectedConnection))
+        // Delete from CloudKit (rejection = deletion for cleaner UX)
+        do {
+            try await dependencies.cloudKitService.rejectConnectionRequest(connection)
+            logger.info("✅ Connection rejected and deleted successfully")
+        } catch {
+            logger.error("❌ Failed to reject connection in CloudKit: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     /// Send a connection request (optimistic update)
@@ -375,7 +367,7 @@ class ConnectionManager: ObservableObject {
         let operation: PendingOperation
 
         switch type {
-        case .accept(let conn), .reject(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn):
             operation = PendingOperation(
                 id: conn.id,
                 type: type,
@@ -408,9 +400,6 @@ class ConnectionManager: ObservableObject {
             switch operation.type {
             case .accept(let connection):
                 try await dependencies.cloudKitService.acceptConnectionRequest(connection)
-
-            case .reject(let connection):
-                try await dependencies.cloudKitService.rejectConnectionRequest(connection)
 
             case .create(let connection):
                 try await dependencies.cloudKitService.saveConnection(connection)

@@ -152,4 +152,30 @@ class UserProfileViewModel: ObservableObject {
             showError = true
         }
     }
+
+    func cancelConnectionRequest() async {
+        guard let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) else {
+            AppLogger.general.error("No connection found to cancel")
+            return
+        }
+
+        // Verify it's a pending request sent by current user
+        guard managedConnection.connection.fromUserId == currentUserId &&
+              managedConnection.connection.status == .pending else {
+            AppLogger.general.error("Connection is not a pending sent request")
+            return
+        }
+
+        isProcessing = true
+        defer { isProcessing = false }
+
+        do {
+            try await dependencies.connectionManager.deleteConnection(managedConnection.connection)
+            AppLogger.general.info("✅ Connection request canceled to \(self.user.username)")
+        } catch {
+            AppLogger.general.error("❌ Failed to cancel connection request: \(error.localizedDescription)")
+            errorMessage = "Failed to cancel request: \(error.localizedDescription)"
+            showError = true
+        }
+    }
 }
