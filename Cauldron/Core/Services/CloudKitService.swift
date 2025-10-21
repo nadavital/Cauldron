@@ -856,19 +856,7 @@ actor CloudKitService {
     }
 
     // MARK: - Connections
-    
-    /// Send a connection request
-    func sendConnectionRequest(from fromUserId: UUID, to toUserId: UUID) async throws -> Connection {
-        let connection = Connection(
-            fromUserId: fromUserId,
-            toUserId: toUserId,
-            status: .pending
-        )
 
-        try await saveConnection(connection)
-        return connection
-    }
-    
     /// Accept a connection request
     func acceptConnectionRequest(_ connection: Connection) async throws {
         logger.info("🔄 Accepting connection request: \(connection.id) from \(connection.fromUserId) to \(connection.toUserId)")
@@ -904,7 +892,7 @@ actor CloudKitService {
 
     /// Save connection to CloudKit PUBLIC database
     /// Uses CKModifyRecordsOperation with .changedKeys save policy to allow updates by any user
-    private func saveConnection(_ connection: Connection) async throws {
+    func saveConnection(_ connection: Connection) async throws {
         let recordID = CKRecord.ID(recordName: connection.id.uuidString)
         let db = try getPublicDatabase()
 
@@ -985,7 +973,11 @@ actor CloudKitService {
 
         logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
         logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted, \(connections.filter { $0.status == .rejected }.count) rejected")
-        return connections
+
+        // Filter out rejected connections - they should be invisible to users
+        let filteredConnections = connections.filter { $0.status != .rejected }
+        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected)")
+        return filteredConnections
     }
     
     /// Delete a connection from CloudKit PUBLIC database

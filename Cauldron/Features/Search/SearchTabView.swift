@@ -163,11 +163,16 @@ struct SearchTabView: View {
                     .foregroundColor(.secondary)
                 
                 ForEach(viewModel.peopleSearchResults) { user in
-                    UserSearchRowView(
-                        user: user,
-                        viewModel: viewModel,
-                        currentUserId: viewModel.currentUserId
-                    )
+                    NavigationLink {
+                        UserProfileView(user: user, dependencies: viewModel.dependencies)
+                    } label: {
+                        UserSearchRowView(
+                            user: user,
+                            viewModel: viewModel,
+                            currentUserId: viewModel.currentUserId
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

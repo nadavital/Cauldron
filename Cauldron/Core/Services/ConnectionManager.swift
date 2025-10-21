@@ -293,6 +293,31 @@ class ConnectionManager: ObservableObject {
         return filtered.sorted { $0.connection.createdAt > $1.connection.createdAt }
     }
 
+    /// Delete a connection (removes friend/unfriends)
+    func deleteConnection(_ connection: Connection) async throws {
+        logger.info("🗑️ Deleting connection: \(connection.id) between \(connection.fromUserId) and \(connection.toUserId)")
+
+        // Remove from local state immediately (optimistic)
+        connections.removeValue(forKey: connection.id)
+
+        // Delete from local cache
+        do {
+            try await dependencies.connectionRepository.delete(connection)
+            logger.info("Deleted connection from local cache")
+        } catch {
+            logger.warning("Failed to delete from cache: \(error.localizedDescription)")
+        }
+
+        // Delete from CloudKit
+        do {
+            try await dependencies.cloudKitService.deleteConnection(connection)
+            logger.info("✅ Connection deleted successfully from CloudKit")
+        } catch {
+            logger.error("❌ Failed to delete connection from CloudKit: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     // MARK: - Private Methods
 
     /// Load connections from local cache
@@ -388,10 +413,7 @@ class ConnectionManager: ObservableObject {
                 try await dependencies.cloudKitService.rejectConnectionRequest(connection)
 
             case .create(let connection):
-                _ = try await dependencies.cloudKitService.sendConnectionRequest(
-                    from: connection.fromUserId,
-                    to: connection.toUserId
-                )
+                try await dependencies.cloudKitService.saveConnection(connection)
             }
 
             // Success! Remove from queue and mark as synced
@@ -407,9 +429,6 @@ class ConnectionManager: ObservableObject {
             }
 
             logger.info("✅ Successfully synced connection: \(operation.id)")
-
-            // Post notification for other views
-            NotificationCenter.default.post(name: NSNotification.Name("RefreshConnections"), object: nil)
 
         } catch {
             logger.error("❌ Failed to sync connection: \(error.localizedDescription)")
