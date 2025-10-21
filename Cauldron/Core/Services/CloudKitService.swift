@@ -968,10 +968,60 @@ actor CloudKitService {
         logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
         logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted, \(connections.filter { $0.status == .rejected }.count) rejected")
 
+        // Clean up duplicates - remove duplicate connections between same two users
+        let cleanedConnections = try await removeDuplicateConnections(connections)
+
         // Filter out rejected connections - they should be invisible to users
-        let filteredConnections = connections.filter { $0.status != .rejected }
-        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected)")
+        let filteredConnections = cleanedConnections.filter { $0.status != .rejected }
+        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected/duplicates)")
         return filteredConnections
+    }
+
+    /// Remove duplicate connections between the same two users
+    /// Keeps the most recent one (by updatedAt), deletes older duplicates
+    private func removeDuplicateConnections(_ connections: [Connection]) async throws -> [Connection] {
+        // Group connections by user pair (regardless of direction)
+        var connectionsByPair: [Set<UUID>: [Connection]] = [:]
+
+        for connection in connections {
+            let userPair = Set([connection.fromUserId, connection.toUserId])
+            connectionsByPair[userPair, default: []].append(connection)
+        }
+
+        var connectionsToKeep: [Connection] = []
+        let db = try getPublicDatabase()
+
+        // For each user pair, keep only the most recent connection
+        for (userPair, pairConnections) in connectionsByPair {
+            if pairConnections.count > 1 {
+                // Sort by updatedAt descending (newest first)
+                let sorted = pairConnections.sorted { $0.updatedAt > $1.updatedAt }
+                let toKeep = sorted.first!
+                let toDelete = Array(sorted.dropFirst())
+
+                logger.warning("🧹 Found \(pairConnections.count) duplicate connections for users \(Array(userPair))")
+                logger.info("  Keeping: \(toKeep.id) (status: \(toKeep.status.rawValue), updated: \(toKeep.updatedAt))")
+
+                // Delete the older duplicates from CloudKit
+                for duplicate in toDelete {
+                    logger.info("  Deleting duplicate: \(duplicate.id) (status: \(duplicate.status.rawValue), updated: \(duplicate.updatedAt))")
+                    do {
+                        let recordID = CKRecord.ID(recordName: duplicate.id.uuidString)
+                        try await db.deleteRecord(withID: recordID)
+                        logger.info("  ✅ Deleted duplicate connection: \(duplicate.id)")
+                    } catch {
+                        logger.error("  ❌ Failed to delete duplicate: \(error.localizedDescription)")
+                    }
+                }
+
+                connectionsToKeep.append(toKeep)
+            } else {
+                // No duplicates for this pair
+                connectionsToKeep.append(pairConnections[0])
+            }
+        }
+
+        return connectionsToKeep
     }
     
     /// Delete a connection from CloudKit PUBLIC database
