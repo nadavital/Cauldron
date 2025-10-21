@@ -84,6 +84,12 @@ struct ContentView: View {
         } catch {
             AppLogger.general.warning("Data preload failed: \(error.localizedDescription)")
         }
+
+        // Preload shared recipes feed in background while launch screen is showing
+        Task.detached(priority: .utility) { @MainActor in
+            SharingTabViewModel.shared.configure(dependencies: dependencies)
+            await SharingTabViewModel.shared.loadSharedRecipes()
+        }
     }
 }
 

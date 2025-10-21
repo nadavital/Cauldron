@@ -272,6 +272,10 @@ struct RecipeImportPreviewView: View {
                 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", systemImage: "checkmark") {
+                        // Prevent race condition by setting isSaving immediately
+                        guard !isSaving else { return }
+                        isSaving = true
+
                         Task {
                             await saveRecipe()
                         }
@@ -343,8 +347,8 @@ struct RecipeImportPreviewView: View {
     }
     
     private func saveRecipe() async {
-        isSaving = true
-        defer { isSaving = false }
+        // Note: isSaving is set in the button action to prevent race condition
+        // It will be reset on error, and on success the view will dismiss
 
         do {
             // Add source URL to notes and ownerId for CloudKit sync
@@ -426,6 +430,7 @@ struct RecipeImportPreviewView: View {
 
         } catch {
             AppLogger.parsing.error("Failed to save recipe: \(error.localizedDescription)")
+            isSaving = false
         }
     }
     

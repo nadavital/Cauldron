@@ -192,20 +192,20 @@ class RecipeEditorViewModel: ObservableObject {
             errorMessage = "Please fill in all required fields"
             return false
         }
-        
-        isSaving = true
-        defer { isSaving = false }
-        
+
+        // Note: isSaving is set in the button action to prevent race condition
+        // It will be reset there on failure, and on success the view will dismiss
+
         do {
             var recipe = try buildRecipe()
-            
+
             // Handle image if selected
             if let image = selectedImage {
                 let filename = try await ImageManager.shared.saveImage(image, recipeId: recipe.id)
                 let imageURL = await ImageManager.shared.imageURL(for: filename)
                 recipe = recipe.withImageURL(imageURL)
             }
-            
+
             // Save to local database (CloudKit sync happens automatically in repository)
             if isEditing {
                 try await dependencies.recipeRepository.update(recipe)
@@ -216,7 +216,7 @@ class RecipeEditorViewModel: ObservableObject {
             AppLogger.general.info("Recipe saved: \(recipe.title)")
 
             return true
-            
+
         } catch {
             errorMessage = "Failed to save recipe: \(error.localizedDescription)"
             AppLogger.general.error("Failed to save recipe: \(error.localizedDescription)")

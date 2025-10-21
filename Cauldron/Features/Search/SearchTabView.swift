@@ -165,11 +165,8 @@ struct SearchTabView: View {
                 ForEach(viewModel.peopleSearchResults) { user in
                     UserSearchRowView(
                         user: user,
-                        dependencies: viewModel.dependencies,
-                        currentUserId: viewModel.currentUserId,
-                        onConnectionChanged: {
-                            await viewModel.loadUsers()
-                        }
+                        viewModel: viewModel,
+                        currentUserId: viewModel.currentUserId
                     )
                 }
             }
@@ -198,20 +195,51 @@ struct SearchTabView: View {
 /// Row view for displaying a user in search with connect button
 struct UserSearchRowView: View {
     let user: User
-    let dependencies: DependencyContainer
+    let viewModel: SearchTabViewModel
     let currentUserId: UUID
-    let onConnectionChanged: () async -> Void
-    
-    @State private var connectionStatus: ConnectionButtonStatus = .none
+
     @State private var isProcessing = false
-    
-    enum ConnectionButtonStatus {
+
+    enum ConnectionUIState {
         case none
         case pending
         case connected
         case pendingReceived
+        case syncing
+        case error(ConnectionError)
     }
-    
+
+    // Compute connection state from ViewModel's connections
+    private var connectionState: ConnectionUIState {
+        // Get the managed connection from the connection manager
+        if let managedConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) {
+            let connection = managedConnection.connection
+
+            // Check sync state first
+            switch managedConnection.syncState {
+            case .syncing:
+                return .syncing
+            case .syncFailed(let error):
+                return .error(error as? ConnectionError ?? .networkFailure(error))
+            case .pendingSync:
+                return .syncing
+            case .synced:
+                break // Continue to check connection status
+            }
+
+            // Then check connection status
+            if connection.isAccepted {
+                return .connected
+            } else if connection.fromUserId == currentUserId {
+                return .pending
+            } else {
+                return .pendingReceived
+            }
+        }
+
+        return .none
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Circle()
@@ -222,24 +250,21 @@ struct UserSearchRowView: View {
                         .font(.headline)
                         .foregroundColor(.cauldronOrange)
                 )
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(user.displayName)
                     .font(.headline)
-                
+
                 Text("@\(user.username)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
-            
+
             Spacer()
-            
+
             connectionButton
         }
         .padding(.vertical, 8)
-        .task {
-            await checkConnectionStatus()
-        }
     }
     
     @ViewBuilder
@@ -251,7 +276,7 @@ struct UserSearchRowView: View {
                 .foregroundColor(.secondary)
                 .italic()
         } else {
-            switch connectionStatus {
+            switch connectionState {
             case .none:
                 Button {
                     Task {
@@ -261,13 +286,9 @@ struct UserSearchRowView: View {
                     if isProcessing {
                         ProgressView()
                     } else {
-                        Text("Connect")
-                            .font(.caption)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.cauldronOrange)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.cauldronOrange)
                     }
                 }
                 .disabled(isProcessing)
@@ -279,59 +300,164 @@ struct UserSearchRowView: View {
 
             case .connected:
                 Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 36))
                     .foregroundColor(.green)
 
-            case .pendingReceived:
-                Text("Respond")
-                    .font(.caption)
-                    .foregroundColor(.cauldronOrange)
-            }
-        }
-    }
-    
-    private func checkConnectionStatus() async {
-        do {
-            // Fetch connections from CloudKit PUBLIC database
-            let connections = try await dependencies.cloudKitService.fetchConnections(forUserId: currentUserId)
+            case .syncing:
+                // Show connected with a subtle spinner
+                ZStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(.green)
 
-            // Find connection with this user
-            if let connection = connections.first(where: { conn in
-                (conn.fromUserId == currentUserId && conn.toUserId == user.id) ||
-                (conn.fromUserId == user.id && conn.toUserId == currentUserId)
-            }) {
-                if connection.isAccepted {
-                    connectionStatus = .connected
-                } else if connection.fromUserId == currentUserId {
-                    connectionStatus = .pending
-                } else {
-                    connectionStatus = .pendingReceived
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .offset(x: 12, y: -12)
                 }
-            } else {
-                connectionStatus = .none
+
+            case .error(let error):
+                // Show error state with retry button
+                Button {
+                    Task {
+                        await retryFailedOperation()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text("Retry")
+                            .font(.caption)
+                    }
+                }
+
+            case .pendingReceived:
+                HStack(spacing: 8) {
+                    Button {
+                        Task {
+                            await acceptConnectionRequest()
+                        }
+                    } label: {
+                        if isProcessing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .disabled(isProcessing)
+
+                    Button {
+                        Task {
+                            await rejectConnectionRequest()
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.red)
+                    }
+                    .disabled(isProcessing)
+                }
             }
-        } catch {
-            AppLogger.general.error("Failed to check connection status: \(error.localizedDescription)")
         }
     }
     
+    // MARK: - Actions (delegate to ViewModel)
+
     private func sendConnectionRequest() async {
         isProcessing = true
         defer { isProcessing = false }
+        await viewModel.sendConnectionRequest(to: user)
+    }
 
-        do {
-            // Send connection request via CloudKit to PUBLIC database
-            let connection = try await dependencies.cloudKitService.sendConnectionRequest(
-                from: currentUserId,
-                to: user.id
-            )
+    private func acceptConnectionRequest() async {
+        isProcessing = true
+        defer { isProcessing = false }
 
-            // Also save locally for offline access
-            try? await dependencies.connectionRepository.save(connection)
+        AppLogger.general.info("🔍 Attempting to accept connection for user: \(user.username) (ID: \(user.id))")
+        AppLogger.general.info("Current user ID: \(currentUserId)")
 
-            connectionStatus = .pending
-            await onConnectionChanged()
-        } catch {
-            AppLogger.general.error("Failed to send connection request: \(error.localizedDescription)")
+        // Get the managed connection directly from ConnectionManager
+        guard let managedConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) else {
+            AppLogger.general.error("❌ Connection not found in ConnectionManager for user: \(user.username)")
+            AppLogger.general.error("Total connections in manager: \(viewModel.dependencies.connectionManager.connections.count)")
+
+            // Try reloading connections and try again
+            AppLogger.general.info("🔄 Reloading connections from CloudKit...")
+            await viewModel.loadConnections()
+
+            // Try again after reload
+            guard let retryConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) else {
+                AppLogger.general.error("❌ Still not found after reload. Aborting.")
+                return
+            }
+
+            AppLogger.general.info("✅ Found connection after reload!")
+            await processAccept(retryConnection.connection)
+            return
+        }
+
+        await processAccept(managedConnection.connection)
+    }
+
+    private func processAccept(_ connection: Connection) async {
+        // Verify it's a pending request TO us
+        guard connection.fromUserId == user.id &&
+              connection.toUserId == currentUserId &&
+              connection.status == .pending else {
+            AppLogger.general.error("❌ Connection found but not a pending request to us.")
+            AppLogger.general.error("  From: \(connection.fromUserId), To: \(connection.toUserId), Status: \(connection.status.rawValue)")
+            AppLogger.general.error("  Expected - From: \(user.id), To: \(currentUserId), Status: pending")
+            return
+        }
+
+        AppLogger.general.info("✅ Accepting connection request from \(user.username)")
+        await viewModel.acceptConnection(connection)
+    }
+
+    private func rejectConnectionRequest() async {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        AppLogger.general.info("🔍 Attempting to reject connection for user: \(user.username)")
+
+        // Get the managed connection directly from ConnectionManager
+        guard let managedConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) else {
+            AppLogger.general.error("❌ Connection not found in ConnectionManager for user: \(user.username)")
+
+            // Try reloading connections and try again
+            await viewModel.loadConnections()
+
+            guard let retryConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) else {
+                AppLogger.general.error("❌ Still not found after reload. Aborting.")
+                return
+            }
+
+            await processReject(retryConnection.connection)
+            return
+        }
+
+        await processReject(managedConnection.connection)
+    }
+
+    private func processReject(_ connection: Connection) async {
+        // Verify it's a pending request TO us
+        guard connection.fromUserId == user.id &&
+              connection.toUserId == currentUserId &&
+              connection.status == .pending else {
+            AppLogger.general.error("❌ Connection found but not a pending request to us.")
+            AppLogger.general.error("  From: \(connection.fromUserId), To: \(connection.toUserId), Status: \(connection.status.rawValue)")
+            return
+        }
+
+        AppLogger.general.info("✅ Rejecting connection request from \(user.username)")
+        await viewModel.rejectConnection(connection)
+    }
+
+    private func retryFailedOperation() async {
+        // Find the connection ID
+        if let managedConnection = viewModel.dependencies.connectionManager.connectionStatus(with: user.id) {
+            await viewModel.dependencies.connectionManager.retryFailedOperation(connectionId: managedConnection.id)
         }
     }
 }

@@ -93,6 +93,11 @@ struct ConnectionsView: View {
         .refreshable {
             await viewModel.loadConnections()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshConnections"))) { _ in
+            Task {
+                await viewModel.loadConnections()
+            }
+        }
         .alert("Error", isPresented: $viewModel.showErrorAlert) {
             Button("OK") { }
         } message: {
@@ -107,48 +112,64 @@ struct ConnectionRequestRowView: View {
     let connection: Connection
     let onAccept: () async -> Void
     let onReject: () async -> Void
-    
+
     @State private var isProcessing = false
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            UserRowView(user: user)
-            
-            HStack(spacing: 12) {
-                Button {
-                    Task {
-                        isProcessing = true
-                        await onAccept()
-                        isProcessing = false
+        HStack(spacing: 12) {
+            Circle()
+                .fill(Color.cauldronOrange.opacity(0.3))
+                .frame(width: 50, height: 50)
+                .overlay(
+                    Text(user.displayName.prefix(2).uppercased())
+                        .font(.headline)
+                        .foregroundColor(.cauldronOrange)
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(user.displayName)
+                    .font(.headline)
+
+                Text("@\(user.username)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if isProcessing {
+                ProgressView()
+            } else {
+                HStack(spacing: 8) {
+                    Button {
+                        Task {
+                            isProcessing = true
+                            await onAccept()
+                            isProcessing = false
+                        }
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.green)
                     }
-                } label: {
-                    Text("Accept")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.cauldronOrange)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                }
-                .disabled(isProcessing)
-                
-                Button {
-                    Task {
-                        isProcessing = true
-                        await onReject()
-                        isProcessing = false
+                    .disabled(isProcessing)
+
+                    Button {
+                        Task {
+                            isProcessing = true
+                            await onReject()
+                            isProcessing = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.red)
                     }
-                } label: {
-                    Text("Reject")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.gray.opacity(0.2))
-                        .foregroundColor(.primary)
-                        .cornerRadius(8)
+                    .disabled(isProcessing)
                 }
-                .disabled(isProcessing)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 }
 
@@ -160,73 +181,85 @@ class ConnectionsViewModel: ObservableObject {
     @Published var usersMap: [UUID: User] = [:]
     @Published var showErrorAlert = false
     @Published var alertMessage = ""
-    
+
     let dependencies: DependencyContainer
-    
+    private var cancellables = Set<AnyCancellable>()
+
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
     }
-    
+
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+
+        // Subscribe to connection manager updates
+        dependencies.connectionManager.$connections
+            .map { managedConnections in
+                // Filter and categorize connections
+                let all = Array(managedConnections.values)
+                let accepted = all.filter { $0.connection.isAccepted }.map { $0.connection }
+                let received = all.filter {
+                    $0.connection.toUserId == (CurrentUserSession.shared.userId ?? UUID()) &&
+                    $0.connection.status == .pending
+                }.map { $0.connection }
+                let sent = all.filter {
+                    $0.connection.fromUserId == (CurrentUserSession.shared.userId ?? UUID()) &&
+                    $0.connection.status == .pending
+                }.map { $0.connection }
+
+                return (accepted, received, sent)
+            }
+            .sink { [weak self] (accepted, received, sent) in
+                self?.connections = accepted
+                self?.receivedRequests = received
+                self?.sentRequests = sent
+            }
+            .store(in: &cancellables)
     }
     
     func loadConnections() async {
-        do {
-            // Fetch connections from CloudKit PUBLIC database
-            let allConnections = try await dependencies.cloudKitService.fetchConnections(forUserId: currentUserId)
+        // Use ConnectionManager - it handles caching and sync automatically
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
 
-            // Also cache locally for offline access
-            for connection in allConnections {
-                try? await dependencies.connectionRepository.save(connection)
-            }
-
-            connections = allConnections.filter { $0.isAccepted }
-            receivedRequests = allConnections.filter { $0.toUserId == currentUserId && $0.status == .pending }
-            sentRequests = allConnections.filter { $0.fromUserId == currentUserId && $0.status == .pending }
-
-            // Load user details for all connections from CloudKit
-            var userIds = Set<UUID>()
-            for connection in allConnections {
-                userIds.insert(connection.fromUserId)
-                userIds.insert(connection.toUserId)
-            }
-
-            // Fetch users from CloudKit by searching
-            for userId in userIds {
-                // Try to get from local cache first
-                if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
-                    usersMap[userId] = cachedUser
-                }
-                // Note: If user not in cache, they won't show. This is okay because
-                // users should be cached when connection was created
-            }
-
-            AppLogger.general.info("Loaded \(allConnections.count) connections from CloudKit (\(self.receivedRequests.count) pending)")
-        } catch {
-            AppLogger.general.error("Failed to load connections: \(error.localizedDescription)")
-            alertMessage = error.localizedDescription
-            showErrorAlert = true
-        }
+        // Load user details for all connections
+        await loadUserDetails()
     }
-    
+
+    private func loadUserDetails() async {
+        // Get all unique user IDs from connections
+        var userIds = Set<UUID>()
+        for connection in connections + receivedRequests + sentRequests {
+            userIds.insert(connection.fromUserId)
+            userIds.insert(connection.toUserId)
+        }
+
+        // Fetch users - try local cache first, then CloudKit
+        for userId in userIds {
+            // Skip if already loaded
+            guard usersMap[userId] == nil else { continue }
+
+            // Try to get from local cache first
+            if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                usersMap[userId] = cachedUser
+            } else {
+                // If not cached, fetch from CloudKit and cache locally
+                if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
+                    usersMap[userId] = cloudUser
+                    try? await dependencies.sharingRepository.save(cloudUser)
+                    AppLogger.general.info("Fetched and cached user from CloudKit: \(cloudUser.username)")
+                } else {
+                    AppLogger.general.warning("Could not find user \(userId) in cache or CloudKit")
+                }
+            }
+        }
+
+        AppLogger.general.info("Loaded connections via ConnectionManager")
+    }
+
     func acceptRequest(_ connection: Connection) async {
         do {
-            // Accept via CloudKit (updates PUBLIC database)
-            try await dependencies.cloudKitService.acceptConnectionRequest(connection)
-
-            // Also update local cache
-            let accepted = Connection(
-                id: connection.id,
-                fromUserId: connection.fromUserId,
-                toUserId: connection.toUserId,
-                status: .accepted,
-                createdAt: connection.createdAt,
-                updatedAt: Date()
-            )
-            try? await dependencies.connectionRepository.save(accepted)
-
-            await loadConnections()
+            try await dependencies.connectionManager.acceptConnection(connection)
+            AppLogger.general.info("✅ Connection accepted successfully")
         } catch {
             alertMessage = "Failed to accept request: \(error.localizedDescription)"
             showErrorAlert = true
@@ -235,13 +268,8 @@ class ConnectionsViewModel: ObservableObject {
 
     func rejectRequest(_ connection: Connection) async {
         do {
-            // Delete from CloudKit PUBLIC database
-            try await dependencies.cloudKitService.deleteConnection(connection)
-
-            // Also delete from local cache
-            try? await dependencies.connectionRepository.delete(connection)
-
-            await loadConnections()
+            try await dependencies.connectionManager.rejectConnection(connection)
+            AppLogger.general.info("✅ Connection rejected successfully")
         } catch {
             alertMessage = "Failed to reject request: \(error.localizedDescription)"
             showErrorAlert = true

@@ -10,6 +10,7 @@ import CloudKit
 import os
 import UIKit
 import Combine
+import UserNotifications
 
 @main
 struct CauldronApp: App {
@@ -188,41 +189,14 @@ class SharedRecipeHandler: ObservableObject {
     }
 
     func acceptCloudKitShareFromMetadata(_ metadata: CKShare.Metadata) async {
-        do {
-            // Try to fetch dependencies
-            guard let dependencies = try? DependencyContainer.persistent() else {
-                AppLogger.general.error("❌ Failed to get dependencies")
-                showErrorAlert("App initialization error. Please restart the app")
-                return
-            }
-
-            AppLogger.general.info("📥 Accepting shared recipe from metadata...")
-            let recipe = try await dependencies.cloudKitService.acceptSharedRecipe(from: metadata)
-
-            // Check if this recipe already exists locally
-            let existingRecipeId = try? await findExistingRecipe(recipe: recipe, dependencies: dependencies)
-
-            if let existingId = existingRecipeId {
-                AppLogger.general.info("✅ Recipe already exists locally with ID: \(existingId)")
-            }
-
-            recipeToAccept = RecipeToAccept(recipe: recipe, existingRecipeId: existingRecipeId)
-            AppLogger.general.info("✅ Successfully accepted shared recipe: \(recipe.title)")
-        } catch let error as CKError {
-            AppLogger.general.error("☁️ CloudKit error in acceptSharedRecipe: \(error.localizedDescription)")
-
-            switch error.code {
-            case .notAuthenticated:
-                showErrorAlert("Please sign in to iCloud to view shared recipes")
-            case .networkFailure, .networkUnavailable:
-                showErrorAlert("Network error. Please check your connection")
-            default:
-                showErrorAlert("Failed to load recipe: \(error.localizedDescription)")
-            }
-        } catch {
-            AppLogger.general.error("❌ Failed to accept shared recipe from metadata: \(error.localizedDescription)")
-            showErrorAlert("Failed to load shared recipe. Please try again")
-        }
+        // TODO: Implement new visibility-based sharing system
+        // Old CKShare link sharing has been removed in favor of:
+        // - Private recipes (only owner can see)
+        // - Friends-only recipes (friends auto-discover in Shared tab)
+        // - Public recipes (everyone can discover)
+        // Users save references or copies instead of accepting shares
+        AppLogger.general.info("⚠️ Link sharing disabled - migrating to visibility-based sharing")
+        showErrorAlert("Link sharing is being updated. Please ask your friend to set their recipe to 'Friends Only' or 'Public' visibility instead.")
     }
 
     private func findExistingRecipe(recipe: Recipe, dependencies: DependencyContainer) async throws -> UUID? {
@@ -390,7 +364,7 @@ struct SharedRecipeAcceptView: View {
 }
 
 // App Delegate to handle CloudKit share acceptance
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var pendingShareURL: URL?
     static var pendingShareMetadata: CKShare.Metadata?
 
@@ -472,7 +446,118 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             AppLogger.general.info("🔵 Launched with user activity: \(userActivityDictionary)")
         }
 
+        // Set up notification center delegate
+        UNUserNotificationCenter.current().delegate = self
+
+        // Request notification permissions
+        requestNotificationPermissions()
+
+        // Register for remote notifications
+        application.registerForRemoteNotifications()
+
         return true
+    }
+
+    /// Request permission to show notifications
+    private func requestNotificationPermissions() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if let error = error {
+                AppLogger.general.error("Failed to request notification permissions: \(error.localizedDescription)")
+            } else if granted {
+                AppLogger.general.info("✅ Notification permissions granted")
+            } else {
+                AppLogger.general.warning("⚠️ Notification permissions denied")
+            }
+        }
+    }
+
+    // MARK: - Push Notification Handling
+
+    /// Called when device successfully registers for remote notifications
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        AppLogger.general.info("📱 Registered for remote notifications with token: \(tokenString)")
+    }
+
+    /// Called when registration for remote notifications fails
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        AppLogger.general.error("❌ Failed to register for remote notifications: \(error.localizedDescription)")
+    }
+
+    /// Called when a remote notification arrives while app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        AppLogger.general.info("📬 Received notification while app in foreground")
+        handleNotification(notification.request.content.userInfo)
+
+        // Show banner and play sound even when app is in foreground
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    /// Called when user taps on a notification
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        AppLogger.general.info("📬 User tapped notification")
+        handleNotification(response.notification.request.content.userInfo)
+
+        // Post notification to navigate to Connections view
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("NavigateToConnections"),
+                object: nil
+            )
+        }
+
+        completionHandler()
+    }
+
+    /// Called when a silent remote notification arrives
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        AppLogger.general.info("📬 Received remote notification")
+        handleNotification(userInfo)
+        completionHandler(.newData)
+    }
+
+    /// Handle CloudKit notification and sync data
+    private func handleNotification(_ userInfo: [AnyHashable: Any]) {
+        AppLogger.general.info("Processing notification userInfo: \(userInfo)")
+
+        // Check if this is a CloudKit notification
+        guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
+            AppLogger.general.warning("Not a CloudKit notification")
+            return
+        }
+
+        AppLogger.general.info("CloudKit notification type: \(notification.notificationType.rawValue)")
+
+        // Handle query notification (for connection requests)
+        if notification.notificationType == .query {
+            AppLogger.general.info("🔔 Connection request notification received - syncing connections")
+
+            // Post notification to trigger connection refresh
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RefreshConnections"),
+                    object: nil
+                )
+            }
+        }
     }
 
     func application(

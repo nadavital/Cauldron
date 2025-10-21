@@ -6,445 +6,144 @@
 //
 
 import SwiftUI
-import CloudKit
 import os
-import Combine
 
-/// View for sharing a recipe with other users
+/// View explaining the new visibility-based sharing model
 struct ShareRecipeView: View {
     let recipe: Recipe
     let dependencies: DependencyContainer
-    
+
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel: ShareRecipeViewModel
-    
+
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
         self.dependencies = dependencies
-        _viewModel = StateObject(wrappedValue: ShareRecipeViewModel(
-            recipe: recipe,
-            dependencies: dependencies
-        ))
     }
-    
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Share Link Button
-                shareLinkSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Current visibility status
+                    currentVisibilitySection
 
-                Divider()
-                    .padding(.vertical, 8)
-
-                if viewModel.isLoading {
-                    ProgressView("Loading users...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.availableUsers.isEmpty {
-                    emptyState
-                } else {
-                    usersList
+                    // How sharing works explanation
+                    howSharingWorksSection
                 }
+                .padding()
             }
-            .navigationTitle("Share Recipe")
+            .navigationTitle("Sharing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button("Done") {
                         dismiss()
                     }
                 }
             }
-            .task {
-                await viewModel.loadUsers()
-            }
-            .alert("Success", isPresented: $viewModel.showSuccessAlert) {
-                Button("OK") {
-                    dismiss()
-                }
-            } message: {
-                Text(viewModel.alertMessage)
-            }
-            .alert("Error", isPresented: $viewModel.showErrorAlert) {
-                Button("OK") { }
-            } message: {
-                Text(viewModel.alertMessage)
-            }
-            .sheet(item: $viewModel.shareURL) { url in
-                ShareSheet(items: [url.value])
-            }
         }
     }
 
-    private var shareLinkSection: some View {
+    private var currentVisibilitySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Share via Link")
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top)
-
-            Button {
-                Task {
-                    await viewModel.generateShareLink()
-                }
-            } label: {
-                HStack {
-                    Image(systemName: "link.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.cauldronOrange)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Generate iCloud Share Link")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-
-                        Text("Works with anyone who has iCloud")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-
-                    if viewModel.isGeneratingLink {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding()
-                .background(Color.cauldronOrange.opacity(0.1))
-                .cornerRadius(12)
-                .padding(.horizontal)
-            }
-            .disabled(viewModel.isGeneratingLink)
-
-            #if DEBUG
-            if viewModel.generatedURL != nil {
-                VStack(spacing: 12) {
-                    Button {
-                        Task {
-                            await viewModel.testAcceptShare()
-                        }
-                    } label: {
-                        HStack {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Test Accept Share (iCloud URL)")
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-
-                                Text("Tests the iCloud share URL")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-
-                            Spacer()
-                        }
-                        .padding()
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-                    }
-
-                    if viewModel.deepLinkURL != nil {
-                        Button {
-                            Task {
-                                await viewModel.testAcceptCustomDeepLink()
-                            }
-                        } label: {
-                            HStack {
-                                Image(systemName: "link.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.purple)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Test Custom Deep Link")
-                                        .font(.headline)
-                                        .foregroundColor(.primary)
-
-                                    Text("For local development testing")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color.purple.opacity(0.1))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
-                        }
-
-                        Button {
-                            if let deepLink = viewModel.deepLinkURL {
-                                UIPasteboard.general.string = deepLink.absoluteString
-                                AppLogger.general.info("📋 Copied custom deep link to clipboard")
-                            }
-                        } label: {
-                            HStack {
-                                Image(systemName: "doc.on.clipboard.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.green)
-
-                                Text("Copy Deep Link for Messages")
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
-                        }
-                    }
-                }
-            }
-            #endif
-        }
-    }
-    
-    private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "person.2")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-            
-            Text("No Users Found")
-                .font(.title2)
+            Label("Current Visibility", systemImage: recipe.visibility.icon)
+                .font(.title3)
                 .fontWeight(.semibold)
-            
-            Text("Create demo users from the Sharing tab to test recipe sharing")
+
+            HStack {
+                Image(systemName: recipe.visibility.icon)
+                    .font(.title)
+                    .foregroundColor(.cauldronOrange)
+                    .frame(width: 50, height: 50)
+                    .background(Color.cauldronOrange.opacity(0.1))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recipe.visibility.displayName)
+                        .font(.headline)
+                    Text(recipe.visibility.description)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(12)
+
+            Text("Edit visibility in the recipe editor")
+                .font(.caption)
                 .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
-    private var usersList: some View {
-        List {
-            Section {
-                Text("Share '\(recipe.title)' with:")
+
+    private var howSharingWorksSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("How Sharing Works")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            VStack(alignment: .leading, spacing: 16) {
+                sharingOptionRow(
+                    icon: "lock.fill",
+                    title: "Private",
+                    description: "Only you can see this recipe. It syncs to your iCloud for backup."
+                )
+
+                Divider()
+
+                sharingOptionRow(
+                    icon: "person.2.fill",
+                    title: "Friends Only",
+                    description: "Your friends can discover this recipe in their Shared tab. They can save a reference (always synced with your updates) or make their own copy."
+                )
+
+                Divider()
+
+                sharingOptionRow(
+                    icon: "globe",
+                    title: "Public",
+                    description: "Anyone can discover this recipe. Perfect for sharing your favorites with the world!"
+                )
+            }
+            .padding()
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(12)
+
+            // Info box
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.blue)
+                    Text("No Links Needed!")
+                        .font(.headline)
+                }
+
+                Text("With the new sharing system, you don't need to send links. Just set your recipe's visibility, and your friends will automatically see it in their Shared Recipes tab.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
-            
-            Section {
-                ForEach(viewModel.availableUsers) { user in
-                    Button {
-                        Task {
-                            await viewModel.shareRecipe(with: user)
-                        }
-                    } label: {
-                        HStack {
-                            Circle()
-                                .fill(Color.cauldronOrange.opacity(0.3))
-                                .frame(width: 40, height: 40)
-                                .overlay(
-                                    Text(user.displayName.prefix(2).uppercased())
-                                        .font(.subheadline)
-                                        .foregroundColor(.cauldronOrange)
-                                )
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(user.displayName)
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                
-                                Text("@\(user.username)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            if viewModel.sharingInProgress {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .foregroundColor(.cauldronOrange)
-                            }
-                        }
-                    }
-                    .disabled(viewModel.sharingInProgress)
-                }
+            .padding()
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(12)
+        }
+    }
+
+    private func sharingOptionRow(icon: String, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.cauldronOrange)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
         }
     }
-}
-
-// Identifiable wrapper for URL
-struct IdentifiableURL: Identifiable {
-    let id = UUID()
-    let value: URL
-}
-
-@MainActor
-class ShareRecipeViewModel: ObservableObject {
-    @Published var availableUsers: [User] = []
-    @Published var isLoading = false
-    @Published var sharingInProgress = false
-    @Published var isGeneratingLink = false
-    @Published var shareURL: IdentifiableURL?
-    @Published var showSuccessAlert = false
-    @Published var showErrorAlert = false
-    @Published var alertMessage = ""
-    @Published var generatedURL: URL?  // Store the URL for testing
-    @Published var deepLinkURL: URL?  // Custom deep link for testing
-
-    let recipe: Recipe
-    let dependencies: DependencyContainer
-
-    var currentUser: User? {
-        CurrentUserSession.shared.currentUser
-    }
-
-    init(recipe: Recipe, dependencies: DependencyContainer) {
-        self.recipe = recipe
-        self.dependencies = dependencies
-    }
-    
-    func loadUsers() async {
-        isLoading = true
-        defer { isLoading = false }
-        
-        do {
-            availableUsers = try await dependencies.sharingService.getAllUsers()
-            AppLogger.general.info("Loaded \(self.availableUsers.count) users for sharing")
-        } catch {
-            AppLogger.general.error("Failed to load users: \(error.localizedDescription)")
-            alertMessage = "Failed to load users: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-    
-    func shareRecipe(with user: User) async {
-        sharingInProgress = true
-        defer { sharingInProgress = false }
-
-        guard let currentUser = currentUser else {
-            alertMessage = "You must be signed in to share recipes"
-            showErrorAlert = true
-            return
-        }
-
-        do {
-            try await dependencies.sharingService.shareRecipe(
-                recipe,
-                with: user,
-                from: currentUser
-            )
-
-            alertMessage = "Recipe shared with \(user.displayName)!"
-            showSuccessAlert = true
-            AppLogger.general.info("Successfully shared recipe with \(user.username)")
-        } catch {
-            AppLogger.general.error("Failed to share recipe: \(error.localizedDescription)")
-            alertMessage = "Failed to share recipe: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-
-    func generateShareLink() async {
-        isGeneratingLink = true
-        defer { isGeneratingLink = false }
-
-        guard let currentUser = currentUser else {
-            alertMessage = "You must be signed in to share recipes"
-            showErrorAlert = true
-            return
-        }
-
-        // Check iCloud availability first
-        let isAvailable = await dependencies.cloudKitService.isCloudKitAvailable()
-        if !isAvailable {
-            alertMessage = "Please sign in to iCloud in Settings to share recipes"
-            showErrorAlert = true
-            return
-        }
-
-        do {
-            let iCloudURL = try await dependencies.cloudKitService.createShareLink(
-                for: recipe,
-                ownerId: currentUser.id
-            )
-            generatedURL = iCloudURL
-
-            // Generate custom deep link for sharing
-            // Format: cauldron://share?url={encoded_icloud_url}
-            if let encodedURL = iCloudURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-               let customDeepLink = URL(string: "cauldron://share?url=\(encodedURL)") {
-                deepLinkURL = customDeepLink
-                AppLogger.general.info("🔗 Generated custom deep link: \(customDeepLink.absoluteString)")
-
-                // Use deep link for sharing (works from Messages!)
-                shareURL = IdentifiableURL(value: customDeepLink)
-                AppLogger.general.info("✅ Sharing custom deep link: \(customDeepLink.absoluteString)")
-            } else {
-                // Fallback to iCloud URL if deep link generation fails
-                shareURL = IdentifiableURL(value: iCloudURL)
-                AppLogger.general.info("⚠️ Fallback to iCloud URL: \(iCloudURL)")
-            }
-        } catch let error as CKError {
-            AppLogger.general.error("☁️ CloudKit error generating share link: \(error.localizedDescription)")
-
-            switch error.code {
-            case .notAuthenticated:
-                alertMessage = "Please sign in to iCloud in Settings to share recipes"
-            case .networkFailure, .networkUnavailable:
-                alertMessage = "Network error. Please check your internet connection"
-            case .quotaExceeded:
-                alertMessage = "iCloud storage is full. Please free up space in Settings"
-            default:
-                alertMessage = "Failed to generate share link: \(error.localizedDescription)"
-            }
-            showErrorAlert = true
-        } catch {
-            AppLogger.general.error("❌ Failed to generate share link: \(error.localizedDescription)")
-            alertMessage = "Failed to generate share link: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-
-    #if DEBUG
-    func testAcceptShare() async {
-        guard let url = generatedURL else {
-            AppLogger.general.warning("No URL to test with")
-            return
-        }
-
-        AppLogger.general.info("🧪 Testing share acceptance with iCloud URL: \(url)")
-
-        // Manually trigger the URL handling
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: NSNotification.Name("TestOpenURL"),
-                object: url
-            )
-        }
-    }
-
-    func testAcceptCustomDeepLink() async {
-        guard let url = deepLinkURL else {
-            AppLogger.general.warning("No custom deep link to test with")
-            return
-        }
-
-        AppLogger.general.info("🧪 Testing share acceptance with custom deep link: \(url)")
-
-        // Manually trigger the URL handling
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: NSNotification.Name("TestOpenURL"),
-                object: url
-            )
-        }
-    }
-    #endif
 }
 
 #Preview {
@@ -452,7 +151,8 @@ class ShareRecipeViewModel: ObservableObject {
         recipe: Recipe(
             title: "Test Recipe",
             ingredients: [],
-            steps: []
+            steps: [],
+            visibility: .friendsOnly
         ),
         dependencies: .preview()
     )

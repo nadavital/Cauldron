@@ -13,9 +13,12 @@ struct SharedRecipeDetailView: View {
     let dependencies: DependencyContainer
     let onCopy: () async -> Void
     let onRemove: () async -> Void
-    
+
     @State private var isPerformingAction = false
+    @State private var isSavingReference = false
     @State private var showRemoveConfirmation = false
+    @State private var showSuccessAlert = false
+    @State private var successMessage = ""
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -93,7 +96,7 @@ struct SharedRecipeDetailView: View {
                     .foregroundColor(.secondary)
             }
             
-            Text("This is a read-only view. Copy to your recipes to edit.")
+            Text("This is a read-only view. Add to your recipes to save a reference (always synced) or copy to edit independently.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, 4)
@@ -201,6 +204,38 @@ struct SharedRecipeDetailView: View {
     
     private var actionButtons: some View {
         VStack(spacing: 12) {
+            // Add to My Recipes (saves reference - always synced)
+            Button {
+                Task {
+                    await saveRecipeReference()
+                }
+            } label: {
+                HStack {
+                    if isSavingReference {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "bookmark.fill")
+                        Text("Add to My Recipes")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.cauldronOrange)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+            .disabled(isSavingReference || isPerformingAction)
+
+            Text("Always synced with original - you'll see updates automatically")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            Divider()
+                .padding(.vertical, 4)
+
+            // Save a Copy (independent recipe)
             Button {
                 Task {
                     isPerformingAction = true
@@ -211,36 +246,58 @@ struct SharedRecipeDetailView: View {
                 HStack {
                     if isPerformingAction {
                         ProgressView()
-                            .tint(.white)
+                            .tint(Color.cauldronOrange)
                     } else {
                         Image(systemName: "doc.on.doc")
-                        Text("Copy to My Recipes")
+                        Text("Save a Copy")
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.cauldronOrange)
-                .foregroundColor(.white)
+                .background(Color.cauldronOrange.opacity(0.1))
+                .foregroundColor(.cauldronOrange)
                 .cornerRadius(12)
             }
-            .disabled(isPerformingAction)
-            
-            Button {
-                showRemoveConfirmation = true
-            } label: {
-                HStack {
-                    Image(systemName: "trash")
-                    Text("Remove from Shared")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.red.opacity(0.1))
-                .foregroundColor(.red)
-                .cornerRadius(12)
-            }
-            .disabled(isPerformingAction)
+            .disabled(isPerformingAction || isSavingReference)
+
+            Text("Independent copy you can edit - won't reflect updates")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(.top, 8)
+        .alert("Success", isPresented: $showSuccessAlert) {
+            Button("OK") { }
+        } message: {
+            Text(successMessage)
+        }
+    }
+
+    private func saveRecipeReference() async {
+        isSavingReference = true
+        defer { isSavingReference = false }
+
+        do {
+            // Get current user
+            let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
+            guard let currentUser = currentUser else {
+                AppLogger.general.error("Cannot save recipe reference - no current user")
+                return
+            }
+
+            // Create recipe reference
+            let reference = RecipeReference.reference(userId: currentUser.id, recipe: sharedRecipe.recipe)
+
+            // Save to CloudKit PUBLIC database
+            try await dependencies.cloudKitService.saveRecipeReference(reference)
+
+            successMessage = "'\(sharedRecipe.recipe.title)' added to your recipes! You'll see updates automatically."
+            showSuccessAlert = true
+            AppLogger.general.info("Saved recipe reference: \(sharedRecipe.recipe.title)")
+        } catch {
+            AppLogger.general.error("Failed to save recipe reference: \(error.localizedDescription)")
+            // TODO: Show error alert
+        }
     }
 }
 

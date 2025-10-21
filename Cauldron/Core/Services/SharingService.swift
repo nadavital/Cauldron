@@ -22,10 +22,25 @@ actor SharingService {
     }
     
     // MARK: - User Management
-    
-    /// Get all users available for sharing
+
+    /// Get all users available for sharing (fetches from CloudKit and caches locally)
     func getAllUsers() async throws -> [User] {
-        try await sharingRepository.fetchAllUsers()
+        // Fetch from CloudKit PUBLIC database to get latest users
+        do {
+            let cloudUsers = try await cloudKitService.fetchAllUsers()
+
+            // Cache users locally for offline access
+            for user in cloudUsers {
+                try? await sharingRepository.save(user)
+            }
+
+            logger.info("Fetched \(cloudUsers.count) users from CloudKit")
+            return cloudUsers
+        } catch {
+            // If CloudKit fails, fallback to local cache
+            logger.warning("Failed to fetch users from CloudKit, using local cache: \(error.localizedDescription)")
+            return try await sharingRepository.fetchAllUsers()
+        }
     }
     
     /// Search for users by username or display name via CloudKit
@@ -46,46 +61,101 @@ actor SharingService {
     }
     
     // MARK: - Recipe Sharing
-    
+
     /// Share a recipe with another user via CloudKit
-    /// Creates a SharedRecipeReference in PUBLIC database so recipient can access it
+    /// TODO: Implement new PUBLIC database sharing with visibility-based access
     func shareRecipe(_ recipe: Recipe, with user: User, from currentUser: User) async throws {
         logger.info("📤 Sharing recipe '\(recipe.title)' with user: \(user.username)")
 
-        // Share via CloudKit PUBLIC database
-        try await cloudKitService.shareRecipe(recipe, with: user.id, from: currentUser.id)
-        logger.info("✅ Shared via CloudKit PUBLIC database")
+        // TODO: Implement new sharing logic:
+        // 1. Copy recipe to PUBLIC database if visibility != .private
+        // 2. No need for direct sharing - friends see via visibility queries
 
-        // Also cache locally for offline access and backwards compatibility
-        let sharedRecipe = SharedRecipe(
-            recipe: recipe,
-            sharedBy: currentUser,
-            sharedAt: Date()
-        )
-        try await sharingRepository.saveSharedRecipe(sharedRecipe)
-        logger.info("✅ Cached locally for offline access")
-
-        logger.info("🎉 Successfully shared recipe '\(recipe.title)' with \(user.username)")
+        logger.warning("⚠️ Recipe sharing not yet implemented with new architecture")
+        throw NSError(domain: "SharingService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sharing not yet implemented"])
     }
     
-    /// Get all recipes shared with the current user
-    /// Fetches from CloudKit first, then falls back to local cache
+    /// Get all recipes shared with the current user (from PUBLIC database)
+    /// Fetches friends' recipes (visibility = friendsOnly) and public recipes (visibility = public)
     func getSharedRecipes() async throws -> [SharedRecipe] {
-        logger.info("📥 Fetching shared recipes from CloudKit")
+        logger.info("📥 Fetching shared recipes from PUBLIC database")
 
-        // For now, return local cached recipes (CloudKit integration in progress)
-        // TODO: Implement full CloudKit fetching with recipe resolution
-        let localRecipes = try await sharingRepository.fetchAllSharedRecipes()
-        logger.info("✅ Fetched \(localRecipes.count) shared recipes from local cache")
+        // Get current user to know who we are
+        let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
+        guard let currentUser = currentUser else {
+            logger.warning("No current user - cannot fetch shared recipes")
+            return []
+        }
 
-        // Future implementation will:
-        // 1. Get current user ID
-        // 2. Fetch SharedRecipeReferences from CloudKit
-        // 3. Resolve references to full recipes
-        // 4. Merge with local cache
-        // 5. Return combined list
+        // Get connected friends from CloudKit
+        let connections = try await cloudKitService.fetchConnections(forUserId: currentUser.id)
+        let acceptedConnections = connections.filter { $0.isAccepted }
 
-        return localRecipes
+        // Get friend user IDs (both from and to, excluding self)
+        let friendIds = acceptedConnections.flatMap { connection -> [UUID] in
+            var ids: [UUID] = []
+            if connection.fromUserId != currentUser.id {
+                ids.append(connection.fromUserId)
+            }
+            if connection.toUserId != currentUser.id {
+                ids.append(connection.toUserId)
+            }
+            return ids
+        }
+
+        logger.info("Found \(friendIds.count) connected friends")
+
+        var allSharedRecipes: [SharedRecipe] = []
+
+        // Fetch friends-only recipes from friends
+        if !friendIds.isEmpty {
+            let friendsRecipes = try await cloudKitService.querySharedRecipes(
+                ownerIds: friendIds,
+                visibility: .friendsOnly
+            )
+            logger.info("Found \(friendsRecipes.count) friends-only recipes")
+
+            // Convert to SharedRecipe objects
+            for recipe in friendsRecipes {
+                // Fetch owner user info by userId
+                if let ownerId = recipe.ownerId,
+                   let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
+                    let sharedRecipe = SharedRecipe(
+                        id: UUID(),
+                        recipe: recipe,
+                        sharedBy: owner,
+                        sharedAt: recipe.createdAt
+                    )
+                    allSharedRecipes.append(sharedRecipe)
+                }
+            }
+        }
+
+        // Fetch all public recipes
+        let publicRecipes = try await cloudKitService.querySharedRecipes(
+            ownerIds: nil,
+            visibility: .publicRecipe
+        )
+        logger.info("Found \(publicRecipes.count) public recipes")
+
+        // Convert to SharedRecipe objects (excluding own recipes)
+        for recipe in publicRecipes {
+            guard recipe.ownerId != currentUser.id else { continue } // Skip own recipes
+
+            if let ownerId = recipe.ownerId,
+               let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
+                let sharedRecipe = SharedRecipe(
+                    id: UUID(),
+                    recipe: recipe,
+                    sharedBy: owner,
+                    sharedAt: recipe.createdAt
+                )
+                allSharedRecipes.append(sharedRecipe)
+            }
+        }
+
+        logger.info("✅ Found \(allSharedRecipes.count) total shared recipes")
+        return allSharedRecipes
     }
     
     /// Copy a shared recipe to the user's personal collection

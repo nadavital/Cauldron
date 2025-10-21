@@ -15,6 +15,7 @@ import FoundationModels
 class AIRecipeGeneratorViewModel: ObservableObject {
     @Published var prompt: String = ""
     @Published var isGenerating: Bool = false
+    @Published var isSaving: Bool = false
     @Published var partialRecipe: GeneratedRecipe.PartiallyGenerated?
     @Published var generatedRecipe: Recipe?
     @Published var errorMessage: String?
@@ -137,6 +138,9 @@ class AIRecipeGeneratorViewModel: ObservableObject {
             errorMessage = "No recipe to save"
             return false
         }
+
+        // Note: isSaving is set in the button action to prevent race condition
+        // It will be reset there on failure, and on success the view will dismiss
 
         do {
             // Add source note

@@ -64,15 +64,22 @@ struct AIRecipeGeneratorView: View {
                 if viewModel.generatedRecipe != nil {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save", systemImage: "checkmark") {
+                            // Prevent race condition by setting isSaving immediately
+                            guard !viewModel.isSaving else { return }
+                            viewModel.isSaving = true
+
                             Task {
                                 if await viewModel.saveRecipe() {
                                     showingSaveConfirmation = true
                                     // Dismiss after short delay
                                     try? await Task.sleep(nanoseconds: 500_000_000)
                                     dismiss()
+                                } else {
+                                    viewModel.isSaving = false
                                 }
                             }
                         }
+                        .disabled(viewModel.isSaving)
                     }
                 }
             }

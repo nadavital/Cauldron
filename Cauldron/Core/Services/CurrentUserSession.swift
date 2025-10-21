@@ -219,6 +219,8 @@ class CurrentUserSession: ObservableObject {
             // Don't block user flow if subscription fails
         }
 
+        // TODO: Re-enable shared recipe notifications once new architecture is implemented
+        /*
         // Subscribe to shared recipes
         do {
             try await dependencies.cloudKitService.subscribeToSharedRecipes(forUserId: userId)
@@ -227,6 +229,7 @@ class CurrentUserSession: ObservableObject {
             logger.warning("Failed to set up shared recipe notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
         }
+        */
     }
     
     /// Update user profile

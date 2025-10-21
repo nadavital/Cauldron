@@ -12,22 +12,41 @@ import os
 
 @MainActor
 class SharingTabViewModel: ObservableObject {
+    static let shared = SharingTabViewModel()
+
     @Published var sharedRecipes: [SharedRecipe] = []
     @Published var isLoading = false
     @Published var showSuccessAlert = false
     @Published var showErrorAlert = false
     @Published var alertMessage = ""
-    
-    let dependencies: DependencyContainer
-    
-    init(dependencies: DependencyContainer) {
+
+    private(set) var dependencies: DependencyContainer?
+    private var hasLoadedOnce = false
+
+    private init() {
+        // Private init for singleton
+    }
+
+    func configure(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
-    
+
     func loadSharedRecipes() async {
-        isLoading = true
-        defer { isLoading = false }
-        
+        guard let dependencies = dependencies else {
+            AppLogger.general.warning("SharingTabViewModel not configured with dependencies")
+            return
+        }
+
+        // Only show loading indicator on first load
+        // After that, show cached data while refreshing in background
+        if !hasLoadedOnce {
+            isLoading = true
+        }
+        defer {
+            isLoading = false
+            hasLoadedOnce = true
+        }
+
         do {
             sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
             AppLogger.general.info("Loaded \(self.sharedRecipes.count) shared recipes")
@@ -39,6 +58,7 @@ class SharingTabViewModel: ObservableObject {
     }
     
     func copyToPersonalCollection(_ sharedRecipe: SharedRecipe) async {
+        guard let dependencies = dependencies else { return }
         do {
             let copiedRecipe = try await dependencies.sharingService.copySharedRecipeToPersonal(sharedRecipe)
             alertMessage = "'\(copiedRecipe.title)' has been copied to your recipes!"
@@ -52,6 +72,7 @@ class SharingTabViewModel: ObservableObject {
     }
     
     func removeSharedRecipe(_ sharedRecipe: SharedRecipe) async {
+        guard let dependencies = dependencies else { return }
         do {
             try await dependencies.sharingService.removeSharedRecipe(sharedRecipe)
             await loadSharedRecipes() // Refresh the list
@@ -64,6 +85,7 @@ class SharingTabViewModel: ObservableObject {
     }
     
     func createDemoUsers() async {
+        guard let dependencies = dependencies else { return }
         do {
             try await dependencies.sharingService.createDemoUsers()
             alertMessage = "Demo users created successfully!"

@@ -36,6 +36,7 @@ class DependencyContainer: ObservableObject {
 
     // UI Services (MainActor)
     let timerManager: TimerManager
+    lazy var connectionManager: ConnectionManager = ConnectionManager(dependencies: self)
 
     // Parsers
     let htmlParser: HTMLRecipeParser
@@ -90,6 +91,8 @@ class DependencyContainer: ObservableObject {
         // Initialize parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
+
+        // Note: connectionManager is lazy and will be initialized on first access
 
         // Start periodic sync after initialization
         self.recipeSyncService.startPeriodicSync()

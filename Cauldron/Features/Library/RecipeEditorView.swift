@@ -226,9 +226,15 @@ struct RecipeEditorView: View {
                 
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", systemImage: "checkmark") {
+                        // Prevent race condition by setting isSaving immediately
+                        guard !viewModel.isSaving else { return }
+                        viewModel.isSaving = true
+
                         Task {
                             if await viewModel.save() {
                                 dismiss()
+                            } else {
+                                viewModel.isSaving = false
                             }
                         }
                     }

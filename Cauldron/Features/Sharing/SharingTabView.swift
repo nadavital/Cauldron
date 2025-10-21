@@ -10,12 +10,14 @@ import os
 
 /// Main sharing tab view showing shared recipes
 struct SharingTabView: View {
-    @StateObject private var viewModel: SharingTabViewModel
+    @ObservedObject private var viewModel = SharingTabViewModel.shared
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var showingEditProfile = false
-    
+
+    let dependencies: DependencyContainer
+
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: SharingTabViewModel(dependencies: dependencies))
+        self.dependencies = dependencies
     }
     
     var body: some View {
@@ -32,7 +34,7 @@ struct SharingTabView: View {
             .navigationTitle("Shared Recipes")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
+                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
                         Label("Connections", systemImage: "person.2")
                     }
                 }
@@ -62,13 +64,15 @@ struct SharingTabView: View {
                 }
             }
             .task {
+                // Configure dependencies if not already done
+                viewModel.configure(dependencies: dependencies)
                 await viewModel.loadSharedRecipes()
             }
             .refreshable {
                 await viewModel.loadSharedRecipes()
             }
             .sheet(isPresented: $showingEditProfile) {
-                EditProfileView(dependencies: viewModel.dependencies)
+                EditProfileView(dependencies: dependencies)
             }
             .alert("Success", isPresented: $viewModel.showSuccessAlert) {
                 Button("OK") { }
@@ -111,7 +115,7 @@ struct SharingTabView: View {
             ForEach(viewModel.sharedRecipes) { sharedRecipe in
                 NavigationLink(destination: SharedRecipeDetailView(
                     sharedRecipe: sharedRecipe,
-                    dependencies: viewModel.dependencies,
+                    dependencies: dependencies,
                     onCopy: {
                         await viewModel.copyToPersonalCollection(sharedRecipe)
                     },

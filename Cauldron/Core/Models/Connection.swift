@@ -11,6 +11,7 @@ import Foundation
 enum ConnectionStatus: String, Codable, Sendable {
     case pending = "pending"
     case accepted = "accepted"
+    case rejected = "rejected"  // Hidden from both users, allows re-requesting
     case blocked = "blocked"
 }
 
