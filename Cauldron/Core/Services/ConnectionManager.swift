@@ -357,7 +357,10 @@ class ConnectionManager: ObservableObject {
         do {
             let cloudConnections = try await dependencies.cloudKitService.fetchConnections(forUserId: userId)
 
-            // Update local cache
+            // Track cloud connection IDs
+            let cloudConnectionIds = Set(cloudConnections.map { $0.id })
+
+            // Update local cache and state with cloud connections
             for connection in cloudConnections {
                 try? await dependencies.connectionRepository.save(connection)
 
@@ -370,7 +373,28 @@ class ConnectionManager: ObservableObject {
                 }
             }
 
-            logger.info("Synced \(cloudConnections.count) connections from CloudKit")
+            // Remove connections that exist locally but not in CloudKit (they were deleted)
+            let localConnectionIds = Set(connections.keys)
+            let deletedConnectionIds = localConnectionIds.subtracting(cloudConnectionIds)
+
+            for deletedId in deletedConnectionIds {
+                // Skip if it's currently syncing (pending operation)
+                if connections[deletedId]?.syncState == .syncing {
+                    continue
+                }
+
+                logger.info("🗑️ Removing locally cached connection deleted in CloudKit: \(deletedId)")
+
+                // Remove from in-memory state
+                if let connection = connections[deletedId]?.connection {
+                    connections.removeValue(forKey: deletedId)
+
+                    // Remove from local cache
+                    try? await dependencies.connectionRepository.delete(connection)
+                }
+            }
+
+            logger.info("Synced \(cloudConnections.count) connections from CloudKit (removed \(deletedConnectionIds.count) deleted)")
 
             // Update badge count after syncing
             updateBadgeCount()
