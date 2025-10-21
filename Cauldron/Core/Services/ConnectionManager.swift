@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import os
+import UserNotifications
 
 /// Represents the sync state of a connection operation
 enum ConnectionSyncState: Equatable {
@@ -141,14 +142,16 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
-        // Create accepted connection
+        // Create accepted connection (preserve sender info)
         let acceptedConnection = Connection(
             id: connection.id,
             fromUserId: connection.fromUserId,
             toUserId: connection.toUserId,
             status: .accepted,
             createdAt: connection.createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fromUsername: connection.fromUsername,
+            fromDisplayName: connection.fromDisplayName
         )
 
         // Update local state immediately (optimistic)
@@ -162,6 +165,9 @@ class ConnectionManager: ObservableObject {
 
         // Queue CloudKit sync in background
         await queueOperation(.accept(acceptedConnection))
+
+        // Update badge count (one less pending request)
+        updateBadgeCount()
     }
 
     /// Reject a connection request (optimistic delete)
@@ -182,6 +188,9 @@ class ConnectionManager: ObservableObject {
         do {
             try await dependencies.cloudKitService.rejectConnectionRequest(connection)
             logger.info("✅ Connection rejected and deleted successfully")
+
+            // Update badge count (one less pending request)
+            updateBadgeCount()
         } catch {
             logger.error("❌ Failed to reject connection in CloudKit: \(error.localizedDescription)")
             throw error
@@ -208,11 +217,16 @@ class ConnectionManager: ObservableObject {
             }
         }
 
-        // Create pending connection
+        // Get current user's info for the connection request
+        let currentUser = CurrentUserSession.shared.currentUser
+
+        // Create pending connection with sender info
         let connection = Connection(
             fromUserId: currentUserId,
             toUserId: userId,
-            status: .pending
+            status: .pending,
+            fromUsername: currentUser?.username,
+            fromDisplayName: currentUser?.displayName
         )
 
         // Update local state immediately (optimistic)
@@ -357,6 +371,9 @@ class ConnectionManager: ObservableObject {
             }
 
             logger.info("Synced \(cloudConnections.count) connections from CloudKit")
+
+            // Update badge count after syncing
+            updateBadgeCount()
         } catch {
             logger.error("Failed to sync from CloudKit: \(error.localizedDescription)")
         }
@@ -471,6 +488,39 @@ class ConnectionManager: ObservableObject {
         for (id, operation) in pendingOperations {
             if let nextRetry = operation.nextRetryAt, nextRetry <= now {
                 await processOperation(operation)
+            }
+        }
+    }
+
+    // MARK: - Badge Management
+
+    /// Update app icon badge count based on pending connection requests
+    func updateBadgeCount() {
+        let pendingRequestsCount = connections.values.filter { managedConn in
+            managedConn.connection.toUserId == currentUserId &&
+            managedConn.connection.status == .pending
+        }.count
+
+        logger.info("📛 Updating badge count to: \(pendingRequestsCount)")
+
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(pendingRequestsCount)
+            } catch {
+                logger.error("Failed to update badge count: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Clear app icon badge (call when user views connection requests)
+    func clearBadge() {
+        logger.info("📛 Clearing badge")
+
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(0)
+            } catch {
+                logger.error("Failed to clear badge: \(error.localizedDescription)")
             }
         }
     }

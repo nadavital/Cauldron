@@ -108,6 +108,10 @@ struct ConnectionsView: View {
         .refreshable {
             await viewModel.loadConnections()
         }
+        .onAppear {
+            // Clear badge when user views the connections (they've seen the pending requests)
+            viewModel.dependencies.connectionManager.clearBadge()
+        }
         .alert("Error", isPresented: $viewModel.showErrorAlert) {
             Button("OK") { }
         } message: {

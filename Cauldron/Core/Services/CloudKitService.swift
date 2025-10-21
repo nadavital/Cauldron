@@ -909,6 +909,14 @@ actor CloudKitService {
         record["createdAt"] = connection.createdAt as CKRecordValue
         record["updatedAt"] = connection.updatedAt as CKRecordValue
 
+        // Sender info for personalized notifications
+        if let fromUsername = connection.fromUsername {
+            record["fromUsername"] = fromUsername as CKRecordValue
+        }
+        if let fromDisplayName = connection.fromDisplayName {
+            record["fromDisplayName"] = fromDisplayName as CKRecordValue
+        }
+
         // Use modifyRecords with .changedKeys to allow any authenticated user to update
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
@@ -1047,13 +1055,19 @@ actor CloudKitService {
             throw CloudKitError.invalidRecord
         }
 
+        // Optional sender info for notifications
+        let fromUsername = record["fromUsername"] as? String
+        let fromDisplayName = record["fromDisplayName"] as? String
+
         return Connection(
             id: connectionId,
             fromUserId: fromUserId,
             toUserId: toUserId,
             status: status,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            fromUsername: fromUsername,
+            fromDisplayName: fromDisplayName
         )
     }
     
@@ -1085,12 +1099,23 @@ actor CloudKitService {
             options: [.firesOnRecordCreation]
         )
 
-        // Configure notification
+        // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
+
+        // Use CloudKit substitution strings to show sender's name
+        // Format: "DisplayName (@username) wants to connect with you"
+        notification.alertLocalizationKey = "%@ (@%@) wants to connect with you"
+        notification.alertLocalizationArgs = ["fromDisplayName", "fromUsername"]
+
+        // Fallback for older iOS or if fields are missing
         notification.alertBody = "You have a new connection request!"
+
         notification.soundName = "default"
         notification.shouldBadge = true
         notification.shouldSendContentAvailable = true
+
+        // Include connection data in userInfo for navigation
+        notification.desiredKeys = ["connectionId", "fromUserId", "fromUsername", "fromDisplayName"]
 
         subscription.notificationInfo = notification
 
