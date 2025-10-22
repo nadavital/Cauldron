@@ -9,331 +9,236 @@ import SwiftUI
 import os
 import Combine
 
-/// View for managing grocery lists
+/// View for managing the unified grocery list
 struct GroceriesView: View {
     @StateObject private var viewModel: GroceriesViewModel
-    @State private var showingNewList = false
-    @State private var showingMergeView = false
-    
+    @State private var showingAddItem = false
+    @State private var viewMode: GroceryGroupingType = .recipe  // Default to grouped by recipe
+    @State private var collapsedGroups: Set<String> = []  // Track which groups are collapsed
+
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: GroceriesViewModel(dependencies: dependencies))
     }
-    
+
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.lists.isEmpty {
+                if viewModel.items.isEmpty {
                     emptyState
                 } else {
-                    groceryListsList
-                }
-            }
-            .navigationTitle("Grocery Lists")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showingNewList = true
-                        } label: {
-                            Label("New Empty List", systemImage: "plus")
-                        }
-                        
-                        Button {
-                            showingMergeView = true
-                        } label: {
-                            Label("From Recipes", systemImage: "fork.knife")
-                        }
-                    } label: {
-                        Label("New List", systemImage: "plus")
+                    if viewMode == .none {
+                        ungroupedListView
+                    } else {
+                        groupedListView
                     }
                 }
             }
-            .sheet(isPresented: $showingNewList) {
-                NewGroceryListView(viewModel: viewModel)
+            .navigationTitle("Groceries")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Picker("View Mode", selection: $viewMode) {
+                            Label("Grouped by Recipe", systemImage: "list.bullet.rectangle")
+                                .tag(GroceryGroupingType.recipe)
+                            Label("Ungrouped", systemImage: "list.bullet")
+                                .tag(GroceryGroupingType.none)
+                        }
+
+                        if !viewModel.items.isEmpty {
+                            Divider()
+
+                            Button(role: .destructive) {
+                                Task { await viewModel.deleteCheckedItems() }
+                            } label: {
+                                Label("Delete Checked Items", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingAddItem = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
             }
-            .sheet(isPresented: $showingMergeView) {
-                GroceryListMergeView(dependencies: viewModel.dependencies)
+            .sheet(isPresented: $showingAddItem) {
+                AddGroceryItemView(dependencies: viewModel.dependencies, onAdd: {
+                    await viewModel.loadItems()
+                })
             }
             .task {
-                await viewModel.loadLists()
+                await viewModel.loadItems()
+            }
+            .refreshable {
+                await viewModel.loadItems()
             }
         }
     }
-    
+
     private var emptyState: some View {
         VStack(spacing: 20) {
             Image(systemName: "cart")
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
-            
-            Text("No Grocery Lists")
+
+            Text("No Grocery Items")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
-            Text("Create a list to start shopping")
+
+            Text("Add items manually or from recipes")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            
+
             Button {
-                showingNewList = true
+                showingAddItem = true
             } label: {
-                Label("Create First List", systemImage: "plus.circle.fill")
+                Label("Add First Item", systemImage: "plus.circle.fill")
             }
             .buttonStyle(.borderedProminent)
             .tint(.cauldronOrange)
         }
         .padding(40)
     }
-    
-    private var groceryListsList: some View {
+
+    // MARK: - Grouped View (by Recipe)
+
+    private var groupedListView: some View {
         List {
-            ForEach(viewModel.lists, id: \.id) { list in
-                NavigationLink(destination: GroceryListDetailView(listId: list.id, dependencies: viewModel.dependencies)) {
-                    VStack(alignment: .leading) {
-                        Text(list.title)
+            ForEach(viewModel.groups) { group in
+                Section {
+                    if !collapsedGroups.contains(group.id) {
+                        ForEach(group.items) { item in
+                            itemRow(item: item)
+                        }
+                        .onDelete { offsets in
+                            deleteItemsFromGroup(group: group, at: offsets)
+                        }
+                    }
+                } header: {
+                    HStack(spacing: 12) {
+                        // Check/uncheck button on the left
+                        Button {
+                            Task {
+                                await viewModel.toggleRecipe(recipeID: group.id)
+                            }
+                        } label: {
+                            Image(systemName: group.allItemsChecked ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(group.allItemsChecked ? .cauldronOrange : .secondary)
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+
+                        // Recipe name in the middle
+                        Text(group.name)
                             .font(.headline)
-                        Text("\(list.itemCount) items • \(list.createdAt.timeAgo())")
+
+                        Spacer()
+
+                        // Item count
+                        Text("\(group.items.count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        // Collapse/expand button on the right
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                if collapsedGroups.contains(group.id) {
+                                    collapsedGroups.remove(group.id)
+                                } else {
+                                    collapsedGroups.insert(group.id)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: collapsedGroups.contains(group.id) ? "chevron.right" : "chevron.down")
+                                .foregroundColor(.secondary)
+                                .font(.title3)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: - Ungrouped View
+
+    private var ungroupedListView: some View {
+        List {
+            ForEach(viewModel.sortedItems) { item in
+                itemRow(item: item)
+            }
+            .onDelete(perform: deleteItems)
+        }
+    }
+
+    // MARK: - Item Row
+
+    private func itemRow(item: GroceryItemDisplay) -> some View {
+        Button {
+            Task {
+                await viewModel.toggleItem(id: item.id)
+            }
+        } label: {
+            HStack {
+                Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(item.isChecked ? .cauldronOrange : .secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .strikethrough(item.isChecked)
+                    if let quantity = item.quantity {
+                        Text(quantity.displayString)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
-            }
-            .onDelete(perform: deleteLists)
-        }
-    }
-    
-    private func deleteLists(at offsets: IndexSet) {
-        Task {
-            for index in offsets {
-                let list = viewModel.lists[index]
-                await viewModel.deleteList(list.id)
-            }
-        }
-    }
-}
 
-struct NewGroceryListView: View {
-    @ObservedObject var viewModel: GroceriesViewModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var title = ""
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField("List name", text: $title)
-            }
-            .navigationTitle("New Grocery List")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") { dismiss() }
-                }
-                
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create", systemImage: "checkmark") {
-                        Task {
-                            await viewModel.createList(title: title)
-                            dismiss()
-                        }
-                    }
-                    .disabled(title.isEmpty)
-                }
+                Spacer()
             }
         }
+        .buttonStyle(.plain)
     }
-}
 
-struct GroceryListDetailView: View {
-    let listId: UUID
-    let dependencies: DependencyContainer
-    
-    @State private var items: [(id: UUID, name: String, quantity: Quantity?, isChecked: Bool)] = []
-    @State private var showingAddItem = false
-    @State private var autoSort = true
-    @State private var showingAddToPantryConfirmation = false
-    @State private var showingShareSheet = false
-    @State private var shareText = ""
-    
-    var checkedItems: [(id: UUID, name: String, quantity: Quantity?, isChecked: Bool)] {
-        items.filter { $0.isChecked }
-    }
-    
-    var sortedItems: [(id: UUID, name: String, quantity: Quantity?, isChecked: Bool)] {
-        if autoSort {
-            return items.sorted { !$0.isChecked && $1.isChecked }
-        } else {
-            return items
-        }
-    }
-    
-    var body: some View {
-        List {
-            ForEach(sortedItems, id: \.id) { item in
-                Button {
-                    Task {
-                        try? await dependencies.groceryRepository.toggleItem(id: item.id)
-                        await loadItems()
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(item.isChecked ? .cauldronOrange : .secondary)
-                        
-                        VStack(alignment: .leading) {
-                            Text(item.name)
-                                .strikethrough(item.isChecked)
-                            if let quantity = item.quantity {
-                                Text(quantity.displayString)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .onDelete(perform: deleteItems)
-        }
-        .navigationTitle("Grocery List")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingAddItem = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-            }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        autoSort.toggle()
-                    } label: {
-                        Label(autoSort ? "Auto-sort: On" : "Auto-sort: Off", 
-                              systemImage: autoSort ? "arrow.up.arrow.down.circle.fill" : "arrow.up.arrow.down.circle")
-                    }
-                    
-                    Divider()
-                    
-                    Button {
-                        selectAll()
-                    } label: {
-                        Label("Check All", systemImage: "checkmark.circle")
-                    }
-                    
-                    Button {
-                        uncheckAll()
-                    } label: {
-                        Label("Uncheck All", systemImage: "circle")
-                    }
-                    
-                    Divider()
-                    
-                    if !checkedItems.isEmpty {
-                        Button {
-                            showingAddToPantryConfirmation = true
-                        } label: {
-                            Label("Add Checked to Pantry", systemImage: "archivebox")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        .sheet(isPresented: $showingAddItem) {
-            AddGroceryItemView(listId: listId, dependencies: dependencies, onAdd: {
-                await loadItems()
-            })
-        }
-        .sheet(isPresented: $showingShareSheet) {
-            ShareSheet(items: [shareText])
-        }
-        .confirmationDialog("Add to Pantry", isPresented: $showingAddToPantryConfirmation) {
-            Button("Add \(checkedItems.count) items to Pantry") {
-                Task {
-                    await addCheckedItemsToPantry()
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will add all checked items to your pantry and remove them from this list.")
-        }
-        .task {
-            await loadItems()
-        }
-    }
-    
-    private func loadItems() async {
-        do {
-            items = try await dependencies.groceryRepository.fetchItems(listId: listId)
-        } catch {
-            AppLogger.persistence.error("Failed to load grocery items: \(error.localizedDescription)")
-        }
-    }
-    
+    // MARK: - Delete Operations
+
     private func deleteItems(at offsets: IndexSet) {
         Task {
             for index in offsets {
-                let item = items[index]
-                try? await dependencies.groceryRepository.deleteItem(id: item.id)
+                let item = viewModel.sortedItems[index]
+                await viewModel.deleteItem(id: item.id)
             }
-            await loadItems()
         }
     }
-    
-    private func exportAndShare() {
-        let groceryItems = items.map { item in
-            GroceryItem(name: item.name, quantity: item.quantity)
-        }
-        shareText = dependencies.groceryService.exportToText(groceryItems)
-        showingShareSheet = true
-    }
-    
-    private func selectAll() {
+
+    private func deleteItemsFromGroup(group: GroceryGroup, at offsets: IndexSet) {
         Task {
-            for item in items where !item.isChecked {
-                try? await dependencies.groceryRepository.toggleItem(id: item.id)
-            }
-            await loadItems()
-        }
-    }
-    
-    private func uncheckAll() {
-        Task {
-            for item in items where item.isChecked {
-                try? await dependencies.groceryRepository.toggleItem(id: item.id)
-            }
-            await loadItems()
-        }
-    }
-    
-    private func addCheckedItemsToPantry() async {
-        for item in checkedItems {
-            // Add to pantry
-            do {
-                try await dependencies.pantryRepository.add(name: item.name, quantity: item.quantity)
-                // Remove from grocery list
-                try await dependencies.groceryRepository.deleteItem(id: item.id)
-            } catch {
-                AppLogger.persistence.error("Failed to add item to pantry: \(error.localizedDescription)")
+            for index in offsets {
+                let item = group.items[index]
+                await viewModel.deleteItem(id: item.id)
             }
         }
-        await loadItems()
     }
 }
 
+// MARK: - Add Item View
+
 struct AddGroceryItemView: View {
-    let listId: UUID
     let dependencies: DependencyContainer
     let onAdd: () async -> Void
-    
+
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var hasQuantity = false
     @State private var quantityValue: Double = 1.0
     @State private var selectedUnit: UnitKind = .cup
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -341,11 +246,11 @@ struct AddGroceryItemView: View {
                     TextField("Item name", text: $name)
                         .textInputAutocapitalization(.words)
                 }
-                
+
                 Section {
                     Toggle("Add Quantity", isOn: $hasQuantity)
                 }
-                
+
                 if hasQuantity {
                     Section("Quantity") {
                         HStack {
@@ -356,7 +261,7 @@ struct AddGroceryItemView: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 100)
                         }
-                        
+
                         Picker("Unit", selection: $selectedUnit) {
                             ForEach(UnitKind.allCases, id: \.self) { unit in
                                 Text(unit.displayName).tag(unit)
@@ -371,16 +276,19 @@ struct AddGroceryItemView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark") { dismiss() }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", systemImage: "checkmark") {
                         Task {
                             let quantity = hasQuantity ? Quantity(value: quantityValue, unit: selectedUnit) : nil
-                            try? await dependencies.groceryRepository.addItem(
-                                listId: listId,
-                                name: name,
-                                quantity: quantity
-                            )
+                            let listId = try? await dependencies.groceryRepository.getOrCreateDefaultList()
+                            if let listId = listId {
+                                try? await dependencies.groceryRepository.addItem(
+                                    listId: listId,
+                                    name: name,
+                                    quantity: quantity
+                                )
+                            }
                             await onAdd()
                             dismiss()
                         }
@@ -392,39 +300,107 @@ struct AddGroceryItemView: View {
     }
 }
 
+// MARK: - View Model
+
 @MainActor
 class GroceriesViewModel: ObservableObject {
-    @Published var lists: [(id: UUID, title: String, createdAt: Date, itemCount: Int)] = []
+    @Published var items: [GroceryItemDisplay] = []
+    @Published var groups: [GroceryGroup] = []
+    @Published var sortedItems: [GroceryItemDisplay] = []
+
     let dependencies: DependencyContainer
-    
+
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
-    
-    func loadLists() async {
+
+    func loadItems() async {
         do {
-            lists = try await dependencies.groceryRepository.fetchAllLists()
+            items = try await dependencies.groceryRepository.fetchAllItemsForDisplay()
+            updateGroups()
+            updateSortedItems()
         } catch {
-            AppLogger.persistence.error("Failed to load grocery lists: \(error.localizedDescription)")
+            AppLogger.persistence.error("Failed to load grocery items: \(error.localizedDescription)")
         }
     }
-    
-    func createList(title: String) async {
+
+    private func updateGroups() {
+        groups = items.groupByRecipe()
+    }
+
+    private func updateSortedItems() {
+        sortedItems = items.sortForUngroupedView()
+    }
+
+    func toggleItem(id: UUID) async {
         do {
-            _ = try await dependencies.groceryRepository.createList(title: title)
-            await loadLists()
+            try await dependencies.groceryRepository.toggleItem(id: id)
+            await loadItems()
         } catch {
-            AppLogger.persistence.error("Failed to create grocery list: \(error.localizedDescription)")
+            AppLogger.persistence.error("Failed to toggle item: \(error.localizedDescription)")
         }
     }
-    
-    func deleteList(_ id: UUID) async {
+
+    func toggleRecipe(recipeID: String) async {
+        // Find if all items in recipe are currently checked
+        let recipeItems = items.filter { $0.recipeID == recipeID || (recipeID == "other" && $0.recipeID == nil) }
+        let allChecked = !recipeItems.isEmpty && recipeItems.allSatisfy { $0.isChecked }
+
         do {
-            try await dependencies.groceryRepository.deleteList(id: id)
-            await loadLists()
+            if recipeID == "other" {
+                // For "Other Items", toggle each individual item
+                for item in recipeItems {
+                    if item.isChecked != !allChecked {
+                        try await dependencies.groceryRepository.toggleItem(id: item.id)
+                    }
+                }
+            } else {
+                // For recipe items, use the bulk operation
+                try await dependencies.groceryRepository.setRecipeChecked(recipeID: recipeID, isChecked: !allChecked)
+            }
+            await loadItems()
         } catch {
-            AppLogger.persistence.error("Failed to delete grocery list: \(error.localizedDescription)")
+            AppLogger.persistence.error("Failed to toggle recipe: \(error.localizedDescription)")
         }
+    }
+
+    func checkAll() async {
+        do {
+            try await dependencies.groceryRepository.setAllItemsChecked(isChecked: true)
+            await loadItems()
+        } catch {
+            AppLogger.persistence.error("Failed to check all items: \(error.localizedDescription)")
+        }
+    }
+
+    func uncheckAll() async {
+        do {
+            try await dependencies.groceryRepository.setAllItemsChecked(isChecked: false)
+            await loadItems()
+        } catch {
+            AppLogger.persistence.error("Failed to uncheck all items: \(error.localizedDescription)")
+        }
+    }
+
+    func deleteItem(id: UUID) async {
+        do {
+            try await dependencies.groceryRepository.deleteItem(id: id)
+            await loadItems()
+        } catch {
+            AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
+        }
+    }
+
+    func deleteCheckedItems() async {
+        let checkedItemIds = items.filter { $0.isChecked }.map { $0.id }
+        for id in checkedItemIds {
+            do {
+                try await dependencies.groceryRepository.deleteItem(id: id)
+            } catch {
+                AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
+            }
+        }
+        await loadItems()
     }
 }
 

@@ -17,14 +17,29 @@ final class ConnectionModel {
     var status: String = ""  // ConnectionStatus rawValue
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
-    
-    init(id: UUID, fromUserId: UUID, toUserId: UUID, status: String, createdAt: Date, updatedAt: Date) {
+
+    // Cached sender info for notifications
+    var fromUsername: String?
+    var fromDisplayName: String?
+
+    init(
+        id: UUID,
+        fromUserId: UUID,
+        toUserId: UUID,
+        status: String,
+        createdAt: Date,
+        updatedAt: Date,
+        fromUsername: String? = nil,
+        fromDisplayName: String? = nil
+    ) {
         self.id = id
         self.fromUserId = fromUserId
         self.toUserId = toUserId
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.fromUsername = fromUsername
+        self.fromDisplayName = fromDisplayName
     }
     
     /// Convert to domain model
@@ -32,14 +47,16 @@ final class ConnectionModel {
         guard let connectionStatus = ConnectionStatus(rawValue: status) else {
             return nil
         }
-        
+
         return Connection(
             id: id,
             fromUserId: fromUserId,
             toUserId: toUserId,
             status: connectionStatus,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            fromUsername: fromUsername,
+            fromDisplayName: fromDisplayName
         )
     }
     
@@ -51,7 +68,9 @@ final class ConnectionModel {
             toUserId: connection.toUserId,
             status: connection.status.rawValue,
             createdAt: connection.createdAt,
-            updatedAt: connection.updatedAt
+            updatedAt: connection.updatedAt,
+            fromUsername: connection.fromUsername,
+            fromDisplayName: connection.fromDisplayName
         )
     }
 }

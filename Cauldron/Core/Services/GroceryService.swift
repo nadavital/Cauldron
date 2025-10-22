@@ -9,36 +9,23 @@ import Foundation
 
 /// Service for grocery list generation and management
 actor GroceryService {
-    private let pantryRepo: PantryRepository
     private let unitsService: UnitsService
-    
-    init(pantryRepo: PantryRepository, unitsService: UnitsService) {
-        self.pantryRepo = pantryRepo
+
+    init(unitsService: UnitsService) {
         self.unitsService = unitsService
     }
-    
-    /// Generate grocery list from recipe, excluding pantry items
+
+    /// Generate grocery list from recipe
     func generateGroceryList(from recipe: Recipe) async throws -> [GroceryItem] {
-        let pantryItems = try await pantryRepo.fetchAll()
-        let pantryNames = Set(pantryItems.map { $0.name.lowercased() })
-        
         var groceryItems: [GroceryItem] = []
-        
+
         for ingredient in recipe.ingredients {
-            // Check if we have it in pantry
-            let normalizedName = ingredient.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            let inPantry = pantryNames.contains { pantryName in
-                normalizedName.contains(pantryName) || pantryName.contains(normalizedName)
-            }
-            
-            if !inPantry {
-                groceryItems.append(GroceryItem(
-                    name: ingredient.name,
-                    quantity: ingredient.quantity
-                ))
-            }
+            groceryItems.append(GroceryItem(
+                name: ingredient.name,
+                quantity: ingredient.quantity
+            ))
         }
-        
+
         return groceryItems
     }
     

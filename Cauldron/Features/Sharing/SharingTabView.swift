@@ -8,20 +8,26 @@
 import SwiftUI
 import os
 
+/// Navigation destinations for SharingTab
+enum SharingTabDestination: Hashable {
+    case connections
+}
+
 /// Main sharing tab view showing shared recipes
 struct SharingTabView: View {
     @ObservedObject private var viewModel = SharingTabViewModel.shared
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var showingEditProfile = false
+    @State private var navigationPath = NavigationPath()
 
     let dependencies: DependencyContainer
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
-    
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Group {
                 if viewModel.isLoading {
                     ProgressView("Loading shared recipes...")
@@ -83,6 +89,17 @@ struct SharingTabView: View {
                 Button("OK") { }
             } message: {
                 Text(viewModel.alertMessage)
+            }
+            .navigationDestination(for: SharingTabDestination.self) { destination in
+                switch destination {
+                case .connections:
+                    ConnectionsView(dependencies: dependencies)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
+                // Navigate to connections when notification is tapped
+                AppLogger.general.info("📍 Navigating to Connections from notification")
+                navigationPath.append(SharingTabDestination.connections)
             }
         }
     }

@@ -243,6 +243,8 @@ actor RecipeRepository {
         model.sourceTitle = recipe.sourceTitle
         model.notes = recipe.notes
         model.imageURL = recipe.imageURL?.absoluteString
+        model.isFavorite = recipe.isFavorite
+        model.visibility = recipe.visibility.rawValue
         model.cloudRecordName = recipe.cloudRecordName  // Preserve CloudKit metadata
         model.ownerId = recipe.ownerId  // Preserve owner ID
         model.updatedAt = Date()

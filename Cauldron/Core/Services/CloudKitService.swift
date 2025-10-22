@@ -856,19 +856,7 @@ actor CloudKitService {
     }
 
     // MARK: - Connections
-    
-    /// Send a connection request
-    func sendConnectionRequest(from fromUserId: UUID, to toUserId: UUID) async throws -> Connection {
-        let connection = Connection(
-            fromUserId: fromUserId,
-            toUserId: toUserId,
-            status: .pending
-        )
 
-        try await saveConnection(connection)
-        return connection
-    }
-    
     /// Accept a connection request
     func acceptConnectionRequest(_ connection: Connection) async throws {
         logger.info("🔄 Accepting connection request: \(connection.id) from \(connection.fromUserId) to \(connection.toUserId)")
@@ -886,25 +874,19 @@ actor CloudKitService {
         logger.info("✅ Connection accepted and saved: \(connection.id) - new status: \(accepted.status.rawValue)")
     }
 
-    /// Reject a connection request by updating its status to rejected
+    /// Reject a connection request by deleting it
     /// This makes it invisible to both users and allows the sender to try again
     func rejectConnectionRequest(_ connection: Connection) async throws {
-        let rejected = Connection(
-            id: connection.id,
-            fromUserId: connection.fromUserId,
-            toUserId: connection.toUserId,
-            status: .rejected,
-            createdAt: connection.createdAt,
-            updatedAt: Date()
-        )
+        logger.info("🔄 Rejecting connection request: \(connection.id) from \(connection.fromUserId) to \(connection.toUserId)")
 
-        try await saveConnection(rejected)
-        logger.info("Rejected connection request: \(connection.id)")
+        // Delete the connection entirely - cleaner than marking as rejected
+        try await deleteConnection(connection)
+        logger.info("✅ Connection request rejected and deleted: \(connection.id)")
     }
 
     /// Save connection to CloudKit PUBLIC database
     /// Uses CKModifyRecordsOperation with .changedKeys save policy to allow updates by any user
-    private func saveConnection(_ connection: Connection) async throws {
+    func saveConnection(_ connection: Connection) async throws {
         let recordID = CKRecord.ID(recordName: connection.id.uuidString)
         let db = try getPublicDatabase()
 
@@ -926,6 +908,14 @@ actor CloudKitService {
         record["status"] = connection.status.rawValue as CKRecordValue
         record["createdAt"] = connection.createdAt as CKRecordValue
         record["updatedAt"] = connection.updatedAt as CKRecordValue
+
+        // Sender info for personalized notifications
+        if let fromUsername = connection.fromUsername {
+            record["fromUsername"] = fromUsername as CKRecordValue
+        }
+        if let fromDisplayName = connection.fromDisplayName {
+            record["fromDisplayName"] = fromDisplayName as CKRecordValue
+        }
 
         // Use modifyRecords with .changedKeys to allow any authenticated user to update
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -985,7 +975,61 @@ actor CloudKitService {
 
         logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
         logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted, \(connections.filter { $0.status == .rejected }.count) rejected")
-        return connections
+
+        // Clean up duplicates - remove duplicate connections between same two users
+        let cleanedConnections = try await removeDuplicateConnections(connections)
+
+        // Filter out rejected connections - they should be invisible to users
+        let filteredConnections = cleanedConnections.filter { $0.status != .rejected }
+        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected/duplicates)")
+        return filteredConnections
+    }
+
+    /// Remove duplicate connections between the same two users
+    /// Keeps the most recent one (by updatedAt), deletes older duplicates
+    private func removeDuplicateConnections(_ connections: [Connection]) async throws -> [Connection] {
+        // Group connections by user pair (regardless of direction)
+        var connectionsByPair: [Set<UUID>: [Connection]] = [:]
+
+        for connection in connections {
+            let userPair = Set([connection.fromUserId, connection.toUserId])
+            connectionsByPair[userPair, default: []].append(connection)
+        }
+
+        var connectionsToKeep: [Connection] = []
+        let db = try getPublicDatabase()
+
+        // For each user pair, keep only the most recent connection
+        for (userPair, pairConnections) in connectionsByPair {
+            if pairConnections.count > 1 {
+                // Sort by updatedAt descending (newest first)
+                let sorted = pairConnections.sorted { $0.updatedAt > $1.updatedAt }
+                let toKeep = sorted.first!
+                let toDelete = Array(sorted.dropFirst())
+
+                logger.warning("🧹 Found \(pairConnections.count) duplicate connections for users \(Array(userPair))")
+                logger.info("  Keeping: \(toKeep.id) (status: \(toKeep.status.rawValue), updated: \(toKeep.updatedAt))")
+
+                // Delete the older duplicates from CloudKit
+                for duplicate in toDelete {
+                    logger.info("  Deleting duplicate: \(duplicate.id) (status: \(duplicate.status.rawValue), updated: \(duplicate.updatedAt))")
+                    do {
+                        let recordID = CKRecord.ID(recordName: duplicate.id.uuidString)
+                        try await db.deleteRecord(withID: recordID)
+                        logger.info("  ✅ Deleted duplicate connection: \(duplicate.id)")
+                    } catch {
+                        logger.error("  ❌ Failed to delete duplicate: \(error.localizedDescription)")
+                    }
+                }
+
+                connectionsToKeep.append(toKeep)
+            } else {
+                // No duplicates for this pair
+                connectionsToKeep.append(pairConnections[0])
+            }
+        }
+
+        return connectionsToKeep
     }
     
     /// Delete a connection from CloudKit PUBLIC database
@@ -1011,13 +1055,19 @@ actor CloudKitService {
             throw CloudKitError.invalidRecord
         }
 
+        // Optional sender info for notifications
+        let fromUsername = record["fromUsername"] as? String
+        let fromDisplayName = record["fromDisplayName"] as? String
+
         return Connection(
             id: connectionId,
             fromUserId: fromUserId,
             toUserId: toUserId,
             status: status,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            fromUsername: fromUsername,
+            fromDisplayName: fromDisplayName
         )
     }
     
@@ -1049,12 +1099,23 @@ actor CloudKitService {
             options: [.firesOnRecordCreation]
         )
 
-        // Configure notification
+        // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
+
+        // Use CloudKit substitution strings to show sender's name
+        // Format: "DisplayName (@username) wants to connect with you"
+        notification.alertLocalizationKey = "%@ (@%@) wants to connect with you"
+        notification.alertLocalizationArgs = ["fromDisplayName", "fromUsername"]
+
+        // Fallback for older iOS or if fields are missing
         notification.alertBody = "You have a new connection request!"
+
         notification.soundName = "default"
         notification.shouldBadge = true
         notification.shouldSendContentAvailable = true
+
+        // Include connection data in userInfo for navigation
+        notification.desiredKeys = ["connectionId", "fromUserId", "fromUsername", "fromDisplayName"]
 
         subscription.notificationInfo = notification
 

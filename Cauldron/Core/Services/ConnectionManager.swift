@@ -9,6 +9,7 @@
 import Foundation
 import Combine
 import os
+import UserNotifications
 
 /// Represents the sync state of a connection operation
 enum ConnectionSyncState: Equatable {
@@ -68,7 +69,6 @@ enum ConnectionError: LocalizedError {
 /// Operation types for the sync queue
 private enum OperationType {
     case accept(Connection)
-    case reject(Connection)
     case create(Connection)
 }
 
@@ -81,7 +81,7 @@ private struct PendingOperation {
 
     var connection: Connection {
         switch type {
-        case .accept(let conn), .reject(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn):
             return conn
         }
     }
@@ -142,14 +142,16 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
-        // Create accepted connection
+        // Create accepted connection (preserve sender info)
         let acceptedConnection = Connection(
             id: connection.id,
             fromUserId: connection.fromUserId,
             toUserId: connection.toUserId,
             status: .accepted,
             createdAt: connection.createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fromUsername: connection.fromUsername,
+            fromDisplayName: connection.fromDisplayName
         )
 
         // Update local state immediately (optimistic)
@@ -163,9 +165,12 @@ class ConnectionManager: ObservableObject {
 
         // Queue CloudKit sync in background
         await queueOperation(.accept(acceptedConnection))
+
+        // Update badge count (one less pending request)
+        updateBadgeCount()
     }
 
-    /// Reject a connection request (optimistic update)
+    /// Reject a connection request (optimistic delete)
     func rejectConnection(_ connection: Connection) async throws {
         logger.info("❌ Rejecting connection: \(connection.id)")
 
@@ -173,27 +178,23 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
-        // Create rejected connection
-        let rejectedConnection = Connection(
-            id: connection.id,
-            fromUserId: connection.fromUserId,
-            toUserId: connection.toUserId,
-            status: .rejected,
-            createdAt: connection.createdAt,
-            updatedAt: Date()
-        )
+        // Remove from local state immediately (optimistic) - rejection = deletion
+        connections.removeValue(forKey: connection.id)
 
-        // Update local state immediately (optimistic)
-        connections[connection.id] = ManagedConnection(
-            connection: rejectedConnection,
-            syncState: .syncing
-        )
+        // Delete from local cache immediately
+        try? await dependencies.connectionRepository.delete(connection)
 
-        // Save to local cache immediately
-        try? await dependencies.connectionRepository.save(rejectedConnection)
+        // Delete from CloudKit (rejection = deletion for cleaner UX)
+        do {
+            try await dependencies.cloudKitService.rejectConnectionRequest(connection)
+            logger.info("✅ Connection rejected and deleted successfully")
 
-        // Queue CloudKit sync in background
-        await queueOperation(.reject(rejectedConnection))
+            // Update badge count (one less pending request)
+            updateBadgeCount()
+        } catch {
+            logger.error("❌ Failed to reject connection in CloudKit: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     /// Send a connection request (optimistic update)
@@ -216,11 +217,16 @@ class ConnectionManager: ObservableObject {
             }
         }
 
-        // Create pending connection
+        // Get current user's info for the connection request
+        let currentUser = CurrentUserSession.shared.currentUser
+
+        // Create pending connection with sender info
         let connection = Connection(
             fromUserId: currentUserId,
             toUserId: userId,
-            status: .pending
+            status: .pending,
+            fromUsername: currentUser?.username,
+            fromDisplayName: currentUser?.displayName
         )
 
         // Update local state immediately (optimistic)
@@ -293,6 +299,31 @@ class ConnectionManager: ObservableObject {
         return filtered.sorted { $0.connection.createdAt > $1.connection.createdAt }
     }
 
+    /// Delete a connection (removes friend/unfriends)
+    func deleteConnection(_ connection: Connection) async throws {
+        logger.info("🗑️ Deleting connection: \(connection.id) between \(connection.fromUserId) and \(connection.toUserId)")
+
+        // Remove from local state immediately (optimistic)
+        connections.removeValue(forKey: connection.id)
+
+        // Delete from local cache
+        do {
+            try await dependencies.connectionRepository.delete(connection)
+            logger.info("Deleted connection from local cache")
+        } catch {
+            logger.warning("Failed to delete from cache: \(error.localizedDescription)")
+        }
+
+        // Delete from CloudKit
+        do {
+            try await dependencies.cloudKitService.deleteConnection(connection)
+            logger.info("✅ Connection deleted successfully from CloudKit")
+        } catch {
+            logger.error("❌ Failed to delete connection from CloudKit: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     // MARK: - Private Methods
 
     /// Load connections from local cache
@@ -326,7 +357,10 @@ class ConnectionManager: ObservableObject {
         do {
             let cloudConnections = try await dependencies.cloudKitService.fetchConnections(forUserId: userId)
 
-            // Update local cache
+            // Track cloud connection IDs
+            let cloudConnectionIds = Set(cloudConnections.map { $0.id })
+
+            // Update local cache and state with cloud connections
             for connection in cloudConnections {
                 try? await dependencies.connectionRepository.save(connection)
 
@@ -339,7 +373,31 @@ class ConnectionManager: ObservableObject {
                 }
             }
 
-            logger.info("Synced \(cloudConnections.count) connections from CloudKit")
+            // Remove connections that exist locally but not in CloudKit (they were deleted)
+            let localConnectionIds = Set(connections.keys)
+            let deletedConnectionIds = localConnectionIds.subtracting(cloudConnectionIds)
+
+            for deletedId in deletedConnectionIds {
+                // Skip if it's currently syncing (pending operation)
+                if connections[deletedId]?.syncState == .syncing {
+                    continue
+                }
+
+                logger.info("🗑️ Removing locally cached connection deleted in CloudKit: \(deletedId)")
+
+                // Remove from in-memory state
+                if let connection = connections[deletedId]?.connection {
+                    connections.removeValue(forKey: deletedId)
+
+                    // Remove from local cache
+                    try? await dependencies.connectionRepository.delete(connection)
+                }
+            }
+
+            logger.info("Synced \(cloudConnections.count) connections from CloudKit (removed \(deletedConnectionIds.count) deleted)")
+
+            // Update badge count after syncing
+            updateBadgeCount()
         } catch {
             logger.error("Failed to sync from CloudKit: \(error.localizedDescription)")
         }
@@ -350,7 +408,7 @@ class ConnectionManager: ObservableObject {
         let operation: PendingOperation
 
         switch type {
-        case .accept(let conn), .reject(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn):
             operation = PendingOperation(
                 id: conn.id,
                 type: type,
@@ -384,14 +442,8 @@ class ConnectionManager: ObservableObject {
             case .accept(let connection):
                 try await dependencies.cloudKitService.acceptConnectionRequest(connection)
 
-            case .reject(let connection):
-                try await dependencies.cloudKitService.rejectConnectionRequest(connection)
-
             case .create(let connection):
-                _ = try await dependencies.cloudKitService.sendConnectionRequest(
-                    from: connection.fromUserId,
-                    to: connection.toUserId
-                )
+                try await dependencies.cloudKitService.saveConnection(connection)
             }
 
             // Success! Remove from queue and mark as synced
@@ -407,9 +459,6 @@ class ConnectionManager: ObservableObject {
             }
 
             logger.info("✅ Successfully synced connection: \(operation.id)")
-
-            // Post notification for other views
-            NotificationCenter.default.post(name: NSNotification.Name("RefreshConnections"), object: nil)
 
         } catch {
             logger.error("❌ Failed to sync connection: \(error.localizedDescription)")
@@ -463,6 +512,39 @@ class ConnectionManager: ObservableObject {
         for (id, operation) in pendingOperations {
             if let nextRetry = operation.nextRetryAt, nextRetry <= now {
                 await processOperation(operation)
+            }
+        }
+    }
+
+    // MARK: - Badge Management
+
+    /// Update app icon badge count based on pending connection requests
+    func updateBadgeCount() {
+        let pendingRequestsCount = connections.values.filter { managedConn in
+            managedConn.connection.toUserId == currentUserId &&
+            managedConn.connection.status == .pending
+        }.count
+
+        logger.info("📛 Updating badge count to: \(pendingRequestsCount)")
+
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(pendingRequestsCount)
+            } catch {
+                logger.error("Failed to update badge count: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Clear app icon badge (call when user views connection requests)
+    func clearBadge() {
+        logger.info("📛 Clearing badge")
+
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(0)
+            } catch {
+                logger.error("Failed to clear badge: \(error.localizedDescription)")
             }
         }
     }

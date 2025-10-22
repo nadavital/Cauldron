@@ -23,14 +23,20 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
     let status: ConnectionStatus
     let createdAt: Date
     let updatedAt: Date
-    
+
+    // Cached sender info for notifications (denormalized for performance)
+    let fromUsername: String?
+    let fromDisplayName: String?
+
     init(
         id: UUID = UUID(),
         fromUserId: UUID,
         toUserId: UUID,
         status: ConnectionStatus = .pending,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        fromUsername: String? = nil,
+        fromDisplayName: String? = nil
     ) {
         self.id = id
         self.fromUserId = fromUserId
@@ -38,6 +44,8 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.fromUsername = fromUsername
+        self.fromDisplayName = fromDisplayName
     }
     
     /// Check if this is an accepted connection

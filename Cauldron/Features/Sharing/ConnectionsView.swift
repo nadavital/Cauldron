@@ -24,45 +24,60 @@ struct ConnectionsView: View {
                 Section("Pending Requests") {
                     ForEach(viewModel.receivedRequests, id: \.id) { connection in
                         if let user = viewModel.usersMap[connection.fromUserId] {
-                            ConnectionRequestRowView(
-                                user: user,
-                                connection: connection,
-                                onAccept: {
-                                    await viewModel.acceptRequest(connection)
-                                },
-                                onReject: {
-                                    await viewModel.rejectRequest(connection)
-                                }
-                            )
+                            NavigationLink {
+                                UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            } label: {
+                                ConnectionRequestRowView(
+                                    user: user,
+                                    connection: connection,
+                                    onAccept: {
+                                        await viewModel.acceptRequest(connection)
+                                    },
+                                    onReject: {
+                                        await viewModel.rejectRequest(connection)
+                                    }
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            
+
             // Active connections
             if !viewModel.connections.isEmpty {
                 Section("Connections") {
                     ForEach(viewModel.connections, id: \.id) { connection in
                         if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
                            let user = viewModel.usersMap[otherUserId] {
-                            UserRowView(user: user)
+                            NavigationLink {
+                                UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            } label: {
+                                UserRowView(user: user)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            
+
             // Sent requests (pending)
             if !viewModel.sentRequests.isEmpty {
                 Section("Sent Requests") {
                     ForEach(viewModel.sentRequests, id: \.id) { connection in
                         if let user = viewModel.usersMap[connection.toUserId] {
-                            HStack {
-                                UserRowView(user: user)
-                                Spacer()
-                                Text("Pending")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            NavigationLink {
+                                UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            } label: {
+                                HStack {
+                                    UserRowView(user: user)
+                                    Spacer()
+                                    Text("Pending")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -93,10 +108,9 @@ struct ConnectionsView: View {
         .refreshable {
             await viewModel.loadConnections()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshConnections"))) { _ in
-            Task {
-                await viewModel.loadConnections()
-            }
+        .onAppear {
+            // Clear badge when user views the connections (they've seen the pending requests)
+            viewModel.dependencies.connectionManager.clearBadge()
         }
         .alert("Error", isPresented: $viewModel.showErrorAlert) {
             Button("OK") { }

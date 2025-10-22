@@ -8,15 +8,14 @@
 import SwiftUI
 import os
 
-/// View for creating a grocery list from multiple recipes
+/// View for adding recipes to the unified grocery list
 struct GroceryListMergeView: View {
     let dependencies: DependencyContainer
     @Environment(\.dismiss) private var dismiss
-    
+
     @State private var allRecipes: [Recipe] = []
     @State private var selectedRecipeIds: Set<UUID> = []
-    @State private var listTitle = ""
-    @State private var isCreating = false
+    @State private var isAdding = false
     @State private var showSuccess = false
     @State private var searchText = ""
     
@@ -32,15 +31,6 @@ struct GroceryListMergeView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("List Name", text: $listTitle)
-                        .textInputAutocapitalization(.words)
-                } header: {
-                    Text("Grocery List Name")
-                } footer: {
-                    Text("Choose recipes to combine into one shopping list")
-                }
-                
                 Section("Select Recipes") {
                     if allRecipes.isEmpty {
                         Text("No recipes found")
@@ -83,7 +73,7 @@ struct GroceryListMergeView: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Search recipes")
-            .navigationTitle("Create Shopping List")
+            .navigationTitle("Add from Recipes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -91,25 +81,25 @@ struct GroceryListMergeView: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button("Add") {
                         Task {
-                            await createMergedList()
+                            await addRecipesToList()
                         }
                     }
-                    .disabled(listTitle.isEmpty || selectedRecipeIds.isEmpty || isCreating)
+                    .disabled(selectedRecipeIds.isEmpty || isAdding)
                 }
             }
             .task {
                 await loadRecipes()
             }
-            .alert("List Created!", isPresented: $showSuccess) {
+            .alert("Recipes Added!", isPresented: $showSuccess) {
                 Button("Done") {
                     dismiss()
                 }
             } message: {
-                Text("Your shopping list '\(listTitle)' has been created with merged ingredients.")
+                Text("\(selectedRecipeIds.count) recipe(s) have been added to your grocery list.")
             }
         }
     }
@@ -134,38 +124,29 @@ struct GroceryListMergeView: View {
         }
     }
     
-    private func createMergedList() async {
-        isCreating = true
-        defer { isCreating = false }
-        
+    private func addRecipesToList() async {
+        isAdding = true
+        defer { isAdding = false }
+
         do {
-            // Generate grocery items from each recipe
-            var allGroceryLists: [[GroceryItem]] = []
-            
+            // Add each recipe's ingredients to the unified list
             for recipe in selectedRecipes {
                 let items = try await dependencies.groceryService.generateGroceryList(from: recipe)
-                allGroceryLists.append(items)
-            }
-            
-            // Merge the lists
-            let mergedItems = await dependencies.groceryService.mergeGroceryLists(allGroceryLists)
-            
-            // Create the grocery list
-            let listId = try await dependencies.groceryRepository.createList(title: listTitle)
-            
-            // Add all merged items
-            for item in mergedItems {
-                try await dependencies.groceryRepository.addItem(
-                    listId: listId,
-                    name: item.name,
-                    quantity: item.quantity
+
+                // Convert to the format needed for addItemsFromRecipe
+                let itemTuples: [(name: String, quantity: Quantity?)] = items.map { ($0.name, $0.quantity) }
+
+                try await dependencies.groceryRepository.addItemsFromRecipe(
+                    recipeID: recipe.id.uuidString,
+                    recipeName: recipe.title,
+                    items: itemTuples
                 )
             }
-            
+
             showSuccess = true
-            
+
         } catch {
-            AppLogger.general.error("Failed to create merged grocery list: \(error.localizedDescription)")
+            AppLogger.general.error("Failed to add recipes to grocery list: \(error.localizedDescription)")
         }
     }
 }

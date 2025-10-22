@@ -100,16 +100,7 @@ struct SampleData {
             for recipe in allRecipes {
                 try await dependencies.recipeRepository.create(recipe)
             }
-            
-            // Add some sample pantry items
-            try await dependencies.pantryRepository.add(name: "flour", quantity: Quantity(value: 5, unit: .pound))
-            try await dependencies.pantryRepository.add(name: "sugar", quantity: Quantity(value: 2, unit: .pound))
-            try await dependencies.pantryRepository.add(name: "olive oil", quantity: Quantity(value: 1, unit: .liter))
-            try await dependencies.pantryRepository.add(name: "salt", quantity: nil)
-            try await dependencies.pantryRepository.add(name: "pepper", quantity: nil)
-            try await dependencies.pantryRepository.add(name: "pasta", quantity: Quantity(value: 2, unit: .pound))
-            try await dependencies.pantryRepository.add(name: "garlic", quantity: Quantity(value: 1, unit: .bunch))
-            
+
             AppLogger.general.info("Sample data loaded successfully")
         } catch {
             AppLogger.general.error("Failed to load sample data: \(error.localizedDescription)")

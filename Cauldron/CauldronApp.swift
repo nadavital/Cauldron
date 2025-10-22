@@ -557,6 +557,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     object: nil
                 )
             }
+
+            // Update badge count asynchronously
+            Task { @MainActor in
+                // Access the default dependencies to get connection manager
+                let dependencies = try? DependencyContainer.persistent()
+                if let dependencies = dependencies,
+                   let userId = CurrentUserSession.shared.userId {
+                    await dependencies.connectionManager.loadConnections(forUserId: userId)
+                    // Badge will be updated automatically in loadConnections
+                }
+            }
         }
     }
 
@@ -588,6 +599,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             )
             AppDelegate.pendingShareMetadata = nil
             AppDelegate.pendingShareURL = nil
+        }
+
+        // Update badge count when app becomes active
+        Task { @MainActor in
+            let dependencies = try? DependencyContainer.persistent()
+            if let dependencies = dependencies {
+                // Update badge count based on current pending requests
+                dependencies.connectionManager.updateBadgeCount()
+                AppLogger.general.info("📛 Badge count refreshed on app activation")
+            }
         }
     }
 

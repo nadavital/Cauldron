@@ -16,13 +16,10 @@ struct RecipeDetailView: View {
     @State private var showingCookMode = false
     @State private var showingEditSheet = false
     @State private var scaleFactor: Double = 1.0
-    @State private var showingGroceryOptions = false
-    @State private var showingNewListSheet = false
-    @State private var newListTitle = ""
-    @State private var existingLists: [(id: UUID, title: String)] = []
     @State private var localIsFavorite: Bool
     @State private var scalingWarnings: [ScalingWarning] = []
     @State private var showingShareSheet = false
+    @State private var showingToast = false
     
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -39,42 +36,70 @@ struct RecipeDetailView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Hero Image
-                    if let imageURL = recipe.imageURL,
-                       let image = loadImage(filename: imageURL.lastPathComponent) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geometry.size.width - 32, height: 300)
-                            .clipped()
-                            .cornerRadius(16)
-                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        ZStack(alignment: .bottom) {
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Hero Image
+                        if let imageURL = recipe.imageURL,
+                           let image = loadImage(filename: imageURL.lastPathComponent) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geometry.size.width - 32, height: 300)
+                                .clipped()
+                                .cornerRadius(16)
+                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        }
+
+                        // Header
+                        headerSection
+
+                        // Ingredients
+                        ingredientsSection
+
+                        // Steps
+                        stepsSection
+
+                        // Nutrition
+                        if let nutrition = recipe.nutrition, nutrition.hasData {
+                            nutritionSection(nutrition)
+                        }
+
+                        // Notes
+                        if let notes = recipe.notes, !notes.isEmpty {
+                            notesSection(notes)
+                        }
                     }
-
-                    // Header
-                    headerSection
-
-                    // Ingredients
-                    ingredientsSection
-
-                    // Steps
-                    stepsSection
-
-                    // Nutrition
-                    if let nutrition = recipe.nutrition, nutrition.hasData {
-                        nutritionSection(nutrition)
-                    }
-
-                    // Notes
-                    if let notes = recipe.notes, !notes.isEmpty {
-                        notesSection(notes)
-                    }
+                    .frame(width: geometry.size.width - 32, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 100) // Add padding for the button
                 }
-                .frame(width: geometry.size.width - 32, alignment: .leading)
-                .padding(.horizontal, 16)
+            }
+
+            // Liquid Glass Cook Button
+            HStack {
+                Spacer()
+
+                Button {
+                    showingCookMode = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "flame.fill")
+                            .font(.body)
+
+                        Text("Cook")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Capsule())
+                    .glassEffect(.regular.tint(.orange).interactive())
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 16)
             }
         }
         .navigationTitle(recipe.title)
@@ -88,15 +113,7 @@ struct RecipeDetailView: View {
                         .foregroundStyle(localIsFavorite ? .yellow : .primary)
                 }
             }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingCookMode = true
-                } label: {
-                    Label("Start Cooking", systemImage: "flame.fill")
-                }
-            }
-            
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button {
@@ -104,17 +121,16 @@ struct RecipeDetailView: View {
                     } label: {
                         Label("Edit Recipe", systemImage: "pencil")
                     }
-                    
+
                     Button {
                         showingShareSheet = true
                     } label: {
                         Label("Share Recipe", systemImage: "square.and.arrow.up")
                     }
-                    
+
                     Button {
                         Task {
-                            await loadExistingLists()
-                            showingGroceryOptions = true
+                            await addToGroceryList()
                         }
                     } label: {
                         Label("Add to Grocery List", systemImage: "cart.badge.plus")
@@ -133,45 +149,7 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showingShareSheet) {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)
         }
-        .confirmationDialog("Add to Grocery List", isPresented: $showingGroceryOptions) {
-            Button("Create New List") {
-                showingNewListSheet = true
-            }
-            
-            ForEach(existingLists, id: \.id) { list in
-                Button(list.title) {
-                    Task {
-                        await addToExistingList(list.id)
-                    }
-                }
-            }
-            
-            Button("Cancel", role: .cancel) { }
-        }
-        .sheet(isPresented: $showingNewListSheet) {
-            NavigationStack {
-                Form {
-                    TextField("List Name", text: $newListTitle)
-                    
-                    Button("Create & Add Items") {
-                        Task {
-                            await createNewListAndAddItems()
-                            showingNewListSheet = false
-                        }
-                    }
-                    .disabled(newListTitle.isEmpty)
-                }
-                .navigationTitle("New Grocery List")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
-                            showingNewListSheet = false
-                        }
-                    }
-                }
-            }
-        }
+        .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
     }
     
     private var headerSection: some View {
@@ -422,40 +400,27 @@ struct RecipeDetailView: View {
         return attributedString
     }
     
-    private func loadExistingLists() async {
+    private func addToGroceryList() async {
         do {
-            let lists = try await dependencies.groceryRepository.fetchAllLists()
-            existingLists = lists.map { (id: $0.id, title: $0.title) }
-        } catch {
-            AppLogger.general.error("Failed to load grocery lists: \(error.localizedDescription)")
-        }
-    }
-    
-    private func createNewListAndAddItems() async {
-        do {
-            let listId = try await dependencies.groceryRepository.createList(title: newListTitle)
-            await addIngredientsToList(listId)
-            newListTitle = ""
-        } catch {
-            AppLogger.general.error("Failed to create grocery list: \(error.localizedDescription)")
-        }
-    }
-    
-    private func addToExistingList(_ listId: UUID) async {
-        await addIngredientsToList(listId)
-    }
-    
-    private func addIngredientsToList(_ listId: UUID) async {
-        for ingredient in scaledRecipe.ingredients {
-            do {
-                try await dependencies.groceryRepository.addItem(
-                    listId: listId,
-                    name: ingredient.name,
-                    quantity: ingredient.quantity
-                )
-            } catch {
-                AppLogger.general.error("Failed to add ingredient to grocery list: \(error.localizedDescription)")
+            // Convert ingredients to the format needed
+            let items: [(name: String, quantity: Quantity?)] = scaledRecipe.ingredients.map {
+                ($0.name, $0.quantity)
             }
+
+            try await dependencies.groceryRepository.addItemsFromRecipe(
+                recipeID: recipe.id.uuidString,
+                recipeName: recipe.title,
+                items: items
+            )
+
+            AppLogger.general.info("Added \(items.count) ingredients to grocery list from '\(recipe.title)'")
+
+            // Show toast notification
+            withAnimation {
+                showingToast = true
+            }
+        } catch {
+            AppLogger.general.error("Failed to add ingredients to grocery list: \(error.localizedDescription)")
         }
     }
     
