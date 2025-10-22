@@ -1102,10 +1102,14 @@ actor CloudKitService {
         // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
 
-        // Use CloudKit field substitution to show sender's display name
-        // Format: "DisplayName wants to connect with you"
-        // The %[fieldName]@ syntax directly substitutes the field value without requiring localization
-        notification.alertBody = "%[fromDisplayName]@ wants to connect with you"
+        // Use localization with field substitution to show sender's display name
+        // This requires a Localizable.strings file with the key "CONNECTION_REQUEST_ALERT"
+        // The %@ placeholder will be replaced with the value from the fromDisplayName field
+        notification.alertLocalizationKey = "CONNECTION_REQUEST_ALERT"
+        notification.alertLocalizationArgs = ["fromDisplayName"]
+
+        // Fallback message if localization fails (shouldn't happen if Localizable.strings exists)
+        notification.alertBody = "You have a new connection request!"
 
         notification.soundName = "default"
         notification.shouldBadge = true
