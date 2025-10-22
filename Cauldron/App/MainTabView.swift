@@ -20,12 +20,13 @@ enum AppTab: String, Hashable {
 /// Main tab-based navigation view
 struct MainTabView: View {
     let dependencies: DependencyContainer
+    let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
 
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Cook", systemImage: "flame.fill", value: .cook) {
-                CookTabView(dependencies: dependencies)
+                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
 
             Tab("Groceries", systemImage: "cart", value: .groceries) {
@@ -50,5 +51,5 @@ struct MainTabView: View {
 }
 
 #Preview {
-    MainTabView(dependencies: .preview())
+    MainTabView(dependencies: .preview(), preloadedData: nil)
 }

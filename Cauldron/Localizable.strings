@@ -1,0 +1,2 @@
+/* Connection request notification */
+"CONNECTION_REQUEST_ALERT" = "%@ wants to connect with you";

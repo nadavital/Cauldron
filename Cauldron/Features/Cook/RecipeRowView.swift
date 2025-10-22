@@ -46,6 +46,15 @@ struct RecipeRowView: View {
                         .lineLimit(2)
                         .truncationMode(.tail)
 
+                    // Reference indicator
+                    if recipe.isReference {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+                            .fixedSize()
+                    }
+
+                    // Favorite indicator
                     if recipe.isFavorite {
                         Image(systemName: "star.fill")
                             .font(.caption)

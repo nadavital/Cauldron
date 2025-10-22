@@ -145,10 +145,12 @@ struct SearchTabView: View {
                         .font(.headline)
                         .foregroundColor(.secondary)
                     if searchText.isEmpty {
+                        #if DEBUG
                         Text("Create demo users from the Sharing tab menu")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
+                        #endif
                     } else {
                         Text("Try searching for a different name")
                             .font(.subheadline)

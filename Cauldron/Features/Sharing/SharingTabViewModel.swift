@@ -23,6 +23,10 @@ class SharingTabViewModel: ObservableObject {
     private(set) var dependencies: DependencyContainer?
     private var hasLoadedOnce = false
 
+    // Track which shared recipes have been saved as RecipeReferences
+    // Maps recipe.id -> reference.id
+    private var savedReferences: [UUID: UUID] = [:]
+
     private init() {
         // Private init for singleton
     }
@@ -50,20 +54,50 @@ class SharingTabViewModel: ObservableObject {
         do {
             sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
             AppLogger.general.info("Loaded \(self.sharedRecipes.count) shared recipes")
+
+            // Load RecipeReferences to track which recipes have been saved
+            await loadSavedReferences()
         } catch {
             AppLogger.general.error("Failed to load shared recipes: \(error.localizedDescription)")
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
             showErrorAlert = true
         }
     }
+
+    /// Load saved RecipeReferences to track which shared recipes the user has saved
+    private func loadSavedReferences() async {
+        guard let dependencies = dependencies,
+              let userId = CurrentUserSession.shared.userId else {
+            return
+        }
+
+        do {
+            let references = try await dependencies.recipeReferenceManager.fetchReferences(for: userId)
+
+            // Build map of recipe ID -> reference ID
+            savedReferences.removeAll()
+            for reference in references {
+                savedReferences[reference.originalRecipeId] = reference.id
+            }
+
+            AppLogger.general.info("Loaded \(references.count) saved recipe references for tracking")
+        } catch {
+            AppLogger.general.warning("Failed to load saved references: \(error.localizedDescription)")
+            // Non-critical failure - continue without reference tracking
+        }
+    }
+
+    /// Check if a shared recipe has been saved as a RecipeReference
+    func hasReference(for recipeId: UUID) -> Bool {
+        savedReferences[recipeId] != nil
+    }
     
     func copyToPersonalCollection(_ sharedRecipe: SharedRecipe) async {
         guard let dependencies = dependencies else { return }
         do {
             let copiedRecipe = try await dependencies.sharingService.copySharedRecipeToPersonal(sharedRecipe)
-            alertMessage = "'\(copiedRecipe.title)' has been copied to your recipes!"
-            showSuccessAlert = true
-            AppLogger.general.info("Copied shared recipe to personal collection")
+            AppLogger.general.info("Copied shared recipe to personal collection: \(copiedRecipe.title)")
+            // Toast notification is shown in SharedRecipeDetailView
         } catch {
             AppLogger.general.error("Failed to copy recipe: \(error.localizedDescription)")
             alertMessage = "Failed to copy recipe: \(error.localizedDescription)"
@@ -83,7 +117,8 @@ class SharingTabViewModel: ObservableObject {
             showErrorAlert = true
         }
     }
-    
+
+    #if DEBUG
     func createDemoUsers() async {
         guard let dependencies = dependencies else { return }
         do {
@@ -96,4 +131,5 @@ class SharingTabViewModel: ObservableObject {
             showErrorAlert = true
         }
     }
+    #endif
 }

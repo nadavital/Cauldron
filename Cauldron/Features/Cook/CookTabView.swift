@@ -19,9 +19,9 @@ struct CookTabView: View {
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
     @State private var isAIAvailable = false
-    
-    init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies))
+
+    init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
+        _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
     }
     
     var body: some View {
@@ -32,12 +32,12 @@ struct CookTabView: View {
                     if !viewModel.cookableRecipes.isEmpty {
                         whatCanICookSection
                     }
-                    
+
                     // Recently Cooked
                     if !viewModel.recentlyCookedRecipes.isEmpty {
                         recentlyCookedSection
                     }
-                    
+
                     // All Recipes
                     allRecipesSection
                 }
@@ -87,23 +87,18 @@ struct CookTabView: View {
                 Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
             }
             .task {
-                // Only load if we don't have data yet (viewModel loads eagerly on init)
-                // This prevents double-loading on first appearance
-                if viewModel.allRecipes.isEmpty {
-                    await viewModel.loadData()
-                }
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
-            }
-            .onAppear {
-                // Reload data whenever view appears to catch changes from child views
-                Task {
-                    await viewModel.loadData()
-                }
             }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
+                // Refresh when a recipe is added from another tab
+                Task {
+                    await viewModel.loadData()
+                }
             }
         }
     }
@@ -442,36 +437,48 @@ struct CategoryCardView: View {
 
 struct RecipeCardView: View {
     let recipe: Recipe
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image
             ZStack(alignment: .topTrailing) {
-                if let imageURL = recipe.imageURL,
-                   let image = loadImage(filename: imageURL.lastPathComponent) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 200, height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                ZStack(alignment: .topLeading) {
+                    if let imageURL = recipe.imageURL,
+                       let image = loadImage(filename: imageURL.lastPathComponent) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 200, height: 120)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .frame(width: 200, height: 120)
-                        .overlay(
-                            Image(systemName: "fork.knife")
-                                .font(.largeTitle)
-                                .foregroundColor(.cauldronOrange.opacity(0.6))
-                        )
+                            .frame(width: 200, height: 120)
+                            .overlay(
+                                Image(systemName: "fork.knife")
+                                    .font(.largeTitle)
+                                    .foregroundColor(.cauldronOrange.opacity(0.6))
+                            )
+                    }
+
+                    // Reference indicator (top-left)
+                    if recipe.isReference {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
+                            .padding(6)
+                            .background(Circle().fill(.ultraThinMaterial))
+                            .padding(8)
+                    }
                 }
-                
-                // Favorite indicator
+
+                // Favorite indicator (top-right)
                 if recipe.isFavorite {
                     Image(systemName: "star.fill")
                         .font(.caption)
@@ -537,5 +544,5 @@ struct RecipeCardView: View {
 }
 
 #Preview {
-    CookTabView(dependencies: .preview())
+    CookTabView(dependencies: .preview(), preloadedData: nil)
 }

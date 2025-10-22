@@ -17,8 +17,11 @@ struct SharedRecipeDetailView: View {
     @State private var isPerformingAction = false
     @State private var isSavingReference = false
     @State private var showRemoveConfirmation = false
-    @State private var showSuccessAlert = false
-    @State private var successMessage = ""
+    @State private var showReferenceToast = false
+    @State private var showCopyToast = false
+    @State private var hasExistingReference = false
+    @State private var hasOwnedCopy = false
+    @State private var isCheckingDuplicates = true
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -75,6 +78,17 @@ struct SharedRecipeDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will remove the recipe from your shared list. You can't undo this action.")
+        }
+        .toast(isShowing: $showReferenceToast, icon: "bookmark.fill", message: "Added to your recipes!")
+        .toast(isShowing: $showCopyToast, icon: "doc.on.doc.fill", message: "Recipe copied!")
+        .task {
+            await checkForDuplicates()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeReferenceRemoved"))) { _ in
+            // Re-check duplicates when a reference is removed
+            Task {
+                await checkForDuplicates()
+            }
         }
     }
     
@@ -214,6 +228,9 @@ struct SharedRecipeDetailView: View {
                     if isSavingReference {
                         ProgressView()
                             .tint(.white)
+                    } else if hasExistingReference {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Already in Your Recipes")
                     } else {
                         Image(systemName: "bookmark.fill")
                         Text("Add to My Recipes")
@@ -221,16 +238,23 @@ struct SharedRecipeDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.cauldronOrange)
+                .background(hasExistingReference ? Color.gray : Color.cauldronOrange)
                 .foregroundColor(.white)
                 .cornerRadius(12)
             }
-            .disabled(isSavingReference || isPerformingAction)
+            .disabled(isSavingReference || isPerformingAction || hasExistingReference || isCheckingDuplicates)
 
-            Text("Always synced with original - you'll see updates automatically")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            if hasExistingReference {
+                Text("You've already added this recipe to your collection")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Always synced with original - you'll see updates automatically")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
             Divider()
                 .padding(.vertical, 4)
@@ -241,12 +265,27 @@ struct SharedRecipeDetailView: View {
                     isPerformingAction = true
                     await onCopy()
                     isPerformingAction = false
+
+                    // Notify other views that a recipe was added
+                    NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
+
+                    // Show toast notification
+                    withAnimation {
+                        showCopyToast = true
+                    }
+
+                    // Dismiss sheet after toast appears
+                    try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
+                    dismiss()
                 }
             } label: {
                 HStack {
                     if isPerformingAction {
                         ProgressView()
                             .tint(Color.cauldronOrange)
+                    } else if hasOwnedCopy {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Copy Already Saved")
                     } else {
                         Image(systemName: "doc.on.doc")
                         Text("Save a Copy")
@@ -254,23 +293,25 @@ struct SharedRecipeDetailView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.cauldronOrange.opacity(0.1))
-                .foregroundColor(.cauldronOrange)
+                .background(hasOwnedCopy ? Color.gray.opacity(0.1) : Color.cauldronOrange.opacity(0.1))
+                .foregroundColor(hasOwnedCopy ? Color.gray : Color.cauldronOrange)
                 .cornerRadius(12)
             }
-            .disabled(isPerformingAction || isSavingReference)
+            .disabled(isPerformingAction || isSavingReference || hasOwnedCopy || isCheckingDuplicates)
 
-            Text("Independent copy you can edit - won't reflect updates")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            if hasOwnedCopy {
+                Text("You already have a copy of this recipe in your collection")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Independent copy you can edit - won't reflect updates")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(.top, 8)
-        .alert("Success", isPresented: $showSuccessAlert) {
-            Button("OK") { }
-        } message: {
-            Text(successMessage)
-        }
     }
 
     private func saveRecipeReference() async {
@@ -291,12 +332,64 @@ struct SharedRecipeDetailView: View {
             // Save to CloudKit PUBLIC database
             try await dependencies.cloudKitService.saveRecipeReference(reference)
 
-            successMessage = "'\(sharedRecipe.recipe.title)' added to your recipes! You'll see updates automatically."
-            showSuccessAlert = true
             AppLogger.general.info("Saved recipe reference: \(sharedRecipe.recipe.title)")
+
+            // Update tracking state immediately
+            await MainActor.run {
+                hasExistingReference = true
+            }
+
+            // Notify other views that a recipe was added
+            await MainActor.run {
+                NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
+            }
+
+            // Refresh the SharingTabViewModel's reference tracking
+            await SharingTabViewModel.shared.loadSharedRecipes()
+
+            // Show toast notification
+            await MainActor.run {
+                withAnimation {
+                    showReferenceToast = true
+                }
+            }
+
+            // Dismiss sheet after toast appears
+            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
+            await MainActor.run {
+                dismiss()
+            }
         } catch {
             AppLogger.general.error("Failed to save recipe reference: \(error.localizedDescription)")
             // TODO: Show error alert
+        }
+    }
+
+    private func checkForDuplicates() async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            isCheckingDuplicates = false
+            return
+        }
+
+        do {
+            // Check for existing reference
+            hasExistingReference = try await dependencies.recipeReferenceManager.hasReference(
+                for: sharedRecipe.recipe.id,
+                userId: userId
+            )
+
+            // Check for owned copy
+            hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
+                title: sharedRecipe.recipe.title,
+                ownerId: userId,
+                ingredientCount: sharedRecipe.recipe.ingredients.count
+            )
+
+            isCheckingDuplicates = false
+            AppLogger.general.info("Duplicate check complete - hasReference: \(hasExistingReference), hasOwnedCopy: \(hasOwnedCopy)")
+        } catch {
+            AppLogger.general.error("Failed to check for duplicates: \(error.localizedDescription)")
+            isCheckingDuplicates = false
         }
     }
 }

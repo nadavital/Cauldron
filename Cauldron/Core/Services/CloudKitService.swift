@@ -1078,14 +1078,14 @@ actor CloudKitService {
     func subscribeToConnectionRequests(forUserId userId: UUID) async throws {
         let subscriptionID = "connection-requests-\(userId.uuidString)"
 
-        // Check if subscription already exists
+        // Delete existing subscription first (if any) to ensure we use the latest notification format
         let db = try getPublicDatabase()
         do {
-            _ = try await db.subscription(for: subscriptionID)
-            logger.info("Connection request subscription already exists")
-            return
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Deleted old connection request subscription")
         } catch {
-            // Subscription doesn't exist, create it
+            // Subscription doesn't exist yet, that's fine
+            logger.info("No existing subscription to delete (creating fresh)")
         }
 
         // Create predicate: toUserId == current user AND status == pending
@@ -1102,12 +1102,13 @@ actor CloudKitService {
         // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
 
-        // Use CloudKit substitution strings to show sender's name
-        // Format: "DisplayName (@username) wants to connect with you"
-        notification.alertLocalizationKey = "%@ (@%@) wants to connect with you"
-        notification.alertLocalizationArgs = ["fromDisplayName", "fromUsername"]
+        // Use localization with field substitution to show sender's display name
+        // This requires a Localizable.strings file with the key "CONNECTION_REQUEST_ALERT"
+        // The %@ placeholder will be replaced with the value from the fromDisplayName field
+        notification.alertLocalizationKey = "CONNECTION_REQUEST_ALERT"
+        notification.alertLocalizationArgs = ["fromDisplayName"]
 
-        // Fallback for older iOS or if fields are missing
+        // Fallback message if localization fails (shouldn't happen if Localizable.strings exists)
         notification.alertBody = "You have a new connection request!"
 
         notification.soundName = "default"
