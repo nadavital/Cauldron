@@ -15,6 +15,7 @@ struct ToastView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.title3)
+                .foregroundStyle(.orange)
 
             Text(message)
                 .font(.subheadline)
@@ -22,8 +23,7 @@ struct ToastView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .background(Capsule())
-        .glassEffect(.regular.tint(.accentColor))
+        .glassEffect(.regular, in: Capsule())
     }
 }
 
@@ -46,8 +46,9 @@ struct ToastModifier: ViewModifier {
                         ToastView(icon: icon, message: message)
                             .glassEffectID("toast", in: glassEffectNamespace)
                             .glassEffectTransition(.materialize)
-                            .padding(.bottom, 50)
+                            .padding(.bottom, 100)
                     }
+                    .allowsHitTesting(false)
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
                             withAnimation {

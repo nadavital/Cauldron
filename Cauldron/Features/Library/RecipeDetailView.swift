@@ -36,42 +36,70 @@ struct RecipeDetailView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Hero Image
-                    if let imageURL = recipe.imageURL,
-                       let image = loadImage(filename: imageURL.lastPathComponent) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geometry.size.width - 32, height: 300)
-                            .clipped()
-                            .cornerRadius(16)
-                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        ZStack(alignment: .bottom) {
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Hero Image
+                        if let imageURL = recipe.imageURL,
+                           let image = loadImage(filename: imageURL.lastPathComponent) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geometry.size.width - 32, height: 300)
+                                .clipped()
+                                .cornerRadius(16)
+                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        }
+
+                        // Header
+                        headerSection
+
+                        // Ingredients
+                        ingredientsSection
+
+                        // Steps
+                        stepsSection
+
+                        // Nutrition
+                        if let nutrition = recipe.nutrition, nutrition.hasData {
+                            nutritionSection(nutrition)
+                        }
+
+                        // Notes
+                        if let notes = recipe.notes, !notes.isEmpty {
+                            notesSection(notes)
+                        }
                     }
-
-                    // Header
-                    headerSection
-
-                    // Ingredients
-                    ingredientsSection
-
-                    // Steps
-                    stepsSection
-
-                    // Nutrition
-                    if let nutrition = recipe.nutrition, nutrition.hasData {
-                        nutritionSection(nutrition)
-                    }
-
-                    // Notes
-                    if let notes = recipe.notes, !notes.isEmpty {
-                        notesSection(notes)
-                    }
+                    .frame(width: geometry.size.width - 32, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 100) // Add padding for the button
                 }
-                .frame(width: geometry.size.width - 32, alignment: .leading)
-                .padding(.horizontal, 16)
+            }
+
+            // Liquid Glass Cook Button
+            HStack {
+                Spacer()
+
+                Button {
+                    showingCookMode = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "flame.fill")
+                            .font(.body)
+
+                        Text("Cook")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Capsule())
+                    .glassEffect(.regular.tint(.orange).interactive())
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 16)
             }
         }
         .navigationTitle(recipe.title)
@@ -85,15 +113,7 @@ struct RecipeDetailView: View {
                         .foregroundStyle(localIsFavorite ? .yellow : .primary)
                 }
             }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showingCookMode = true
-                } label: {
-                    Label("Start Cooking", systemImage: "flame.fill")
-                }
-            }
-            
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button {
@@ -101,13 +121,13 @@ struct RecipeDetailView: View {
                     } label: {
                         Label("Edit Recipe", systemImage: "pencil")
                     }
-                    
+
                     Button {
                         showingShareSheet = true
                     } label: {
                         Label("Share Recipe", systemImage: "square.and.arrow.up")
                     }
-                    
+
                     Button {
                         Task {
                             await addToGroceryList()
