@@ -7,9 +7,22 @@
 
 import Foundation
 
-/// A saved reference to someone else's shared recipe
-/// This allows users to "bookmark" recipes they can view but don't own
-/// References stay synced with the original - edits propagate automatically
+/// A saved reference to someone else's shared recipe (stored in CloudKit PUBLIC database)
+///
+/// This represents a user's **explicit save** of a public/shared recipe to their personal collection.
+/// Unlike SharedRecipe (which is just a browsing view), RecipeReference is persistent and appears
+/// in the user's main recipe list (Cook/Library tabs).
+///
+/// Key characteristics:
+/// - Stored as a separate record in CloudKit (not a copy of the recipe)
+/// - Points to the original recipe via originalRecipeId
+/// - References stay synced with the original - edits propagate automatically
+/// - Can be deleted independently without affecting the original recipe
+/// - Allows users to "bookmark" recipes they can view but don't own
+///
+/// This is distinct from:
+/// - SharedRecipe: Temporary browsing model for public recipes (Sharing tab only)
+/// - Owned Recipe copy: Independent copy that user can edit (created via "Save a Copy")
 struct RecipeReference: Codable, Sendable, Hashable, Identifiable {
     let id: UUID
     let userId: UUID  // Who saved this reference

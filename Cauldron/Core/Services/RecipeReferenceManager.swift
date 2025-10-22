@@ -44,6 +44,15 @@ actor RecipeReferenceManager {
         return reference
     }
 
+    /// Check if a reference already exists for a recipe
+    func hasReference(for recipeId: UUID, userId: UUID) async throws -> Bool {
+        logger.info("Checking if reference exists for recipe \(recipeId) by user \(userId)")
+        let reference = try await findReference(for: recipeId, userId: userId)
+        let hasRef = reference != nil
+        logger.info("Reference exists: \(hasRef)")
+        return hasRef
+    }
+
     // MARK: - Delete Reference
 
     /// Delete a recipe reference (removes bookmark, doesn't affect original recipe)
@@ -54,9 +63,11 @@ actor RecipeReferenceManager {
     }
 
     /// Delete a reference by finding it first
+    /// Throws RecipeReferenceError.referenceNotFound if no reference exists for this recipe
     func deleteReference(for recipeId: UUID, userId: UUID) async throws {
         guard let reference = try await findReference(for: recipeId, userId: userId) else {
-            logger.warning("No reference found to delete for recipe \(recipeId)")
+            logger.info("No reference found to delete for recipe \(recipeId) by user \(userId)")
+            logger.info("This is expected when the recipe is a public/shared recipe viewed directly from PUBLIC database")
             throw RecipeReferenceError.referenceNotFound
         }
         try await deleteReference(reference.id)

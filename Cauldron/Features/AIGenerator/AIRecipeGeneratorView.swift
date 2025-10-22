@@ -14,7 +14,6 @@ struct AIRecipeGeneratorView: View {
     @StateObject private var viewModel: AIRecipeGeneratorViewModel
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
-    @State private var showingSaveConfirmation: Bool = false
 
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: AIRecipeGeneratorViewModel(dependencies: dependencies))
@@ -70,9 +69,7 @@ struct AIRecipeGeneratorView: View {
 
                             Task {
                                 if await viewModel.saveRecipe() {
-                                    showingSaveConfirmation = true
-                                    // Dismiss after short delay
-                                    try? await Task.sleep(nanoseconds: 500_000_000)
+                                    // Dismiss immediately - CloudKit sync happens in background
                                     dismiss()
                                 } else {
                                     viewModel.isSaving = false

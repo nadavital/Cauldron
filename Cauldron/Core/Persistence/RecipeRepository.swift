@@ -379,14 +379,39 @@ actor RecipeRepository {
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.id == id }
         )
-        
+
         guard let model = try context.fetch(descriptor).first else {
             throw RepositoryError.notFound
         }
-        
+
         model.isFavorite.toggle()
         model.updatedAt = Date()
         try context.save()
+    }
+
+    /// Check if a similar recipe already exists
+    /// Uses title and ingredient count as heuristics to detect duplicates
+    func hasSimilarRecipe(title: String, ownerId: UUID, ingredientCount: Int) async throws -> Bool {
+        let context = ModelContext(modelContainer)
+
+        // Fetch all recipes owned by this user
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.ownerId == ownerId
+            }
+        )
+
+        let models = try context.fetch(descriptor)
+        let recipes = try models.map { try $0.toDomain() }
+
+        // Check if any recipe has the same title and similar ingredient count
+        let hasSimilar = recipes.contains { recipe in
+            recipe.title.lowercased() == title.lowercased() &&
+            recipe.ingredients.count == ingredientCount
+        }
+
+        logger.info("Checking for similar recipe - title: '\(title)', ingredientCount: \(ingredientCount), hasSimilar: \(hasSimilar)")
+        return hasSimilar
     }
 }
 

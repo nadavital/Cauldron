@@ -77,6 +77,10 @@ actor SharingService {
     
     /// Get all recipes shared with the current user (from PUBLIC database)
     /// Fetches friends' recipes (visibility = friendsOnly) and public recipes (visibility = public)
+    ///
+    /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
+    /// To save a recipe for later, users must explicitly create a RecipeReference (via "Add to My Recipes")
+    /// or copy it to their personal collection (via "Save a Copy").
     func getSharedRecipes() async throws -> [SharedRecipe] {
         logger.info("📥 Fetching shared recipes from PUBLIC database")
 
@@ -160,9 +164,19 @@ actor SharingService {
     
     /// Copy a shared recipe to the user's personal collection
     func copySharedRecipeToPersonal(_ sharedRecipe: SharedRecipe) async throws -> Recipe {
-        let personalCopy = sharedRecipe.createPersonalCopy()
+        // Get current user ID
+        let userId = await MainActor.run {
+            CurrentUserSession.shared.userId
+        }
+
+        guard let userId = userId else {
+            logger.error("Cannot copy recipe - no current user")
+            throw NSError(domain: "SharingService", code: 2, userInfo: [NSLocalizedDescriptionKey: "No current user found"])
+        }
+
+        let personalCopy = sharedRecipe.createPersonalCopy(ownerId: userId)
         try await recipeRepository.create(personalCopy)
-        logger.info("Copied shared recipe '\(personalCopy.title)' to personal collection")
+        logger.info("Copied shared recipe '\(personalCopy.title)' to personal collection with ownerId: \(userId)")
         return personalCopy
     }
     

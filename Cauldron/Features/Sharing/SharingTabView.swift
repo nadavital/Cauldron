@@ -53,10 +53,13 @@ struct SharingTabView: View {
                             } label: {
                                 Label("Edit Profile (@\(user.username))", systemImage: "person.circle")
                             }
-                            
+
+                            #if DEBUG
                             Divider()
+                            #endif
                         }
-                        
+
+                        #if DEBUG
                         Button {
                             Task {
                                 await viewModel.createDemoUsers()
@@ -64,6 +67,7 @@ struct SharingTabView: View {
                         } label: {
                             Label("Create Demo Users", systemImage: "person.2.fill")
                         }
+                        #endif
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -117,12 +121,14 @@ struct SharingTabView: View {
             Text("Recipes shared with you will appear here")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            
+
+            #if DEBUG
             Text("Tap the menu to create demo users for testing")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.top, 8)
+            #endif
         }
         .padding()
     }

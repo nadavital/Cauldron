@@ -27,6 +27,8 @@ struct RecipeDetailView: View {
     @State private var showConvertSuccess = false
     @State private var recipeOwner: User?
     @State private var isLoadingOwner = false
+    @State private var hasOwnedCopy = false
+    @State private var showReferenceRemovedToast = false
 
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -173,11 +175,13 @@ struct RecipeDetailView: View {
                         } label: {
                             if isConvertingToCopy {
                                 Label("Converting...", systemImage: "doc.on.doc")
+                            } else if hasOwnedCopy {
+                                Label("Already Have a Copy", systemImage: "checkmark.circle.fill")
                             } else {
                                 Label("Make a Copy", systemImage: "doc.on.doc")
                             }
                         }
-                        .disabled(isConvertingToCopy)
+                        .disabled(isConvertingToCopy || hasOwnedCopy)
 
                         Divider()
 
@@ -235,10 +239,13 @@ struct RecipeDetailView: View {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
+        .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
         .task {
             // Load recipe owner info if this is a reference
             if recipe.isReference, let ownerId = recipe.ownerId {
                 await loadRecipeOwner(ownerId)
+                // Check if user already has a copy of this recipe
+                await checkForOwnedCopy()
             }
         }
     }
@@ -605,6 +612,18 @@ struct RecipeDetailView: View {
         }
     }
 
+    /// Delete a recipe reference (bookmark to a shared recipe)
+    ///
+    /// This handles two scenarios:
+    /// 1. Recipe was explicitly saved via "Add to My Recipes" - A RecipeReference record exists in CloudKit
+    ///    → Delete the RecipeReference record, show toast, dismiss view
+    ///
+    /// 2. Recipe is being viewed from Sharing tab but was never saved - No RecipeReference exists
+    ///    → This happens when viewing public recipes from cached queries
+    ///    → Gracefully handle by just dismissing the view (nothing to delete)
+    ///
+    /// This method ensures we don't show errors to users when they try to remove recipes
+    /// they're just browsing (as opposed to recipes they've explicitly saved).
     private func deleteReference() async {
         guard let userId = CurrentUserSession.shared.userId else {
             AppLogger.general.error("Cannot delete reference - no current user")
@@ -618,17 +637,58 @@ struct RecipeDetailView: View {
             )
             AppLogger.general.info("Deleted recipe reference: \(recipe.title)")
 
+            // Notify other views that a reference was removed
+            NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
+
             // Show toast
             withAnimation {
-                showingToast = true
+                showReferenceRemovedToast = true
             }
 
             // Dismiss after a delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 dismiss()
             }
+        } catch RecipeReferenceError.referenceNotFound {
+            // No RecipeReference found. This could mean:
+            // 1. User is browsing a public recipe (never saved) - just dismiss
+            // 2. Recipe is an orphaned local copy (exists in local DB but not as a reference) - delete it
+
+            // Check if this recipe exists in local storage
+            do {
+                let localRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id)
+                if localRecipe != nil {
+                    // This is an orphaned local recipe - delete it from local storage
+                    AppLogger.general.info("Found orphaned local recipe \(recipe.title) - deleting from local storage")
+                    try await dependencies.recipeRepository.delete(id: recipe.id)
+
+                    // Notify other views
+                    NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
+
+                    // Show toast
+                    withAnimation {
+                        showReferenceRemovedToast = true
+                    }
+
+                    // Dismiss after delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismiss()
+                    }
+                } else {
+                    // Recipe only exists in PUBLIC database (browsing scenario) - just dismiss
+                    AppLogger.general.info("No reference to delete for recipe \(recipe.title) - dismissing view")
+                    NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
+                    dismiss()
+                }
+            } catch {
+                // Failed to check local storage - just dismiss gracefully
+                AppLogger.general.warning("Could not check local storage for recipe: \(error.localizedDescription)")
+                NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
+                dismiss()
+            }
         } catch {
             AppLogger.general.error("Failed to delete reference: \(error.localizedDescription)")
+            // Show error to user in future enhancement
         }
     }
 
@@ -670,6 +730,23 @@ struct RecipeDetailView: View {
         } catch {
             AppLogger.general.warning("Failed to load recipe owner: \(error.localizedDescription)")
             // Don't show error to user - just don't display the profile link
+        }
+    }
+
+    private func checkForOwnedCopy() async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            return
+        }
+
+        do {
+            hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
+                title: recipe.title,
+                ownerId: userId,
+                ingredientCount: recipe.ingredients.count
+            )
+            AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")
+        } catch {
+            AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")
         }
     }
 }

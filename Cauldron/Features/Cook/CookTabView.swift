@@ -94,6 +94,12 @@ struct CookTabView: View {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
+                // Refresh when a recipe is added from another tab
+                Task {
+                    await viewModel.loadData()
+                }
+            }
         }
     }
     
