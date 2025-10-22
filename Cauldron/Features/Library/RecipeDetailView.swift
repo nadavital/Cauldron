@@ -16,13 +16,10 @@ struct RecipeDetailView: View {
     @State private var showingCookMode = false
     @State private var showingEditSheet = false
     @State private var scaleFactor: Double = 1.0
-    @State private var showingGroceryOptions = false
-    @State private var showingNewListSheet = false
-    @State private var newListTitle = ""
-    @State private var existingLists: [(id: UUID, title: String)] = []
     @State private var localIsFavorite: Bool
     @State private var scalingWarnings: [ScalingWarning] = []
     @State private var showingShareSheet = false
+    @State private var showingToast = false
     
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -113,8 +110,7 @@ struct RecipeDetailView: View {
                     
                     Button {
                         Task {
-                            await loadExistingLists()
-                            showingGroceryOptions = true
+                            await addToGroceryList()
                         }
                     } label: {
                         Label("Add to Grocery List", systemImage: "cart.badge.plus")
@@ -133,45 +129,7 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showingShareSheet) {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)
         }
-        .confirmationDialog("Add to Grocery List", isPresented: $showingGroceryOptions) {
-            Button("Create New List") {
-                showingNewListSheet = true
-            }
-            
-            ForEach(existingLists, id: \.id) { list in
-                Button(list.title) {
-                    Task {
-                        await addToExistingList(list.id)
-                    }
-                }
-            }
-            
-            Button("Cancel", role: .cancel) { }
-        }
-        .sheet(isPresented: $showingNewListSheet) {
-            NavigationStack {
-                Form {
-                    TextField("List Name", text: $newListTitle)
-                    
-                    Button("Create & Add Items") {
-                        Task {
-                            await createNewListAndAddItems()
-                            showingNewListSheet = false
-                        }
-                    }
-                    .disabled(newListTitle.isEmpty)
-                }
-                .navigationTitle("New Grocery List")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Cancel") {
-                            showingNewListSheet = false
-                        }
-                    }
-                }
-            }
-        }
+        .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
     }
     
     private var headerSection: some View {
@@ -422,40 +380,27 @@ struct RecipeDetailView: View {
         return attributedString
     }
     
-    private func loadExistingLists() async {
+    private func addToGroceryList() async {
         do {
-            let lists = try await dependencies.groceryRepository.fetchAllLists()
-            existingLists = lists.map { (id: $0.id, title: $0.title) }
-        } catch {
-            AppLogger.general.error("Failed to load grocery lists: \(error.localizedDescription)")
-        }
-    }
-    
-    private func createNewListAndAddItems() async {
-        do {
-            let listId = try await dependencies.groceryRepository.createList(title: newListTitle)
-            await addIngredientsToList(listId)
-            newListTitle = ""
-        } catch {
-            AppLogger.general.error("Failed to create grocery list: \(error.localizedDescription)")
-        }
-    }
-    
-    private func addToExistingList(_ listId: UUID) async {
-        await addIngredientsToList(listId)
-    }
-    
-    private func addIngredientsToList(_ listId: UUID) async {
-        for ingredient in scaledRecipe.ingredients {
-            do {
-                try await dependencies.groceryRepository.addItem(
-                    listId: listId,
-                    name: ingredient.name,
-                    quantity: ingredient.quantity
-                )
-            } catch {
-                AppLogger.general.error("Failed to add ingredient to grocery list: \(error.localizedDescription)")
+            // Convert ingredients to the format needed
+            let items: [(name: String, quantity: Quantity?)] = scaledRecipe.ingredients.map {
+                ($0.name, $0.quantity)
             }
+
+            try await dependencies.groceryRepository.addItemsFromRecipe(
+                recipeID: recipe.id.uuidString,
+                recipeName: recipe.title,
+                items: items
+            )
+
+            AppLogger.general.info("Added \(items.count) ingredients to grocery list from '\(recipe.title)'")
+
+            // Show toast notification
+            withAnimation {
+                showingToast = true
+            }
+        } catch {
+            AppLogger.general.error("Failed to add ingredients to grocery list: \(error.localizedDescription)")
         }
     }
     

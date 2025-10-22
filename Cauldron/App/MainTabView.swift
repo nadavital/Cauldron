@@ -12,7 +12,6 @@ import os
 /// Tab identifiers for MainTabView
 enum AppTab: String, Hashable {
     case cook
-    case pantry
     case groceries
     case sharing
     case search
@@ -27,10 +26,6 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             Tab("Cook", systemImage: "flame.fill", value: .cook) {
                 CookTabView(dependencies: dependencies)
-            }
-
-            Tab("Pantry", systemImage: "cabinet", value: .pantry) {
-                PantryView(dependencies: dependencies)
             }
 
             Tab("Groceries", systemImage: "cart", value: .groceries) {

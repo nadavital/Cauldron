@@ -18,7 +18,6 @@ class DependencyContainer: ObservableObject {
     // Repositories (actors - thread-safe)
     let recipeRepository: RecipeRepository
     let deletedRecipeRepository: DeletedRecipeRepository
-    let pantryRepository: PantryRepository
     let groceryRepository: GroceryRepository
     let cookingHistoryRepository: CookingHistoryRepository
     let sharingRepository: SharingRepository
@@ -55,7 +54,6 @@ class DependencyContainer: ObservableObject {
             cloudKitService: cloudKitService,
             deletedRecipeRepository: deletedRecipeRepository
         )
-        self.pantryRepository = PantryRepository(modelContainer: modelContainer)
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
@@ -68,13 +66,10 @@ class DependencyContainer: ObservableObject {
         self.timerManager = TimerManager()
 
         self.groceryService = GroceryService(
-            pantryRepo: pantryRepository,
             unitsService: unitsService
         )
 
-        self.recommender = Recommender(
-            pantryRepo: pantryRepository
-        )
+        self.recommender = Recommender()
 
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
@@ -103,7 +98,6 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
-            PantryItemModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,
@@ -123,7 +117,6 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
-            PantryItemModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,

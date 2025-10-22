@@ -74,9 +74,6 @@ struct ContentView: View {
             let recipes = try await dependencies.recipeRepository.fetchAll()
             AppLogger.general.info("Preloaded \(recipes.count) recipes")
 
-            // Preload pantry items for "what can I cook" calculation
-            _ = try await dependencies.pantryRepository.fetchAll()
-
             // Preload cooking history
             _ = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
 
