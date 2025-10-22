@@ -126,25 +126,7 @@ struct AllRecipesListView: View {
                             try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
                             // Update the local recipe in the list
                             if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
-                                var updatedRecipe = localRecipes[index]
-                                updatedRecipe = Recipe(
-                                    id: updatedRecipe.id,
-                                    title: updatedRecipe.title,
-                                    ingredients: updatedRecipe.ingredients,
-                                    steps: updatedRecipe.steps,
-                                    yields: updatedRecipe.yields,
-                                    totalMinutes: updatedRecipe.totalMinutes,
-                                    tags: updatedRecipe.tags,
-                                    nutrition: updatedRecipe.nutrition,
-                                    sourceURL: updatedRecipe.sourceURL,
-                                    sourceTitle: updatedRecipe.sourceTitle,
-                                    notes: updatedRecipe.notes,
-                                    imageURL: updatedRecipe.imageURL,
-                                    isFavorite: !updatedRecipe.isFavorite,
-                                    createdAt: updatedRecipe.createdAt,
-                                    updatedAt: updatedRecipe.updatedAt
-                                )
-                                localRecipes[index] = updatedRecipe
+                                localRecipes[index] = localRecipes[index].toggledFavorite()
                             }
                         }
                     } label: {

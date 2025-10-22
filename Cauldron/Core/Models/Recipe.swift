@@ -157,6 +157,35 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
+    /// Create a copy with updated favorite flag
+    func withFavorite(_ isFavorite: Bool) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            createdAt: createdAt,
+            updatedAt: Date()
+        )
+    }
+
+    /// Toggle the favorite status while preserving metadata
+    func toggledFavorite() -> Recipe {
+        withFavorite(!isFavorite)
+    }
+
     /// Check if the current user owns this recipe
     @MainActor
     func isOwnedByCurrentUser() -> Bool {
