@@ -12,7 +12,8 @@ import os
 struct RecipeDetailView: View {
     let recipe: Recipe
     let dependencies: DependencyContainer
-    
+
+    @Environment(\.dismiss) private var dismiss
     @State private var showingCookMode = false
     @State private var showingEditSheet = false
     @State private var scaleFactor: Double = 1.0
@@ -20,6 +21,7 @@ struct RecipeDetailView: View {
     @State private var scalingWarnings: [ScalingWarning] = []
     @State private var showingShareSheet = false
     @State private var showingToast = false
+    @State private var recipeWasDeleted = false
     
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -144,7 +146,18 @@ struct RecipeDetailView: View {
             CookModeView(recipe: recipe, dependencies: dependencies)
         }
         .sheet(isPresented: $showingEditSheet) {
-            RecipeEditorView(dependencies: dependencies, recipe: recipe)
+            RecipeEditorView(
+                dependencies: dependencies,
+                recipe: recipe,
+                onDelete: {
+                    recipeWasDeleted = true
+                }
+            )
+        }
+        .onChange(of: recipeWasDeleted) { _, wasDeleted in
+            if wasDeleted {
+                dismiss()
+            }
         }
         .sheet(isPresented: $showingShareSheet) {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)

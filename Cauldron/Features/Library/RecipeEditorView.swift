@@ -16,9 +16,12 @@ struct RecipeEditorView: View {
     @State private var showingImagePicker = false
     @State private var imagePickerSourceType: UIImagePickerController.SourceType = .camera
     @State private var showDeleteConfirmation = false
-    
-    init(dependencies: DependencyContainer, recipe: Recipe? = nil) {
+
+    let onDelete: (() -> Void)?
+
+    init(dependencies: DependencyContainer, recipe: Recipe? = nil, onDelete: (() -> Void)? = nil) {
         _viewModel = StateObject(wrappedValue: RecipeEditorViewModel(dependencies: dependencies, existingRecipe: recipe))
+        self.onDelete = onDelete
     }
     
     var body: some View {
@@ -292,6 +295,9 @@ struct RecipeEditorView: View {
                         AppLogger.general.warning("Failed to delete from CloudKit (continuing): \(error.localizedDescription)")
                     }
                 }
+
+                // Notify parent view that recipe was deleted
+                onDelete?()
 
                 dismiss()
             } catch {
