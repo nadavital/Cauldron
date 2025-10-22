@@ -156,4 +156,20 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             updatedAt: Date()
         )
     }
+
+    /// Check if the current user owns this recipe
+    @MainActor
+    func isOwnedByCurrentUser() -> Bool {
+        guard let ownerId = ownerId,
+              let currentUserId = CurrentUserSession.shared.userId else {
+            return false
+        }
+        return ownerId == currentUserId
+    }
+
+    /// Check if this is a referenced recipe (not owned by current user)
+    @MainActor
+    var isReference: Bool {
+        !isOwnedByCurrentUser()
+    }
 }

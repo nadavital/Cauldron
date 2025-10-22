@@ -22,7 +22,12 @@ struct RecipeDetailView: View {
     @State private var showingShareSheet = false
     @State private var showingToast = false
     @State private var recipeWasDeleted = false
-    
+    @State private var showDeleteConfirmation = false
+    @State private var isConvertingToCopy = false
+    @State private var showConvertSuccess = false
+    @State private var recipeOwner: User?
+    @State private var isLoadingOwner = false
+
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
         self.dependencies = dependencies
@@ -117,29 +122,96 @@ struct RecipeDetailView: View {
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showingEditSheet = true
-                    } label: {
-                        Label("Edit Recipe", systemImage: "pencil")
-                    }
+                if recipe.isOwnedByCurrentUser() {
+                    // Owned recipe menu
+                    Menu {
+                        Button {
+                            showingEditSheet = true
+                        } label: {
+                            Label("Edit Recipe", systemImage: "pencil")
+                        }
 
-                    Button {
-                        showingShareSheet = true
-                    } label: {
-                        Label("Share Recipe", systemImage: "square.and.arrow.up")
-                    }
+                        Button {
+                            showingShareSheet = true
+                        } label: {
+                            Label("Share Recipe", systemImage: "square.and.arrow.up")
+                        }
 
-                    Button {
-                        Task {
-                            await addToGroceryList()
+                        Button {
+                            Task {
+                                await addToGroceryList()
+                            }
+                        } label: {
+                            Label("Add to Grocery List", systemImage: "cart.badge.plus")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Recipe", systemImage: "trash")
                         }
                     } label: {
-                        Label("Add to Grocery List", systemImage: "cart.badge.plus")
+                        Image(systemName: "ellipsis.circle")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                } else {
+                    // Referenced recipe menu (read-only)
+                    Menu {
+                        Button {
+                            Task {
+                                await addToGroceryList()
+                            }
+                        } label: {
+                            Label("Add to Grocery List", systemImage: "cart.badge.plus")
+                        }
+
+                        Button {
+                            Task {
+                                await convertToCopy()
+                            }
+                        } label: {
+                            if isConvertingToCopy {
+                                Label("Converting...", systemImage: "doc.on.doc")
+                            } else {
+                                Label("Make a Copy", systemImage: "doc.on.doc")
+                            }
+                        }
+                        .disabled(isConvertingToCopy)
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Remove Reference", systemImage: "bookmark.slash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
+            }
+        }
+        .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            if recipe.isOwnedByCurrentUser() {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        await deleteRecipe()
+                    }
+                }
+            } else {
+                Button("Remove Reference", role: .destructive) {
+                    Task {
+                        await deleteReference()
+                    }
+                }
+            }
+        } message: {
+            if recipe.isOwnedByCurrentUser() {
+                Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
+            } else {
+                Text("This will remove the recipe reference from your collection. The original recipe will remain in the owner's collection.")
             }
         }
         .sheet(isPresented: $showingCookMode) {
@@ -163,6 +235,12 @@ struct RecipeDetailView: View {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
+        .task {
+            // Load recipe owner info if this is a reference
+            if recipe.isReference, let ownerId = recipe.ownerId {
+                await loadRecipeOwner(ownerId)
+            }
+        }
     }
     
     private var headerSection: some View {
@@ -175,18 +253,75 @@ struct RecipeDetailView: View {
                         Text(time)
                     }
                 }
-                
+
                 HStack(spacing: 6) {
                     Image(systemName: "person.2")
                         .foregroundColor(.cauldronOrange)
                     Text(recipe.yields)
                 }
-                
+
                 Spacer()
             }
             .font(.subheadline)
             .foregroundColor(.secondary)
-            
+
+            // Reference indicator banner
+            if recipe.isReference {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.caption)
+                            .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+
+                        Text("Recipe Reference")
+                            .font(.caption)
+                            .fontWeight(.medium)
+
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text("View-only. Tap the menu to make an editable copy.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+                    }
+
+                    // Owner profile link button
+                    if let owner = recipeOwner {
+                        NavigationLink(destination: UserProfileView(user: owner, dependencies: dependencies)) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+
+                                Text("View \(owner.displayName)'s profile")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    } else if isLoadingOwner {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Loading owner info...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.1))
+                .cornerRadius(8)
+            }
+
             if !recipe.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -457,6 +592,84 @@ struct RecipeDetailView: View {
             } catch {
                 AppLogger.general.error("Failed to toggle favorite: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func deleteRecipe() async {
+        do {
+            try await dependencies.recipeRepository.delete(id: recipe.id)
+            AppLogger.general.info("Deleted recipe: \(recipe.title)")
+            recipeWasDeleted = true
+        } catch {
+            AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteReference() async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("Cannot delete reference - no current user")
+            return
+        }
+
+        do {
+            try await dependencies.recipeReferenceManager.deleteReference(
+                for: recipe.id,
+                userId: userId
+            )
+            AppLogger.general.info("Deleted recipe reference: \(recipe.title)")
+
+            // Show toast
+            withAnimation {
+                showingToast = true
+            }
+
+            // Dismiss after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                dismiss()
+            }
+        } catch {
+            AppLogger.general.error("Failed to delete reference: \(error.localizedDescription)")
+        }
+    }
+
+    private func convertToCopy() async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("Cannot convert to copy - no current user")
+            return
+        }
+
+        isConvertingToCopy = true
+        defer { isConvertingToCopy = false }
+
+        do {
+            let ownedCopy = try await dependencies.recipeReferenceManager.convertReferenceToOwnedCopyAndDeleteReference(
+                recipe: recipe,
+                currentUserId: userId
+            )
+            AppLogger.general.info("Converted reference to owned copy: \(ownedCopy.title)")
+
+            // Show success state
+            showConvertSuccess = true
+
+            // Dismiss and navigate to the new copy
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                dismiss()
+            }
+        } catch {
+            AppLogger.general.error("Failed to convert to copy: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadRecipeOwner(_ ownerId: UUID) async {
+        isLoadingOwner = true
+        defer { isLoadingOwner = false }
+
+        do {
+            recipeOwner = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId)
+            AppLogger.general.info("Loaded recipe owner: \(recipeOwner?.displayName ?? "unknown")")
+        } catch {
+            AppLogger.general.warning("Failed to load recipe owner: \(error.localizedDescription)")
+            // Don't show error to user - just don't display the profile link
         }
     }
 }

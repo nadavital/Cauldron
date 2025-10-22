@@ -72,7 +72,31 @@ struct ContentView: View {
         do {
             // Fetch recipes to warm up the database
             let recipes = try await dependencies.recipeRepository.fetchAll()
-            AppLogger.general.info("Preloaded \(recipes.count) recipes")
+            AppLogger.general.info("Preloaded \(recipes.count) owned recipes")
+
+            // Preload recipe references (for shared recipes saved by user)
+            if let userId = userSession.userId, userSession.isCloudSyncAvailable {
+                do {
+                    let references = try await dependencies.recipeReferenceManager.fetchReferences(for: userId)
+                    AppLogger.general.info("Preloaded \(references.count) recipe references")
+
+                    // Fetch full recipes for references in background to warm cache
+                    for reference in references {
+                        Task.detached(priority: .utility) {
+                            do {
+                                _ = try await dependencies.cloudKitService.fetchPublicRecipe(
+                                    recipeId: reference.originalRecipeId,
+                                    ownerId: reference.originalOwnerId
+                                )
+                            } catch {
+                                AppLogger.general.warning("Failed to preload reference: \(reference.recipeTitle)")
+                            }
+                        }
+                    }
+                } catch {
+                    AppLogger.general.warning("Failed to preload recipe references: \(error.localizedDescription)")
+                }
+            }
 
             // Preload cooking history
             _ = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)

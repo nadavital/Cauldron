@@ -32,6 +32,7 @@ class DependencyContainer: ObservableObject {
     let sharingService: SharingService
     let cloudKitService: CloudKitService
     let recipeSyncService: RecipeSyncService
+    let recipeReferenceManager: RecipeReferenceManager
 
     // UI Services (MainActor)
     let timerManager: TimerManager
@@ -81,6 +82,11 @@ class DependencyContainer: ObservableObject {
             cloudKitService: cloudKitService,
             recipeRepository: recipeRepository,
             deletedRecipeRepository: deletedRecipeRepository
+        )
+
+        self.recipeReferenceManager = RecipeReferenceManager(
+            cloudKitService: cloudKitService,
+            recipeRepository: recipeRepository
         )
 
         // Initialize parsers
