@@ -1078,14 +1078,14 @@ actor CloudKitService {
     func subscribeToConnectionRequests(forUserId userId: UUID) async throws {
         let subscriptionID = "connection-requests-\(userId.uuidString)"
 
-        // Check if subscription already exists
+        // Delete existing subscription first (if any) to ensure we use the latest notification format
         let db = try getPublicDatabase()
         do {
-            _ = try await db.subscription(for: subscriptionID)
-            logger.info("Connection request subscription already exists")
-            return
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Deleted old connection request subscription")
         } catch {
-            // Subscription doesn't exist, create it
+            // Subscription doesn't exist yet, that's fine
+            logger.info("No existing subscription to delete (creating fresh)")
         }
 
         // Create predicate: toUserId == current user AND status == pending
