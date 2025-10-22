@@ -19,9 +19,9 @@ struct CookTabView: View {
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
     @State private var isAIAvailable = false
-    
-    init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies))
+
+    init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
+        _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
     }
     
     var body: some View {
@@ -32,12 +32,12 @@ struct CookTabView: View {
                     if !viewModel.cookableRecipes.isEmpty {
                         whatCanICookSection
                     }
-                    
+
                     // Recently Cooked
                     if !viewModel.recentlyCookedRecipes.isEmpty {
                         recentlyCookedSection
                     }
-                    
+
                     // All Recipes
                     allRecipesSection
                 }
@@ -87,19 +87,8 @@ struct CookTabView: View {
                 Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
             }
             .task {
-                // Only load if we don't have data yet (viewModel loads eagerly on init)
-                // This prevents double-loading on first appearance
-                if viewModel.allRecipes.isEmpty {
-                    await viewModel.loadData()
-                }
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
-            }
-            .onAppear {
-                // Reload data whenever view appears to catch changes from child views
-                Task {
-                    await viewModel.loadData()
-                }
             }
             .refreshable {
                 // Force sync when user pulls to refresh
@@ -549,5 +538,5 @@ struct RecipeCardView: View {
 }
 
 #Preview {
-    CookTabView(dependencies: .preview())
+    CookTabView(dependencies: .preview(), preloadedData: nil)
 }
