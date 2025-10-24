@@ -1298,7 +1298,7 @@ actor HTMLRecipeParser: RecipeParser {
         
         // Normalize whitespace while preserving line breaks
         result = result.replacingOccurrences(of: "\r", with: "\n")
-        result = result.replacingOccurrences(of: "[ \t\f]+", with: " ", options: .regularExpression)
+        result = result.replacingOccurrences(of: #"[ \t\f]+"#, with: " ", options: .regularExpression)
         result = result.replacingOccurrences(of: " \n", with: "\n", options: .regularExpression)
         result = result.replacingOccurrences(of: "\n ", with: "\n", options: .regularExpression)
         result = result.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
