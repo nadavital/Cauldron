@@ -24,6 +24,11 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     let dependencies: DependencyContainer
     private var generationTask: Task<Void, Never>?
 
+    private static let existingRecipeThreshold: Double = 4.0
+    private static let newRecipeKeywords: Set<String> = [
+        "new", "original", "invent", "made-up", "brand-new", "experimental"
+    ]
+
     enum GenerationProgress {
         case idle
         case generatingTitle
@@ -93,6 +98,16 @@ class AIRecipeGeneratorViewModel: ObservableObject {
 
         generationTask = Task {
             do {
+                if let existingRecipe = await self.findExistingRecipeIfAvailable(for: prompt) {
+                    guard !Task.isCancelled else { return }
+
+                    self.generatedRecipe = existingRecipe
+                    self.generationProgress = .complete
+                    self.isGenerating = false
+                    AppLogger.general.info("Matched existing recipe for prompt: \(existingRecipe.title)")
+                    return
+                }
+
                 let stream = dependencies.foundationModelsService.generateRecipe(from: prompt)
 
                 for try await partial in stream {
@@ -227,5 +242,78 @@ class AIRecipeGeneratorViewModel: ObservableObject {
             tags: partial.tags ?? [],
             notes: partial.notes
         )
+    }
+
+    private func findExistingRecipeIfAvailable(for prompt: String) async -> Recipe? {
+        let normalizedPrompt = prompt.lowercased()
+        let promptTokens = tokenize(normalizedPrompt)
+
+        guard !promptTokens.isEmpty else {
+            return nil
+        }
+
+        if promptTokens.contains(where: { Self.newRecipeKeywords.contains($0) }) {
+            return nil
+        }
+
+        do {
+            let recipes = try await dependencies.recipeRepository.fetchAll()
+            guard !recipes.isEmpty else { return nil }
+
+            var bestMatch: (recipe: Recipe, score: Double)?
+
+            for recipe in recipes {
+                let score = scoreRecipe(recipe, promptTokens: promptTokens, normalizedPrompt: normalizedPrompt)
+                if let currentBest = bestMatch {
+                    if score > currentBest.score {
+                        bestMatch = (recipe, score)
+                    }
+                } else {
+                    bestMatch = (recipe, score)
+                }
+            }
+
+            if let match = bestMatch, match.score >= Self.existingRecipeThreshold {
+                return match.recipe
+            }
+        } catch {
+            AppLogger.general.error("Failed to search existing recipes: \(error.localizedDescription)")
+        }
+
+        return nil
+    }
+
+    private func scoreRecipe(_ recipe: Recipe, promptTokens: [String], normalizedPrompt: String) -> Double {
+        var score: Double = 0
+
+        let title = recipe.title.lowercased()
+        if normalizedPrompt.contains(title) {
+            score += 8
+        }
+
+        let titleTokens = tokenize(title)
+        let overlappingTitleTokens = titleTokens.filter { promptTokens.contains($0) }
+        score += Double(overlappingTitleTokens.count) * 3
+
+        let tagTokens = recipe.tags.map { $0.name.lowercased() }
+        let overlappingTags = tagTokens.filter { promptTokens.contains($0) }
+        score += Double(overlappingTags.count) * 2
+
+        let ingredientTokens = recipe.ingredients.flatMap { tokenize($0.name.lowercased()) }
+        let overlappingIngredients = ingredientTokens.filter { promptTokens.contains($0) }
+        score += Double(Set(overlappingIngredients).count) * 0.75
+
+        let yields = recipe.yields.lowercased()
+        if promptTokens.contains(where: { yields.contains($0) }) {
+            score += 0.5
+        }
+
+        return score
+    }
+
+    private func tokenize(_ text: String) -> [String] {
+        text.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count > 2 }
     }
 }

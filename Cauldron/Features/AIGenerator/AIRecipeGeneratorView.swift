@@ -40,6 +40,8 @@ struct AIRecipeGeneratorView: View {
                         // Preview of generated recipe
                         if let partial = viewModel.partialRecipe {
                             recipePreviewSection(partial: partial)
+                        } else if let recipe = viewModel.generatedRecipe {
+                            generatedRecipeSection(recipe: recipe)
                         }
 
                         // Error display
@@ -354,6 +356,134 @@ struct AIRecipeGeneratorView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: partial.ingredients?.count)
         .animation(.easeInOut(duration: 0.3), value: partial.steps?.count)
+    }
+
+    private func generatedRecipeSection(recipe: Recipe) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Recipe Preview")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Title")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+
+                Text(recipe.title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+
+            HStack {
+                Label(recipe.yields, systemImage: "person.2")
+                    .font(.subheadline)
+
+                if let minutes = recipe.totalMinutes {
+                    Label("\(minutes) min", systemImage: "clock")
+                        .font(.subheadline)
+                }
+            }
+            .foregroundColor(.secondary)
+
+            if !recipe.ingredients.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Ingredients")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+
+                    ForEach(recipe.ingredients) { ingredient in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Circle()
+                                .fill(Color.cauldronOrange.opacity(0.3))
+                                .frame(width: 6, height: 6)
+
+                            Text(ingredient.displayString)
+                                .font(.body)
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemBackground))
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+            }
+
+            if !recipe.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Instructions")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+
+                    ForEach(recipe.steps.sorted(by: { $0.index < $1.index })) { step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(step.index + 1)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(Color.cauldronOrange))
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(step.text)
+                                    .font(.body)
+
+                                if !step.timers.isEmpty {
+                                    ForEach(step.timers) { timer in
+                                        Text("\(timer.label): \(timer.displayDuration)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemBackground))
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+            }
+
+            if !recipe.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(recipe.tags) { tag in
+                            Text(tag.name)
+                                .font(.caption)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.cauldronOrange.opacity(0.2))
+                                .cornerRadius(8)
+                        }
+                    }
+                }
+            }
+
+            if let notes = recipe.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+
+                    Text(notes)
+                        .font(.body)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemBackground))
+                .cornerRadius(12)
+                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+            }
+        }
     }
 
     private func errorSection(error: String) -> some View {
