@@ -42,6 +42,8 @@ actor HTMLRecipeParser: RecipeParser {
         let nsString = html as NSString
         let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsString.length))
 
+        var candidateDictionaries: [[String: Any]] = []
+
         // Try each JSON-LD block
         for match in matches {
             guard match.numberOfRanges >= 2 else { continue }
@@ -49,7 +51,17 @@ actor HTMLRecipeParser: RecipeParser {
             let jsonRange = match.range(at: 1)
             let jsonString = nsString.substring(with: jsonRange)
 
-            if let recipe = try? parseJSONLD(jsonString, sourceURL: sourceURL) {
+            let dictionaries = parseJSONLDDictionaries(jsonString)
+            candidateDictionaries.append(contentsOf: dictionaries)
+        }
+
+        let rankedDictionaries = rankRecipeDictionaries(candidateDictionaries, sourceURL: sourceURL)
+        guard !rankedDictionaries.isEmpty else {
+            return nil
+        }
+
+        for candidate in rankedDictionaries {
+            if let recipe = try parseRecipeFromJSON(candidate, sourceURL: sourceURL) {
                 return recipe
             }
         }
@@ -57,13 +69,11 @@ actor HTMLRecipeParser: RecipeParser {
         return nil
     }
 
-    private func parseJSONLD(_ jsonString: String, sourceURL: URL) throws -> Recipe? {
-        guard let jsonData = jsonString.data(using: .utf8) else { return nil }
+    private func parseJSONLDDictionaries(_ jsonString: String) -> [[String: Any]] {
+        guard let jsonData = jsonString.data(using: .utf8) else { return [] }
 
         let jsonObject = try? JSONSerialization.jsonObject(with: jsonData)
-        guard let candidate = extractRecipeDictionary(from: jsonObject) else { return nil }
-
-        return try parseRecipeFromJSON(candidate, sourceURL: sourceURL)
+        return collectRecipeDictionaries(from: jsonObject)
     }
 
     private func parseRecipeFromJSON(_ json: [String: Any], sourceURL: URL) throws -> Recipe? {
@@ -163,58 +173,54 @@ actor HTMLRecipeParser: RecipeParser {
         return minutes > 0 ? minutes : nil
     }
 
-    private func extractRecipeDictionary(from object: Any?) -> [String: Any]? {
-        guard let object = object else { return nil }
+    private func collectRecipeDictionaries(from object: Any?) -> [[String: Any]] {
+        guard let object = object else { return [] }
+
+        var results: [[String: Any]] = []
 
         if let dict = object as? [String: Any] {
             if isRecipeDictionary(dict) {
-                return dict
+                results.append(dict)
             }
 
-            if let mainEntity = extractRecipeDictionary(from: dict["mainEntity"]) {
-                return mainEntity
+            let nestedKeys = [
+                "mainEntity",
+                "mainEntityOfPage",
+                "item",
+                "potentialAction",
+                "subjectOf"
+            ]
+
+            for key in nestedKeys {
+                results.append(contentsOf: collectRecipeDictionaries(from: dict[key]))
             }
 
-            if let mainEntityOfPage = extractRecipeDictionary(from: dict["mainEntityOfPage"]) {
-                return mainEntityOfPage
+            if let graph = dict["@graph"] {
+                results.append(contentsOf: collectRecipeDictionaries(from: graph))
             }
 
-            if let graph = dict["@graph"] as? [Any] {
-                for node in graph {
-                    if let recipe = extractRecipeDictionary(from: node) {
-                        return recipe
-                    }
-                }
+            if let list = dict["@list"] {
+                results.append(contentsOf: collectRecipeDictionaries(from: list))
             }
 
-            if let potentialList = dict["@list"] as? [Any] {
-                for node in potentialList {
-                    if let recipe = extractRecipeDictionary(from: node) {
-                        return recipe
-                    }
-                }
+            if let itemList = dict["itemListElement"] {
+                results.append(contentsOf: collectRecipeDictionaries(from: itemList))
             }
 
-            if let itemList = dict["itemListElement"] as? [Any] {
-                for node in itemList {
-                    if let recipe = extractRecipeDictionary(from: node) {
-                        return recipe
-                    }
-                }
+            if let hasPart = dict["hasPart"] {
+                results.append(contentsOf: collectRecipeDictionaries(from: hasPart))
             }
 
-            return nil
-        }
-
-        if let array = object as? [Any] {
+            if let mentions = dict["mentions"] {
+                results.append(contentsOf: collectRecipeDictionaries(from: mentions))
+            }
+        } else if let array = object as? [Any] {
             for element in array {
-                if let recipe = extractRecipeDictionary(from: element) {
-                    return recipe
-                }
+                results.append(contentsOf: collectRecipeDictionaries(from: element))
             }
         }
 
-        return nil
+        return results
     }
 
     private func isRecipeDictionary(_ dict: [String: Any]) -> Bool {
@@ -240,6 +246,187 @@ actor HTMLRecipeParser: RecipeParser {
         }
 
         return false
+    }
+
+    private func rankRecipeDictionaries(_ candidates: [[String: Any]], sourceURL: URL) -> [[String: Any]] {
+        guard !candidates.isEmpty else { return [] }
+
+        let normalizedSource = normalizeURL(sourceURL)
+        let sourceHost = sourceURL.host?.lowercased()
+        let slugTokens = tokenizeSlug(from: sourceURL)
+        let sourcePathTokens = tokenizePath(from: sourceURL)
+
+        var scoredCandidates: [([String: Any], Double)] = []
+
+        for candidate in candidates {
+            let candidateURLs = extractCandidateURLs(from: candidate, baseURL: sourceURL)
+            var score: Double = 0
+
+            var matchedPageURL = false
+            for url in candidateURLs {
+                let normalized = normalizeURL(url)
+                if normalized == normalizedSource {
+                    score += 1_000
+                    matchedPageURL = true
+                    break
+                }
+            }
+
+            let hasHostMatch = candidateURLs.contains { $0.host?.lowercased() == sourceHost }
+
+            if !matchedPageURL {
+                for url in candidateURLs {
+                    if url.host?.lowercased() == sourceHost {
+                        score += 200
+
+                        let pathTokens = tokenizePath(from: url)
+                        if !slugTokens.isEmpty {
+                            let overlap = slugTokens.intersection(pathTokens)
+                            score += Double(overlap.count * 25)
+                        }
+
+                        if !sourcePathTokens.isEmpty {
+                            let overlap = sourcePathTokens.intersection(pathTokens)
+                            score += Double(overlap.count * 10)
+                        }
+
+                        break
+                    }
+                }
+            }
+
+            if !matchedPageURL && !hasHostMatch {
+                if let sourceHost = sourceHost, candidateURLs.contains(where: { $0.host != nil && $0.host?.lowercased() != sourceHost }) {
+                    score -= 150
+                }
+            }
+
+            let titleKeys = ["name", "headline", "alternateName"]
+            for key in titleKeys {
+                if let text = candidate[key] as? String {
+                    let nameTokens = tokenize(text)
+                    if !slugTokens.isEmpty {
+                        let overlap = slugTokens.intersection(nameTokens)
+                        if !overlap.isEmpty {
+                            score += Double(overlap.count * 20)
+                        }
+                    }
+
+                    if !sourcePathTokens.isEmpty {
+                        let overlap = sourcePathTokens.intersection(nameTokens)
+                        if !overlap.isEmpty {
+                            score += Double(overlap.count * 10)
+                        }
+                    }
+                }
+            }
+
+            let ingredientCount = extractIngredientEntries(from: candidate).count
+            if ingredientCount > 0 {
+                score += Double(min(ingredientCount, 50))
+            }
+
+            let instructionCount = extractInstructionEntries(from: candidate).count
+            if instructionCount > 0 {
+                score += Double(min(instructionCount, 50))
+            }
+
+            scoredCandidates.append((candidate, score))
+        }
+
+        return scoredCandidates
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
+    }
+
+    private func extractCandidateURLs(from dict: [String: Any], baseURL: URL) -> [URL] {
+        var results: [URL] = []
+        var seen: Set<String> = []
+
+        func appendURLs(from value: Any?) {
+            guard let value = value else { return }
+
+            if let string = value as? String {
+                let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+
+                if let absolute = URL(string: trimmed), absolute.scheme != nil {
+                    let normalized = normalizeURL(absolute)
+                    if !seen.contains(normalized) {
+                        seen.insert(normalized)
+                        results.append(absolute)
+                    }
+                } else if let resolved = URL(string: trimmed, relativeTo: baseURL) {
+                    let absolute = resolved.absoluteURL
+                    let normalized = normalizeURL(absolute)
+                    if !seen.contains(normalized) {
+                        seen.insert(normalized)
+                        results.append(absolute)
+                    }
+                }
+            } else if let array = value as? [Any] {
+                for element in array {
+                    appendURLs(from: element)
+                }
+            } else if let dict = value as? [String: Any] {
+                if let id = dict["@id"] { appendURLs(from: id) }
+                if let url = dict["url"] { appendURLs(from: url) }
+                if let sameAs = dict["sameAs"] { appendURLs(from: sameAs) }
+                if let mainEntity = dict["mainEntityOfPage"] { appendURLs(from: mainEntity) }
+            }
+        }
+
+        let urlKeys = ["url", "@id", "sameAs", "mainEntityOfPage", "identifier"]
+        for key in urlKeys {
+            appendURLs(from: dict[key])
+        }
+
+        return results
+    }
+
+    private func normalizeURL(_ url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: true) else {
+            return url.absoluteString
+        }
+
+        components.fragment = nil
+        if let query = components.query, query.isEmpty {
+            components.query = nil
+        }
+
+        if var normalized = components.url?.absoluteString {
+            if normalized.hasSuffix("/") {
+                normalized.removeLast()
+            }
+            return normalized
+        }
+
+        var normalized = url.absoluteString
+        if normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+
+    private func tokenizeSlug(from url: URL) -> Set<String> {
+        let slugComponents = url.pathComponents.filter { $0 != "/" }
+        guard let last = slugComponents.last else { return [] }
+        return tokenize(last)
+    }
+
+    private func tokenizePath(from url: URL) -> Set<String> {
+        let components = url.pathComponents.filter { $0 != "/" }
+        let tokens = components.flatMap { tokenize($0) }
+        return Set(tokens)
+    }
+
+    private func tokenize(_ string: String) -> Set<String> {
+        let separators = CharacterSet.alphanumerics.inverted
+        let parts = string
+            .lowercased()
+            .components(separatedBy: separators)
+            .filter { $0.count >= 2 }
+        return Set(parts)
     }
 
     private func extractIngredientEntries(from json: [String: Any]) -> [Any] {
