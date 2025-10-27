@@ -23,11 +23,31 @@ struct TimerSpec: Codable, Sendable, Hashable, Identifiable {
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60
         let secs = seconds % 60
-        
+
         if hours > 0 {
-            return "\(hours)h \(minutes)m"
+            // Show hours and minutes only if minutes > 0
+            if minutes > 0 {
+                // Show seconds only if present
+                if secs > 0 {
+                    return "\(hours)h \(minutes)m \(secs)s"
+                } else {
+                    return "\(hours)h \(minutes)m"
+                }
+            } else {
+                // Show seconds if hours but no minutes
+                if secs > 0 {
+                    return "\(hours)h \(secs)s"
+                } else {
+                    return "\(hours)h"
+                }
+            }
         } else if minutes > 0 {
-            return "\(minutes)m \(secs)s"
+            // Show minutes and seconds only if seconds > 0
+            if secs > 0 {
+                return "\(minutes)m \(secs)s"
+            } else {
+                return "\(minutes)m"
+            }
         } else {
             return "\(secs)s"
         }

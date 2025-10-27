@@ -13,10 +13,17 @@ struct SearchTabView: View {
     @StateObject private var viewModel: SearchTabViewModel
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
-    
+    @State private var recipeFilter: RecipeFilter = .all
+
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
         case people = "People"
+    }
+
+    enum RecipeFilter: String, CaseIterable {
+        case all = "All"
+        case publicOnly = "Public"
+        case friendsOnly = "Friends Only"
     }
     
     init(dependencies: DependencyContainer) {
@@ -37,21 +44,35 @@ struct SearchTabView: View {
                 
                 // Content based on search mode
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        if searchMode == .recipes {
-                            if searchText.isEmpty {
-                                // Show categories when not searching
-                                categoriesView
-                            } else {
-                                // Show recipe search results
-                                recipeSearchResultsView
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Recipe filter (only shown in recipe mode when searching)
+                        if searchMode == .recipes && !searchText.isEmpty {
+                            Picker("Filter", selection: $recipeFilter) {
+                                ForEach(RecipeFilter.allCases, id: \.self) { filter in
+                                    Text(filter.rawValue).tag(filter)
+                                }
                             }
-                        } else {
-                            // Show people search
-                            peopleSearchView
+                            .pickerStyle(.segmented)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
                         }
+
+                        VStack(alignment: .leading, spacing: 24) {
+                            if searchMode == .recipes {
+                                if searchText.isEmpty {
+                                    // Show categories when not searching
+                                    categoriesView
+                                } else {
+                                    // Show recipe search results
+                                    recipeSearchResultsView
+                                }
+                            } else {
+                                // Show people search
+                                peopleSearchView
+                            }
+                        }
+                        .padding()
                     }
-                    .padding()
                 }
             }
             .navigationTitle("Search")
@@ -101,7 +122,9 @@ struct SearchTabView: View {
     
     private var recipeSearchResultsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if viewModel.recipeSearchResults.isEmpty {
+            let filteredRecipes = filterRecipes(viewModel.recipeSearchResults)
+
+            if filteredRecipes.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 48))
@@ -109,24 +132,35 @@ struct SearchTabView: View {
                     Text("No recipes found")
                         .font(.headline)
                         .foregroundColor(.secondary)
-                    Text("Try searching for different keywords")
+                    Text(recipeFilter == .all ? "Try searching for different keywords" : "Try a different filter")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
             } else {
-                Text("\(viewModel.recipeSearchResults.count) recipes found")
+                Text("\(filteredRecipes.count) recipes found")
                     .font(.headline)
                     .foregroundColor(.secondary)
-                
-                ForEach(viewModel.recipeSearchResults) { recipe in
+
+                ForEach(filteredRecipes) { recipe in
                     NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                         RecipeRowView(recipe: recipe)
                     }
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+
+    private func filterRecipes(_ recipes: [Recipe]) -> [Recipe] {
+        switch recipeFilter {
+        case .all:
+            return recipes
+        case .publicOnly:
+            return recipes.filter { $0.visibility == .publicRecipe }
+        case .friendsOnly:
+            return recipes.filter { $0.visibility == .friendsOnly }
         }
     }
     

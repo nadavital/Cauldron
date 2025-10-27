@@ -129,17 +129,20 @@ struct RecipeEditorView: View {
                 
                 // Recipe Visibility
                 Section {
-                    Picker("Visibility", selection: $viewModel.visibility) {
+                    VStack(spacing: 12) {
                         ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                            Label(visibility.displayName, systemImage: visibility.icon)
-                                .tag(visibility)
+                            VisibilityOptionCard(
+                                visibility: visibility,
+                                isSelected: viewModel.visibility == visibility,
+                                onSelect: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        viewModel.visibility = visibility
+                                    }
+                                }
+                            )
                         }
                     }
-                    .pickerStyle(.menu)
-                    
-                    Text(viewModel.visibility.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    .padding(.vertical, 8)
                 } header: {
                     Text("Who can see this recipe?")
                 } footer: {
@@ -397,11 +400,10 @@ struct StepEditorRow: View {
             .toggleStyle(.switch)
             .padding(.vertical, 4)
             
-            if !step.timers.isEmpty {
-                ForEach(step.timers.indices, id: \.self) { timerIndex in
-                    TimerEditorRow(timer: $step.timers[timerIndex])
-                }
-                .padding(.leading, 4)
+            // Show only the first timer (limit to one timer per step)
+            if let timerIndex = step.timers.indices.first {
+                TimerEditorRow(timer: $step.timers[timerIndex])
+                    .padding(.leading, 4)
             }
         }
         .padding(.vertical, 8)
@@ -503,6 +505,62 @@ struct NutritionEditorView: View {
                 .multilineTextAlignment(.trailing)
                 .frame(width: 80)
         }
+    }
+}
+
+// MARK: - Visibility Option Card
+
+struct VisibilityOptionCard: View {
+    let visibility: RecipeVisibility
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.cauldronOrange : Color.gray.opacity(0.2))
+                        .frame(width: 50, height: 50)
+
+                    Image(systemName: visibility.icon)
+                        .font(.title3)
+                        .foregroundColor(isSelected ? .white : .secondary)
+                }
+
+                // Text content
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(visibility.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Text(visibility.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer()
+
+                // Selection indicator
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.cauldronOrange.opacity(0.1) : Color(.systemGray6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.cauldronOrange : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

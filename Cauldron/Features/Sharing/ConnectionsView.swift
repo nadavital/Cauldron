@@ -27,18 +27,56 @@ struct ConnectionsView: View {
                             NavigationLink {
                                 UserProfileView(user: user, dependencies: viewModel.dependencies)
                             } label: {
-                                ConnectionRequestRowView(
-                                    user: user,
-                                    connection: connection,
-                                    onAccept: {
-                                        await viewModel.acceptRequest(connection)
-                                    },
-                                    onReject: {
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(Color.cauldronOrange.opacity(0.3))
+                                        .frame(width: 50, height: 50)
+                                        .overlay(
+                                            Text(user.displayName.prefix(2).uppercased())
+                                                .font(.headline)
+                                                .foregroundColor(.cauldronOrange)
+                                        )
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(user.displayName)
+                                            .font(.headline)
+
+                                        Text("@\(user.username)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    // Visual indicator for pending request
+                                    Text("New Request")
+                                        .font(.caption)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.cauldronOrange.opacity(0.2))
+                                        .foregroundColor(.cauldronOrange)
+                                        .cornerRadius(8)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    Task {
                                         await viewModel.rejectRequest(connection)
                                     }
-                                )
+                                } label: {
+                                    Label("Reject", systemImage: "xmark")
+                                }
+
+                                Button {
+                                    Task {
+                                        await viewModel.acceptRequest(connection)
+                                    }
+                                } label: {
+                                    Label("Accept", systemImage: "checkmark")
+                                }
+                                .tint(.green)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }

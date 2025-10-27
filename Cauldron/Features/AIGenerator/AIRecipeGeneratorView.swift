@@ -153,32 +153,70 @@ struct AIRecipeGeneratorView: View {
             Text("What would you like to cook?")
                 .font(.headline)
 
-            TextEditor(text: $viewModel.prompt)
-                .frame(minHeight: 140)
-                .padding(14)
-                .background(Color.cauldronBackground)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
-                )
-                .focused($isPromptFocused)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $viewModel.prompt)
+                    .frame(minHeight: 160)
+                    .padding(14)
+                    .background(Color.cauldronBackground)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
+                    )
+                    .focused($isPromptFocused)
 
-            Text("Examples: \"Healthy chicken pasta\", \"Quick vegetarian dinner\", \"Chocolate dessert for 8 people\"")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                // Placeholder text
+                if viewModel.prompt.isEmpty {
+                    Text("Describe your ideal dish...")
+                        .foregroundColor(.secondary.opacity(0.5))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 22)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            // Quick suggestion chips
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Quick ideas:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        SuggestionChip(text: "Quick meal", onTap: {
+                            viewModel.prompt = "A quick and easy meal for tonight"
+                        })
+                        SuggestionChip(text: "Vegetarian", onTap: {
+                            viewModel.prompt = "A delicious vegetarian recipe"
+                        })
+                        SuggestionChip(text: "Dessert", onTap: {
+                            viewModel.prompt = "A sweet dessert for special occasions"
+                        })
+                        SuggestionChip(text: "Low-carb", onTap: {
+                            viewModel.prompt = "A healthy low-carb dinner"
+                        })
+                        SuggestionChip(text: "Comfort food", onTap: {
+                            viewModel.prompt = "A hearty comfort food meal"
+                        })
+                    }
+                }
+            }
 
             Button {
                 viewModel.generateRecipe()
                 isPromptFocused = false
             } label: {
-                Label("Generate Recipe", systemImage: "wand.and.stars")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(viewModel.canGenerate ? Color.cauldronOrange : Color.gray.opacity(0.3))
-                    .foregroundColor(viewModel.canGenerate ? .white : .secondary)
-                    .cornerRadius(12)
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                    Text("Generate Recipe")
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(viewModel.canGenerate ? Color.cauldronOrange : Color.gray.opacity(0.3))
+                .foregroundColor(viewModel.canGenerate ? .white : .secondary)
+                .cornerRadius(12)
             }
             .disabled(!viewModel.canGenerate)
         }
@@ -367,6 +405,33 @@ struct AIRecipeGeneratorView: View {
         .padding(16)
         .background(Color.red.opacity(0.1))
         .cornerRadius(12)
+    }
+}
+
+// MARK: - Suggestion Chip
+
+struct SuggestionChip: View {
+    let text: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(text)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.cauldronOrange.opacity(0.1))
+                )
+                .foregroundColor(.cauldronOrange)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.cauldronOrange.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 

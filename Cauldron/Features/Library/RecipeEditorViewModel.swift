@@ -184,7 +184,10 @@ class RecipeEditorViewModel: ObservableObject {
     
     func addTimer(to stepIndex: Int) {
         guard steps.indices.contains(stepIndex) else { return }
-        steps[stepIndex].timers.append(TimerInput())
+        // Only add a timer if there isn't one already (limit to one timer per step)
+        if steps[stepIndex].timers.isEmpty {
+            steps[stepIndex].timers.append(TimerInput())
+        }
     }
     
     func save() async -> Bool {

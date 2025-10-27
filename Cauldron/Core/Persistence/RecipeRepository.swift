@@ -389,6 +389,41 @@ actor RecipeRepository {
         try context.save()
     }
 
+    /// Update visibility for a recipe
+    func updateVisibility(id: UUID, visibility: RecipeVisibility) async throws {
+        // Fetch the full recipe
+        guard let recipe = try await fetch(id: id) else {
+            throw RepositoryError.notFound
+        }
+
+        // Create updated recipe with new visibility
+        let updatedRecipe = Recipe(
+            id: recipe.id,
+            title: recipe.title,
+            ingredients: recipe.ingredients,
+            steps: recipe.steps,
+            yields: recipe.yields,
+            totalMinutes: recipe.totalMinutes,
+            tags: recipe.tags,
+            nutrition: recipe.nutrition,
+            sourceURL: recipe.sourceURL,
+            sourceTitle: recipe.sourceTitle,
+            notes: recipe.notes,
+            imageURL: recipe.imageURL,
+            isFavorite: recipe.isFavorite,
+            visibility: visibility,
+            ownerId: recipe.ownerId,
+            cloudRecordName: recipe.cloudRecordName,
+            createdAt: recipe.createdAt,
+            updatedAt: Date()
+        )
+
+        // Update the recipe (this handles CloudKit sync)
+        try await update(updatedRecipe)
+
+        logger.info("Updated recipe visibility: \(recipe.title) -> \(visibility.displayName)")
+    }
+
     /// Check if a similar recipe already exists
     /// Uses title and ingredient count as heuristics to detect duplicates
     func hasSimilarRecipe(title: String, ownerId: UUID, ingredientCount: Int) async throws -> Bool {

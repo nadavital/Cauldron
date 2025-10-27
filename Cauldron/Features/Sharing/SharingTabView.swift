@@ -13,12 +13,19 @@ enum SharingTabDestination: Hashable {
     case connections
 }
 
+/// Sections in the Sharing tab
+enum SharingSection: String, CaseIterable {
+    case recipes = "Recipes"
+    case connections = "Connections"
+}
+
 /// Main sharing tab view showing shared recipes
 struct SharingTabView: View {
     @ObservedObject private var viewModel = SharingTabViewModel.shared
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var showingEditProfile = false
     @State private var navigationPath = NavigationPath()
+    @State private var selectedSection: SharingSection = .recipes
 
     let dependencies: DependencyContainer
 
@@ -28,22 +35,29 @@ struct SharingTabView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            Group {
-                if viewModel.isLoading {
-                    ProgressView("Loading shared recipes...")
-                } else if viewModel.sharedRecipes.isEmpty {
-                    emptyState
-                } else {
-                    recipesList
-                }
-            }
-            .navigationTitle("Shared Recipes")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
-                        Label("Connections", systemImage: "person.2")
+            VStack(spacing: 0) {
+                // Segmented control for switching sections
+                Picker("Section", selection: $selectedSection) {
+                    ForEach(SharingSection.allCases, id: \.self) { section in
+                        Text(section.rawValue).tag(section)
                     }
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                // Content based on selected section
+                Group {
+                    switch selectedSection {
+                    case .recipes:
+                        recipesSection
+                    case .connections:
+                        ConnectionsView(dependencies: dependencies)
+                    }
+                }
+            }
+            .navigationTitle("Sharing")
+            .toolbar {
                 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -103,11 +117,23 @@ struct SharingTabView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
                 // Navigate to connections when notification is tapped
                 AppLogger.general.info("📍 Navigating to Connections from notification")
-                navigationPath.append(SharingTabDestination.connections)
+                selectedSection = .connections
             }
         }
     }
-    
+
+    private var recipesSection: some View {
+        Group {
+            if viewModel.isLoading {
+                ProgressView("Loading shared recipes...")
+            } else if viewModel.sharedRecipes.isEmpty {
+                emptyState
+            } else {
+                recipesList
+            }
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 20) {
             Image(systemName: "square.and.arrow.up")

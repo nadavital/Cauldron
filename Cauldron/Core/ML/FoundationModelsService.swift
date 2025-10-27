@@ -157,9 +157,16 @@ struct GeneratedRecipe: Equatable {
 
         let recipeSteps = steps.enumerated().map { index, genStep -> CookStep in
             var timers: [TimerSpec] = []
-            if let timerSeconds = genStep.timerSeconds {
+
+            // First, use the timer from AI if available
+            if let timerSeconds = genStep.timerSeconds, timerSeconds > 0 {
                 timers.append(TimerSpec(id: UUID(), seconds: timerSeconds))
+            } else {
+                // Fallback: Extract timers from step text
+                let extractedTimers = TimerExtractor.extractTimers(from: genStep.text)
+                timers.append(contentsOf: extractedTimers)
             }
+
             return CookStep(id: UUID(), index: index, text: genStep.text, timers: timers)
         }
 

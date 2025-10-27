@@ -77,15 +77,10 @@ class ImporterViewModel: ObservableObject {
     }
     
     private func importFromURL() async throws -> Recipe {
-        // Try Foundation Models first
-        var recipe: Recipe
-        if let foundationRecipe = try await dependencies.foundationModelsService.parseRecipeText(urlString) {
-            recipe = foundationRecipe
-        } else {
-            // Fallback to HTML parser
-            recipe = try await dependencies.htmlParser.parse(from: urlString)
-        }
-        
+        // Use HTML parser directly (more reliable than AI for structured recipe sites)
+        // The HTML parser will use schema.org JSON-LD when available, then fall back to heuristics
+        var recipe = try await dependencies.htmlParser.parse(from: urlString)
+
         // Download and save image if recipe has an imageURL
         if let imageURL = recipe.imageURL {
             do {
@@ -99,7 +94,7 @@ class ImporterViewModel: ObservableObject {
                 // Continue without image - non-fatal error
             }
         }
-        
+
         return recipe
     }
     
