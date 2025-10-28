@@ -37,30 +37,11 @@ struct SharingTabView: View {
             combinedFeedSection
             .navigationTitle("Sharing")
             .toolbar {
-                
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if let user = userSession.currentUser {
-                            NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
-                                Label("View My Profile", systemImage: "person.circle.fill")
-                            }
-
-                            #if DEBUG
-                            Divider()
-                            #endif
+                    if let user = userSession.currentUser {
+                        NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
+                            Image(systemName: "person.circle.fill")
                         }
-
-                        #if DEBUG
-                        Button {
-                            Task {
-                                await viewModel.createDemoUsers()
-                            }
-                        } label: {
-                            Label("Create Demo Users", systemImage: "person.2.fill")
-                        }
-                        #endif
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
@@ -352,7 +333,7 @@ struct ConnectionsInlineView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             // Pending requests (most important - shown first)
             if !viewModel.receivedRequests.isEmpty {
                 ForEach(viewModel.receivedRequests.prefix(3), id: \.id) { connection in
@@ -377,82 +358,64 @@ struct ConnectionsInlineView: View {
                             .font(.caption)
                             .foregroundColor(.cauldronOrange)
                             .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
                     }
                 }
             }
 
-            // Connection summary
-            HStack(spacing: 20) {
-                if !viewModel.connections.isEmpty {
-                    VStack(spacing: 4) {
-                        Text("\(viewModel.connections.count)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.green)
+            // Connections display
+            if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
+                // Empty state
+                VStack(spacing: 12) {
+                    Image(systemName: "person.2.circle")
+                        .font(.system(size: 40))
+                        .foregroundColor(.gray.opacity(0.5))
 
-                        Text("Connected")
+                    Text("No connections yet")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    NavigationLink(destination: SearchTabView(dependencies: dependencies)) {
+                        Text("Find people to connect")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.cauldronOrange)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                // Header with count and see all
+                HStack {
+                    Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "Connection" : "Connections")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
-                if !viewModel.sentRequests.isEmpty {
-                    VStack(spacing: 4) {
-                        Text("\(viewModel.sentRequests.count)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.blue)
+                    Spacer()
 
-                        Text("Pending")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "person.2.circle")
-                            .font(.system(size: 40))
-                            .foregroundColor(.gray.opacity(0.5))
-
-                        Text("No connections yet")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-
-                        NavigationLink(destination: SearchTabView(dependencies: dependencies)) {
-                            Text("Find people to connect")
-                                .font(.caption)
+                    if !viewModel.connections.isEmpty {
+                        NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
+                            Text("See All")
+                                .font(.subheadline)
                                 .foregroundColor(.cauldronOrange)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+                .padding(.horizontal, 16)
 
-            // View all connections button
-            if !viewModel.connections.isEmpty || !viewModel.sentRequests.isEmpty {
-                NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
-                    HStack {
-                        Text("View All Connections")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
+                // Horizontal scrolling connections
+                if !viewModel.connections.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
+                                if let user = viewModel.usersMap[connection.toUserId] ?? viewModel.usersMap[connection.fromUserId] {
+                                    ConnectionAvatarCard(user: user, dependencies: dependencies)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
                     }
-                    .foregroundColor(.cauldronOrange)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.cauldronOrange.opacity(0.1))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 16)
                 }
-                .buttonStyle(.plain)
             }
         }
         .task {

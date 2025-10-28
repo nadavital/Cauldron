@@ -17,13 +17,7 @@ struct EditProfileView: View {
     @State private var displayName = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
-    
-    var isValid: Bool {
-        username.count >= 3 && username.count <= 20 &&
-        displayName.count >= 1 &&
-        username.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
-    }
-    
+
     var hasChanges: Bool {
         guard let user = userSession.currentUser else { return false }
         return username != user.username || displayName != user.displayName
@@ -61,17 +55,21 @@ struct EditProfileView: View {
                     TextField("Username", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    
+                } header: {
+                    Text("Username")
+                } footer: {
+                    Text("Your unique identifier. Used for mentions and finding you on the platform.")
+                        .font(.caption)
+                }
+
+                Section {
                     TextField("Display Name", text: $displayName)
                         .textInputAutocapitalization(.words)
                 } header: {
-                    Text("Profile Information")
+                    Text("Display Name")
                 } footer: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Username: 3-20 characters, letters, numbers, and underscores only")
-                        Text("Display Name: How others see you")
-                    }
-                    .font(.caption)
+                    Text("How others see you. This is what appears on your profile and shared recipes.")
+                        .font(.caption)
                 }
                 
                 if let error = errorMessage {
@@ -86,18 +84,18 @@ struct EditProfileView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button("Save", systemImage: "checkmark") {
                         Task {
                             await saveProfile()
                         }
                     }
-                    .disabled(!isValid || !hasChanges || isSaving)
+                    .disabled(!hasChanges || isSaving)
                 }
             }
             .onAppear {
@@ -112,7 +110,27 @@ struct EditProfileView: View {
     private func saveProfile() async {
         isSaving = true
         errorMessage = nil
-        
+
+        // Validate username
+        if username.count < 3 || username.count > 20 {
+            errorMessage = "Username must be between 3 and 20 characters"
+            isSaving = false
+            return
+        }
+
+        if !username.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
+            errorMessage = "Username can only contain letters, numbers, and underscores"
+            isSaving = false
+            return
+        }
+
+        // Validate display name
+        if displayName.count < 1 {
+            errorMessage = "Display name cannot be empty"
+            isSaving = false
+            return
+        }
+
         do {
             try await userSession.updateUser(
                 username: username,

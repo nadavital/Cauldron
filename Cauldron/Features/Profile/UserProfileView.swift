@@ -34,7 +34,7 @@ struct UserProfileView: View {
                 }
 
                 // Connections Row (for current user)
-                if viewModel.isCurrentUser && !viewModel.connections.isEmpty {
+                if viewModel.isCurrentUser {
                     connectionsRow
                 }
 
@@ -296,45 +296,31 @@ struct UserProfileView: View {
     }
 
     private var connectionsRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        NavigationLink {
+            ConnectionsView(dependencies: viewModel.dependencies)
+        } label: {
             HStack {
-                Label("Connections", systemImage: "person.2.fill")
-                    .font(.headline)
-                    .foregroundColor(.primary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Connections", systemImage: "person.2.fill")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "connection" : "connections")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
 
                 Spacer()
 
-                if viewModel.connections.count > 6 {
-                    NavigationLink {
-                        ConnectionsView(dependencies: viewModel.dependencies)
-                    } label: {
-                        Text("View All")
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                    }
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
-            .padding(.horizontal)
-
-            if !viewModel.connections.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(0..<min(6, viewModel.connections.count), id: \.self) { index in
-                            let connection = viewModel.connections[index]
-                            if let otherUserId = connection.connection.otherUserId(currentUserId: viewModel.currentUserId),
-                               let user = viewModel.usersMap[otherUserId] {
-                                ConnectionAvatarCard(
-                                    user: user,
-                                    dependencies: viewModel.dependencies
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
+            .padding()
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(12)
         }
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
     }
 
     private var recipesSection: some View {
