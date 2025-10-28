@@ -14,30 +14,7 @@ struct RecipeRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Thumbnail image
-            if let imageURL = recipe.imageURL,
-               let image = loadImage(filename: imageURL.lastPathComponent) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                // Placeholder
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Image(systemName: "fork.knife")
-                            .foregroundColor(.cauldronOrange.opacity(0.6))
-                            .font(.body)
-                    )
-            }
+            RecipeImageView(thumbnailImageURL: recipe.imageURL)
             
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -101,16 +78,6 @@ struct RecipeRowView: View {
         .padding(.vertical, 4)
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
 }
 
 #Preview {

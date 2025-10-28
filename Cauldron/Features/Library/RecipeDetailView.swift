@@ -53,30 +53,9 @@ struct RecipeDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero Image - Stretches to top
-                    if let imageURL = recipe.imageURL,
-                       let image = loadImage(filename: imageURL.lastPathComponent) {
-                        GeometryReader { geo in
-                            ZStack(alignment: .bottom) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: geo.size.width)
-                                    .frame(minHeight: 250, maxHeight: 450)
-                                    .clipped()
-
-                                // Gradient overlay for text readability
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color.clear,
-                                        Color.black.opacity(0.3)
-                                    ]),
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            }
-                        }
-                        .frame(height: imageHeight(for: image))
-                        .ignoresSafeArea(edges: .top)
+                    if let imageURL = recipe.imageURL {
+                        HeroRecipeImageView(imageURL: imageURL)
+                            .ignoresSafeArea(edges: .top)
                     }
 
                     // Content sections
@@ -609,30 +588,6 @@ struct RecipeDetailView: View {
         }
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        // Synchronous load for SwiftUI - consider caching for performance
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
-
-    private func imageHeight(for image: UIImage) -> CGFloat {
-        let aspectRatio = image.size.width / image.size.height
-        // Use a reasonable default width for calculation
-        // The GeometryReader will handle actual width constraints
-        let estimatedWidth: CGFloat = 390 // Approximate device width
-
-        // Calculate height based on aspect ratio
-        let calculatedHeight = estimatedWidth / aspectRatio
-
-        // Clamp between min and max values for better UX
-        return min(max(calculatedHeight, 250), 450)
-    }
     
     private func toggleFavorite() {
         Task {
@@ -841,55 +796,49 @@ struct RecipeVisibilityPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                // Header
-                VStack(spacing: 8) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 40))
-                        .foregroundColor(.cauldronOrange)
+            Form {
+                Section {
+                    Picker("Visibility", selection: $selectedVisibility) {
+                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                            Label(visibility.displayName, systemImage: visibility.icon)
+                                .tag(visibility)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } header: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 40))
+                            .foregroundColor(.cauldronOrange)
 
-                    Text("Recipe Visibility")
-                        .font(.title2)
-                        .fontWeight(.bold)
+                        Text("Choose who can see this recipe")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+                    .textCase(nil)
+                }
 
-                    Text("Choose who can see this recipe")
-                        .font(.subheadline)
+                Section {
+                    Text(selectedVisibility.description)
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                } header: {
+                    Text("Description")
                 }
-                .padding(.top, 20)
-
-                // Visibility options
-                VStack(spacing: 16) {
-                    ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                        VisibilityOptionCard(
-                            visibility: visibility,
-                            isSelected: selectedVisibility == visibility,
-                            onSelect: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedVisibility = visibility
-                                }
-                            }
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                Spacer()
-
-                // Action buttons
-                HStack(spacing: 12) {
-                    Button {
+            }
+            .navigationTitle("Recipe Visibility")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
                         dismiss()
-                    } label: {
-                        Text("Cancel")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color(.systemGray5))
-                            .foregroundColor(.primary)
-                            .cornerRadius(12)
                     }
+                }
 
+                ToolbarItem(placement: .confirmationAction) {
                     Button {
                         Task {
                             await onSave(selectedVisibility)
@@ -897,26 +846,14 @@ struct RecipeVisibilityPickerSheet: View {
                     } label: {
                         if isChanging {
                             ProgressView()
-                                .tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
                         } else {
                             Text("Save")
-                                .font(.headline)
                                 .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
                         }
                     }
-                    .background(Color.cauldronOrange)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
                     .disabled(isChanging || selectedVisibility == currentVisibility)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

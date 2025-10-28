@@ -17,10 +17,19 @@ class UserProfileViewModel: ObservableObject {
     @Published var showError = false
     @Published var errorMessage = ""
     @Published var isProcessing = false
+    @Published var userRecipes: [SharedRecipe] = []
+    @Published var isLoadingRecipes = false
+    @Published var selectedFilter: RecipeFilter = .all
 
     let user: User
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
+
+    enum RecipeFilter: String, CaseIterable {
+        case all = "All"
+        case publicOnly = "Public"
+        case friendsOnly = "Friends"
+    }
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -176,6 +185,85 @@ class UserProfileViewModel: ObservableObject {
             AppLogger.general.error("❌ Failed to cancel connection request: \(error.localizedDescription)")
             errorMessage = "Failed to cancel request: \(error.localizedDescription)"
             showError = true
+        }
+    }
+
+    // MARK: - Recipe Fetching
+
+    func loadUserRecipes() async {
+        isLoadingRecipes = true
+        defer { isLoadingRecipes = false }
+
+        do {
+            userRecipes = try await fetchUserRecipes()
+            AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
+        } catch {
+            AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
+            errorMessage = "Failed to load recipes: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+
+    private func fetchUserRecipes() async throws -> [SharedRecipe] {
+        var allRecipes: [SharedRecipe] = []
+
+        // Get current user to check connection status
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return []
+        }
+
+        // Determine if we're connected to this user
+        let isConnected = connectionState == .connected
+
+        // Fetch public recipes from this user
+        let publicRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+            ownerIds: [user.id],
+            visibility: .publicRecipe
+        )
+        AppLogger.general.info("Found \(publicRecipes.count) public recipes from \(self.user.username)")
+
+        // Convert to SharedRecipe
+        for recipe in publicRecipes {
+            let sharedRecipe = SharedRecipe(
+                id: UUID(),
+                recipe: recipe,
+                sharedBy: user,
+                sharedAt: recipe.updatedAt
+            )
+            allRecipes.append(sharedRecipe)
+        }
+
+        // If connected, also fetch friends-only recipes
+        if isConnected {
+            let friendsRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: [user.id],
+                visibility: .friendsOnly
+            )
+            AppLogger.general.info("Found \(friendsRecipes.count) friends-only recipes from \(self.user.username)")
+
+            for recipe in friendsRecipes {
+                let sharedRecipe = SharedRecipe(
+                    id: UUID(),
+                    recipe: recipe,
+                    sharedBy: user,
+                    sharedAt: recipe.updatedAt
+                )
+                allRecipes.append(sharedRecipe)
+            }
+        }
+
+        // Sort by updated date (most recent first)
+        return allRecipes.sorted { $0.sharedAt > $1.sharedAt }
+    }
+
+    var filteredRecipes: [SharedRecipe] {
+        switch selectedFilter {
+        case .all:
+            return userRecipes
+        case .publicOnly:
+            return userRecipes.filter { $0.recipe.visibility == .publicRecipe }
+        case .friendsOnly:
+            return userRecipes.filter { $0.recipe.visibility == .friendsOnly }
         }
     }
 }

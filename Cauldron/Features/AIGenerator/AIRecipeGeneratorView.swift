@@ -175,31 +175,51 @@ struct AIRecipeGeneratorView: View {
                 }
             }
 
-            // Quick suggestion chips
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Quick ideas:")
+            // Category-based inspiration
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Get inspired:")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        SuggestionChip(text: "Quick meal", onTap: {
-                            viewModel.prompt = "A quick and easy meal for tonight"
-                        })
-                        SuggestionChip(text: "Vegetarian", onTap: {
-                            viewModel.prompt = "A delicious vegetarian recipe"
-                        })
-                        SuggestionChip(text: "Dessert", onTap: {
-                            viewModel.prompt = "A sweet dessert for special occasions"
-                        })
-                        SuggestionChip(text: "Low-carb", onTap: {
-                            viewModel.prompt = "A healthy low-carb dinner"
-                        })
-                        SuggestionChip(text: "Comfort food", onTap: {
-                            viewModel.prompt = "A hearty comfort food meal"
-                        })
+                // Cuisine
+                RecipeTagSection(
+                    title: "Cuisine",
+                    icon: "map",
+                    tags: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
                     }
-                }
+                )
+
+                // Dietary
+                RecipeTagSection(
+                    title: "Diet",
+                    icon: "leaf",
+                    tags: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
+
+                // Time
+                RecipeTagSection(
+                    title: "Time",
+                    icon: "clock",
+                    tags: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
+
+                // Type
+                RecipeTagSection(
+                    title: "Type",
+                    icon: "fork.knife",
+                    tags: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
             }
 
             Button {
@@ -275,7 +295,7 @@ struct AIRecipeGeneratorView: View {
                 .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronBackground)
+                        .fill(Color.cauldronSecondaryBackground)
                 )
             }
 
@@ -334,7 +354,7 @@ struct AIRecipeGeneratorView: View {
                 .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronBackground)
+                        .fill(Color.cauldronSecondaryBackground)
                 )
             }
 
@@ -367,7 +387,7 @@ struct AIRecipeGeneratorView: View {
                 .padding(16)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronBackground)
+                        .fill(Color.cauldronSecondaryBackground)
                 )
             }
 
@@ -405,6 +425,46 @@ struct AIRecipeGeneratorView: View {
         .padding(16)
         .background(Color.red.opacity(0.1))
         .cornerRadius(12)
+    }
+
+    // Helper function to append tags to prompt
+    private func appendToPrompt(_ tag: String) {
+        if viewModel.prompt.isEmpty {
+            viewModel.prompt = tag
+        } else if !viewModel.prompt.contains(tag) {
+            // Add with proper spacing
+            let trimmed = viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            viewModel.prompt = trimmed + (trimmed.hasSuffix(",") ? " " : ", ") + tag
+        }
+    }
+}
+
+// MARK: - Recipe Tag Section
+
+struct RecipeTagSection: View {
+    let title: String
+    let icon: String
+    let tags: [String]
+    let onTagTap: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
+                        SuggestionChip(text: tag, onTap: {
+                            onTagTap(tag)
+                        })
+                    }
+                }
+            }
+        }
     }
 }
 

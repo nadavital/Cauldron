@@ -18,127 +18,84 @@ struct ConnectionsView: View {
     }
     
     var body: some View {
-        List {
-            // Pending requests received
-            if !viewModel.receivedRequests.isEmpty {
-                Section("Pending Requests") {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                // Pending requests received
+                if !viewModel.receivedRequests.isEmpty {
+                    sectionHeader(title: "Pending Requests", icon: "bell.badge.fill", color: .cauldronOrange)
+
                     ForEach(viewModel.receivedRequests, id: \.id) { connection in
                         if let user = viewModel.usersMap[connection.fromUserId] {
-                            NavigationLink {
-                                UserProfileView(user: user, dependencies: viewModel.dependencies)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Circle()
-                                        .fill(Color.cauldronOrange.opacity(0.3))
-                                        .frame(width: 50, height: 50)
-                                        .overlay(
-                                            Text(user.displayName.prefix(2).uppercased())
-                                                .font(.headline)
-                                                .foregroundColor(.cauldronOrange)
-                                        )
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(user.displayName)
-                                            .font(.headline)
-
-                                        Text("@\(user.username)")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Spacer()
-
-                                    // Visual indicator for pending request
-                                    Text("New Request")
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.cauldronOrange.opacity(0.2))
-                                        .foregroundColor(.cauldronOrange)
-                                        .cornerRadius(8)
+                            ConnectionRequestCard(
+                                user: user,
+                                connection: connection,
+                                dependencies: viewModel.dependencies,
+                                onAccept: {
+                                    await viewModel.acceptRequest(connection)
+                                },
+                                onReject: {
+                                    await viewModel.rejectRequest(connection)
                                 }
-                                .padding(.vertical, 8)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await viewModel.rejectRequest(connection)
-                                    }
-                                } label: {
-                                    Label("Reject", systemImage: "xmark")
-                                }
-
-                                Button {
-                                    Task {
-                                        await viewModel.acceptRequest(connection)
-                                    }
-                                } label: {
-                                    Label("Accept", systemImage: "checkmark")
-                                }
-                                .tint(.green)
-                            }
+                            )
                         }
                     }
                 }
-            }
 
-            // Active connections
-            if !viewModel.connections.isEmpty {
-                Section("Connections") {
+                // Active connections
+                if !viewModel.connections.isEmpty {
+                    sectionHeader(title: "Connections", icon: "person.2.fill", color: .green)
+
                     ForEach(viewModel.connections, id: \.id) { connection in
                         if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
                            let user = viewModel.usersMap[otherUserId] {
-                            NavigationLink {
-                                UserProfileView(user: user, dependencies: viewModel.dependencies)
-                            } label: {
-                                UserRowView(user: user)
-                            }
-                            .buttonStyle(.plain)
+                            ConnectionCard(user: user, dependencies: viewModel.dependencies)
                         }
                     }
                 }
-            }
 
-            // Sent requests (pending)
-            if !viewModel.sentRequests.isEmpty {
-                Section("Sent Requests") {
+                // Sent requests (pending)
+                if !viewModel.sentRequests.isEmpty {
+                    sectionHeader(title: "Sent Requests", icon: "paperplane.fill", color: .blue)
+
                     ForEach(viewModel.sentRequests, id: \.id) { connection in
                         if let user = viewModel.usersMap[connection.toUserId] {
-                            NavigationLink {
-                                UserProfileView(user: user, dependencies: viewModel.dependencies)
-                            } label: {
-                                HStack {
-                                    UserRowView(user: user)
-                                    Spacer()
-                                    Text("Pending")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
+                            SentRequestCard(user: user, dependencies: viewModel.dependencies)
                         }
                     }
                 }
-            }
-            
-            if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
-                Section {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No Connections Yet")
-                            .font(.headline)
-                        Text("Search for users in the Search tab to connect")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+
+                // Empty state
+                if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "person.2.circle")
+                            .font(.system(size: 72))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.6)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        VStack(spacing: 8) {
+                            Text("No Connections Yet")
+                                .font(.title2)
+                                .fontWeight(.bold)
+
+                            Text("Search for users in the Search tab to start connecting with other home chefs!")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
+                        }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+                    .padding(.vertical, 80)
                 }
             }
+            .padding(.vertical, 12)
         }
+        .background(Color.cauldronBackground.ignoresSafeArea())
         .navigationTitle("Connections")
         .task {
             await viewModel.loadConnections()
@@ -156,72 +113,253 @@ struct ConnectionsView: View {
             Text(viewModel.alertMessage)
         }
     }
+
+    private func sectionHeader(title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(color)
+
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .padding(.top, 8)
+    }
 }
 
-/// Row view for a connection request
-struct ConnectionRequestRowView: View {
+// MARK: - Connection Request Card
+
+struct ConnectionRequestCard: View {
     let user: User
     let connection: Connection
+    let dependencies: DependencyContainer
     let onAccept: () async -> Void
     let onReject: () async -> Void
 
     @State private var isProcessing = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Color.cauldronOrange.opacity(0.3))
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(user.displayName.prefix(2).uppercased())
+        NavigationLink {
+            UserProfileView(user: user, dependencies: dependencies)
+        } label: {
+            HStack(spacing: 16) {
+                // Avatar
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.cauldronOrange.opacity(0.4), Color.cauldronOrange.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Text(user.displayName.prefix(2).uppercased())
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.cauldronOrange)
+                    )
+                    .shadow(color: Color.cauldronOrange.opacity(0.2), radius: 4, x: 0, y: 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(user.displayName)
                         .font(.headline)
-                        .foregroundColor(.cauldronOrange)
-                )
+                        .foregroundColor(.primary)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(user.displayName)
-                    .font(.headline)
+                    Text("@\(user.username)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
 
-                Text("@\(user.username)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if isProcessing {
-                ProgressView()
-            } else {
-                HStack(spacing: 8) {
-                    Button {
-                        Task {
-                            isProcessing = true
-                            await onAccept()
-                            isProcessing = false
-                        }
-                    } label: {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.green)
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                        Text("wants to connect")
+                            .font(.caption)
                     }
-                    .disabled(isProcessing)
+                    .foregroundColor(.cauldronOrange)
+                }
 
-                    Button {
-                        Task {
-                            isProcessing = true
-                            await onReject()
-                            isProcessing = false
+                Spacer()
+
+                // Action buttons
+                if isProcessing {
+                    ProgressView()
+                        .padding(.trailing, 8)
+                } else {
+                    VStack(spacing: 8) {
+                        Button {
+                            Task {
+                                isProcessing = true
+                                await onAccept()
+                                isProcessing = false
+                            }
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(
+                                    Circle()
+                                        .fill(Color.green)
+                                )
+                                .shadow(color: Color.green.opacity(0.3), radius: 3, x: 0, y: 2)
                         }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.red)
+
+                        Button {
+                            Task {
+                                isProcessing = true
+                                await onReject()
+                                isProcessing = false
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(
+                                    Circle()
+                                        .fill(Color.red)
+                                )
+                                .shadow(color: Color.red.opacity(0.3), radius: 3, x: 0, y: 2)
+                        }
                     }
-                    .disabled(isProcessing)
                 }
             }
+            .padding(16)
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
         }
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Connection Card
+
+struct ConnectionCard: View {
+    let user: User
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        NavigationLink {
+            UserProfileView(user: user, dependencies: dependencies)
+        } label: {
+            HStack(spacing: 16) {
+                // Avatar
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.green.opacity(0.3), Color.green.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Text(user.displayName.prefix(2).uppercased())
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+                    )
+                    .shadow(color: Color.green.opacity(0.15), radius: 3, x: 0, y: 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(user.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Text("@\(user.username)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
+            .padding(16)
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sent Request Card
+
+struct SentRequestCard: View {
+    let user: User
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        NavigationLink {
+            UserProfileView(user: user, dependencies: dependencies)
+        } label: {
+            HStack(spacing: 16) {
+                // Avatar
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Text(user.displayName.prefix(2).uppercased())
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+                    )
+                    .shadow(color: Color.blue.opacity(0.15), radius: 3, x: 0, y: 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(user.displayName)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+
+                    Text("@\(user.username)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text("Pending")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.blue)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
+            .padding(16)
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
     }
 }
 

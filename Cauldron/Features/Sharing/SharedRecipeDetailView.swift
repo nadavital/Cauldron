@@ -26,43 +26,36 @@ struct SharedRecipeDetailView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Header with shared info
-                sharedInfoSection
-                
-                // Recipe image if available
+            VStack(alignment: .leading, spacing: 0) {
+                // Hero Image - Stretches to top
                 if let imageURL = sharedRecipe.recipe.imageURL {
-                    AsyncImage(url: imageURL) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
+                    HeroRecipeImageView(imageURL: imageURL)
+                        .ignoresSafeArea(edges: .top)
+                }
+
+                VStack(alignment: .leading, spacing: 24) {
+                    // Header with shared info
+                    sharedInfoSection
+
+                    // Recipe details
+                    recipeInfoSection
+
+                    // Ingredients
+                    ingredientsSection
+
+                    // Steps
+                    stepsSection
+
+                    // Notes if available
+                    if let notes = sharedRecipe.recipe.notes, !notes.isEmpty {
+                        notesSection(notes)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    // Action buttons
+                    actionButtons
                 }
-                
-                // Recipe details
-                recipeInfoSection
-                
-                // Ingredients
-                ingredientsSection
-                
-                // Steps
-                stepsSection
-                
-                // Notes if available
-                if let notes = sharedRecipe.recipe.notes, !notes.isEmpty {
-                    notesSection(notes)
-                }
-                
-                // Action buttons
-                actionButtons
+                .padding()
             }
-            .padding()
         }
         .navigationTitle(sharedRecipe.recipe.title)
         .navigationBarTitleDisplayMode(.large)
@@ -191,7 +184,7 @@ struct SharedRecipeDetailView: View {
                             .font(.body)
                         
                         if let timer = step.timers.first {
-                            Label("\(TimerSpec.minutes) minutes", systemImage: "timer")
+                            Label(timer.displayDuration, systemImage: "timer")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

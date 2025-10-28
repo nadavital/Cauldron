@@ -440,32 +440,10 @@ struct RecipeCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Image
+            // Image with badges
             ZStack(alignment: .topTrailing) {
                 ZStack(alignment: .topLeading) {
-                    if let imageURL = recipe.imageURL,
-                       let image = loadImage(filename: imageURL.lastPathComponent) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 200, height: 120)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.1)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 200, height: 120)
-                            .overlay(
-                                Image(systemName: "fork.knife")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.cauldronOrange.opacity(0.6))
-                            )
-                    }
+                    RecipeImageView(cardImageURL: recipe.imageURL)
 
                     // Reference indicator (top-left)
                     if recipe.isReference {
@@ -488,14 +466,14 @@ struct RecipeCardView: View {
                         .padding(8)
                 }
             }
-            .frame(width: 200, height: 120)
+            .frame(width: 240, height: 160)
             
             // Title - single line for clean look
             Text(recipe.title)
                 .font(.headline)
                 .lineLimit(1)
-                .frame(width: 200, height: 20, alignment: .leading)
-            
+                .frame(width: 240, height: 20, alignment: .leading)
+
             // Metadata row - fixed height for alignment
             HStack(spacing: 4) {
                 // Time - always reserve space
@@ -508,9 +486,9 @@ struct RecipeCardView: View {
                         .font(.caption)
                         .frame(width: 60)
                 }
-                
+
                 Spacer()
-                
+
                 // Tag - always reserve space
                 if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
                     Text(firstTag.name)
@@ -526,21 +504,11 @@ struct RecipeCardView: View {
                         .frame(width: 60)
                 }
             }
-            .frame(width: 200, height: 20)
+            .frame(width: 240, height: 20)
         }
-        .frame(width: 200)
+        .frame(width: 240)
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
 }
 
 #Preview {

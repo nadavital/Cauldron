@@ -226,27 +226,6 @@ struct ImporterView: View {
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
 
-            if let clipboardPreview = clipboardPreviewText {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Image(systemName: "doc.on.clipboard")
-                            .foregroundColor(.secondary)
-                        Text("Clipboard Preview:")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Text(clipboardPreview)
-                        .font(.caption)
-                        .foregroundColor(.primary)
-                        .lineLimit(3)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
-                }
-            }
-
             Button {
                 pasteFromClipboard()
             } label: {
@@ -269,14 +248,6 @@ struct ImporterView: View {
         }
         .padding(16)
         .cardStyle()
-    }
-
-    private var clipboardPreviewText: String? {
-        guard let clipboardString = UIPasteboard.general.string,
-              !clipboardString.isEmpty else { return nil }
-
-        let preview = clipboardString.prefix(100)
-        return preview.count < clipboardString.count ? String(preview) + "..." : String(preview)
     }
 
     private func errorSection(_ message: String) -> some View {

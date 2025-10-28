@@ -134,7 +134,14 @@ class RecipeEditorViewModel: ObservableObject {
         // Load existing image if available
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
-            selectedImage = loadImage(filename: imageURL.lastPathComponent)
+            Task {
+                let result = await RecipeImageService.shared.loadImage(from: imageURL)
+                if case .success(let image) = result {
+                    await MainActor.run {
+                        selectedImage = image
+                    }
+                }
+            }
         }
         
         ingredients = recipe.ingredients.map { ingredient in
@@ -322,18 +329,4 @@ enum RecipeEditorError: LocalizedError {
     }
 }
 
-// MARK: - Helper Methods
-
-extension RecipeEditorViewModel {
-    private func loadImage(filename: String) -> UIImage? {
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
-}
 

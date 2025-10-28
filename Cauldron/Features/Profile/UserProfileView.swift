@@ -32,7 +32,8 @@ struct UserProfileView: View {
                     connectionSection
                 }
 
-                Spacer()
+                // Recipes Section
+                recipesSection
             }
             .padding()
         }
@@ -40,6 +41,7 @@ struct UserProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await viewModel.loadConnectionStatus()
+            await viewModel.loadUserRecipes()
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { }
@@ -185,13 +187,9 @@ struct UserProfileView: View {
 
     private var pendingText: some View {
         VStack(spacing: 12) {
-            HStack {
-                ProgressView()
-                    .scaleEffect(0.8)
-                Text("Request Sent")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-            }
+            Label("Request Sent", systemImage: "clock")
+                .font(.headline)
+                .foregroundColor(.secondary)
             Text("Waiting for \(user.displayName) to respond")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -214,6 +212,165 @@ struct UserProfileView: View {
             .disabled(viewModel.isProcessing)
         }
         .padding()
+    }
+
+    private var recipesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            HStack {
+                Label("Recipes", systemImage: "book")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Spacer()
+
+                if !viewModel.userRecipes.isEmpty && viewModel.connectionState == .connected {
+                    // Filter picker (only show if connected and has recipes)
+                    Picker("Filter", selection: $viewModel.selectedFilter) {
+                        ForEach(UserProfileViewModel.RecipeFilter.allCases, id: \.self) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 200)
+                }
+            }
+            .padding(.horizontal)
+
+            // Content
+            if viewModel.isLoadingRecipes {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 40)
+            } else if viewModel.filteredRecipes.isEmpty {
+                emptyRecipesState
+            } else {
+                recipesGrid
+            }
+        }
+    }
+
+    private var emptyRecipesState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary.opacity(0.5))
+
+            Text(emptyStateMessage)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private var emptyStateMessage: String {
+        if viewModel.connectionState == .connected {
+            if viewModel.selectedFilter == .friendsOnly {
+                return "\(user.displayName) hasn't shared any recipes with friends"
+            } else if viewModel.selectedFilter == .publicOnly {
+                return "\(user.displayName) hasn't made any recipes public"
+            } else {
+                return "\(user.displayName) hasn't shared any recipes yet"
+            }
+        } else {
+            return "\(user.displayName) hasn't made any recipes public yet"
+        }
+    }
+
+    private var recipesGrid: some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 16),
+            GridItem(.flexible(), spacing: 16)
+        ], spacing: 16) {
+            ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
+                NavigationLink(destination: SharedRecipeDetailView(
+                    sharedRecipe: sharedRecipe,
+                    dependencies: viewModel.dependencies,
+                    onCopy: {
+                        // Reload recipes after copying
+                        await viewModel.loadUserRecipes()
+                    },
+                    onRemove: {
+                        // Reload recipes after removing
+                        await viewModel.loadUserRecipes()
+                    }
+                )) {
+                    RecipeCard(sharedRecipe: sharedRecipe)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - Recipe Card
+
+struct RecipeCard: View {
+    let sharedRecipe: SharedRecipe
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Image
+            if let imageURL = sharedRecipe.recipe.imageURL {
+                RecipeImageView(previewImageURL: imageURL, showPlaceholderText: false)
+                    .frame(height: 120)
+                    .clipped()
+            } else {
+                placeholderImage
+            }
+
+            // Title
+            Text(sharedRecipe.recipe.title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .lineLimit(2)
+                .foregroundColor(.primary)
+
+            // Meta info
+            HStack(spacing: 8) {
+                if let time = sharedRecipe.recipe.displayTime {
+                    Label(time, systemImage: "clock")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                // Visibility indicator
+                Image(systemName: sharedRecipe.recipe.visibility.icon)
+                    .font(.caption2)
+                    .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
+            }
+        }
+        .padding(12)
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+    }
+
+    private var placeholderImage: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.cauldronOrange.opacity(0.08),
+                    Color.cauldronOrange.opacity(0.02)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Image(systemName: "fork.knife")
+                .font(.system(size: 36))
+                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+        }
+        .frame(height: 120)
+        .clipped()
     }
 }
 
