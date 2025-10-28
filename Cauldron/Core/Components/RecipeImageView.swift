@@ -203,26 +203,25 @@ struct HeroRecipeImageView: View {
     var body: some View {
         Group {
             if let image = loadedImage {
-                GeometryReader { geo in
-                    ZStack(alignment: .bottom) {
+                ZStack(alignment: .bottom) {
+                    GeometryReader { geo in
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
-                            .frame(width: geo.size.width)
-                            .frame(minHeight: 250, maxHeight: 450)
+                            .frame(width: geo.size.width, height: geo.size.height)
                             .clipped()
-                            .opacity(imageOpacity)
-
-                        // Gradient overlay for text readability
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.clear,
-                                Color.black.opacity(0.4)
-                            ]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
                     }
+                    .opacity(imageOpacity)
+
+                    // Gradient overlay for text readability
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.clear,
+                            Color.black.opacity(0.4)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 }
                 .frame(height: imageHeight(for: image))
             } else {

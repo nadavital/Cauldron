@@ -19,17 +19,10 @@ class UserProfileViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var userRecipes: [SharedRecipe] = []
     @Published var isLoadingRecipes = false
-    @Published var selectedFilter: RecipeFilter = .all
 
     let user: User
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
-
-    enum RecipeFilter: String, CaseIterable {
-        case all = "All"
-        case publicOnly = "Public"
-        case friendsOnly = "Friends"
-    }
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -257,13 +250,6 @@ class UserProfileViewModel: ObservableObject {
     }
 
     var filteredRecipes: [SharedRecipe] {
-        switch selectedFilter {
-        case .all:
-            return userRecipes
-        case .publicOnly:
-            return userRecipes.filter { $0.recipe.visibility == .publicRecipe }
-        case .friendsOnly:
-            return userRecipes.filter { $0.recipe.visibility == .friendsOnly }
-        }
+        return userRecipes
     }
 }

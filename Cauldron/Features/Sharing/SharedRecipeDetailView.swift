@@ -50,15 +50,67 @@ struct SharedRecipeDetailView: View {
                     if let notes = sharedRecipe.recipe.notes, !notes.isEmpty {
                         notesSection(notes)
                     }
-
-                    // Action buttons
-                    actionButtons
                 }
                 .padding()
             }
         }
         .navigationTitle(sharedRecipe.recipe.title)
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    // Add to My Recipes (saves reference - always synced)
+                    Button {
+                        Task {
+                            await saveRecipeReference()
+                        }
+                    } label: {
+                        if hasExistingReference {
+                            Label("Already in Your Recipes", systemImage: "checkmark.circle.fill")
+                        } else {
+                            Label("Add to My Recipes", systemImage: "bookmark.fill")
+                        }
+                    }
+                    .disabled(isSavingReference || isPerformingAction || hasExistingReference || isCheckingDuplicates)
+
+                    // Save a Copy (independent recipe)
+                    Button {
+                        Task {
+                            isPerformingAction = true
+                            await onCopy()
+                            isPerformingAction = false
+
+                            // Notify other views that a recipe was added
+                            NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
+
+                            // Show toast notification
+                            withAnimation {
+                                showCopyToast = true
+                            }
+
+                            // Dismiss sheet after toast appears
+                            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
+                            dismiss()
+                        }
+                    } label: {
+                        if hasOwnedCopy {
+                            Label("Copy Already Saved", systemImage: "checkmark.circle.fill")
+                        } else {
+                            Label("Save a Copy", systemImage: "doc.on.doc")
+                        }
+                    }
+                    .disabled(isPerformingAction || isSavingReference || hasOwnedCopy || isCheckingDuplicates)
+                } label: {
+                    if isSavingReference || isPerformingAction {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                }
+                .disabled(isCheckingDuplicates)
+            }
+        }
         .confirmationDialog("Remove Shared Recipe", isPresented: $showRemoveConfirmation) {
             Button("Remove from Shared", role: .destructive) {
                 Task {
@@ -209,103 +261,6 @@ struct SharedRecipeDetailView: View {
         .cornerRadius(12)
     }
     
-    private var actionButtons: some View {
-        VStack(spacing: 12) {
-            // Add to My Recipes (saves reference - always synced)
-            Button {
-                Task {
-                    await saveRecipeReference()
-                }
-            } label: {
-                HStack {
-                    if isSavingReference {
-                        ProgressView()
-                            .tint(.white)
-                    } else if hasExistingReference {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Already in Your Recipes")
-                    } else {
-                        Image(systemName: "bookmark.fill")
-                        Text("Add to My Recipes")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(hasExistingReference ? Color.gray : Color.cauldronOrange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-            }
-            .disabled(isSavingReference || isPerformingAction || hasExistingReference || isCheckingDuplicates)
-
-            if hasExistingReference {
-                Text("You've already added this recipe to your collection")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            } else {
-                Text("Always synced with original - you'll see updates automatically")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Divider()
-                .padding(.vertical, 4)
-
-            // Save a Copy (independent recipe)
-            Button {
-                Task {
-                    isPerformingAction = true
-                    await onCopy()
-                    isPerformingAction = false
-
-                    // Notify other views that a recipe was added
-                    NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
-
-                    // Show toast notification
-                    withAnimation {
-                        showCopyToast = true
-                    }
-
-                    // Dismiss sheet after toast appears
-                    try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
-                    dismiss()
-                }
-            } label: {
-                HStack {
-                    if isPerformingAction {
-                        ProgressView()
-                            .tint(Color.cauldronOrange)
-                    } else if hasOwnedCopy {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Copy Already Saved")
-                    } else {
-                        Image(systemName: "doc.on.doc")
-                        Text("Save a Copy")
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(hasOwnedCopy ? Color.gray.opacity(0.1) : Color.cauldronOrange.opacity(0.1))
-                .foregroundColor(hasOwnedCopy ? Color.gray : Color.cauldronOrange)
-                .cornerRadius(12)
-            }
-            .disabled(isPerformingAction || isSavingReference || hasOwnedCopy || isCheckingDuplicates)
-
-            if hasOwnedCopy {
-                Text("You already have a copy of this recipe in your collection")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            } else {
-                Text("Independent copy you can edit - won't reflect updates")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .padding(.top, 8)
-    }
 
     private func saveRecipeReference() async {
         isSavingReference = true

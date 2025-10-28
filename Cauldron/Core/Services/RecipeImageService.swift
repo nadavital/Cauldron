@@ -46,9 +46,8 @@ class RecipeImageService {
                 // Local file - load from disk
                 data = try Data(contentsOf: url)
             } else {
-                // Remote URL - download
-                let (downloadedData, _) = try await URLSession.shared.data(from: url)
-                data = downloadedData
+                // Remote URL - download with retry logic
+                data = try await downloadImageWithRetry(from: url)
             }
 
             guard let image = UIImage(data: data) else {
@@ -62,6 +61,38 @@ class RecipeImageService {
         } catch {
             return .failure(.loadFailed(error))
         }
+    }
+
+    /// Download image from remote URL with retry logic
+    private func downloadImageWithRetry(from url: URL, maxRetries: Int = 2) async throws -> Data {
+        var lastError: Error?
+
+        for attempt in 0...maxRetries {
+            do {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 15
+                request.cachePolicy = .returnCacheDataElseLoad
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                // Verify response
+                if let httpResponse = response as? HTTPURLResponse {
+                    guard (200...299).contains(httpResponse.statusCode) else {
+                        throw ImageLoadError.httpError(statusCode: httpResponse.statusCode)
+                    }
+                }
+
+                return data
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    // Wait before retrying (exponential backoff)
+                    try await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 500_000_000)) // 0.5s, 1s, 2s...
+                }
+            }
+        }
+
+        throw lastError ?? ImageLoadError.loadFailed(NSError(domain: "RecipeImageService", code: -1, userInfo: nil))
     }
 
     /// Load an image from a filename in the RecipeImages directory
@@ -97,6 +128,7 @@ enum ImageLoadError: Error, LocalizedError {
     case invalidURL
     case invalidImageData
     case loadFailed(Error)
+    case httpError(statusCode: Int)
 
     var errorDescription: String? {
         switch self {
@@ -106,6 +138,8 @@ enum ImageLoadError: Error, LocalizedError {
             return "Unable to decode image data"
         case .loadFailed(let error):
             return "Failed to load image: \(error.localizedDescription)"
+        case .httpError(let statusCode):
+            return "HTTP error: \(statusCode)"
         }
     }
 }

@@ -14,6 +14,12 @@ import FoundationModels
 @MainActor
 class AIRecipeGeneratorViewModel: ObservableObject {
     @Published var prompt: String = ""
+    @Published var selectedCuisines: Set<String> = []
+    @Published var selectedDiets: Set<String> = []
+    @Published var selectedTimes: Set<String> = []
+    @Published var selectedTypes: Set<String> = []
+    @Published var additionalNotes: String = ""
+    @Published var useCategoryMode: Bool = true
     @Published var isGenerating: Bool = false
     @Published var isSaving: Bool = false
     @Published var partialRecipe: GeneratedRecipe.PartiallyGenerated?
@@ -72,7 +78,44 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     }
 
     var canGenerate: Bool {
-        !prompt.trimmed.isEmpty && !isGenerating
+        if isGenerating { return false }
+
+        if useCategoryMode {
+            // In category mode, at least one category must be selected
+            return !selectedCuisines.isEmpty || !selectedDiets.isEmpty ||
+                   !selectedTimes.isEmpty || !selectedTypes.isEmpty
+        } else {
+            // In prompt mode, prompt must not be empty
+            return !prompt.trimmed.isEmpty
+        }
+    }
+
+    var hasSelectedCategories: Bool {
+        !selectedCuisines.isEmpty || !selectedDiets.isEmpty ||
+        !selectedTimes.isEmpty || !selectedTypes.isEmpty
+    }
+
+    private var generationPrompt: String {
+        if useCategoryMode {
+            var promptParts: [String] = []
+
+            // Add selected categories
+            let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
+                               Array(selectedTimes) + Array(selectedTypes)
+
+            if !allCategories.isEmpty {
+                promptParts.append(allCategories.joined(separator: ", "))
+            }
+
+            // Add additional notes if provided
+            if !additionalNotes.trimmed.isEmpty {
+                promptParts.append(additionalNotes.trimmed)
+            }
+
+            return promptParts.joined(separator: " - ")
+        } else {
+            return prompt
+        }
     }
 
     func checkAvailability() async -> Bool {
@@ -93,7 +136,7 @@ class AIRecipeGeneratorViewModel: ObservableObject {
 
         generationTask = Task {
             do {
-                let stream = dependencies.foundationModelsService.generateRecipe(from: prompt)
+                let stream = dependencies.foundationModelsService.generateRecipe(from: generationPrompt)
 
                 for try await partial in stream {
                     guard !Task.isCancelled else { break }

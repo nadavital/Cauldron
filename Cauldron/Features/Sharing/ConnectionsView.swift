@@ -101,7 +101,7 @@ struct ConnectionsView: View {
             await viewModel.loadConnections()
         }
         .refreshable {
-            await viewModel.loadConnections()
+            await viewModel.loadConnections(forceRefresh: true)
         }
         .onAppear {
             // Clear badge when user views the connections (they've seen the pending requests)
@@ -407,9 +407,9 @@ class ConnectionsViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
-    func loadConnections() async {
+    func loadConnections(forceRefresh: Bool = false) async {
         // Use ConnectionManager - it handles caching and sync automatically
-        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
 
         // Load user details for all connections
         await loadUserDetails()

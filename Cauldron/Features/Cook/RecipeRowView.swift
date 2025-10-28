@@ -17,29 +17,31 @@ struct RecipeRowView: View {
             RecipeImageView(thumbnailImageURL: recipe.imageURL)
             
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(recipe.title)
                         .font(.headline)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .layoutPriority(1)
 
-                    // Reference indicator
-                    if recipe.isReference {
-                        Image(systemName: "bookmark.fill")
-                            .font(.caption)
-                            .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-                            .fixedSize()
-                    }
+                    // Indicators
+                    HStack(spacing: 4) {
+                        // Reference indicator
+                        if recipe.isReference {
+                            Image(systemName: "bookmark.fill")
+                                .font(.caption)
+                                .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+                        }
 
-                    // Favorite indicator
-                    if recipe.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.caption)
-                            .foregroundColor(.yellow)
-                            .fixedSize()
+                        // Favorite indicator
+                        if recipe.isFavorite {
+                            Image(systemName: "star.fill")
+                                .font(.caption)
+                                .foregroundColor(.yellow)
+                        }
                     }
+                    .fixedSize()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 8) {
                     if let time = recipe.displayTime {

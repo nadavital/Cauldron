@@ -28,7 +28,14 @@ struct AIRecipeGeneratorView: View {
                     if !isAvailable {
                         unavailableSection
                     } else {
-                        promptSection
+                        // Mode toggle
+                        modeSelectorSection
+
+                        if viewModel.useCategoryMode {
+                            categorySelectionSection
+                        } else {
+                            promptSection
+                        }
 
                         if viewModel.isGenerating || viewModel.generatedRecipe != nil {
                             progressSection
@@ -145,6 +152,100 @@ struct AIRecipeGeneratorView: View {
                 .multilineTextAlignment(.center)
         }
         .padding(24)
+        .cardStyle()
+    }
+
+    private var modeSelectorSection: some View {
+        Picker("Mode", selection: $viewModel.useCategoryMode) {
+            Text("Categories").tag(true)
+            Text("Prompt").tag(false)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
+    }
+
+    private var categorySelectionSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Select Categories")
+                .font(.headline)
+
+            // Cuisine
+            CategorySelectionRow(
+                title: "Cuisine",
+                icon: "map",
+                options: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                selected: $viewModel.selectedCuisines
+            )
+
+            // Dietary
+            CategorySelectionRow(
+                title: "Diet",
+                icon: "leaf",
+                options: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                selected: $viewModel.selectedDiets
+            )
+
+            // Time
+            CategorySelectionRow(
+                title: "Time",
+                icon: "clock",
+                options: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                selected: $viewModel.selectedTimes
+            )
+
+            // Type
+            CategorySelectionRow(
+                title: "Meal",
+                icon: "fork.knife",
+                options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                selected: $viewModel.selectedTypes
+            )
+
+            // Additional Notes
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Additional Notes")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $viewModel.additionalNotes)
+                        .frame(minHeight: 80)
+                        .padding(12)
+                        .background(Color.cauldronBackground)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                        )
+
+                    if viewModel.additionalNotes.isEmpty {
+                        Text("e.g., no peanuts, extra spicy, low sodium...")
+                            .foregroundColor(.secondary.opacity(0.5))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 20)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+
+            Button {
+                viewModel.generateRecipe()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                    Text("Generate Recipe")
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(viewModel.canGenerate ? Color.cauldronOrange : Color.gray.opacity(0.3))
+                .foregroundColor(viewModel.canGenerate ? .white : .secondary)
+                .cornerRadius(12)
+            }
+            .disabled(!viewModel.canGenerate)
+        }
+        .padding(20)
         .cardStyle()
     }
 
@@ -489,6 +590,70 @@ struct SuggestionChip: View {
                 .overlay(
                     Capsule()
                         .stroke(Color.cauldronOrange.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Category Selection Row
+
+struct CategorySelectionRow: View {
+    let title: String
+    let icon: String
+    let options: [String]
+    @Binding var selected: Set<String>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(options, id: \.self) { option in
+                        CategoryChip(
+                            text: option,
+                            isSelected: selected.contains(option),
+                            onTap: {
+                                if selected.contains(option) {
+                                    selected.remove(option)
+                                } else {
+                                    selected.insert(option)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Category Chip
+
+struct CategoryChip: View {
+    let text: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(text)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.cauldronOrange : Color.cauldronOrange.opacity(0.1))
+                )
+                .foregroundColor(isSelected ? .white : .cauldronOrange)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.cauldronOrange, lineWidth: isSelected ? 0 : 1)
                 )
         }
         .buttonStyle(.plain)

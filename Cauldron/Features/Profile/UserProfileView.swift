@@ -68,12 +68,68 @@ struct UserProfileView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            // Username
-            Text("@\(user.username)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Username and Connection Status Badge
+            HStack(spacing: 8) {
+                Text("@\(user.username)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                if !viewModel.isCurrentUser {
+                    connectionStatusBadge
+                }
+            }
         }
         .padding(.top)
+    }
+
+    @ViewBuilder
+    private var connectionStatusBadge: some View {
+        switch viewModel.connectionState {
+        case .connected:
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                Text("Connected")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.green)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.green.opacity(0.15))
+            .cornerRadius(8)
+
+        case .pendingSent:
+            HStack(spacing: 4) {
+                Image(systemName: "clock.fill")
+                    .font(.caption)
+                Text("Pending")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.orange.opacity(0.15))
+            .cornerRadius(8)
+
+        case .pendingReceived:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption)
+                Text("Wants to Connect")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.blue)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.15))
+            .cornerRadius(8)
+
+        case .notConnected, .loading:
+            EmptyView()
+        }
     }
 
     @ViewBuilder
@@ -217,25 +273,10 @@ struct UserProfileView: View {
     private var recipesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Section header
-            HStack {
-                Label("Recipes", systemImage: "book")
-                    .font(.title2)
-                    .fontWeight(.bold)
-
-                Spacer()
-
-                if !viewModel.userRecipes.isEmpty && viewModel.connectionState == .connected {
-                    // Filter picker (only show if connected and has recipes)
-                    Picker("Filter", selection: $viewModel.selectedFilter) {
-                        ForEach(UserProfileViewModel.RecipeFilter.allCases, id: \.self) { filter in
-                            Text(filter.rawValue).tag(filter)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 200)
-                }
-            }
-            .padding(.horizontal)
+            Label("Recipes", systemImage: "book")
+                .font(.title2)
+                .fontWeight(.bold)
+                .padding(.horizontal)
 
             // Content
             if viewModel.isLoadingRecipes {
@@ -270,13 +311,7 @@ struct UserProfileView: View {
 
     private var emptyStateMessage: String {
         if viewModel.connectionState == .connected {
-            if viewModel.selectedFilter == .friendsOnly {
-                return "\(user.displayName) hasn't shared any recipes with friends"
-            } else if viewModel.selectedFilter == .publicOnly {
-                return "\(user.displayName) hasn't made any recipes public"
-            } else {
-                return "\(user.displayName) hasn't shared any recipes yet"
-            }
+            return "\(user.displayName) hasn't shared any recipes yet"
         } else {
             return "\(user.displayName) hasn't made any recipes public yet"
         }

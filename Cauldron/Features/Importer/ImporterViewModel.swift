@@ -85,13 +85,14 @@ class ImporterViewModel: ObservableObject {
         if let imageURL = recipe.imageURL {
             do {
                 let imageFilename = try await ImageManager.shared.downloadAndSaveImage(from: imageURL, recipeId: recipe.id)
-                // Store just the filename as the URL path component
-                let localImageURL = URL(string: imageFilename)
+                // Store the full file URL to the locally saved image
+                let localImageURL = await ImageManager.shared.imageURL(for: imageFilename)
                 recipe = recipe.withImageURL(localImageURL)
-                AppLogger.parsing.info("Successfully downloaded recipe image")
+                AppLogger.parsing.info("Successfully downloaded recipe image to: \(localImageURL.path)")
             } catch {
                 AppLogger.parsing.warning("Failed to download recipe image: \(error.localizedDescription)")
                 // Continue without image - non-fatal error
+                // Keep the original URL as fallback for remote loading
             }
         }
 

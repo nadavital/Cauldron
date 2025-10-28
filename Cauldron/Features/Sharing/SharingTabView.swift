@@ -35,27 +35,7 @@ struct SharingTabView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            VStack(spacing: 0) {
-                // Segmented control for switching sections
-                Picker("Section", selection: $selectedSection) {
-                    ForEach(SharingSection.allCases, id: \.self) { section in
-                        Text(section.rawValue).tag(section)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-
-                // Content based on selected section
-                Group {
-                    switch selectedSection {
-                    case .recipes:
-                        recipesSection
-                    case .connections:
-                        ConnectionsView(dependencies: dependencies)
-                    }
-                }
-            }
+            combinedFeedSection
             .navigationTitle("Sharing")
             .toolbar {
                 
@@ -120,6 +100,71 @@ struct SharingTabView: View {
                 selectedSection = .connections
             }
         }
+    }
+
+    private var combinedFeedSection: some View {
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                // Connection requests section
+                Section {
+                    ConnectionsInlineView(dependencies: dependencies)
+                } header: {
+                    SectionHeader(title: "Connections", icon: "person.2.fill", color: .green)
+                }
+
+                // Shared recipes section
+                Section {
+                    if viewModel.isLoading {
+                        HStack {
+                            Spacer()
+                            ProgressView("Loading shared recipes...")
+                                .padding(.vertical, 40)
+                            Spacer()
+                        }
+                    } else if viewModel.sharedRecipes.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 48))
+                                .foregroundColor(.gray.opacity(0.5))
+
+                            Text("No Shared Recipes")
+                                .font(.headline)
+
+                            Text("Recipes shared with you will appear here")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                    } else {
+                        ForEach(viewModel.sharedRecipes) { sharedRecipe in
+                            NavigationLink(destination: SharedRecipeDetailView(
+                                sharedRecipe: sharedRecipe,
+                                dependencies: dependencies,
+                                onCopy: {
+                                    await viewModel.copyToPersonalCollection(sharedRecipe)
+                                },
+                                onRemove: {
+                                    await viewModel.removeSharedRecipe(sharedRecipe)
+                                }
+                            )) {
+                                SharedRecipeRowView(sharedRecipe: sharedRecipe)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+
+                            Divider()
+                                .padding(.leading, 16)
+                        }
+                    }
+                } header: {
+                    SectionHeader(title: "Shared Recipes", icon: "book.fill", color: .cauldronOrange)
+                }
+            }
+        }
+        .background(Color.cauldronBackground.ignoresSafeArea())
     }
 
     private var recipesSection: some View {
@@ -188,13 +233,17 @@ struct SharedRecipeRowView: View {
             HStack {
                 Text(sharedRecipe.recipe.title)
                     .font(.headline)
-                
-                Spacer()
-                
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+
+                Spacer(minLength: 8)
+
                 if let time = sharedRecipe.recipe.displayTime {
                     Label(time, systemImage: "clock")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .fixedSize()
                 }
             }
             
@@ -227,6 +276,154 @@ struct SharedRecipeRowView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Section Header
+
+struct SectionHeader: View {
+    let title: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(color)
+
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Color.cauldronBackground)
+    }
+}
+
+// MARK: - Inline Connections View
+
+struct ConnectionsInlineView: View {
+    @StateObject private var viewModel: ConnectionsViewModel
+    let dependencies: DependencyContainer
+
+    init(dependencies: DependencyContainer) {
+        self.dependencies = dependencies
+        _viewModel = StateObject(wrappedValue: ConnectionsViewModel(dependencies: dependencies))
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            // Pending requests (most important - shown first)
+            if !viewModel.receivedRequests.isEmpty {
+                ForEach(viewModel.receivedRequests.prefix(3), id: \.id) { connection in
+                    if let user = viewModel.usersMap[connection.fromUserId] {
+                        ConnectionRequestCard(
+                            user: user,
+                            connection: connection,
+                            dependencies: dependencies,
+                            onAccept: {
+                                await viewModel.acceptRequest(connection)
+                            },
+                            onReject: {
+                                await viewModel.rejectRequest(connection)
+                            }
+                        )
+                    }
+                }
+
+                if viewModel.receivedRequests.count > 3 {
+                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
+                        Text("View \(viewModel.receivedRequests.count - 3) more requests")
+                            .font(.caption)
+                            .foregroundColor(.cauldronOrange)
+                            .padding(.vertical, 8)
+                    }
+                }
+            }
+
+            // Connection summary
+            HStack(spacing: 20) {
+                if !viewModel.connections.isEmpty {
+                    VStack(spacing: 4) {
+                        Text("\(viewModel.connections.count)")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+
+                        Text("Connected")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if !viewModel.sentRequests.isEmpty {
+                    VStack(spacing: 4) {
+                        Text("\(viewModel.sentRequests.count)")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.blue)
+
+                        Text("Pending")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.2.circle")
+                            .font(.system(size: 40))
+                            .foregroundColor(.gray.opacity(0.5))
+
+                        Text("No connections yet")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        NavigationLink(destination: SearchTabView(dependencies: dependencies)) {
+                            Text("Find people to connect")
+                                .font(.caption)
+                                .foregroundColor(.cauldronOrange)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+
+            // View all connections button
+            if !viewModel.connections.isEmpty || !viewModel.sentRequests.isEmpty {
+                NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
+                    HStack {
+                        Text("View All Connections")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.cauldronOrange)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.cauldronOrange.opacity(0.1))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 16)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .task {
+            await viewModel.loadConnections()
+        }
     }
 }
 
