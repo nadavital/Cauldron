@@ -33,7 +33,7 @@ enum ConnectionSyncState: Equatable {
 }
 
 /// Enhanced connection model with sync state
-struct ManagedConnection: Equatable {
+struct ManagedConnection: Equatable, Identifiable {
     let connection: Connection
     let syncState: ConnectionSyncState
 

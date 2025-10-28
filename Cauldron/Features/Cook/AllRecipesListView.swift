@@ -211,7 +211,7 @@ struct AllRecipesListView: View {
                     } label: {
                         Label("Sort By", systemImage: "arrow.up.arrow.down")
                     }
-                    
+
                     // Filter section
                     Menu {
                         Button {
@@ -224,7 +224,7 @@ struct AllRecipesListView: View {
                                 }
                             }
                         }
-                        
+
                         ForEach(allTags, id: \.self) { tag in
                             Button {
                                 selectedTag = tag
@@ -247,28 +247,12 @@ struct AllRecipesListView: View {
 
             // Add recipe menu (right position)
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showingEditor = true
-                    } label: {
-                        Label("Create Manually", systemImage: "square.and.pencil")
-                    }
-
-                    Button {
-                        showingAIGenerator = true
-                    } label: {
-                        Label("Generate with AI", systemImage: "sparkles")
-                    }
-
-                    Button {
-                        showingImporter = true
-                    } label: {
-                        Label("Import from URL or Text", systemImage: "arrow.down.doc")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .imageScale(.medium)
-                }
+                AddRecipeMenu(
+                    dependencies: dependencies,
+                    showingEditor: $showingEditor,
+                    showingAIGenerator: $showingAIGenerator,
+                    showingImporter: $showingImporter
+                )
             }
         }
     }

@@ -103,8 +103,7 @@ struct RecipeDetailView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Capsule())
-                    .glassEffect(.regular.tint(.orange).interactive())
+                    .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
                 }
                 .padding(.trailing, 20)
                 .padding(.bottom, 16)

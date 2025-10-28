@@ -19,6 +19,9 @@ class UserProfileViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var userRecipes: [SharedRecipe] = []
     @Published var isLoadingRecipes = false
+    @Published var connections: [ManagedConnection] = []
+    @Published var isLoadingConnections = false
+    @Published var usersMap: [UUID: User] = [:]
 
     let user: User
     let dependencies: DependencyContainer
@@ -46,10 +49,14 @@ class UserProfileViewModel: ObservableObject {
 
         // Subscribe to connection manager updates for real-time state changes
         dependencies.connectionManager.$connections
-            .sink { [weak self] _ in
+            .sink { [weak self] connections in
                 guard let self = self else { return }
                 Task { @MainActor in
                     await self.updateConnectionState()
+                    // Update connections list if viewing current user
+                    if self.isCurrentUser {
+                        self.connections = connections.values.filter { $0.connection.isAccepted }
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -57,6 +64,29 @@ class UserProfileViewModel: ObservableObject {
 
     func loadConnectionStatus() async {
         await updateConnectionState()
+    }
+
+    func loadConnections() async {
+        // Only load connections for current user
+        guard isCurrentUser else { return }
+
+        isLoadingConnections = true
+        defer { isLoadingConnections = false }
+
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
+        connections = dependencies.connectionManager.connections.values.filter { $0.connection.isAccepted }
+
+        // Load user details for all connections
+        for managedConnection in connections {
+            if let otherUserId = managedConnection.connection.otherUserId(currentUserId: currentUserId) {
+                do {
+                    let user = try await dependencies.cloudKitService.fetchUser(byUserId: otherUserId)
+                    usersMap[otherUserId] = user
+                } catch {
+                    AppLogger.general.error("Failed to load user \(otherUserId): \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private func updateConnectionState() async {
@@ -251,5 +281,9 @@ class UserProfileViewModel: ObservableObject {
 
     var filteredRecipes: [SharedRecipe] {
         return userRecipes
+    }
+
+    var displayedConnections: [ManagedConnection] {
+        return Array(connections.prefix(6))
     }
 }

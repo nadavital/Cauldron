@@ -23,7 +23,6 @@ enum SharingSection: String, CaseIterable {
 struct SharingTabView: View {
     @ObservedObject private var viewModel = SharingTabViewModel.shared
     @StateObject private var userSession = CurrentUserSession.shared
-    @State private var showingEditProfile = false
     @State private var navigationPath = NavigationPath()
     @State private var selectedSection: SharingSection = .recipes
 
@@ -42,10 +41,8 @@ struct SharingTabView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         if let user = userSession.currentUser {
-                            Button {
-                                showingEditProfile = true
-                            } label: {
-                                Label("Edit Profile (@\(user.username))", systemImage: "person.circle")
+                            NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
+                                Label("View My Profile", systemImage: "person.circle.fill")
                             }
 
                             #if DEBUG
@@ -74,9 +71,6 @@ struct SharingTabView: View {
             }
             .refreshable {
                 await viewModel.loadSharedRecipes()
-            }
-            .sheet(isPresented: $showingEditProfile) {
-                EditProfileView(dependencies: dependencies)
             }
             .alert("Success", isPresented: $viewModel.showSuccessAlert) {
                 Button("OK") { }

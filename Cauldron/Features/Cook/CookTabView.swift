@@ -46,7 +46,12 @@ struct CookTabView: View {
             .navigationTitle("Cook")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    addRecipeMenu
+                    AddRecipeMenu(
+                        dependencies: viewModel.dependencies,
+                        showingEditor: $showingEditor,
+                        showingAIGenerator: $showingAIGenerator,
+                        showingImporter: $showingImporter
+                    )
                 }
             }
             .sheet(isPresented: $showingImporter, onDismiss: {
@@ -281,33 +286,6 @@ struct CookTabView: View {
         .padding(.vertical, 40)
     }
     
-    private var addRecipeMenu: some View {
-        Menu {
-            // AI Generation option (only show if available)
-            if isAIAvailable {
-                Button {
-                    showingAIGenerator = true
-                } label: {
-                    Label("Generate with AI", systemImage: "apple.intelligence")
-                }
-            }
-
-            Button {
-                showingEditor = true
-            } label: {
-                Label("Create Manually", systemImage: "square.and.pencil")
-            }
-
-            Button {
-                showingImporter = true
-            } label: {
-                Label("Import from URL or Text", systemImage: "arrow.down.doc")
-            }
-        } label: {
-            Image(systemName: "plus")
-                .imageScale(.medium)
-        }
-    }
     
     @ViewBuilder
     private func recipeContextMenu(for recipe: Recipe) -> some View {

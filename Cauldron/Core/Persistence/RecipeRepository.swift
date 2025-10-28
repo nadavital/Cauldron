@@ -249,6 +249,13 @@ actor RecipeRepository {
         model.ownerId = recipe.ownerId  // Preserve owner ID
         model.updatedAt = Date()
 
+        // Log image URL being saved
+        if let imageURLString = recipe.imageURL?.absoluteString {
+            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with imageURL: \(imageURLString)")
+        } else {
+            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with NO imageURL")
+        }
+
         try context.save()
 
         // Immediately sync to CloudKit

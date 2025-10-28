@@ -241,18 +241,10 @@ struct AIRecipeGeneratorView: View {
                 Text("Generate Recipe")
                     .font(.headline)
             }
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 32)
             .padding(.vertical, 16)
-            .background(
-                LinearGradient(
-                    colors: viewModel.canGenerate ? [Color.cauldronOrange, Color.cauldronOrange.opacity(0.8)] : [Color.gray, Color.gray.opacity(0.8)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .cornerRadius(30)
-            .shadow(color: viewModel.canGenerate ? Color.cauldronOrange.opacity(0.4) : Color.clear, radius: 12, x: 0, y: 6)
+            .glassEffect(viewModel.canGenerate ? .regular.tint(.orange).interactive() : .regular.tint(.gray), in: Capsule())
         }
         .disabled(!viewModel.canGenerate)
         .padding(.bottom, 32)

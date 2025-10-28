@@ -12,6 +12,7 @@ struct UserProfileView: View {
     let user: User
     @StateObject private var viewModel: UserProfileViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showingEditProfile = false
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -32,6 +33,11 @@ struct UserProfileView: View {
                     connectionSection
                 }
 
+                // Connections Row (for current user)
+                if viewModel.isCurrentUser && !viewModel.connections.isEmpty {
+                    connectionsRow
+                }
+
                 // Recipes Section
                 recipesSection
             }
@@ -42,11 +48,17 @@ struct UserProfileView: View {
         .task {
             await viewModel.loadConnectionStatus()
             await viewModel.loadUserRecipes()
+            if viewModel.isCurrentUser {
+                await viewModel.loadConnections()
+            }
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { }
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .sheet(isPresented: $showingEditProfile) {
+            EditProfileView(dependencies: viewModel.dependencies)
         }
     }
 
@@ -77,6 +89,19 @@ struct UserProfileView: View {
                 if !viewModel.isCurrentUser {
                     connectionStatusBadge
                 }
+            }
+
+            // Edit Profile button for current user
+            if viewModel.isCurrentUser {
+                Button {
+                    showingEditProfile = true
+                } label: {
+                    Label("Edit Profile", systemImage: "pencil")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cauldronOrange)
             }
         }
         .padding(.top)
@@ -268,6 +293,48 @@ struct UserProfileView: View {
             .disabled(viewModel.isProcessing)
         }
         .padding()
+    }
+
+    private var connectionsRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Connections", systemImage: "person.2.fill")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                if viewModel.connections.count > 6 {
+                    NavigationLink {
+                        ConnectionsView(dependencies: viewModel.dependencies)
+                    } label: {
+                        Text("View All")
+                            .font(.caption)
+                            .foregroundColor(.cauldronOrange)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            if !viewModel.connections.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(0..<min(6, viewModel.connections.count), id: \.self) { index in
+                            let connection = viewModel.connections[index]
+                            if let otherUserId = connection.connection.otherUserId(currentUserId: viewModel.currentUserId),
+                               let user = viewModel.usersMap[otherUserId] {
+                                ConnectionAvatarCard(
+                                    user: user,
+                                    dependencies: viewModel.dependencies
+                                )
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     private var recipesSection: some View {
