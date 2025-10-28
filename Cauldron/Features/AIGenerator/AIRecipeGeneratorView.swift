@@ -21,39 +21,41 @@ struct AIRecipeGeneratorView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    headerSection
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerSection
 
-                    if !isAvailable {
-                        unavailableSection
-                    } else {
-                        // Mode toggle
-                        modeSelectorSection
-
-                        if viewModel.useCategoryMode {
-                            categorySelectionSection
+                        if !isAvailable {
+                            unavailableSection
                         } else {
-                            promptSection
-                        }
+                            // Combined prompt and category section
+                            combinedInputSection
 
-                        if viewModel.isGenerating || viewModel.generatedRecipe != nil {
-                            progressSection
-                        }
+                            if viewModel.isGenerating || viewModel.generatedRecipe != nil {
+                                progressSection
+                            }
 
-                        if let partial = viewModel.partialRecipe {
-                            recipePreviewSection(partial: partial)
-                        }
+                            if let partial = viewModel.partialRecipe {
+                                recipePreviewSection(partial: partial)
+                            }
 
-                        if let error = viewModel.errorMessage {
-                            errorSection(error: error)
+                            if let error = viewModel.errorMessage {
+                                errorSection(error: error)
+                            }
                         }
                     }
+                    .padding(.vertical, 28)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 100) // Space for floating button
                 }
-                .padding(.vertical, 28)
-                .padding(.horizontal, 20)
+                .background(Color.cauldronBackground.ignoresSafeArea())
+
+                // Floating generate button
+                if isAvailable && !viewModel.isGenerating && viewModel.generatedRecipe == nil {
+                    floatingGenerateButton
+                }
             }
-            .background(Color.cauldronBackground.ignoresSafeArea())
             .navigationTitle("Generate Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -155,19 +157,42 @@ struct AIRecipeGeneratorView: View {
         .cardStyle()
     }
 
-    private var modeSelectorSection: some View {
-        Picker("Mode", selection: $viewModel.useCategoryMode) {
-            Text("Categories").tag(true)
-            Text("Prompt").tag(false)
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 20)
-    }
-
-    private var categorySelectionSection: some View {
+    private var combinedInputSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Select Categories")
-                .font(.headline)
+            // Prompt/Notes field
+            VStack(alignment: .leading, spacing: 12) {
+                Text(viewModel.hasSelectedCategories ? "Additional Notes (Optional)" : "What would you like to cook?")
+                    .font(.headline)
+
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $viewModel.prompt)
+                        .frame(minHeight: 100)
+                        .padding(14)
+                        .background(Color.cauldronBackground)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
+                        )
+                        .focused($isPromptFocused)
+
+                    if viewModel.prompt.isEmpty {
+                        Text(viewModel.hasSelectedCategories ? "e.g., no peanuts, extra spicy, low sodium..." : "Describe your ideal dish...")
+                            .foregroundColor(.secondary.opacity(0.5))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 22)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            // Categories
+            Text("Or select categories:")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
 
             // Cuisine
             CategorySelectionRow(
@@ -193,60 +218,44 @@ struct AIRecipeGeneratorView: View {
                 selected: $viewModel.selectedTimes
             )
 
-            // Type
+            // Meal Type
             CategorySelectionRow(
                 title: "Meal",
                 icon: "fork.knife",
                 options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
                 selected: $viewModel.selectedTypes
             )
-
-            // Additional Notes
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Additional Notes")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $viewModel.additionalNotes)
-                        .frame(minHeight: 80)
-                        .padding(12)
-                        .background(Color.cauldronBackground)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-                        )
-
-                    if viewModel.additionalNotes.isEmpty {
-                        Text("e.g., no peanuts, extra spicy, low sodium...")
-                            .foregroundColor(.secondary.opacity(0.5))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 20)
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
-
-            Button {
-                viewModel.generateRecipe()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "wand.and.stars")
-                    Text("Generate Recipe")
-                        .fontWeight(.semibold)
-                }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(viewModel.canGenerate ? Color.cauldronOrange : Color.gray.opacity(0.3))
-                .foregroundColor(viewModel.canGenerate ? .white : .secondary)
-                .cornerRadius(12)
-            }
-            .disabled(!viewModel.canGenerate)
         }
         .padding(20)
         .cardStyle()
+    }
+
+    private var floatingGenerateButton: some View {
+        Button {
+            viewModel.generateRecipe()
+            isPromptFocused = false
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "wand.and.stars")
+                    .font(.title3)
+                Text("Generate Recipe")
+                    .font(.headline)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 16)
+            .background(
+                LinearGradient(
+                    colors: viewModel.canGenerate ? [Color.cauldronOrange, Color.cauldronOrange.opacity(0.8)] : [Color.gray, Color.gray.opacity(0.8)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(30)
+            .shadow(color: viewModel.canGenerate ? Color.cauldronOrange.opacity(0.4) : Color.clear, radius: 12, x: 0, y: 6)
+        }
+        .disabled(!viewModel.canGenerate)
+        .padding(.bottom, 32)
     }
 
     private var promptSection: some View {
@@ -644,8 +653,9 @@ struct CategoryChip: View {
             Text(text)
                 .font(.caption)
                 .fontWeight(.medium)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
                 .background(
                     Capsule()
                         .fill(isSelected ? Color.cauldronOrange : Color.cauldronOrange.opacity(0.1))
@@ -657,6 +667,7 @@ struct CategoryChip: View {
                 )
         }
         .buttonStyle(.plain)
+        .fixedSize()
     }
 }
 

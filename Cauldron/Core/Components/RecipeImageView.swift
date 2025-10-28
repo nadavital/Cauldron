@@ -193,7 +193,7 @@ extension RecipeImageView {
 
 // MARK: - Hero Recipe Image View
 
-/// Hero image view with dynamic height and gradient overlay
+/// Hero image view with card style and padding
 struct HeroRecipeImageView: View {
     let imageURL: URL?
 
@@ -203,31 +203,20 @@ struct HeroRecipeImageView: View {
     var body: some View {
         Group {
             if let image = loadedImage {
-                ZStack(alignment: .bottom) {
-                    GeometryReader { geo in
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                    }
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: imageHeight(for: image))
+                    .clipped()
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
                     .opacity(imageOpacity)
-
-                    // Gradient overlay for text readability
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.clear,
-                            Color.black.opacity(0.4)
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-                .frame(height: imageHeight(for: image))
             } else {
                 placeholderView
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
         .task {
             await loadImage()
         }
@@ -249,18 +238,20 @@ struct HeroRecipeImageView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(Color.cauldronOrange.opacity(0.3))
         }
-        .frame(height: 300)
+        .frame(height: 280)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 
     private func imageHeight(for image: UIImage) -> CGFloat {
         let aspectRatio = image.size.width / image.size.height
-        let estimatedWidth: CGFloat = 390 // Approximate device width
+        let estimatedWidth: CGFloat = 358 // Device width minus padding (390 - 32)
 
         // Calculate height based on aspect ratio
         let calculatedHeight = estimatedWidth / aspectRatio
 
         // Clamp between min and max values for better UX
-        return min(max(calculatedHeight, 250), 450)
+        return min(max(calculatedHeight, 220), 380)
     }
 
     private func loadImage() async {

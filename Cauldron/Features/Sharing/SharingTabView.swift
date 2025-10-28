@@ -104,16 +104,23 @@ struct SharingTabView: View {
 
     private var combinedFeedSection: some View {
         ScrollView {
-            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(spacing: 16) {
                 // Connection requests section
-                Section {
-                    ConnectionsInlineView(dependencies: dependencies)
-                } header: {
+                VStack(spacing: 0) {
                     SectionHeader(title: "Connections", icon: "person.2.fill", color: .green)
+
+                    ConnectionsInlineView(dependencies: dependencies)
+                        .padding(.bottom, 8)
                 }
+                .background(Color.cauldronSecondaryBackground)
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
 
                 // Shared recipes section
-                Section {
+                VStack(spacing: 0) {
+                    SectionHeader(title: "Shared Recipes", icon: "book.fill", color: .cauldronOrange)
+
                     if viewModel.isLoading {
                         HStack {
                             Spacer()
@@ -123,20 +130,38 @@ struct SharingTabView: View {
                         }
                     } else if viewModel.sharedRecipes.isEmpty {
                         VStack(spacing: 16) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 48))
-                                .foregroundColor(.gray.opacity(0.5))
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.cauldronOrange.opacity(0.2), Color.cauldronOrange.opacity(0.05)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .frame(width: 80, height: 80)
 
-                            Text("No Shared Recipes")
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.7)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                            }
+
+                            Text("No Shared Recipes Yet")
                                 .font(.headline)
 
-                            Text("Recipes shared with you will appear here")
+                            Text("When your connections share recipes,\nthey'll appear here")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+                        .padding(.vertical, 50)
                     } else {
                         ForEach(viewModel.sharedRecipes) { sharedRecipe in
                             NavigationLink(destination: SharedRecipeDetailView(
@@ -151,17 +176,21 @@ struct SharingTabView: View {
                             )) {
                                 SharedRecipeRowView(sharedRecipe: sharedRecipe)
                                     .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
                             }
                             .buttonStyle(.plain)
 
-                            Divider()
-                                .padding(.leading, 16)
+                            if sharedRecipe.id != viewModel.sharedRecipes.last?.id {
+                                Divider()
+                                    .padding(.leading, 102)
+                            }
                         }
+                        .padding(.vertical, 4)
                     }
-                } header: {
-                    SectionHeader(title: "Shared Recipes", icon: "book.fill", color: .cauldronOrange)
                 }
+                .background(Color.cauldronSecondaryBackground)
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
         }
         .background(Color.cauldronBackground.ignoresSafeArea())
@@ -224,58 +253,71 @@ struct SharingTabView: View {
     }
 }
 
-/// Row view for a shared recipe
+/// Row view for a shared recipe with enhanced visuals
 struct SharedRecipeRowView: View {
     let sharedRecipe: SharedRecipe
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        HStack(spacing: 14) {
+            // Recipe Image
+            RecipeImageView(thumbnailImageURL: sharedRecipe.recipe.imageURL)
+
+            VStack(alignment: .leading, spacing: 8) {
+                // Title
                 Text(sharedRecipe.recipe.title)
                     .font(.headline)
                     .lineLimit(2)
                     .truncationMode(.tail)
-                    .layoutPriority(1)
 
-                Spacer(minLength: 8)
+                // Shared by info
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.cauldronOrange.opacity(0.3))
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Text(sharedRecipe.sharedBy.displayName.prefix(1).uppercased())
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.cauldronOrange)
+                        )
 
-                if let time = sharedRecipe.recipe.displayTime {
-                    Label(time, systemImage: "clock")
+                    Text(sharedRecipe.sharedBy.displayName)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .fixedSize()
+
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Text(sharedRecipe.sharedAt.formatted(.relative(presentation: .named)))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-            }
-            
-            HStack {
-                Label("Shared by \(sharedRecipe.sharedBy.displayName)", systemImage: "person.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                Text(sharedRecipe.sharedAt.formatted(date: .abbreviated, time: .omitted))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            if !sharedRecipe.recipe.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(sharedRecipe.recipe.tags, id: \.name) { tag in
+
+                // Time and tags
+                HStack(spacing: 8) {
+                    if let time = sharedRecipe.recipe.displayTime {
+                        Label(time, systemImage: "clock.fill")
+                            .font(.caption2)
+                            .foregroundColor(.cauldronOrange)
+                    }
+
+                    if !sharedRecipe.recipe.tags.isEmpty {
+                        ForEach(sharedRecipe.recipe.tags.prefix(2), id: \.name) { tag in
                             Text(tag.name)
                                 .font(.caption2)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.cauldronOrange.opacity(0.2))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.cauldronOrange.opacity(0.15))
                                 .foregroundColor(.cauldronOrange)
-                                .cornerRadius(6)
+                                .cornerRadius(4)
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
     }
 }
 
@@ -289,20 +331,18 @@ struct SectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundColor(color)
 
             Text(title)
                 .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
 
             Spacer()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Color.cauldronBackground)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
     }
 }
 

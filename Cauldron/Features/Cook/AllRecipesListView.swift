@@ -21,6 +21,7 @@ struct AllRecipesListView: View {
     @State private var localRecipes: [Recipe]
     @State private var showingImporter = false
     @State private var showingEditor = false
+    @State private var showingAIGenerator = false
     @State private var selectedRecipe: Recipe?
     
     init(recipes: [Recipe], dependencies: DependencyContainer) {
@@ -186,26 +187,11 @@ struct AllRecipesListView: View {
         .sheet(isPresented: $showingEditor) {
             RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe)
         }
+        .sheet(isPresented: $showingAIGenerator) {
+            AIRecipeGeneratorView(dependencies: dependencies)
+        }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showingEditor = true
-                    } label: {
-                        Label("Create Manually", systemImage: "square.and.pencil")
-                    }
-                    
-                    Button {
-                        showingImporter = true
-                    } label: {
-                        Label("Import from URL or Text", systemImage: "arrow.down.doc")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .imageScale(.medium)
-                }
-            }
-            
+            // Filter/Sort menu (left position for consistency)
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     // Sort section
@@ -256,6 +242,32 @@ struct AllRecipesListView: View {
                     }
                 } label: {
                     Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                }
+            }
+
+            // Add recipe menu (right position)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        showingEditor = true
+                    } label: {
+                        Label("Create Manually", systemImage: "square.and.pencil")
+                    }
+
+                    Button {
+                        showingAIGenerator = true
+                    } label: {
+                        Label("Generate with AI", systemImage: "sparkles")
+                    }
+
+                    Button {
+                        showingImporter = true
+                    } label: {
+                        Label("Import from URL or Text", systemImage: "arrow.down.doc")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .imageScale(.medium)
                 }
             }
         }

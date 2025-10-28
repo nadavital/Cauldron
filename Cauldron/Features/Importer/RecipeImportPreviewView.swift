@@ -33,10 +33,9 @@ struct RecipeImportPreviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Hero Image - Stretches to top
+                    // Hero Image - Card style
                     if let imageURL = editedRecipe.imageURL {
                         HeroRecipeImageView(imageURL: imageURL)
-                            .ignoresSafeArea(edges: .top)
                     }
 
                     VStack(alignment: .leading, spacing: 20) {

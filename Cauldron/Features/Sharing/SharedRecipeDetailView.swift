@@ -27,10 +27,9 @@ struct SharedRecipeDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Hero Image - Stretches to top
+                // Hero Image - Card style
                 if let imageURL = sharedRecipe.recipe.imageURL {
                     HeroRecipeImageView(imageURL: imageURL)
-                        .ignoresSafeArea(edges: .top)
                 }
 
                 VStack(alignment: .leading, spacing: 24) {

@@ -49,28 +49,29 @@ struct RecipeRowView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .fixedSize()
                     }
 
                     Text(recipe.yields)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .fixedSize()
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
 
                     if !recipe.tags.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(recipe.tags.prefix(2)) { tag in
-                                Text(tag.name)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.cauldronOrange.opacity(0.2))
-                                    .cornerRadius(4)
-                            }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
+                        // Show only first tag to prevent overflow
+                        Text(recipe.tags.first!.name)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.cauldronOrange.opacity(0.2))
+                            .foregroundColor(.cauldronOrange)
+                            .cornerRadius(4)
+                            .frame(maxWidth: 100)
                     }
                 }
             }

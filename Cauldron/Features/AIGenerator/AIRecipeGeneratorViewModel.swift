@@ -80,14 +80,8 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     var canGenerate: Bool {
         if isGenerating { return false }
 
-        if useCategoryMode {
-            // In category mode, at least one category must be selected
-            return !selectedCuisines.isEmpty || !selectedDiets.isEmpty ||
-                   !selectedTimes.isEmpty || !selectedTypes.isEmpty
-        } else {
-            // In prompt mode, prompt must not be empty
-            return !prompt.trimmed.isEmpty
-        }
+        // Can generate if either prompt is filled OR categories are selected
+        return !prompt.trimmed.isEmpty || hasSelectedCategories
     }
 
     var hasSelectedCategories: Bool {
@@ -96,26 +90,22 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     }
 
     private var generationPrompt: String {
-        if useCategoryMode {
-            var promptParts: [String] = []
+        var promptParts: [String] = []
 
-            // Add selected categories
-            let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
-                               Array(selectedTimes) + Array(selectedTypes)
+        // Add selected categories
+        let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
+                           Array(selectedTimes) + Array(selectedTypes)
 
-            if !allCategories.isEmpty {
-                promptParts.append(allCategories.joined(separator: ", "))
-            }
-
-            // Add additional notes if provided
-            if !additionalNotes.trimmed.isEmpty {
-                promptParts.append(additionalNotes.trimmed)
-            }
-
-            return promptParts.joined(separator: " - ")
-        } else {
-            return prompt
+        if !allCategories.isEmpty {
+            promptParts.append(allCategories.joined(separator: ", "))
         }
+
+        // Add prompt/notes
+        if !prompt.trimmed.isEmpty {
+            promptParts.append(prompt.trimmed)
+        }
+
+        return promptParts.joined(separator: " - ")
     }
 
     func checkAvailability() async -> Bool {
