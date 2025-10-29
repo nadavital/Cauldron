@@ -100,7 +100,9 @@ final class RecipeModel {
             sourceURL: recipe.sourceURL?.absoluteString,
             sourceTitle: recipe.sourceTitle,
             notes: recipe.notes,
-            imageURL: recipe.imageURL?.absoluteString,
+            // Store only the filename, not the full path
+            // This prevents issues when the Documents directory path changes (app rebuild, etc.)
+            imageURL: recipe.imageURL?.lastPathComponent,
             isFavorite: recipe.isFavorite,
             visibility: recipe.visibility.rawValue,
             ownerId: recipe.ownerId,
@@ -119,23 +121,38 @@ final class RecipeModel {
         let tags = try decoder.decode([Tag].self, from: tagsBlob)
         let nutrition = try nutritionBlob.map { try decoder.decode(Nutrition.self, from: $0) }
 
-        // Handle image URL with defensive repair
+        // Reconstruct image URL from filename
+        // Always build the URL dynamically to handle Documents directory path changes
         var finalImageURL: URL? = nil
-        if let imageURLString = imageURL {
-            if let url = URL(string: imageURLString) {
-                finalImageURL = url
-                AppLogger.general.debug("✅ Image URL loaded: \(imageURLString)")
-            } else {
-                AppLogger.general.warning("⚠️ Failed to parse imageURL: \(imageURLString)")
-                // Attempt repair: check if it's just a filename
-                if !imageURLString.contains("/") {
-                    // It's just a filename, construct file URL
-                    let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                    let repairedURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(imageURLString)
-                    finalImageURL = repairedURL
-                    AppLogger.general.info("🔧 Repaired imageURL from filename: \(imageURLString) -> \(repairedURL.path)")
+        if let imageURLString = imageURL, !imageURLString.isEmpty {
+            // Extract filename (handles both old full URLs and new filename-only format)
+            let filename: String
+            if imageURLString.contains("/") {
+                // Old format: full URL - extract filename from path
+                if let url = URL(string: imageURLString) {
+                    filename = url.lastPathComponent
+                    AppLogger.general.debug("🔄 Migrating old imageURL format to filename: \(filename)")
+                } else {
+                    AppLogger.general.warning("⚠️ Failed to parse imageURL: \(imageURLString)")
+                    return Recipe(
+                        id: id, title: title, ingredients: ingredients, steps: steps,
+                        yields: yields, totalMinutes: totalMinutes, tags: tags, nutrition: nutrition,
+                        sourceURL: sourceURL.flatMap { URL(string: $0) }, sourceTitle: sourceTitle,
+                        notes: notes, imageURL: nil, isFavorite: isFavorite,
+                        visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
+                        ownerId: ownerId, cloudRecordName: cloudRecordName,
+                        createdAt: createdAt, updatedAt: updatedAt
+                    )
                 }
+            } else {
+                // New format: already a filename
+                filename = imageURLString
             }
+
+            // Reconstruct full URL using current Documents directory
+            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            finalImageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
+            AppLogger.general.debug("✅ Image URL reconstructed: \(filename) -> \(finalImageURL?.path ?? "nil")")
         }
 
         return Recipe(

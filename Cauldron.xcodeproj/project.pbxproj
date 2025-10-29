@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		AE25A62B2EB1E26F00EC6346 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 505171AA2DCB0D4B0077095A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 50F5BA812E937E2C00E4A5C4;
+			remoteInfo = Cauldron;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		50F5BA822E937E2C00E4A5C4 /* Cauldron.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cauldron.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CauldronTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -44,6 +55,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AE25A6242EB1E26F00EC6346 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -60,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				50F5BA822E937E2C00E4A5C4 /* Cauldron.app */,
+				AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,6 +108,26 @@
 			productReference = 50F5BA822E937E2C00E4A5C4 /* Cauldron.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AE25A6262EB1E26F00EC6346 /* CauldronTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AE25A62F2EB1E26F00EC6346 /* Build configuration list for PBXNativeTarget "CauldronTests" */;
+			buildPhases = (
+				AE25A6232EB1E26F00EC6346 /* Sources */,
+				AE25A6242EB1E26F00EC6346 /* Frameworks */,
+				AE25A6252EB1E26F00EC6346 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AE25A62C2EB1E26F00EC6346 /* PBXTargetDependency */,
+			);
+			name = CauldronTests;
+			packageProductDependencies = (
+			);
+			productName = CauldronTests;
+			productReference = AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -101,6 +140,10 @@
 				TargetAttributes = {
 					50F5BA812E937E2C00E4A5C4 = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					AE25A6262EB1E26F00EC6346 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 50F5BA812E937E2C00E4A5C4;
 					};
 				};
 			};
@@ -121,12 +164,20 @@
 			projectRoot = "";
 			targets = (
 				50F5BA812E937E2C00E4A5C4 /* Cauldron */,
+				AE25A6262EB1E26F00EC6346 /* CauldronTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		50F5BA802E937E2C00E4A5C4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AE25A6252EB1E26F00EC6346 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -143,7 +194,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AE25A6232EB1E26F00EC6346 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AE25A62C2EB1E26F00EC6346 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 50F5BA812E937E2C00E4A5C4 /* Cauldron */;
+			targetProxy = AE25A62B2EB1E26F00EC6346 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		505171BB2DCB0D4C0077095A /* Debug */ = {
@@ -345,6 +411,48 @@
 			};
 			name = Release;
 		};
+		AE25A62D2EB1E26F00EC6346 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C4MRP56MF5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
+			};
+			name = Debug;
+		};
+		AE25A62E2EB1E26F00EC6346 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C4MRP56MF5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -362,6 +470,15 @@
 			buildConfigurations = (
 				50F5BA8B2E937E2D00E4A5C4 /* Debug */,
 				50F5BA8C2E937E2D00E4A5C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AE25A62F2EB1E26F00EC6346 /* Build configuration list for PBXNativeTarget "CauldronTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AE25A62D2EB1E26F00EC6346 /* Debug */,
+				AE25A62E2EB1E26F00EC6346 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

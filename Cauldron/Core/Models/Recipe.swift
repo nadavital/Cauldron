@@ -20,7 +20,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let sourceURL: URL?
     let sourceTitle: String?
     let notes: String?
-    let imageURL: URL?
+    let imageURL: URL?  // Computed from imageFilename when loading from disk
     let isFavorite: Bool
     let visibility: RecipeVisibility
     let ownerId: UUID?  // User who owns this recipe (for cloud sync)

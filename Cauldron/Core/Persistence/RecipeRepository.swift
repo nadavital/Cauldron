@@ -242,18 +242,19 @@ actor RecipeRepository {
         model.sourceURL = recipe.sourceURL?.absoluteString
         model.sourceTitle = recipe.sourceTitle
         model.notes = recipe.notes
-        model.imageURL = recipe.imageURL?.absoluteString
+        // Store only the filename, not the full path
+        model.imageURL = recipe.imageURL?.lastPathComponent
         model.isFavorite = recipe.isFavorite
         model.visibility = recipe.visibility.rawValue
         model.cloudRecordName = recipe.cloudRecordName  // Preserve CloudKit metadata
         model.ownerId = recipe.ownerId  // Preserve owner ID
         model.updatedAt = Date()
 
-        // Log image URL being saved
-        if let imageURLString = recipe.imageURL?.absoluteString {
-            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with imageURL: \(imageURLString)")
+        // Log image filename being saved
+        if let imageFilename = recipe.imageURL?.lastPathComponent {
+            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with image filename: \(imageFilename)")
         } else {
-            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with NO imageURL")
+            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with NO image")
         }
 
         try context.save()

@@ -189,14 +189,23 @@ class SharedRecipeHandler: ObservableObject {
     }
 
     func acceptCloudKitShareFromMetadata(_ metadata: CKShare.Metadata) async {
-        // TODO: Implement new visibility-based sharing system
-        // Old CKShare link sharing has been removed in favor of:
-        // - Private recipes (only owner can see)
-        // - Friends-only recipes (friends auto-discover in Shared tab)
-        // - Public recipes (everyone can discover)
-        // Users save references or copies instead of accepting shares
-        AppLogger.general.info("⚠️ Link sharing disabled - migrating to visibility-based sharing")
-        showErrorAlert("Link sharing is being updated. Please ask your friend to set their recipe to 'Friends Only' or 'Public' visibility instead.")
+        // NOTE: CKShare link sharing has been intentionally replaced with visibility-based sharing.
+        //
+        // New sharing model:
+        // - Private recipes: Only owner can see (syncs to iCloud for backup)
+        // - Friends-only recipes: Connected friends auto-discover in Shared tab
+        // - Public recipes: Everyone can discover in Shared tab
+        //
+        // Users save recipes via:
+        // - "Add to My Recipes": Creates synced reference (stays updated with original)
+        // - "Save a Copy": Creates independent editable copy
+        //
+        // This approach avoids CKShare zone complexity and provides automatic discovery.
+        // If direct link sharing is needed in the future, consider simple deep links
+        // (cauldron://recipe/UUID) that fall back to PUBLIC database lookup.
+
+        AppLogger.general.info("⚠️ CKShare link sharing disabled - using visibility-based sharing")
+        showErrorAlert("Recipe link sharing has been updated! Ask your friend to set the recipe to 'Friends Only' or 'Public' visibility, and you'll see it in your Sharing tab.")
     }
 
     private func findExistingRecipe(recipe: Recipe, dependencies: DependencyContainer) async throws -> UUID? {

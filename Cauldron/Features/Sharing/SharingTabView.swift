@@ -393,7 +393,8 @@ struct ConnectionsInlineView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
-                                if let user = viewModel.usersMap[connection.toUserId] ?? viewModel.usersMap[connection.fromUserId] {
+                                if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
+                                   let user = viewModel.usersMap[otherUserId] {
                                     ConnectionAvatarCard(user: user, dependencies: dependencies)
                                 }
                             }

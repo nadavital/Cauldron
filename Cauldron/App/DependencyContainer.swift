@@ -138,34 +138,11 @@ class DependencyContainer: ObservableObject {
             try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true, attributes: nil)
         }
 
-        // Use migration plan to allow automatic migration
+        // SwiftData will handle automatic lightweight migrations for compatible schema changes
         let config = ModelConfiguration(schema: schema, allowsSave: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
 
-        do {
-            let container = try ModelContainer(for: schema, configurations: [config])
-            return DependencyContainer(modelContainer: container)
-        } catch {
-            print("⚠️ Database migration failed: \(error.localizedDescription)")
-            print("🗑️ Deleting old database and starting fresh...")
-
-            // If migration fails, delete the old database and start fresh
-            // NOTE: Database deletion on migration failure is temporary beta behavior.
-            // TODO: Implement proper migration strategy before v1.0 production release.
-            // Current approach will cause data loss when users upgrade between TestFlight builds.
-            let storeURL = appSupportURL.appendingPathComponent("default.store")
-            let shmURL = appSupportURL.appendingPathComponent("default.store-shm")
-            let walURL = appSupportURL.appendingPathComponent("default.store-wal")
-
-            try? fileManager.removeItem(at: storeURL)
-            try? fileManager.removeItem(at: shmURL)
-            try? fileManager.removeItem(at: walURL)
-
-            print("✅ Old database deleted, creating fresh database...")
-
-            // Try again with fresh database
-            let container = try ModelContainer(for: schema, configurations: [config])
-            return DependencyContainer(modelContainer: container)
-        }
+        return DependencyContainer(modelContainer: container)
     }
 }
 
@@ -177,11 +154,13 @@ private struct DependencyContainerKey: EnvironmentKey {
             return try DependencyContainer.persistent()
         } catch {
             fatalError("""
-                Failed to initialize DependencyContainer: \(error.localizedDescription)
+                Failed to initialize database: \(error.localizedDescription)
 
-                This is usually caused by database migration issues.
-                The app will now attempt to recover by deleting the database.
-                Please restart the app.
+                This may indicate database corruption. Please try:
+                1. Restart the app
+                2. If the issue persists, reinstall the app
+
+                Note: Your recipes are safely stored in iCloud and will be restored after reinstalling.
                 """)
         }
     }()
