@@ -24,6 +24,8 @@ class CurrentUserSession: ObservableObject {
     private let userIdKey = "currentUserId"
     private let usernameKey = "currentUsername"
     private let displayNameKey = "currentDisplayName"
+    private let profileEmojiKey = "currentProfileEmoji"
+    private let profileColorKey = "currentProfileColor"
     private let hasCompletedLocalOnboardingKey = "hasCompletedLocalOnboarding"
     private let logger = Logger(subsystem: "com.cauldron", category: "UserSession")
 
@@ -114,11 +116,17 @@ class CurrentUserSession: ObservableObject {
 
             logger.info("Found existing local user: \(username)")
 
+            // Retrieve optional profile emoji and color
+            let profileEmoji = UserDefaults.standard.string(forKey: profileEmojiKey)
+            let profileColor = UserDefaults.standard.string(forKey: profileColorKey)
+
             // Recreate user object from local storage
             currentUser = User(
                 id: userId,
                 username: username,
-                displayName: displayName
+                displayName: displayName,
+                profileEmoji: profileEmoji,
+                profileColor: profileColor
             )
 
             // If iCloud is available, try to sync
@@ -126,7 +134,9 @@ class CurrentUserSession: ObservableObject {
                 do {
                     let cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
                         username: username,
-                        displayName: displayName
+                        displayName: displayName,
+                        profileEmoji: profileEmoji,
+                        profileColor: profileColor
                     )
                     currentUser = cloudUser
                     saveUserToDefaults(cloudUser)
@@ -167,6 +177,8 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.set(user.id.uuidString, forKey: userIdKey)
         UserDefaults.standard.set(user.username, forKey: usernameKey)
         UserDefaults.standard.set(user.displayName, forKey: displayNameKey)
+        UserDefaults.standard.set(user.profileEmoji, forKey: profileEmojiKey)
+        UserDefaults.standard.set(user.profileColor, forKey: profileColorKey)
     }
     
     /// Create and save a new user during onboarding
@@ -308,6 +320,8 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: displayNameKey)
+        UserDefaults.standard.removeObject(forKey: profileEmojiKey)
+        UserDefaults.standard.removeObject(forKey: profileColorKey)
 
         currentUser = nil
         needsOnboarding = true
