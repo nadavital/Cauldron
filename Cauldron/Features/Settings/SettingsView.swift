@@ -79,20 +79,6 @@ struct EditProfileView: View {
                 // Emoji picker
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        // Current emoji or placeholder
-                        if let emoji = profileEmoji {
-                            HStack {
-                                Text("Current: \(emoji)")
-                                    .font(.title2)
-                                Spacer()
-                                Button("Clear") {
-                                    profileEmoji = nil
-                                }
-                                .font(.caption)
-                                .foregroundColor(.red)
-                            }
-                        }
-
                         // Quick pick food emojis
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
                             ForEach(foodEmojis, id: \.self) { emoji in
@@ -112,10 +98,22 @@ struct EditProfileView: View {
                         Button {
                             showingEmojiPicker = true
                         } label: {
-                            Label("Choose Custom Emoji", systemImage: "face.smiling")
+                            Image(systemName: "face.smiling")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+
+                        // Clear button if emoji selected
+                        if profileEmoji != nil {
+                            Button {
+                                profileEmoji = nil
+                            } label: {
+                                Text("Clear Selection")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
                     }
                 } header: {
                     Text("Profile Emoji")

@@ -170,29 +170,39 @@ class CurrentUserSession: ObservableObject {
     }
     
     /// Create and save a new user during onboarding
-    func createUser(username: String, displayName: String, dependencies: DependencyContainer) async throws {
+    func createUser(
+        username: String,
+        displayName: String,
+        profileEmoji: String? = nil,
+        profileColor: String? = nil,
+        dependencies: DependencyContainer
+    ) async throws {
         logger.info("Creating new user: \(username)")
-        
+
         let userId = UUID()
-        
+
         // Try to create in CloudKit first
         var cloudUser: User?
         do {
             cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
                 username: username,
-                displayName: displayName
+                displayName: displayName,
+                profileEmoji: profileEmoji,
+                profileColor: profileColor
             )
             logger.info("User created in CloudKit")
         } catch {
             logger.warning("CloudKit user creation failed (ok if not enabled): \(error.localizedDescription)")
             // Continue with local user
         }
-        
+
         // Use CloudKit user if available, otherwise create local
         let user = cloudUser ?? User(
             id: userId,
             username: username,
-            displayName: displayName
+            displayName: displayName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
 
         // Save to UserDefaults

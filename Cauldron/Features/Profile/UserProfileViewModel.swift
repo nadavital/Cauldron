@@ -233,8 +233,8 @@ class UserProfileViewModel: ObservableObject {
             lastConnectionState = connectionState
         }
 
+        // Only show loading state when actually fetching
         isLoadingRecipes = true
-        defer { isLoadingRecipes = false }
 
         do {
             userRecipes = try await fetchUserRecipes()
@@ -246,6 +246,8 @@ class UserProfileViewModel: ObservableObject {
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
             showError = true
         }
+
+        isLoadingRecipes = false
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {

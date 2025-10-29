@@ -294,7 +294,12 @@ actor CloudKitService {
     }
 
     /// Fetch or create current user profile
-    func fetchOrCreateCurrentUser(username: String, displayName: String) async throws -> User {
+    func fetchOrCreateCurrentUser(
+        username: String,
+        displayName: String,
+        profileEmoji: String? = nil,
+        profileColor: String? = nil
+    ) async throws -> User {
         // First check account status
         let accountStatus = await checkAccountStatus()
         guard accountStatus.isAvailable else {
@@ -323,7 +328,9 @@ actor CloudKitService {
         let user = User(
             username: username,
             displayName: displayName,
-            cloudRecordName: customRecordName
+            cloudRecordName: customRecordName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
         try await saveUser(user)
         return user
