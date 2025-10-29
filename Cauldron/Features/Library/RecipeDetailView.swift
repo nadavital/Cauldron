@@ -32,6 +32,7 @@ struct RecipeDetailView: View {
     @State private var showingVisibilityPicker = false
     @State private var currentVisibility: RecipeVisibility
     @State private var isChangingVisibility = false
+    @State private var showingCollectionPicker = false
 
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -151,6 +152,12 @@ struct RecipeDetailView: View {
                             Label("Add to Grocery List", systemImage: "cart.badge.plus")
                         }
 
+                        Button {
+                            showingCollectionPicker = true
+                        } label: {
+                            Label("Add to Collection", systemImage: "folder.badge.plus")
+                        }
+
                         Divider()
 
                         Button(role: .destructive) {
@@ -170,6 +177,12 @@ struct RecipeDetailView: View {
                             }
                         } label: {
                             Label("Add to Grocery List", systemImage: "cart.badge.plus")
+                        }
+
+                        Button {
+                            showingCollectionPicker = true
+                        } label: {
+                            Label("Add to Collection", systemImage: "folder.badge.plus")
                         }
 
                         Button {
@@ -251,6 +264,10 @@ struct RecipeDetailView: View {
                 }
             )
             .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showingCollectionPicker) {
+            AddToCollectionSheet(recipe: recipe, dependencies: dependencies)
+                .presentationDetents([.medium, .large])
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")

@@ -28,6 +28,9 @@ struct CookTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    // My Collections
+                    collectionsSection
+
                     // What Can I Cook?
                     if !viewModel.cookableRecipes.isEmpty {
                         whatCanICookSection
@@ -189,7 +192,32 @@ struct CookTabView: View {
             }
         }
     }
-    
+
+    private var collectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "folder.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("My Collections")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: CollectionsListView(dependencies: viewModel.dependencies)) {
+                    Text("View All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+
+            // TODO: Load actual collections from repository
+            // For now, show a placeholder
+            Text("Organize your recipes into collections")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
     private var allRecipesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {

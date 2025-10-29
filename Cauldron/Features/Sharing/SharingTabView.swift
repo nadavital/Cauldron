@@ -92,6 +92,9 @@ struct SharingTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 
+                // Shared collections section
+                sharedCollectionsSection
+
                 // Shared recipes section
                 VStack(spacing: 0) {
                     SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
@@ -169,6 +172,22 @@ struct SharingTabView: View {
             }
         }
         .background(Color.cauldronBackground.ignoresSafeArea())
+    }
+
+    private var sharedCollectionsSection: some View {
+        VStack(spacing: 0) {
+            SectionHeader(title: "Shared Collections", icon: "folder.fill", color: .purple)
+
+            // TODO: Load actual shared collections from friends
+            Text("Collections from your friends will appear here")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        }
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+        .padding(.horizontal, 16)
     }
 
     private var recipesSection: some View {

@@ -14,16 +14,18 @@ actor RecipeRepository {
     private let modelContainer: ModelContainer
     private let cloudKitService: CloudKitService
     private let deletedRecipeRepository: DeletedRecipeRepository
+    private let collectionRepository: CollectionRepository?
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeRepository")
 
     // Track recipes pending sync
     private var pendingSyncRecipes = Set<UUID>()
     private var syncRetryTask: Task<Void, Never>?
 
-    init(modelContainer: ModelContainer, cloudKitService: CloudKitService, deletedRecipeRepository: DeletedRecipeRepository) {
+    init(modelContainer: ModelContainer, cloudKitService: CloudKitService, deletedRecipeRepository: DeletedRecipeRepository, collectionRepository: CollectionRepository? = nil) {
         self.modelContainer = modelContainer
         self.cloudKitService = cloudKitService
         self.deletedRecipeRepository = deletedRecipeRepository
+        self.collectionRepository = collectionRepository
 
         // Start retry mechanism for failed syncs
         startSyncRetryTask()
@@ -283,6 +285,11 @@ actor RecipeRepository {
         // Delete from local database
         context.delete(model)
         try context.save()
+
+        // Remove from all collections
+        if let collectionRepository = collectionRepository {
+            try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
+        }
 
         // Mark as deleted (create tombstone) to prevent re-downloading from CloudKit
         try await deletedRecipeRepository.markAsDeleted(
