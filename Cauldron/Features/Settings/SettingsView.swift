@@ -24,6 +24,10 @@ struct EditProfileView: View {
     // Preset food emojis for quick selection
     private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐"]
 
+    // Additional emojis for random selection
+    private let allEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
+                            "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
+
     var hasChanges: Bool {
         guard let user = userSession.currentUser else { return false }
         return username != user.username ||
@@ -95,15 +99,24 @@ struct EditProfileView: View {
                             }
                         }
 
-                        // Custom emoji picker and clear buttons
+                        // Custom emoji picker and action buttons
                         HStack(spacing: 8) {
                             Button {
                                 showingEmojiPicker = true
                             } label: {
-                                Label("More Emojis", systemImage: "face.smiling")
+                                Label("Choose Emoji", systemImage: "face.smiling")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
+
+                            Button {
+                                profileEmoji = allEmojis.randomElement()
+                            } label: {
+                                Label("Random", systemImage: "shuffle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.cauldronOrange)
 
                             if profileEmoji != nil {
                                 Button {
@@ -123,27 +136,38 @@ struct EditProfileView: View {
 
                 // Color picker
                 Section {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
-                        ForEach(Color.allProfileColors, id: \.self) { color in
-                            Button {
-                                profileColor = color.toHex()
-                            } label: {
-                                Circle()
-                                    .fill(color.opacity(0.3))
-                                    .frame(width: 44, height: 44)
-                                    .overlay(
-                                        Circle()
-                                            .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
-                                    )
-                                    .overlay(
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(color)
-                                            .font(.headline)
-                                            .opacity(profileColor == color.toHex() ? 1 : 0)
-                                    )
+                    VStack(alignment: .leading, spacing: 12) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
+                            ForEach(Color.allProfileColors, id: \.self) { color in
+                                Button {
+                                    profileColor = color.toHex()
+                                } label: {
+                                    Circle()
+                                        .fill(color.opacity(0.3))
+                                        .frame(width: 44, height: 44)
+                                        .overlay(
+                                            Circle()
+                                                .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
+                                        )
+                                        .overlay(
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(color)
+                                                .font(.headline)
+                                                .opacity(profileColor == color.toHex() ? 1 : 0)
+                                        )
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+
+                        Button {
+                            profileColor = Color.allProfileColors.randomElement()?.toHex()
+                        } label: {
+                            Label("Random Color", systemImage: "shuffle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.cauldronOrange)
                     }
                 } header: {
                     Text("Profile Color")

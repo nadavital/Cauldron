@@ -57,6 +57,14 @@ extension Color {
     static let profileTeal = Color(red: 0.2, green: 0.8, blue: 0.8)
     static let profileRed = Color(red: 1.0, green: 0.3, blue: 0.3)
     static let profileIndigo = Color(red: 0.4, green: 0.4, blue: 0.9)
+    static let profileYellow = Color(red: 1.0, green: 0.8, blue: 0.2)
+    static let profileMint = Color(red: 0.3, green: 0.9, blue: 0.7)
+    static let profileCoral = Color(red: 1.0, green: 0.5, blue: 0.5)
+    static let profileLavender = Color(red: 0.7, green: 0.6, blue: 0.9)
+    static let profileLime = Color(red: 0.6, green: 0.9, blue: 0.3)
+    static let profileSky = Color(red: 0.5, green: 0.8, blue: 1.0)
+    static let profileRose = Color(red: 0.9, green: 0.4, blue: 0.6)
+    static let profilePeriwinkle = Color(red: 0.6, green: 0.6, blue: 1.0)
 
     /// All available profile colors
     static let allProfileColors: [Color] = [
@@ -67,7 +75,15 @@ extension Color {
         .profilePink,
         .profileTeal,
         .profileRed,
-        .profileIndigo
+        .profileIndigo,
+        .profileYellow,
+        .profileMint,
+        .profileCoral,
+        .profileLavender,
+        .profileLime,
+        .profileSky,
+        .profileRose,
+        .profilePeriwinkle
     ]
 
     /// Convert Color to hex string

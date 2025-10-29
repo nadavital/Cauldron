@@ -32,10 +32,16 @@ struct EmojiPickerView: View {
                     .multilineTextAlignment(.center)
                     .focused($isTextFieldFocused)
                     .frame(height: 100)
-                    .onChange(of: emojiInput) { newValue in
-                        // Only keep the first emoji character
+                    .keyboardType(.default)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .onChange(of: emojiInput) { oldValue, newValue in
+                        // Only allow emoji characters
                         if let firstEmoji = newValue.first(where: { $0.isEmoji }) {
                             emojiInput = String(firstEmoji)
+                        } else if !newValue.isEmpty {
+                            // If user typed non-emoji characters, reject the input
+                            emojiInput = oldValue
                         }
                     }
 
