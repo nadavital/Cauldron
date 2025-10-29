@@ -15,7 +15,7 @@ struct OnboardingView: View {
     @State private var username = ""
     @State private var displayName = ""
     @State private var profileEmoji: String?
-    @State private var profileColor: String?
+    @State private var profileColor: String? = Color.profileOrange.toHex()
     @State private var isCreating = false
     @State private var errorMessage: String?
     @State private var showingEmojiPicker = false

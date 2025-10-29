@@ -95,25 +95,26 @@ struct EditProfileView: View {
                             }
                         }
 
-                        // Custom emoji picker button
-                        Button {
-                            showingEmojiPicker = true
-                        } label: {
-                            Image(systemName: "face.smiling")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-
-                        // Clear button if emoji selected
-                        if profileEmoji != nil {
+                        // Custom emoji picker and clear buttons
+                        HStack(spacing: 8) {
                             Button {
-                                profileEmoji = nil
+                                showingEmojiPicker = true
                             } label: {
-                                Text("Clear Selection")
+                                Label("More Emojis", systemImage: "face.smiling")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
-                            .tint(.red)
+
+                            if profileEmoji != nil {
+                                Button {
+                                    profileEmoji = nil
+                                } label: {
+                                    Label("Clear", systemImage: "xmark.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+                            }
                         }
                     }
                 } header: {
@@ -179,7 +180,8 @@ struct EditProfileView: View {
                     username = user.username
                     displayName = user.displayName
                     profileEmoji = user.profileEmoji
-                    profileColor = user.profileColor
+                    // Default to orange if no color is set
+                    profileColor = user.profileColor ?? Color.profileOrange.toHex()
                 }
             }
             .sheet(isPresented: $showingEmojiPicker) {

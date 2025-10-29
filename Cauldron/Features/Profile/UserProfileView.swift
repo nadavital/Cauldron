@@ -13,6 +13,7 @@ struct UserProfileView: View {
     @StateObject private var viewModel: UserProfileViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
+    @State private var hasLoadedInitialData = false
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -40,11 +41,17 @@ struct UserProfileView: View {
         }
         .navigationTitle(user.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await viewModel.loadConnectionStatus()
-            await viewModel.loadUserRecipes()
-            if viewModel.isCurrentUser {
-                await viewModel.loadConnections()
+        .onAppear {
+            // Only load initial data once - the viewModel's cache will handle subsequent requests
+            if !hasLoadedInitialData {
+                hasLoadedInitialData = true
+                Task {
+                    await viewModel.loadConnectionStatus()
+                    await viewModel.loadUserRecipes()
+                    if viewModel.isCurrentUser {
+                        await viewModel.loadConnections()
+                    }
+                }
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -76,9 +83,15 @@ struct UserProfileView: View {
                 // Friends count for current user
                 if viewModel.isCurrentUser {
                     NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
-                        Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.cauldronOrange)
                     }
                 } else if !viewModel.isCurrentUser {
                     connectionStatusBadge
@@ -346,12 +359,12 @@ struct UserProfileView: View {
                     sharedRecipe: sharedRecipe,
                     dependencies: viewModel.dependencies,
                     onCopy: {
-                        // Reload recipes after copying
-                        await viewModel.loadUserRecipes()
+                        // Reload recipes after copying - force refresh since data changed
+                        await viewModel.loadUserRecipes(forceRefresh: true)
                     },
                     onRemove: {
-                        // Reload recipes after removing
-                        await viewModel.loadUserRecipes()
+                        // Reload recipes after removing - force refresh since data changed
+                        await viewModel.loadUserRecipes(forceRefresh: true)
                     }
                 )) {
                     RecipeCard(sharedRecipe: sharedRecipe)
