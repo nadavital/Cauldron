@@ -27,6 +27,16 @@ class SearchTabViewModel: ObservableObject {
     private var peopleSearchText: String = ""
     private var cancellables = Set<AnyCancellable>()
 
+    // Caching
+    private var cachedUsers: [User] = []
+    private var usersCacheTimestamp: Date?
+    private var cachedPublicRecipes: [Recipe] = []
+    private var publicRecipesCacheTimestamp: Date?
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+
+    // Debouncing
+    private let peopleSearchSubject = PassthroughSubject<String, Never>()
+
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
     }
@@ -41,6 +51,18 @@ class SearchTabViewModel: ObservableObject {
                 managedConnections.values.map { $0.connection }
             }
             .assign(to: &$connections)
+
+        // Set up debounced people search
+        peopleSearchSubject
+            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+            .removeDuplicates()
+            .sink { [weak self] query in
+                guard let self = self else { return }
+                Task {
+                    await self.performPeopleSearch(query)
+                }
+            }
+            .store(in: &cancellables)
     }
     
     func loadData() async {
@@ -69,17 +91,32 @@ class SearchTabViewModel: ObservableObject {
     }
 
     func loadPublicRecipes() async {
+        // Check if cache is valid
+        if let timestamp = publicRecipesCacheTimestamp,
+           Date().timeIntervalSince(timestamp) < cacheValidityDuration,
+           !cachedPublicRecipes.isEmpty {
+            AppLogger.general.info("Using cached public recipes (\(self.cachedPublicRecipes.count) recipes)")
+            publicRecipes = cachedPublicRecipes
+            return
+        }
+
         do {
             // Fetch all public recipes from CloudKit
+            AppLogger.general.info("Fetching fresh public recipes from CloudKit")
             let recipes = try await dependencies.cloudKitService.querySharedRecipes(
                 ownerIds: nil,
                 visibility: .publicRecipe
             )
 
             // Filter out own recipes
-            publicRecipes = recipes.filter { $0.ownerId != currentUserId }
+            let filteredRecipes = recipes.filter { $0.ownerId != currentUserId }
+            publicRecipes = filteredRecipes
 
-            AppLogger.general.info("Loaded \(publicRecipes.count) public recipes for search")
+            // Update cache
+            cachedPublicRecipes = filteredRecipes
+            publicRecipesCacheTimestamp = Date()
+
+            AppLogger.general.info("Loaded \(self.publicRecipes.count) public recipes for search")
         } catch {
             AppLogger.general.error("Failed to load public recipes: \(error.localizedDescription)")
             publicRecipes = []
@@ -132,7 +169,7 @@ class SearchTabViewModel: ObservableObject {
         defer { isLoadingPeople = false }
 
         do {
-            let allUsers = try await dependencies.sharingService.getAllUsers()
+            let allUsers = try await fetchUsersWithCache()
 
             // Preserve search filtering after reload
             if peopleSearchText.isEmpty {
@@ -148,6 +185,27 @@ class SearchTabViewModel: ObservableObject {
             AppLogger.general.error("Failed to load users: \(error.localizedDescription)")
             peopleSearchResults = []
         }
+    }
+
+    /// Fetch users with caching to avoid unnecessary CloudKit queries
+    private func fetchUsersWithCache() async throws -> [User] {
+        // Check if cache is valid
+        if let timestamp = usersCacheTimestamp,
+           Date().timeIntervalSince(timestamp) < cacheValidityDuration,
+           !cachedUsers.isEmpty {
+            AppLogger.general.info("Using cached users (\(self.cachedUsers.count) users)")
+            return cachedUsers
+        }
+
+        // Cache expired or empty, fetch fresh data
+        AppLogger.general.info("Fetching fresh user data from CloudKit")
+        let users = try await dependencies.sharingService.getAllUsers()
+
+        // Update cache
+        cachedUsers = users
+        usersCacheTimestamp = Date()
+
+        return users
     }
     
     func updateRecipeSearch(_ query: String) {
@@ -171,28 +229,31 @@ class SearchTabViewModel: ObservableObject {
     
     func updatePeopleSearch(_ query: String) {
         peopleSearchText = query
+        // Send to debounced subject instead of fetching immediately
+        peopleSearchSubject.send(query)
+    }
 
-        Task {
-            isLoadingPeople = true
-            defer { isLoadingPeople = false }
+    /// Perform the actual people search with caching (called after debounce)
+    private func performPeopleSearch(_ query: String) async {
+        isLoadingPeople = true
+        defer { isLoadingPeople = false }
 
-            do {
-                let allUsers = try await dependencies.sharingService.getAllUsers()
+        do {
+            let allUsers = try await fetchUsersWithCache()
 
-                if query.isEmpty {
-                    peopleSearchResults = allUsers
-                } else {
-                    // Filter locally for better UX (allows substring matching)
-                    let lowercased = query.lowercased()
-                    peopleSearchResults = allUsers.filter { user in
-                        user.username.lowercased().contains(lowercased) ||
-                        user.displayName.lowercased().contains(lowercased)
-                    }
+            if query.isEmpty {
+                peopleSearchResults = allUsers
+            } else {
+                // Filter locally for better UX (allows substring matching)
+                let lowercased = query.lowercased()
+                peopleSearchResults = allUsers.filter { user in
+                    user.username.lowercased().contains(lowercased) ||
+                    user.displayName.lowercased().contains(lowercased)
                 }
-            } catch {
-                AppLogger.general.error("Failed to search users: \(error.localizedDescription)")
-                peopleSearchResults = []
             }
+        } catch {
+            AppLogger.general.error("Failed to search users: \(error.localizedDescription)")
+            peopleSearchResults = []
         }
     }
     

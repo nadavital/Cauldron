@@ -403,7 +403,7 @@ struct CategoryCardView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .frame(width: 140)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(12)
