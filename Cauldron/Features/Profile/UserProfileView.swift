@@ -41,6 +41,7 @@ struct UserProfileView: View {
         }
         .navigationTitle(user.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $viewModel.searchText, prompt: "Search recipes")
         .onAppear {
             // Only load initial data once - the viewModel's cache will handle subsequent requests
             if !hasLoadedInitialData {
@@ -294,10 +295,22 @@ struct UserProfileView: View {
     private var recipesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Section header
-            Label("Recipes", systemImage: "book")
-                .font(.title2)
-                .fontWeight(.bold)
-                .padding(.horizontal)
+            HStack {
+                Label("Recipes", systemImage: "book")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Spacer()
+
+                // Show count when searching
+                if !viewModel.searchText.isEmpty && !viewModel.isLoadingRecipes {
+                    Text("\(viewModel.filteredRecipes.count)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
 
             // Content
             if viewModel.isLoadingRecipes {
@@ -317,7 +330,7 @@ struct UserProfileView: View {
 
     private var emptyRecipesState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "book.closed")
+            Image(systemName: viewModel.searchText.isEmpty ? "book.closed" : "magnifyingglass")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary.opacity(0.5))
 
@@ -331,7 +344,9 @@ struct UserProfileView: View {
     }
 
     private var emptyStateMessage: String {
-        if viewModel.connectionState == .connected {
+        if !viewModel.searchText.isEmpty {
+            return "No recipes match '\(viewModel.searchText)'"
+        } else if viewModel.connectionState == .connected {
             return "\(user.displayName) hasn't shared any recipes yet"
         } else {
             return "\(user.displayName) hasn't made any recipes public yet"
@@ -374,8 +389,8 @@ struct RecipeCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // Image
             if let imageURL = sharedRecipe.recipe.imageURL {
-                RecipeImageView(previewImageURL: imageURL, showPlaceholderText: false)
-                    .frame(height: 120)
+                RecipeImageView(cardImageURL: imageURL)
+                    .frame(height: 160)
                     .clipped()
             } else {
                 placeholderImage
@@ -404,6 +419,7 @@ struct RecipeCard: View {
                     .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(12)
@@ -425,7 +441,7 @@ struct RecipeCard: View {
                 .font(.system(size: 36))
                 .foregroundStyle(Color.cauldronOrange.opacity(0.3))
         }
-        .frame(height: 120)
+        .frame(height: 160)
         .clipped()
     }
 }
