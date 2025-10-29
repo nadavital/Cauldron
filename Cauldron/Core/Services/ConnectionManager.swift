@@ -165,7 +165,10 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
-        // Create accepted connection (preserve sender info)
+        // Get current user's info for the acceptor fields
+        let currentUser = CurrentUserSession.shared.currentUser
+
+        // Create accepted connection (preserve sender info, add acceptor info)
         let acceptedConnection = Connection(
             id: connection.id,
             fromUserId: connection.fromUserId,
@@ -174,7 +177,9 @@ class ConnectionManager: ObservableObject {
             createdAt: connection.createdAt,
             updatedAt: Date(),
             fromUsername: connection.fromUsername,
-            fromDisplayName: connection.fromDisplayName
+            fromDisplayName: connection.fromDisplayName,
+            toUsername: currentUser?.username,
+            toDisplayName: currentUser?.displayName
         )
 
         // Update local state immediately (optimistic)

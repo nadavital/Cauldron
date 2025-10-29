@@ -950,6 +950,14 @@ actor CloudKitService {
             record["fromDisplayName"] = fromDisplayName as CKRecordValue
         }
 
+        // Acceptor info for acceptance notifications
+        if let toUsername = connection.toUsername {
+            record["toUsername"] = toUsername as CKRecordValue
+        }
+        if let toDisplayName = connection.toDisplayName {
+            record["toDisplayName"] = toDisplayName as CKRecordValue
+        }
+
         // Use modifyRecords with .changedKeys to allow any authenticated user to update
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
@@ -1092,6 +1100,10 @@ actor CloudKitService {
         let fromUsername = record["fromUsername"] as? String
         let fromDisplayName = record["fromDisplayName"] as? String
 
+        // Optional acceptor/receiver info for acceptance notifications
+        let toUsername = record["toUsername"] as? String
+        let toDisplayName = record["toDisplayName"] as? String
+
         return Connection(
             id: connectionId,
             fromUserId: fromUserId,
@@ -1100,7 +1112,9 @@ actor CloudKitService {
             createdAt: createdAt,
             updatedAt: updatedAt,
             fromUsername: fromUsername,
-            fromDisplayName: fromDisplayName
+            fromDisplayName: fromDisplayName,
+            toUsername: toUsername,
+            toDisplayName: toDisplayName
         )
     }
     
@@ -1142,7 +1156,7 @@ actor CloudKitService {
         notification.alertLocalizationArgs = ["fromDisplayName"]
 
         // Fallback message if localization fails (shouldn't happen if Localizable.strings exists)
-        notification.alertBody = "You have a new connection request!"
+        notification.alertBody = "You have a new friend request!"
 
         notification.soundName = "default"
         notification.shouldBadge = true
@@ -1173,6 +1187,75 @@ actor CloudKitService {
             logger.info("Unsubscribed from connection requests")
         } catch {
             logger.warning("Failed to unsubscribe: \(error.localizedDescription)")
+        }
+    }
+
+    /// Subscribe to connection acceptances for push notifications
+    /// This sets up a CloudKit subscription so the user gets notified when someone accepts their friend request
+    func subscribeToConnectionAcceptances(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-acceptances-\(userId.uuidString)"
+
+        // Delete existing subscription first (if any) to ensure we use the latest notification format
+        let db = try getPublicDatabase()
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Deleted old connection acceptance subscription")
+        } catch {
+            // Subscription doesn't exist yet, that's fine
+            logger.info("No existing acceptance subscription to delete (creating fresh)")
+        }
+
+        // Create predicate: fromUserId == current user AND status == accepted
+        let predicate = NSPredicate(format: "fromUserId == %@ AND status == %@", userId.uuidString, "accepted")
+
+        // Create query subscription
+        let subscription = CKQuerySubscription(
+            recordType: connectionRecordType,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordUpdate]  // Fires when status changes to accepted
+        )
+
+        // Configure notification with personalized message
+        let notification = CKSubscription.NotificationInfo()
+
+        // Use localization with field substitution to show acceptor's display name
+        // The %@ placeholder will be replaced with the value from the toUsername field
+        notification.alertLocalizationKey = "CONNECTION_ACCEPTED_ALERT"
+        notification.alertLocalizationArgs = ["toUsername"]
+
+        // Fallback message if localization fails
+        notification.alertBody = "Your friend request was accepted!"
+
+        notification.soundName = "default"
+        notification.shouldBadge = false  // Don't badge for acceptances, only for incoming requests
+        notification.shouldSendContentAvailable = true
+
+        // Include connection data in userInfo for navigation
+        notification.desiredKeys = ["connectionId", "toUserId", "toUsername", "toDisplayName"]
+
+        subscription.notificationInfo = notification
+
+        // Save subscription
+        do {
+            _ = try await db.save(subscription)
+            logger.info("Successfully subscribed to connection acceptances")
+        } catch {
+            logger.error("Failed to save connection acceptance subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Unsubscribe from connection acceptance notifications
+    func unsubscribeFromConnectionAcceptances(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-acceptances-\(userId.uuidString)"
+        let db = try getPublicDatabase()
+
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Unsubscribed from connection acceptances")
+        } catch {
+            logger.warning("Failed to unsubscribe from acceptances: \(error.localizedDescription)")
         }
     }
 

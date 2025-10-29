@@ -1,2 +1,5 @@
-/* Connection request notification */
-"CONNECTION_REQUEST_ALERT" = "%@ wants to connect with you";
+/* Friend request notification */
+"CONNECTION_REQUEST_ALERT" = "%@ sent you a friend request";
+
+/* Friend request accepted notification */
+"CONNECTION_ACCEPTED_ALERT" = "%@ accepted your friend request";

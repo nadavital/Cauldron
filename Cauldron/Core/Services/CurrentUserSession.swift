@@ -241,6 +241,15 @@ class CurrentUserSession: ObservableObject {
             // Don't block user flow if subscription fails
         }
 
+        // Subscribe to connection acceptances
+        do {
+            try await dependencies.cloudKitService.subscribeToConnectionAcceptances(forUserId: userId)
+            logger.info("Successfully set up connection acceptance notifications")
+        } catch {
+            logger.warning("Failed to set up connection acceptance notifications: \(error.localizedDescription)")
+            // Don't block user flow if subscription fails
+        }
+
         // TODO: Re-enable shared recipe notifications once new architecture is implemented
         /*
         // Subscribe to shared recipes
