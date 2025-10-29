@@ -12,7 +12,8 @@ import os
 
 @MainActor
 class SearchTabViewModel: ObservableObject {
-    @Published var allRecipes: [Recipe] = []
+    @Published var allRecipes: [Recipe] = [] // User's own recipes
+    @Published var publicRecipes: [Recipe] = [] // All public recipes from CloudKit
     @Published var recipesByTag: [String: [Recipe]] = [:]
     @Published var recipeSearchResults: [Recipe] = []
     @Published var peopleSearchResults: [User] = []
@@ -47,10 +48,13 @@ class SearchTabViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // Load all recipes
+            // Load user's own recipes
             allRecipes = try await dependencies.recipeRepository.fetchAll()
 
-            // Group recipes by tags
+            // Load all public recipes from CloudKit
+            await loadPublicRecipes()
+
+            // Group recipes by tags (using own recipes for category browsing)
             groupRecipesByTags()
 
             // Load connections (for determining connection status in user search)
@@ -61,6 +65,24 @@ class SearchTabViewModel: ObservableObject {
 
         } catch {
             AppLogger.general.error("Failed to load search tab data: \(error.localizedDescription)")
+        }
+    }
+
+    func loadPublicRecipes() async {
+        do {
+            // Fetch all public recipes from CloudKit
+            let recipes = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: nil,
+                visibility: .publicRecipe
+            )
+
+            // Filter out own recipes
+            publicRecipes = recipes.filter { $0.ownerId != currentUserId }
+
+            AppLogger.general.info("Loaded \(publicRecipes.count) public recipes for search")
+        } catch {
+            AppLogger.general.error("Failed to load public recipes: \(error.localizedDescription)")
+            publicRecipes = []
         }
     }
 
@@ -130,12 +152,16 @@ class SearchTabViewModel: ObservableObject {
     
     func updateRecipeSearch(_ query: String) {
         recipeSearchText = query
-        
+
         if query.isEmpty {
             recipeSearchResults = []
         } else {
             let lowercased = query.lowercased()
-            recipeSearchResults = allRecipes.filter { recipe in
+
+            // Search both personal recipes AND public recipes
+            let combinedRecipes = allRecipes + publicRecipes
+
+            recipeSearchResults = combinedRecipes.filter { recipe in
                 recipe.title.lowercased().contains(lowercased) ||
                 recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
                 recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })

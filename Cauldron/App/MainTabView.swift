@@ -33,7 +33,7 @@ struct MainTabView: View {
                 GroceriesView(dependencies: dependencies)
             }
 
-            Tab("Sharing", systemImage: "person.2", value: .sharing) {
+            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
                 SharingTabView(dependencies: dependencies)
             }
 
@@ -43,8 +43,8 @@ struct MainTabView: View {
         }
         .tint(.cauldronOrange)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
-            // Switch to Sharing tab when connection notification is tapped
-            AppLogger.general.info("📍 Switching to Sharing tab from notification")
+            // Switch to Friends tab when connection notification is tapped
+            AppLogger.general.info("📍 Switching to Friends tab from notification")
             selectedTab = .sharing
         }
     }

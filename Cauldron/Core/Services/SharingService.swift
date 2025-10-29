@@ -135,30 +135,35 @@ actor SharingService {
             }
         }
 
-        // Fetch all public recipes
-        let publicRecipes = try await cloudKitService.querySharedRecipes(
-            ownerIds: nil,
-            visibility: .publicRecipe
-        )
-        logger.info("Found \(publicRecipes.count) public recipes")
+        // Also fetch public recipes from friends (so friends see each other's public recipes too)
+        if !friendIds.isEmpty {
+            let friendsPublicRecipes = try await cloudKitService.querySharedRecipes(
+                ownerIds: friendIds,
+                visibility: .publicRecipe
+            )
+            logger.info("Found \(friendsPublicRecipes.count) public recipes from friends")
 
-        // Convert to SharedRecipe objects (excluding own recipes)
-        for recipe in publicRecipes {
-            guard recipe.ownerId != currentUser.id else { continue } // Skip own recipes
+            // Convert to SharedRecipe objects
+            for recipe in friendsPublicRecipes {
+                // Skip if already added (shouldn't happen but be safe)
+                if allSharedRecipes.contains(where: { $0.recipe.id == recipe.id }) {
+                    continue
+                }
 
-            if let ownerId = recipe.ownerId,
-               let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
-                let sharedRecipe = SharedRecipe(
-                    id: UUID(),
-                    recipe: recipe,
-                    sharedBy: owner,
-                    sharedAt: recipe.createdAt
-                )
-                allSharedRecipes.append(sharedRecipe)
+                if let ownerId = recipe.ownerId,
+                   let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
+                    let sharedRecipe = SharedRecipe(
+                        id: UUID(),
+                        recipe: recipe,
+                        sharedBy: owner,
+                        sharedAt: recipe.createdAt
+                    )
+                    allSharedRecipes.append(sharedRecipe)
+                }
             }
         }
 
-        logger.info("✅ Found \(allSharedRecipes.count) total shared recipes")
+        logger.info("✅ Found \(allSharedRecipes.count) total shared recipes from friends")
         return allSharedRecipes
     }
     

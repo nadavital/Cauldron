@@ -35,7 +35,7 @@ struct SharingTabView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             combinedFeedSection
-            .navigationTitle("Sharing")
+            .navigationTitle("Friends")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if let user = userSession.currentUser {
@@ -94,7 +94,7 @@ struct SharingTabView: View {
 
                 // Shared recipes section
                 VStack(spacing: 0) {
-                    SectionHeader(title: "Shared Recipes", icon: "book.fill", color: .cauldronOrange)
+                    SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
 
                     if viewModel.isLoading {
                         HStack {
@@ -127,10 +127,10 @@ struct SharingTabView: View {
                                     )
                             }
 
-                            Text("No Shared Recipes Yet")
+                            Text("No Friends' Recipes Yet")
                                 .font(.headline)
 
-                            Text("When your friends share recipes,\nthey'll appear here")
+                            Text("Add friends and their shared recipes\nwill appear here")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -189,11 +189,11 @@ struct SharingTabView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
             
-            Text("No Shared Recipes")
+            Text("No Friends' Recipes")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
-            Text("Recipes shared with you will appear here")
+
+            Text("Add friends to see their shared recipes here")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
