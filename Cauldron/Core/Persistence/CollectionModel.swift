@@ -14,7 +14,7 @@ final class CollectionModel {
     var id: UUID = UUID()
     var name: String = ""
     var descriptionText: String?  // "description" is reserved in SwiftData
-    var userId: UUID
+    var userId: UUID = UUID()  // Default value required for CloudKit
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
