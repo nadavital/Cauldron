@@ -40,7 +40,7 @@ struct SharingTabView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if let user = userSession.currentUser {
                         NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
-                            Image(systemName: "person.circle.fill")
+                            Image(systemName: "person.fill")
                         }
                     }
                 }
@@ -80,9 +80,9 @@ struct SharingTabView: View {
     private var combinedFeedSection: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
-                // Connection requests section
+                // Friends section
                 VStack(spacing: 0) {
-                    SectionHeader(title: "Connections", icon: "person.2.fill", color: .green)
+                    SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
                     ConnectionsInlineView(dependencies: dependencies)
                         .padding(.bottom, 8)
@@ -130,7 +130,7 @@ struct SharingTabView: View {
                             Text("No Shared Recipes Yet")
                                 .font(.headline)
 
-                            Text("When your connections share recipes,\nthey'll appear here")
+                            Text("When your friends share recipes,\nthey'll appear here")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -246,15 +246,7 @@ struct SharedRecipeRowView: View {
 
                 // Shared by info
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.cauldronOrange.opacity(0.3))
-                        .frame(width: 20, height: 20)
-                        .overlay(
-                            Text(sharedRecipe.sharedBy.displayName.prefix(1).uppercased())
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.cauldronOrange)
-                        )
+                    ProfileAvatar(user: sharedRecipe.sharedBy, size: 20)
 
                     Text(sharedRecipe.sharedBy.displayName)
                         .font(.caption)
@@ -363,7 +355,7 @@ struct ConnectionsInlineView: View {
                 }
             }
 
-            // Connections display
+            // Friends display
             if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
                 // Empty state
                 VStack(spacing: 12) {
@@ -371,12 +363,12 @@ struct ConnectionsInlineView: View {
                         .font(.system(size: 40))
                         .foregroundColor(.gray.opacity(0.5))
 
-                    Text("No connections yet")
+                    Text("No friends yet")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
                     NavigationLink(destination: SearchTabView(dependencies: dependencies)) {
-                        Text("Find people to connect")
+                        Text("Find people to add")
                             .font(.caption)
                             .foregroundColor(.cauldronOrange)
                     }
@@ -384,26 +376,20 @@ struct ConnectionsInlineView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
             } else {
-                // Header with count and see all
-                HStack {
-                    Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "Connection" : "Connections")")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                // Horizontal scrolling friends
+                if !viewModel.connections.isEmpty {
+                    HStack {
+                        Spacer()
 
-                    Spacer()
-
-                    if !viewModel.connections.isEmpty {
                         NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
                             Text("See All")
                                 .font(.subheadline)
                                 .foregroundColor(.cauldronOrange)
                         }
                     }
-                }
-                .padding(.horizontal, 16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
 
-                // Horizontal scrolling connections
-                if !viewModel.connections.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(viewModel.connections.prefix(10), id: \.id) { connection in

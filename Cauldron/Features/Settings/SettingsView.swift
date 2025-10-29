@@ -15,12 +15,30 @@ struct EditProfileView: View {
     
     @State private var username = ""
     @State private var displayName = ""
+    @State private var profileEmoji: String?
+    @State private var profileColor: String?
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showingEmojiPicker = false
+
+    // Preset food emojis for quick selection
+    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐"]
 
     var hasChanges: Bool {
         guard let user = userSession.currentUser else { return false }
-        return username != user.username || displayName != user.displayName
+        return username != user.username ||
+               displayName != user.displayName ||
+               profileEmoji != user.profileEmoji ||
+               profileColor != user.profileColor
+    }
+
+    var previewUser: User {
+        User(
+            username: username.isEmpty ? "username" : username,
+            displayName: displayName.isEmpty ? "Display Name" : displayName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
+        )
     }
     
     var body: some View {
@@ -29,16 +47,8 @@ struct EditProfileView: View {
                 // Profile preview
                 Section {
                     HStack(spacing: 16) {
-                        Circle()
-                            .fill(Color.cauldronOrange.gradient)
-                            .frame(width: 60, height: 60)
-                            .overlay {
-                                Text(displayName.isEmpty ? "?" : displayName.prefix(1).uppercased())
-                                    .font(.title)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.white)
-                            }
-                        
+                        ProfileAvatar(user: previewUser, size: 60)
+
                         VStack(alignment: .leading, spacing: 4) {
                             Text(displayName.isEmpty ? "Display Name" : displayName)
                                 .font(.headline)
@@ -57,9 +67,6 @@ struct EditProfileView: View {
                         .autocorrectionDisabled()
                 } header: {
                     Text("Username")
-                } footer: {
-                    Text("Your unique identifier. Used for mentions and finding you on the platform.")
-                        .font(.caption)
                 }
 
                 Section {
@@ -67,9 +74,78 @@ struct EditProfileView: View {
                         .textInputAutocapitalization(.words)
                 } header: {
                     Text("Display Name")
-                } footer: {
-                    Text("How others see you. This is what appears on your profile and shared recipes.")
-                        .font(.caption)
+                }
+
+                // Emoji picker
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Current emoji or placeholder
+                        if let emoji = profileEmoji {
+                            HStack {
+                                Text("Current: \(emoji)")
+                                    .font(.title2)
+                                Spacer()
+                                Button("Clear") {
+                                    profileEmoji = nil
+                                }
+                                .font(.caption)
+                                .foregroundColor(.red)
+                            }
+                        }
+
+                        // Quick pick food emojis
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
+                            ForEach(foodEmojis, id: \.self) { emoji in
+                                Button {
+                                    profileEmoji = emoji
+                                } label: {
+                                    Text(emoji)
+                                        .font(.title2)
+                                        .frame(width: 44, height: 44)
+                                        .background(profileEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.clear)
+                                        .cornerRadius(8)
+                                }
+                            }
+                        }
+
+                        // Custom emoji picker button
+                        Button {
+                            showingEmojiPicker = true
+                        } label: {
+                            Label("Choose Custom Emoji", systemImage: "face.smiling")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } header: {
+                    Text("Profile Emoji")
+                }
+
+                // Color picker
+                Section {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
+                        ForEach(Color.allProfileColors, id: \.self) { color in
+                            Button {
+                                profileColor = color.toHex()
+                            } label: {
+                                Circle()
+                                    .fill(color.opacity(0.3))
+                                    .frame(width: 44, height: 44)
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
+                                    )
+                                    .overlay(
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(color)
+                                            .font(.headline)
+                                            .opacity(profileColor == color.toHex() ? 1 : 0)
+                                    )
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Profile Color")
                 }
                 
                 if let error = errorMessage {
@@ -102,7 +178,12 @@ struct EditProfileView: View {
                 if let user = userSession.currentUser {
                     username = user.username
                     displayName = user.displayName
+                    profileEmoji = user.profileEmoji
+                    profileColor = user.profileColor
                 }
+            }
+            .sheet(isPresented: $showingEmojiPicker) {
+                EmojiPickerView(selectedEmoji: $profileEmoji)
             }
         }
     }
@@ -135,6 +216,8 @@ struct EditProfileView: View {
             try await userSession.updateUser(
                 username: username,
                 displayName: displayName,
+                profileEmoji: profileEmoji,
+                profileColor: profileColor,
                 dependencies: dependencies
             )
             dismiss()

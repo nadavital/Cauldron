@@ -87,7 +87,7 @@ struct RecipeEditorView: View {
                 Section("Recipe Details") {
                     TextField("Recipe Title", text: $viewModel.title)
                     TextField("Yields (e.g., 4 servings)", text: $viewModel.yields)
-                    
+
                     HStack {
                         Text("Total Time")
                         Spacer()
@@ -97,6 +97,24 @@ struct RecipeEditorView: View {
                             .frame(width: 80)
                         Text("min")
                             .foregroundColor(.secondary)
+                    }
+
+                    // Visibility dropdown
+                    Menu {
+                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                            Button {
+                                viewModel.visibility = visibility
+                            } label: {
+                                Label(visibility.displayName, systemImage: visibility.icon)
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Text("Visibility")
+                            Spacer()
+                            Label(viewModel.visibility.displayName, systemImage: viewModel.visibility.icon)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 
@@ -126,31 +144,7 @@ struct RecipeEditorView: View {
                         }
                     }
                 }
-                
-                // Recipe Visibility
-                Section {
-                    Picker("Visibility", selection: $viewModel.visibility) {
-                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                            Label(visibility.displayName, systemImage: visibility.icon)
-                                .tag(visibility)
-                        }
-                    }
-                    .pickerStyle(.segmented)
 
-                    // Show description for selected visibility
-                    Text(viewModel.visibility.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } header: {
-                    Text("Who can see this recipe?")
-                } footer: {
-                    if viewModel.visibility != .privateRecipe {
-                        Text("This recipe will be synced to iCloud and visible to others")
-                            .font(.caption)
-                    }
-                }
-                
                 // Ingredients
                 Section {
                     ForEach(viewModel.ingredients.indices, id: \.self) { index in

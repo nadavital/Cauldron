@@ -33,11 +33,6 @@ struct UserProfileView: View {
                     connectionSection
                 }
 
-                // Connections Row (for current user)
-                if viewModel.isCurrentUser {
-                    connectionsRow
-                }
-
                 // Recipes Section
                 recipesSection
             }
@@ -65,28 +60,27 @@ struct UserProfileView: View {
     private var profileHeader: some View {
         VStack(spacing: 16) {
             // Avatar
-            Circle()
-                .fill(Color.cauldronOrange.opacity(0.3))
-                .frame(width: 100, height: 100)
-                .overlay(
-                    Text(user.displayName.prefix(2).uppercased())
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(.cauldronOrange)
-                )
+            ProfileAvatar(user: user, size: 100)
 
             // Display Name
             Text(user.displayName)
                 .font(.title2)
                 .fontWeight(.bold)
 
-            // Username and Connection Status Badge
-            HStack(spacing: 8) {
+            // Username, Friends Count, and Connection Status Badge
+            VStack(spacing: 8) {
                 Text("@\(user.username)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                if !viewModel.isCurrentUser {
+                // Friends count for current user
+                if viewModel.isCurrentUser {
+                    NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
+                        Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                } else if !viewModel.isCurrentUser {
                     connectionStatusBadge
                 }
             }
@@ -114,7 +108,7 @@ struct UserProfileView: View {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption)
-                Text("Connected")
+                Text("Friends")
                     .font(.caption)
                     .fontWeight(.medium)
             }
@@ -142,7 +136,7 @@ struct UserProfileView: View {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.caption)
-                Text("Wants to Connect")
+                Text("Wants to be Friends")
                     .font(.caption)
                     .fontWeight(.medium)
             }
@@ -187,7 +181,7 @@ struct UserProfileView: View {
                 await viewModel.sendConnectionRequest()
             }
         } label: {
-            Label("Connect", systemImage: "person.badge.plus")
+            Label("Add Friend", systemImage: "person.badge.plus")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -200,7 +194,7 @@ struct UserProfileView: View {
 
     private var pendingReceivedButtons: some View {
         VStack(spacing: 12) {
-            Text("Connection Request")
+            Text("Friend Request")
                 .font(.headline)
                 .padding(.bottom, 4)
 
@@ -244,7 +238,7 @@ struct UserProfileView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.green)
                     .font(.title3)
-                Text("Connected")
+                Text("Friends")
                     .font(.headline)
             }
             .padding(.bottom, 8)
@@ -254,7 +248,7 @@ struct UserProfileView: View {
                     await viewModel.removeConnection()
                 }
             } label: {
-                Label("Remove Connection", systemImage: "person.badge.minus")
+                Label("Remove Friend", systemImage: "person.badge.minus")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -293,34 +287,6 @@ struct UserProfileView: View {
             .disabled(viewModel.isProcessing)
         }
         .padding()
-    }
-
-    private var connectionsRow: some View {
-        NavigationLink {
-            ConnectionsView(dependencies: viewModel.dependencies)
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("Connections", systemImage: "person.2.fill")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "connection" : "connections")")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
-        }
-        .buttonStyle(.plain)
     }
 
     private var recipesSection: some View {

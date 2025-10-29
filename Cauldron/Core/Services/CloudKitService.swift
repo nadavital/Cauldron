@@ -351,6 +351,12 @@ actor CloudKitService {
         if let email = user.email {
             record["email"] = email as CKRecordValue
         }
+        if let emoji = user.profileEmoji {
+            record["profileEmoji"] = emoji as CKRecordValue
+        }
+        if let color = user.profileColor {
+            record["profileColor"] = color as CKRecordValue
+        }
         record["createdAt"] = user.createdAt as CKRecordValue
 
         // Save to PUBLIC database so other users can discover this user
@@ -468,6 +474,8 @@ actor CloudKitService {
 
         let email = record["email"] as? String
         let createdAt = record["createdAt"] as? Date ?? Date()
+        let profileEmoji = record["profileEmoji"] as? String
+        let profileColor = record["profileColor"] as? String
 
         return User(
             id: userId,
@@ -475,7 +483,9 @@ actor CloudKitService {
             displayName: displayName,
             email: email,
             cloudRecordName: record.recordID.recordName,
-            createdAt: createdAt
+            createdAt: createdAt,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
     }
     

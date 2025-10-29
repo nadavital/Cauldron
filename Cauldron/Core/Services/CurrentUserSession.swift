@@ -233,20 +233,28 @@ class CurrentUserSession: ObservableObject {
     }
     
     /// Update user profile
-    func updateUser(username: String, displayName: String, dependencies: DependencyContainer) async throws {
+    func updateUser(
+        username: String,
+        displayName: String,
+        profileEmoji: String? = nil,
+        profileColor: String? = nil,
+        dependencies: DependencyContainer
+    ) async throws {
         guard let currentUser = currentUser else {
             throw UserSessionError.notAuthenticated
         }
-        
+
         logger.info("Updating user profile: \(username)")
-        
+
         let updatedUser = User(
             id: currentUser.id,
             username: username,
             displayName: displayName,
-            cloudRecordName: currentUser.cloudRecordName
+            cloudRecordName: currentUser.cloudRecordName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
-        
+
         // Try to update in CloudKit
         do {
             try await dependencies.cloudKitService.saveUser(updatedUser)

@@ -41,9 +41,9 @@ struct ConnectionsView: View {
                     }
                 }
 
-                // Active connections
+                // Active friends
                 if !viewModel.connections.isEmpty {
-                    sectionHeader(title: "Connections", icon: "person.2.fill", color: .green)
+                    sectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
                     ForEach(viewModel.connections, id: \.id) { connection in
                         if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
@@ -78,11 +78,11 @@ struct ConnectionsView: View {
                             )
 
                         VStack(spacing: 8) {
-                            Text("No Connections Yet")
+                            Text("No Friends Yet")
                                 .font(.title2)
                                 .fontWeight(.bold)
 
-                            Text("Search for users in the Search tab to start connecting with other home chefs!")
+                            Text("Search for users in the Search tab to start adding friends!")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -96,7 +96,7 @@ struct ConnectionsView: View {
             .padding(.vertical, 12)
         }
         .background(Color.cauldronBackground.ignoresSafeArea())
-        .navigationTitle("Connections")
+        .navigationTitle("Friends")
         .task {
             await viewModel.loadConnections()
         }
@@ -151,22 +151,7 @@ struct ConnectionRequestCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.cauldronOrange.opacity(0.4), Color.cauldronOrange.opacity(0.2)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Text(user.displayName.prefix(2).uppercased())
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.cauldronOrange)
-                    )
-                    .shadow(color: Color.cauldronOrange.opacity(0.2), radius: 4, x: 0, y: 2)
+                ProfileAvatar(user: user, size: 60)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)
@@ -180,7 +165,7 @@ struct ConnectionRequestCard: View {
                     HStack(spacing: 4) {
                         Image(systemName: "sparkles")
                             .font(.caption2)
-                        Text("wants to connect")
+                        Text("wants to be friends")
                             .font(.caption)
                     }
                     .foregroundColor(.cauldronOrange)
@@ -255,22 +240,7 @@ struct ConnectionCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.green.opacity(0.3), Color.green.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Text(user.displayName.prefix(2).uppercased())
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.green)
-                    )
-                    .shadow(color: Color.green.opacity(0.15), radius: 3, x: 0, y: 2)
+                ProfileAvatar(user: user, size: 60)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)
@@ -311,22 +281,7 @@ struct SentRequestCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Text(user.displayName.prefix(2).uppercased())
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(.blue)
-                    )
-                    .shadow(color: Color.blue.opacity(0.15), radius: 3, x: 0, y: 2)
+                ProfileAvatar(user: user, size: 60)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)

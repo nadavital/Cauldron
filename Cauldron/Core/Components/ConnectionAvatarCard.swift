@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// Compact card showing a connection's avatar and name
+/// Compact card showing a friend's avatar and name
 struct ConnectionAvatarCard: View {
     let user: User
     let dependencies: DependencyContainer
@@ -15,15 +15,7 @@ struct ConnectionAvatarCard: View {
     var body: some View {
         NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
             VStack(spacing: 6) {
-                Circle()
-                    .fill(Color.cauldronOrange.opacity(0.3))
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Text(user.displayName.prefix(2).uppercased())
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.cauldronOrange)
-                    )
+                ProfileAvatar(user: user, size: 60)
 
                 Text(user.displayName)
                     .font(.caption)

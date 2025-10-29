@@ -283,14 +283,7 @@ struct UserSearchRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(Color.cauldronOrange.opacity(0.3))
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(user.displayName.prefix(2).uppercased())
-                        .font(.headline)
-                        .foregroundColor(.cauldronOrange)
-                )
+            ProfileAvatar(user: user, size: 50)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(user.displayName)
@@ -509,14 +502,7 @@ struct UserRowView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(Color.cauldronOrange.opacity(0.3))
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(user.displayName.prefix(2).uppercased())
-                        .font(.headline)
-                        .foregroundColor(.cauldronOrange)
-                )
+            ProfileAvatar(user: user, size: 50)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(user.displayName)

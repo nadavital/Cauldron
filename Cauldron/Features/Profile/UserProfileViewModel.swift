@@ -27,6 +27,11 @@ class UserProfileViewModel: ObservableObject {
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
 
+    // Recipe caching
+    private var lastRecipeLoadTime: Date?
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+    private var lastConnectionState: ConnectionState?
+
     enum ConnectionState: Equatable {
         case notConnected
         case pendingSent
@@ -213,12 +218,28 @@ class UserProfileViewModel: ObservableObject {
 
     // MARK: - Recipe Fetching
 
-    func loadUserRecipes() async {
+    func loadUserRecipes(forceRefresh: Bool = false) async {
+        // Check cache validity
+        if !forceRefresh, let lastLoadTime = lastRecipeLoadTime,
+           Date().timeIntervalSince(lastLoadTime) < cacheValidityDuration,
+           lastConnectionState == connectionState {
+            AppLogger.general.info("Using cached recipes for \(self.user.username)")
+            return
+        }
+
+        // Invalidate cache if connection state changed
+        if lastConnectionState != connectionState {
+            AppLogger.general.info("Connection state changed, invalidating recipe cache")
+            lastConnectionState = connectionState
+        }
+
         isLoadingRecipes = true
         defer { isLoadingRecipes = false }
 
         do {
             userRecipes = try await fetchUserRecipes()
+            lastRecipeLoadTime = Date()
+            lastConnectionState = connectionState
             AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")

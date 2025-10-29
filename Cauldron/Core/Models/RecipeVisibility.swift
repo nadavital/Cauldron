@@ -24,7 +24,7 @@ enum RecipeVisibility: String, Codable, Sendable, CaseIterable {
     var description: String {
         switch self {
         case .privateRecipe: return "Only you can see this recipe"
-        case .friendsOnly: return "Only your connections can see this recipe"
+        case .friendsOnly: return "Only your friends can see this recipe"
         case .publicRecipe: return "Anyone can discover and view this recipe"
         }
     }
