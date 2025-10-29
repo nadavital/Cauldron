@@ -45,11 +45,6 @@
 			path = Cauldron;
 			sourceTree = "<group>";
 		};
-		AE25A6282EB1E26F00EC6346 /* CauldronTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = CauldronTests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,7 +70,6 @@
 			children = (
 				505171B42DCB0D4B0077095A /* Cauldron */,
 				50F5BA832E937E2C00E4A5C4 /* Cauldron */,
-				AE25A6282EB1E26F00EC6346 /* CauldronTests */,
 				505171B32DCB0D4B0077095A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -126,9 +120,6 @@
 			);
 			dependencies = (
 				AE25A62C2EB1E26F00EC6346 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				AE25A6282EB1E26F00EC6346 /* CauldronTests */,
 			);
 			name = CauldronTests;
 			packageProductDependencies = (
