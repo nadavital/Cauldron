@@ -351,7 +351,24 @@ actor CloudKitService {
         }
 
         let recordID = CKRecord.ID(recordName: recordName)
-        let record = CKRecord(recordType: userRecordType, recordID: recordID)
+        let db = try getPublicDatabase()
+
+        // Try to fetch existing record first to update it, otherwise create new one
+        let record: CKRecord
+        do {
+            record = try await db.record(for: recordID)
+            logger.info("Updating existing user record in CloudKit: \(user.username)")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Record doesn't exist, create new one
+            record = CKRecord(recordType: userRecordType, recordID: recordID)
+            logger.info("Creating new user record in CloudKit: \(user.username)")
+        } catch {
+            // Other error, rethrow
+            logger.error("Error fetching existing user record: \(error.localizedDescription)")
+            throw error
+        }
+
+        // Update/set all fields
         record["userId"] = user.id.uuidString as CKRecordValue
         record["username"] = user.username as CKRecordValue
         record["displayName"] = user.displayName as CKRecordValue
@@ -367,7 +384,6 @@ actor CloudKitService {
         record["createdAt"] = user.createdAt as CKRecordValue
 
         // Save to PUBLIC database so other users can discover this user
-        let db = try getPublicDatabase()
         _ = try await db.save(record)
         logger.info("Saved user: \(user.username) to PUBLIC database")
     }
