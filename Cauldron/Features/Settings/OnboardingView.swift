@@ -139,6 +139,7 @@ struct OnboardingView: View {
                                                 .opacity(profileColor == color.toHex() ? 1 : 0)
                                         )
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
                     }

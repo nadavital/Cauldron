@@ -91,6 +91,7 @@ struct EditProfileView: View {
                                         .background(profileEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.clear)
                                         .cornerRadius(8)
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
 
@@ -140,6 +141,7 @@ struct EditProfileView: View {
                                             .opacity(profileColor == color.toHex() ? 1 : 0)
                                     )
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 } header: {

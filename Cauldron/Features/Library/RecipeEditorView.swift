@@ -101,13 +101,13 @@ struct RecipeEditorView: View {
 
                     // Visibility dropdown
                     Menu {
-                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                            Button {
-                                viewModel.visibility = visibility
-                            } label: {
+                        Picker("Visibility", selection: $viewModel.visibility) {
+                            ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
                                 Label(visibility.displayName, systemImage: visibility.icon)
+                                    .tag(visibility)
                             }
                         }
+                        .labelsHidden()
                     } label: {
                         HStack {
                             Text("Visibility")
