@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import os
 
 /// SwiftData persistence model for Recipe
 @Model
@@ -112,12 +113,31 @@ final class RecipeModel {
     /// Convert to domain Recipe
     func toDomain() throws -> Recipe {
         let decoder = JSONDecoder()
-        
+
         let ingredients = try decoder.decode([Ingredient].self, from: ingredientsBlob)
         let steps = try decoder.decode([CookStep].self, from: stepsBlob)
         let tags = try decoder.decode([Tag].self, from: tagsBlob)
         let nutrition = try nutritionBlob.map { try decoder.decode(Nutrition.self, from: $0) }
-        
+
+        // Handle image URL with defensive repair
+        var finalImageURL: URL? = nil
+        if let imageURLString = imageURL {
+            if let url = URL(string: imageURLString) {
+                finalImageURL = url
+                AppLogger.general.debug("✅ Image URL loaded: \(imageURLString)")
+            } else {
+                AppLogger.general.warning("⚠️ Failed to parse imageURL: \(imageURLString)")
+                // Attempt repair: check if it's just a filename
+                if !imageURLString.contains("/") {
+                    // It's just a filename, construct file URL
+                    let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                    let repairedURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(imageURLString)
+                    finalImageURL = repairedURL
+                    AppLogger.general.info("🔧 Repaired imageURL from filename: \(imageURLString) -> \(repairedURL.path)")
+                }
+            }
+        }
+
         return Recipe(
             id: id,
             title: title,
@@ -130,7 +150,7 @@ final class RecipeModel {
             sourceURL: sourceURL.flatMap { URL(string: $0) },
             sourceTitle: sourceTitle,
             notes: notes,
-            imageURL: imageURL.flatMap { URL(string: $0) },
+            imageURL: finalImageURL,
             isFavorite: isFavorite,
             visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
             ownerId: ownerId,

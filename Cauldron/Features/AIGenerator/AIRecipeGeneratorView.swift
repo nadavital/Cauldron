@@ -21,34 +21,40 @@ struct AIRecipeGeneratorView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Header with Apple Intelligence branding
-                    headerSection
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerSection
 
-                    if !isAvailable {
-                        unavailableSection
-                    } else {
-                        // Prompt input section
-                        promptSection
+                        if !isAvailable {
+                            unavailableSection
+                        } else {
+                            // Combined prompt and category section
+                            combinedInputSection
 
-                        // Generation progress
-                        if viewModel.isGenerating || viewModel.generatedRecipe != nil {
-                            progressSection
-                        }
+                            if viewModel.isGenerating || viewModel.generatedRecipe != nil {
+                                progressSection
+                            }
 
-                        // Preview of generated recipe
-                        if let partial = viewModel.partialRecipe {
-                            recipePreviewSection(partial: partial)
-                        }
+                            if let partial = viewModel.partialRecipe {
+                                recipePreviewSection(partial: partial)
+                            }
 
-                        // Error display
-                        if let error = viewModel.errorMessage {
-                            errorSection(error: error)
+                            if let error = viewModel.errorMessage {
+                                errorSection(error: error)
+                            }
                         }
                     }
+                    .padding(.vertical, 28)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 100) // Space for floating button
                 }
-                .padding()
+                .background(Color.cauldronBackground.ignoresSafeArea())
+
+                // Floating generate button
+                if isAvailable && !viewModel.isGenerating && viewModel.generatedRecipe == nil {
+                    floatingGenerateButton
+                }
             }
             .navigationTitle("Generate Recipe")
             .navigationBarTitleDisplayMode(.inline)
@@ -89,47 +95,54 @@ struct AIRecipeGeneratorView: View {
     // MARK: - Sections
 
     private var headerSection: some View {
-        VStack(spacing: 16) {
-            // Apple Intelligence logo
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.0, green: 0.5, blue: 1.0),
-                                Color(red: 0.5, green: 0.0, blue: 1.0)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        VStack(spacing: 20) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.18, green: 0.28, blue: 0.99),
+                                    Color(red: 0.57, green: 0.14, blue: 1.0)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 80, height: 80)
-                    .shadow(color: .blue.opacity(0.3), radius: 10, x: 0, y: 5)
+                        .frame(width: 70, height: 70)
 
-                Image(systemName: "apple.intelligence")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.white)
+                    Image(systemName: "apple.intelligence")
+                        .font(.system(size: 34))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("AI Recipe Generator")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+
+                    Text("Describe what you crave and Cauldron will craft the recipe using Apple Intelligence.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
-            VStack(spacing: 8) {
-                Text("AI Recipe Generator")
-                    .font(.title2)
-                    .fontWeight(.bold)
+            Divider()
 
-                Text("Describe a recipe and Apple Intelligence will create it for you")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
+            Text("Fine-tune the prompt with ingredients, dietary preferences, or timing to receive a recipe that's ready to cook.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.leading)
         }
-        .padding(.top)
+        .padding(20)
+        .cardStyle()
     }
 
     private var unavailableSection: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 50))
+                .font(.system(size: 44))
                 .foregroundColor(.orange)
 
             Text("Apple Intelligence Not Available")
@@ -139,61 +152,209 @@ struct AIRecipeGeneratorView: View {
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
         }
-        .padding(.vertical, 40)
+        .padding(24)
+        .cardStyle()
+    }
+
+    private var combinedInputSection: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Prompt/Notes field
+            VStack(alignment: .leading, spacing: 12) {
+                Text(viewModel.hasSelectedCategories ? "Additional Notes (Optional)" : "What would you like to cook?")
+                    .font(.headline)
+
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $viewModel.prompt)
+                        .frame(minHeight: 100)
+                        .padding(14)
+                        .background(Color.cauldronBackground)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
+                        )
+                        .focused($isPromptFocused)
+
+                    if viewModel.prompt.isEmpty {
+                        Text(viewModel.hasSelectedCategories ? "e.g., no peanuts, extra spicy, low sodium..." : "Describe your ideal dish...")
+                            .foregroundColor(.secondary.opacity(0.5))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 22)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            // Categories
+            Text("Or select categories:")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            // Cuisine
+            CategorySelectionRow(
+                title: "Cuisine",
+                icon: "map",
+                options: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                selected: $viewModel.selectedCuisines
+            )
+
+            // Dietary
+            CategorySelectionRow(
+                title: "Diet",
+                icon: "leaf",
+                options: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                selected: $viewModel.selectedDiets
+            )
+
+            // Time
+            CategorySelectionRow(
+                title: "Time",
+                icon: "clock",
+                options: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                selected: $viewModel.selectedTimes
+            )
+
+            // Meal Type
+            CategorySelectionRow(
+                title: "Meal",
+                icon: "fork.knife",
+                options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                selected: $viewModel.selectedTypes
+            )
+        }
+        .padding(20)
+        .cardStyle()
+    }
+
+    private var floatingGenerateButton: some View {
+        Button {
+            viewModel.generateRecipe()
+            isPromptFocused = false
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "wand.and.stars")
+                    .font(.title3)
+                Text("Generate Recipe")
+                    .font(.headline)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 16)
+            .glassEffect(viewModel.canGenerate ? .regular.tint(.orange).interactive() : .regular.tint(.gray), in: Capsule())
+        }
+        .disabled(!viewModel.canGenerate)
+        .padding(.bottom, 32)
     }
 
     private var promptSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("What would you like to cook?")
                 .font(.headline)
 
-            VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
                 TextEditor(text: $viewModel.prompt)
-                    .frame(minHeight: 120)
-                    .padding(12)
-                    .background(Color(.systemGray6))
+                    .frame(minHeight: 160)
+                    .padding(14)
+                    .background(Color.cauldronBackground)
                     .cornerRadius(12)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(isPromptFocused ? Color.blue : Color.clear, lineWidth: 2)
+                            .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
                     )
                     .focused($isPromptFocused)
 
-                Text("Examples: \"Healthy chicken pasta\", \"Quick vegetarian dinner\", \"Chocolate dessert for 8 people\"")
+                // Placeholder text
+                if viewModel.prompt.isEmpty {
+                    Text("Describe your ideal dish...")
+                        .foregroundColor(.secondary.opacity(0.5))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 22)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            // Category-based inspiration
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Get inspired:")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                // Cuisine
+                RecipeTagSection(
+                    title: "Cuisine",
+                    icon: "map",
+                    tags: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
+
+                // Dietary
+                RecipeTagSection(
+                    title: "Diet",
+                    icon: "leaf",
+                    tags: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
+
+                // Time
+                RecipeTagSection(
+                    title: "Time",
+                    icon: "clock",
+                    tags: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
+
+                // Type
+                RecipeTagSection(
+                    title: "Type",
+                    icon: "fork.knife",
+                    tags: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                    onTagTap: { tag in
+                        appendToPrompt(tag)
+                    }
+                )
             }
 
             Button {
                 viewModel.generateRecipe()
                 isPromptFocused = false
             } label: {
-                HStack {
+                HStack(spacing: 8) {
                     Image(systemName: "wand.and.stars")
                     Text("Generate Recipe")
+                        .fontWeight(.semibold)
                 }
+                .font(.headline)
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(viewModel.canGenerate ? Color.blue : Color.gray)
-                .foregroundColor(.white)
+                .padding(.vertical, 14)
+                .background(viewModel.canGenerate ? Color.cauldronOrange : Color.gray.opacity(0.3))
+                .foregroundColor(viewModel.canGenerate ? .white : .secondary)
                 .cornerRadius(12)
             }
             .disabled(!viewModel.canGenerate)
         }
-        .padding(.top)
+        .padding(20)
+        .cardStyle()
     }
 
     private var progressSection: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 if viewModel.isGenerating {
                     ProgressView()
-                        .scaleEffect(0.8)
+                        .tint(.cauldronOrange)
                 } else {
                     Image(systemName: viewModel.generationProgress.systemImage)
-                        .foregroundColor(viewModel.generationProgress == .complete ? .green : .blue)
+                        .foregroundColor(viewModel.generationProgress == .complete ? .green : .cauldronOrange)
                 }
 
                 Text(viewModel.generationProgress.description)
@@ -206,19 +367,15 @@ struct AIRecipeGeneratorView: View {
                     Button {
                         viewModel.regenerate()
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise")
-                            Text("Regenerate")
-                        }
-                        .font(.caption)
-                        .foregroundColor(.blue)
+                        Label("Regenerate", systemImage: "arrow.clockwise")
+                            .font(.caption)
                     }
+                    .buttonStyle(.bordered)
                 }
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
         }
+        .padding(16)
+        .cardStyle()
     }
 
     private func recipePreviewSection(partial: GeneratedRecipe.PartiallyGenerated) -> some View {
@@ -226,44 +383,38 @@ struct AIRecipeGeneratorView: View {
             Text("Recipe Preview")
                 .font(.headline)
 
-            // Title with animated typing effect
             if let title = partial.title {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Title")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .textCase(.uppercase)
 
                     Text(title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .font(.title3)
+                        .fontWeight(.semibold)
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.cauldronSecondaryBackground)
+                )
             }
 
-            // Yields and time
-            if let yields = partial.yields ?? partial.totalMinutes.map({ _ in "" }) {
-                HStack {
-                    if let y = partial.yields {
-                        Label(y, systemImage: "person.2")
-                            .font(.subheadline)
+            if partial.yields != nil || partial.totalMinutes != nil {
+                HStack(spacing: 16) {
+                    if let yields = partial.yields, !yields.isEmpty {
+                        Label(yields, systemImage: "person.2")
                     }
 
                     if let minutes = partial.totalMinutes {
                         Label("\(minutes) min", systemImage: "clock")
-                            .font(.subheadline)
                     }
                 }
+                .font(.subheadline)
                 .foregroundColor(.secondary)
-                .transition(.opacity)
             }
 
-            // Ingredients
             if let ingredients = partial.ingredients, !ingredients.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Ingredients")
@@ -271,38 +422,44 @@ struct AIRecipeGeneratorView: View {
                         .foregroundColor(.secondary)
                         .textCase(.uppercase)
 
-                    ForEach(ingredients.indices, id: \.self) { index in
-                        let ingredient = ingredients[index]
-                        HStack {
-                            Circle()
-                                .fill(Color.cauldronOrange.opacity(0.3))
-                                .frame(width: 6, height: 6)
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(ingredients.indices, id: \.self) { index in
+                            let ingredient = ingredients[index]
 
-                            if let value = ingredient.quantityValue,
-                               let unitStr = ingredient.quantityUnit {
-                                Text("\(value, specifier: "%.1f") \(unitStr)")
-                                    .fontWeight(.medium)
-                            }
+                            HStack(alignment: .top, spacing: 12) {
+                                Circle()
+                                    .fill(Color.cauldronOrange.opacity(0.25))
+                                    .frame(width: 8, height: 8)
+                                    .padding(.top, 6)
 
-                            Text(ingredient.name ?? "")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if let value = ingredient.quantityValue,
+                                       let unit = ingredient.quantityUnit {
+                                        Text("\(value, specifier: "%.1f") \(unit)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
 
-                            if let note = ingredient.note {
-                                Text("(\(note))")
-                                    .foregroundColor(.secondary)
+                                    Text(ingredient.name ?? "")
+                                        .font(.body)
+
+                                    if let note = ingredient.note {
+                                        Text(note)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
                             }
                         }
-                        .font(.body)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.cauldronSecondaryBackground)
+                )
             }
 
-            // Steps
             if let steps = partial.steps, !steps.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Instructions")
@@ -310,54 +467,54 @@ struct AIRecipeGeneratorView: View {
                         .foregroundColor(.secondary)
                         .textCase(.uppercase)
 
-                    ForEach(steps.indices, id: \.self) { index in
-                        let step = steps[index]
-                        HStack(alignment: .top, spacing: 12) {
-                            Text("\(index + 1)")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(width: 28, height: 28)
-                                .background(Circle().fill(Color.cauldronOrange))
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(steps.indices, id: \.self) { index in
+                            let step = steps[index]
 
-                            Text(step.text ?? "")
-                                .font(.body)
-                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("\(index + 1)")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .padding(8)
+                                    .background(Circle().fill(Color.cauldronOrange.opacity(0.15)))
+                                    .foregroundColor(.cauldronOrange)
 
-                            Spacer()
+                                Text(step.text ?? "")
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.cauldronSecondaryBackground)
+                )
             }
 
-            // Tags
             if let tags = partial.tags, !tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
+                    HStack(spacing: 8) {
                         ForEach(tags, id: \.self) { tag in
                             Text(tag)
                                 .font(.caption)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color.cauldronOrange.opacity(0.2))
-                                .cornerRadius(8)
+                                .background(Color.cauldronOrange.opacity(0.15))
+                                .foregroundColor(.cauldronOrange)
+                                .cornerRadius(10)
                         }
                     }
                 }
-                .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: partial.ingredients?.count)
-        .animation(.easeInOut(duration: 0.3), value: partial.steps?.count)
+        .padding(20)
+        .cardStyle()
     }
 
     private func errorSection(error: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.red)
 
@@ -365,11 +522,144 @@ struct AIRecipeGeneratorView: View {
                 .font(.subheadline)
                 .foregroundColor(.red)
 
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding()
+        .padding(16)
         .background(Color.red.opacity(0.1))
         .cornerRadius(12)
+    }
+
+    // Helper function to append tags to prompt
+    private func appendToPrompt(_ tag: String) {
+        if viewModel.prompt.isEmpty {
+            viewModel.prompt = tag
+        } else if !viewModel.prompt.contains(tag) {
+            // Add with proper spacing
+            let trimmed = viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            viewModel.prompt = trimmed + (trimmed.hasSuffix(",") ? " " : ", ") + tag
+        }
+    }
+}
+
+// MARK: - Recipe Tag Section
+
+struct RecipeTagSection: View {
+    let title: String
+    let icon: String
+    let tags: [String]
+    let onTagTap: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
+                        SuggestionChip(text: tag, onTap: {
+                            onTagTap(tag)
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Suggestion Chip
+
+struct SuggestionChip: View {
+    let text: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(text)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.cauldronOrange.opacity(0.1))
+                )
+                .foregroundColor(.cauldronOrange)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.cauldronOrange.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Category Selection Row
+
+struct CategorySelectionRow: View {
+    let title: String
+    let icon: String
+    let options: [String]
+    @Binding var selected: Set<String>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(options, id: \.self) { option in
+                        CategoryChip(
+                            text: option,
+                            isSelected: selected.contains(option),
+                            onTap: {
+                                if selected.contains(option) {
+                                    selected.remove(option)
+                                } else {
+                                    selected.insert(option)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Category Chip
+
+struct CategoryChip: View {
+    let text: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(text)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.cauldronOrange : Color.cauldronOrange.opacity(0.1))
+                )
+                .foregroundColor(isSelected ? .white : .cauldronOrange)
+                .overlay(
+                    Capsule()
+                        .stroke(Color.cauldronOrange, lineWidth: isSelected ? 0 : 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
     }
 }
 

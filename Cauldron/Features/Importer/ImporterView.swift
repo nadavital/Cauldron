@@ -19,50 +19,29 @@ struct ImporterView: View {
     
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("Import Type", selection: $viewModel.importType) {
-                        Text("URL").tag(ImportType.url)
-                        Text("Text").tag(ImportType.text)
-                    }
-                    .pickerStyle(.segmented)
-                }
-                
-                Section {
+            ScrollView {
+                VStack(spacing: 24) {
+                    headerSection
+
+                    importTypePicker
+
                     switch viewModel.importType {
                     case .url:
                         urlSection
                     case .text:
                         textSection
                     }
-                }
-                
-                // Paste from Clipboard Section
-                Section {
-                    Button {
-                        pasteFromClipboard()
-                    } label: {
-                        HStack {
-                            Image(systemName: "doc.on.clipboard")
-                                .foregroundColor(.cauldronOrange)
-                            Text("Paste from Clipboard")
-                            Spacer()
-                        }
-                    }
-                } header: {
-                    Text("Quick Import")
-                } footer: {
-                    Text("Paste a URL or recipe text you've already copied")
-                }
-                
-                if let error = viewModel.errorMessage {
-                    Section {
-                        Text(error)
-                            .foregroundColor(.red)
-                            .font(.caption)
+
+                    quickImportSection
+
+                    if let error = viewModel.errorMessage {
+                        errorSection(error)
                     }
                 }
+                .padding(.vertical, 32)
+                .padding(.horizontal, 20)
             }
+            .background(Color.cauldronBackground.ignoresSafeArea())
             .navigationTitle("Import Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -99,32 +78,192 @@ struct ImporterView: View {
         }
     }
     
-    private var urlSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Recipe URL", text: $viewModel.urlString)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.URL)
-                .autocapitalization(.none)
-            
-            Text("Paste a link to a recipe website")
-                .font(.caption)
-                .foregroundColor(.secondary)
+    private var headerSection: some View {
+        HStack(alignment: .center, spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.cauldronOrange.opacity(0.8),
+                                Color.cauldronOrange
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 64, height: 64)
+
+                Image(systemName: "square.and.arrow.down.on.square")
+                    .font(.system(size: 28))
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Import a Recipe")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+
+                Text("Bring recipes into Cauldron by pasting a link or the full recipe text.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .cardStyle()
     }
-    
+
+    private var importTypePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import Method")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            Picker("Import Type", selection: $viewModel.importType) {
+                Label("URL", systemImage: "link").tag(ImportType.url)
+                Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(16)
+        .cardStyle()
+    }
+
+    private var urlSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Recipe Link", systemImage: "link")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    TextField("https://example.com/recipe", text: $viewModel.urlString)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .padding(12)
+                        .background(Color.cauldronBackground)
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(isValidURL ? Color.green.opacity(0.4) : Color.secondary.opacity(0.15), lineWidth: 1.5)
+                        )
+
+                    if isValidURL {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.title3)
+                    }
+                }
+
+                Text("Paste a link to the recipe and we'll import the details.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .cardStyle()
+    }
+
+    private var isValidURL: Bool {
+        guard !viewModel.urlString.isEmpty else { return false }
+        if let url = URL(string: viewModel.urlString),
+           (url.scheme == "http" || url.scheme == "https") {
+            return true
+        }
+        return false
+    }
+
     private var textSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextEditor(text: $viewModel.textInput)
-                .frame(minHeight: 200)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
-            
-            Text("Paste or type your recipe. Include title, ingredients, and steps.")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Recipe Text", systemImage: "text.justifyleft")
+                    .font(.headline)
+
+                Spacer()
+
+                if !viewModel.textInput.isEmpty {
+                    Text("\(viewModel.textInput.count) characters")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $viewModel.textInput)
+                    .frame(minHeight: 220)
+                    .padding(12)
+                    .background(Color.cauldronBackground)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1.5)
+                    )
+
+                if viewModel.textInput.isEmpty {
+                    Text("Paste your recipe here...\n\nExample:\n\nChocolate Chip Cookies\n\nIngredients:\n- 2 cups flour\n- 1 cup sugar\n...\n\nSteps:\n1. Mix dry ingredients\n2. Add wet ingredients\n...")
+                        .foregroundColor(.secondary.opacity(0.5))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 20)
+                        .allowsHitTesting(false)
+                }
+            }
+
+            Text("Include the title, ingredients, and steps for the most accurate import.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+        .padding(16)
+        .cardStyle()
+    }
+
+    private var quickImportSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Quick Actions")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            Button {
+                pasteFromClipboard()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.on.clipboard.fill")
+                    Text("Paste from Clipboard")
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.cauldronOrange.opacity(0.12))
+                .foregroundColor(.cauldronOrange)
+                .cornerRadius(12)
+            }
+
+            Text("We'll detect whether it's a link or recipe text automatically.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(16)
+        .cardStyle()
+    }
+
+    private func errorSection(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundColor(.red)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.red)
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(Color.red.opacity(0.1))
+        .cornerRadius(12)
     }
     
     private func pasteFromClipboard() {

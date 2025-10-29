@@ -77,29 +77,25 @@ class ImporterViewModel: ObservableObject {
     }
     
     private func importFromURL() async throws -> Recipe {
-        // Try Foundation Models first
-        var recipe: Recipe
-        if let foundationRecipe = try await dependencies.foundationModelsService.parseRecipeText(urlString) {
-            recipe = foundationRecipe
-        } else {
-            // Fallback to HTML parser
-            recipe = try await dependencies.htmlParser.parse(from: urlString)
-        }
-        
+        // Use HTML parser directly (more reliable than AI for structured recipe sites)
+        // The HTML parser will use schema.org JSON-LD when available, then fall back to heuristics
+        var recipe = try await dependencies.htmlParser.parse(from: urlString)
+
         // Download and save image if recipe has an imageURL
         if let imageURL = recipe.imageURL {
             do {
                 let imageFilename = try await ImageManager.shared.downloadAndSaveImage(from: imageURL, recipeId: recipe.id)
-                // Store just the filename as the URL path component
-                let localImageURL = URL(string: imageFilename)
+                // Store the full file URL to the locally saved image
+                let localImageURL = await ImageManager.shared.imageURL(for: imageFilename)
                 recipe = recipe.withImageURL(localImageURL)
-                AppLogger.parsing.info("Successfully downloaded recipe image")
+                AppLogger.parsing.info("Successfully downloaded recipe image to: \(localImageURL.path)")
             } catch {
                 AppLogger.parsing.warning("Failed to download recipe image: \(error.localizedDescription)")
                 // Continue without image - non-fatal error
+                // Keep the original URL as fallback for remote loading
             }
         }
-        
+
         return recipe
     }
     

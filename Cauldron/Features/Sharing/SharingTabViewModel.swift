@@ -117,19 +117,4 @@ class SharingTabViewModel: ObservableObject {
             showErrorAlert = true
         }
     }
-
-    #if DEBUG
-    func createDemoUsers() async {
-        guard let dependencies = dependencies else { return }
-        do {
-            try await dependencies.sharingService.createDemoUsers()
-            alertMessage = "Demo users created successfully!"
-            showSuccessAlert = true
-        } catch {
-            AppLogger.general.error("Failed to create demo users: \(error.localizedDescription)")
-            alertMessage = "Failed to create demo users: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-    #endif
 }

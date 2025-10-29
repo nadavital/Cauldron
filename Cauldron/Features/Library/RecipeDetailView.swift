@@ -29,11 +29,15 @@ struct RecipeDetailView: View {
     @State private var isLoadingOwner = false
     @State private var hasOwnedCopy = false
     @State private var showReferenceRemovedToast = false
+    @State private var showingVisibilityPicker = false
+    @State private var currentVisibility: RecipeVisibility
+    @State private var isChangingVisibility = false
 
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
         self.dependencies = dependencies
         self._localIsFavorite = State(initialValue: recipe.isFavorite)
+        self._currentVisibility = State(initialValue: recipe.visibility)
     }
     
     private var scaledResult: ScaledRecipe {
@@ -46,21 +50,16 @@ struct RecipeDetailView: View {
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        // Hero Image
-                        if let imageURL = recipe.imageURL,
-                           let image = loadImage(filename: imageURL.lastPathComponent) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geometry.size.width - 32, height: 300)
-                                .clipped()
-                                .cornerRadius(16)
-                                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Hero Image - Stretches to top
+                    if let imageURL = recipe.imageURL {
+                        HeroRecipeImageView(imageURL: imageURL)
+                            .ignoresSafeArea(edges: .top)
+                    }
 
+                    // Content sections
+                    VStack(alignment: .leading, spacing: 20) {
                         // Header
                         headerSection
 
@@ -80,8 +79,8 @@ struct RecipeDetailView: View {
                             notesSection(notes)
                         }
                     }
-                    .frame(width: geometry.size.width - 32, alignment: .leading)
                     .padding(.horizontal, 16)
+                    .padding(.top, recipe.imageURL != nil ? 0 : 20)
                     .padding(.bottom, 100) // Add padding for the button
                 }
             }
@@ -104,15 +103,14 @@ struct RecipeDetailView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Capsule())
-                    .glassEffect(.regular.tint(.orange).interactive())
+                    .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
                 }
                 .padding(.trailing, 20)
                 .padding(.bottom, 16)
             }
         }
         .navigationTitle(recipe.title)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -131,6 +129,12 @@ struct RecipeDetailView: View {
                             showingEditSheet = true
                         } label: {
                             Label("Edit Recipe", systemImage: "pencil")
+                        }
+
+                        Button {
+                            showingVisibilityPicker = true
+                        } label: {
+                            Label("Change Visibility", systemImage: currentVisibility.icon)
                         }
 
                         Button {
@@ -237,6 +241,16 @@ struct RecipeDetailView: View {
         }
         .sheet(isPresented: $showingShareSheet) {
             ShareRecipeView(recipe: recipe, dependencies: dependencies)
+        }
+        .sheet(isPresented: $showingVisibilityPicker) {
+            RecipeVisibilityPickerSheet(
+                currentVisibility: $currentVisibility,
+                isChanging: $isChangingVisibility,
+                onSave: { newVisibility in
+                    await changeVisibility(to: newVisibility)
+                }
+            )
+            .presentationDetents([.medium])
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
@@ -441,20 +455,14 @@ struct RecipeDetailView: View {
                             .lineLimit(nil)
                             .multilineTextAlignment(.leading)
 
-                        if !step.timers.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(step.timers) { timer in
-                                        Label(timer.displayDuration, systemImage: "timer")
-                                            .font(.caption)
-                                            .foregroundColor(.cauldronOrange)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.cauldronOrange.opacity(0.1))
-                                            .cornerRadius(6)
-                                    }
-                                }
-                            }
+                        if let timer = step.timers.first {
+                            Label(timer.displayDuration, systemImage: "timer")
+                                .font(.caption)
+                                .foregroundColor(.cauldronOrange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.cauldronOrange.opacity(0.1))
+                                .cornerRadius(6)
                         }
                     }
                 }
@@ -579,17 +587,6 @@ struct RecipeDetailView: View {
         }
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        // Synchronous load for SwiftUI - consider caching for performance
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
     
     private func toggleFavorite() {
         Task {
@@ -747,6 +744,115 @@ struct RecipeDetailView: View {
             AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")
         } catch {
             AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")
+        }
+    }
+
+    private func changeVisibility(to newVisibility: RecipeVisibility) async {
+        isChangingVisibility = true
+        defer { isChangingVisibility = false }
+
+        do {
+            // Update the recipe's visibility in the repository
+            try await dependencies.recipeRepository.updateVisibility(
+                id: recipe.id,
+                visibility: newVisibility
+            )
+
+            // Update local state
+            currentVisibility = newVisibility
+
+            AppLogger.general.info("Changed recipe '\(recipe.title)' visibility to \(newVisibility.displayName)")
+
+            // Dismiss the sheet
+            showingVisibilityPicker = false
+        } catch {
+            AppLogger.general.error("Failed to change visibility: \(error.localizedDescription)")
+            // TODO: Show error to user
+        }
+    }
+}
+
+// MARK: - Recipe Visibility Picker Sheet
+
+struct RecipeVisibilityPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var currentVisibility: RecipeVisibility
+    @Binding var isChanging: Bool
+    let onSave: (RecipeVisibility) async -> Void
+
+    @State private var selectedVisibility: RecipeVisibility
+
+    init(
+        currentVisibility: Binding<RecipeVisibility>,
+        isChanging: Binding<Bool>,
+        onSave: @escaping (RecipeVisibility) async -> Void
+    ) {
+        self._currentVisibility = currentVisibility
+        self._isChanging = isChanging
+        self.onSave = onSave
+        self._selectedVisibility = State(initialValue: currentVisibility.wrappedValue)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Visibility", selection: $selectedVisibility) {
+                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                            Label(visibility.displayName, systemImage: visibility.icon)
+                                .tag(visibility)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } header: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 40))
+                            .foregroundColor(.cauldronOrange)
+
+                        Text("Choose who can see this recipe")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+                    .textCase(nil)
+                }
+
+                Section {
+                    Text(selectedVisibility.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } header: {
+                    Text("Description")
+                }
+            }
+            .navigationTitle("Recipe Visibility")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task {
+                            await onSave(selectedVisibility)
+                        }
+                    } label: {
+                        if isChanging {
+                            ProgressView()
+                        } else {
+                            Text("Save")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(isChanging || selectedVisibility == currentVisibility)
+                }
+            }
         }
     }
 }

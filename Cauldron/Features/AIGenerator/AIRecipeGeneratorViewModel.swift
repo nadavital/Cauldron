@@ -14,6 +14,12 @@ import FoundationModels
 @MainActor
 class AIRecipeGeneratorViewModel: ObservableObject {
     @Published var prompt: String = ""
+    @Published var selectedCuisines: Set<String> = []
+    @Published var selectedDiets: Set<String> = []
+    @Published var selectedTimes: Set<String> = []
+    @Published var selectedTypes: Set<String> = []
+    @Published var additionalNotes: String = ""
+    @Published var useCategoryMode: Bool = true
     @Published var isGenerating: Bool = false
     @Published var isSaving: Bool = false
     @Published var partialRecipe: GeneratedRecipe.PartiallyGenerated?
@@ -72,7 +78,34 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     }
 
     var canGenerate: Bool {
-        !prompt.trimmed.isEmpty && !isGenerating
+        if isGenerating { return false }
+
+        // Can generate if either prompt is filled OR categories are selected
+        return !prompt.trimmed.isEmpty || hasSelectedCategories
+    }
+
+    var hasSelectedCategories: Bool {
+        !selectedCuisines.isEmpty || !selectedDiets.isEmpty ||
+        !selectedTimes.isEmpty || !selectedTypes.isEmpty
+    }
+
+    private var generationPrompt: String {
+        var promptParts: [String] = []
+
+        // Add selected categories
+        let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
+                           Array(selectedTimes) + Array(selectedTypes)
+
+        if !allCategories.isEmpty {
+            promptParts.append(allCategories.joined(separator: ", "))
+        }
+
+        // Add prompt/notes
+        if !prompt.trimmed.isEmpty {
+            promptParts.append(prompt.trimmed)
+        }
+
+        return promptParts.joined(separator: " - ")
     }
 
     func checkAvailability() async -> Bool {
@@ -93,7 +126,7 @@ class AIRecipeGeneratorViewModel: ObservableObject {
 
         generationTask = Task {
             do {
-                let stream = dependencies.foundationModelsService.generateRecipe(from: prompt)
+                let stream = dependencies.foundationModelsService.generateRecipe(from: generationPrompt)
 
                 for try await partial in stream {
                     guard !Task.isCancelled else { break }

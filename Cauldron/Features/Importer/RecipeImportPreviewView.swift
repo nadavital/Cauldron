@@ -32,71 +32,48 @@ struct RecipeImportPreviewView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Source info with link button
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.cauldronOrange)
-                            Text(sourceInfo)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                        
-                        // Source URL button if available
-                        if let sourceURL = editedRecipe.sourceURL {
-                            Button {
-                                UIApplication.shared.open(sourceURL)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "link.circle.fill")
-                                    Text("View Original Recipe")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right")
+                VStack(alignment: .leading, spacing: 0) {
+                    // Hero Image - Card style
+                    if let imageURL = editedRecipe.imageURL {
+                        HeroRecipeImageView(imageURL: imageURL)
+                    }
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Source info with link button
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "info.circle")
+                                    .foregroundColor(.cauldronOrange)
+                                Text(sourceInfo)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+
+                            // Source URL button if available
+                            if let sourceURL = editedRecipe.sourceURL {
+                                Button {
+                                    UIApplication.shared.open(sourceURL)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "link.circle.fill")
+                                        Text("View Original Recipe")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right")
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(12)
+                                    .background(Color.cauldronOrange)
+                                    .cornerRadius(10)
                                 }
-                                .foregroundColor(.white)
-                                .padding(12)
-                                .background(Color.cauldronOrange)
-                                .cornerRadius(10)
                             }
                         }
-                    }
-                    .padding()
-                    .background(Color.cauldronSecondaryBackground)
-                    .cornerRadius(12)
-                    .padding(.horizontal)
-                    
-                    // Hero Image (if any)
-                    if let imageURL = editedRecipe.imageURL,
-                       let image = loadImage(filename: imageURL.lastPathComponent) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 300)
-                            .clipped()
-                            .cornerRadius(16)
-                            .padding(.horizontal)
-                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                    } else if editedRecipe.imageURL != nil {
-                        // Show placeholder if image should exist but failed to load
-                        VStack(spacing: 12) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 48))
-                                .foregroundColor(.secondary)
-                            Text("Image not available")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 200)
+                        .padding()
                         .background(Color.cauldronSecondaryBackground)
-                        .cornerRadius(16)
+                        .cornerRadius(12)
                         .padding(.horizontal)
-                    }
                     
                     // Recipe details
                     VStack(alignment: .leading, spacing: 16) {
@@ -251,9 +228,10 @@ struct RecipeImportPreviewView: View {
                         .cardStyle()
                         .padding(.horizontal)
                     }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical)
             }
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)
@@ -335,16 +313,6 @@ struct RecipeImportPreviewView: View {
         .cornerRadius(8)
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
     
     private func saveRecipe() async {
         // Note: isSaving is set in the button action to prevent race condition

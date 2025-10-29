@@ -190,22 +190,4 @@ actor SharingService {
     func getSharedRecipe(id: UUID) async throws -> SharedRecipe? {
         try await sharingRepository.fetchSharedRecipe(id: id)
     }
-    
-    // MARK: - Demo Data
-    
-    /// Create some demo users for testing (this would come from a backend in production)
-    func createDemoUsers() async throws {
-        let demoUsers = [
-            User(username: "chef_julia", displayName: "Julia Child"),
-            User(username: "gordon_ramsay", displayName: "Gordon Ramsay"),
-            User(username: "jamie_oliver", displayName: "Jamie Oliver"),
-            User(username: "ina_garten", displayName: "Ina Garten"),
-            User(username: "alton_brown", displayName: "Alton Brown")
-        ]
-        
-        for user in demoUsers {
-            try await sharingRepository.save(user)
-        }
-        logger.info("Created \(demoUsers.count) demo users")
-    }
 }

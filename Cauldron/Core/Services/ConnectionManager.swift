@@ -33,7 +33,7 @@ enum ConnectionSyncState: Equatable {
 }
 
 /// Enhanced connection model with sync state
-struct ManagedConnection: Equatable {
+struct ManagedConnection: Equatable, Identifiable {
     let connection: Connection
     let syncState: ConnectionSyncState
 
@@ -112,6 +112,10 @@ class ConnectionManager: ObservableObject {
 
     private let maxRetries = 5
 
+    // Cache management
+    private var lastSyncTime: Date?
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
     }
@@ -124,14 +128,33 @@ class ConnectionManager: ObservableObject {
     // MARK: - Public API
 
     /// Load connections from local cache and CloudKit
-    func loadConnections(forUserId userId: UUID) async {
-        logger.info("📥 Loading connections for user: \(userId)")
+    /// - Parameters:
+    ///   - userId: The user ID to load connections for
+    ///   - forceRefresh: If true, bypasses cache and forces a CloudKit sync
+    func loadConnections(forUserId userId: UUID, forceRefresh: Bool = false) async {
+        logger.info("📥 Loading connections for user: \(userId) (forceRefresh: \(forceRefresh))")
+
+        // Check if cache is still valid
+        if !forceRefresh, let lastSync = lastSyncTime {
+            let timeSinceLastSync = Date().timeIntervalSince(lastSync)
+            if timeSinceLastSync < cacheValidityDuration {
+                logger.info("📦 Using cached connections (synced \(Int(timeSinceLastSync))s ago)")
+                // Only load from cache if we don't have any connections yet
+                if connections.isEmpty {
+                    await loadFromCache(userId: userId)
+                }
+                return
+            }
+        }
 
         // First, load from local cache for instant display
         await loadFromCache(userId: userId)
 
         // Then fetch from CloudKit in background
         await syncFromCloudKit(userId: userId)
+
+        // Update last sync time
+        lastSyncTime = Date()
     }
 
     /// Accept a connection request (optimistic update)

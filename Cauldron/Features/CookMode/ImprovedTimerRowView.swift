@@ -90,9 +90,15 @@ struct ImprovedTimerRowView: View {
     }
     
     private func formatTime(_ seconds: Int) -> String {
-        let mins = seconds / 60
+        let hours = seconds / 3600
+        let mins = (seconds % 3600) / 60
         let secs = seconds % 60
-        return String(format: "%02d:%02d", mins, secs)
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        } else {
+            return String(format: "%02d:%02d", mins, secs)
+        }
     }
 }
 

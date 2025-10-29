@@ -14,55 +14,34 @@ struct RecipeRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Thumbnail image
-            if let imageURL = recipe.imageURL,
-               let image = loadImage(filename: imageURL.lastPathComponent) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                // Placeholder
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 60, height: 60)
-                    .overlay(
-                        Image(systemName: "fork.knife")
-                            .foregroundColor(.cauldronOrange.opacity(0.6))
-                            .font(.body)
-                    )
-            }
+            RecipeImageView(thumbnailImageURL: recipe.imageURL)
             
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(recipe.title)
                         .font(.headline)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .layoutPriority(1)
 
-                    // Reference indicator
-                    if recipe.isReference {
-                        Image(systemName: "bookmark.fill")
-                            .font(.caption)
-                            .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-                            .fixedSize()
-                    }
+                    // Indicators
+                    HStack(spacing: 4) {
+                        // Reference indicator
+                        if recipe.isReference {
+                            Image(systemName: "bookmark.fill")
+                                .font(.caption)
+                                .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+                        }
 
-                    // Favorite indicator
-                    if recipe.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.caption)
-                            .foregroundColor(.yellow)
-                            .fixedSize()
+                        // Favorite indicator
+                        if recipe.isFavorite {
+                            Image(systemName: "star.fill")
+                                .font(.caption)
+                                .foregroundColor(.yellow)
+                        }
                     }
+                    .fixedSize()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 8) {
                     if let time = recipe.displayTime {
@@ -70,28 +49,29 @@ struct RecipeRowView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .fixedSize()
                     }
 
                     Text(recipe.yields)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .fixedSize()
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
 
                     if !recipe.tags.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(recipe.tags.prefix(2)) { tag in
-                                Text(tag.name)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.cauldronOrange.opacity(0.2))
-                                    .cornerRadius(4)
-                            }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
+                        // Show only first tag to prevent overflow
+                        Text(recipe.tags.first!.name)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.cauldronOrange.opacity(0.2))
+                            .foregroundColor(.cauldronOrange)
+                            .cornerRadius(4)
+                            .frame(maxWidth: 100)
                     }
                 }
             }
@@ -101,16 +81,6 @@ struct RecipeRowView: View {
         .padding(.vertical, 4)
     }
     
-    private func loadImage(filename: String) -> UIImage? {
-        let fileManager = FileManager.default
-        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let imageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-        
-        guard let imageData = try? Data(contentsOf: imageURL) else {
-            return nil
-        }
-        return UIImage(data: imageData)
-    }
 }
 
 #Preview {

@@ -294,7 +294,12 @@ actor CloudKitService {
     }
 
     /// Fetch or create current user profile
-    func fetchOrCreateCurrentUser(username: String, displayName: String) async throws -> User {
+    func fetchOrCreateCurrentUser(
+        username: String,
+        displayName: String,
+        profileEmoji: String? = nil,
+        profileColor: String? = nil
+    ) async throws -> User {
         // First check account status
         let accountStatus = await checkAccountStatus()
         guard accountStatus.isAvailable else {
@@ -323,7 +328,9 @@ actor CloudKitService {
         let user = User(
             username: username,
             displayName: displayName,
-            cloudRecordName: customRecordName
+            cloudRecordName: customRecordName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
         try await saveUser(user)
         return user
@@ -344,17 +351,39 @@ actor CloudKitService {
         }
 
         let recordID = CKRecord.ID(recordName: recordName)
-        let record = CKRecord(recordType: userRecordType, recordID: recordID)
+        let db = try getPublicDatabase()
+
+        // Try to fetch existing record first to update it, otherwise create new one
+        let record: CKRecord
+        do {
+            record = try await db.record(for: recordID)
+            logger.info("Updating existing user record in CloudKit: \(user.username)")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Record doesn't exist, create new one
+            record = CKRecord(recordType: userRecordType, recordID: recordID)
+            logger.info("Creating new user record in CloudKit: \(user.username)")
+        } catch {
+            // Other error, rethrow
+            logger.error("Error fetching existing user record: \(error.localizedDescription)")
+            throw error
+        }
+
+        // Update/set all fields
         record["userId"] = user.id.uuidString as CKRecordValue
         record["username"] = user.username as CKRecordValue
         record["displayName"] = user.displayName as CKRecordValue
         if let email = user.email {
             record["email"] = email as CKRecordValue
         }
+        if let emoji = user.profileEmoji {
+            record["profileEmoji"] = emoji as CKRecordValue
+        }
+        if let color = user.profileColor {
+            record["profileColor"] = color as CKRecordValue
+        }
         record["createdAt"] = user.createdAt as CKRecordValue
 
         // Save to PUBLIC database so other users can discover this user
-        let db = try getPublicDatabase()
         _ = try await db.save(record)
         logger.info("Saved user: \(user.username) to PUBLIC database")
     }
@@ -468,6 +497,8 @@ actor CloudKitService {
 
         let email = record["email"] as? String
         let createdAt = record["createdAt"] as? Date ?? Date()
+        let profileEmoji = record["profileEmoji"] as? String
+        let profileColor = record["profileColor"] as? String
 
         return User(
             id: userId,
@@ -475,7 +506,9 @@ actor CloudKitService {
             displayName: displayName,
             email: email,
             cloudRecordName: record.recordID.recordName,
-            createdAt: createdAt
+            createdAt: createdAt,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
         )
     }
     

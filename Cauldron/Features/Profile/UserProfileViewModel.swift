@@ -17,10 +17,20 @@ class UserProfileViewModel: ObservableObject {
     @Published var showError = false
     @Published var errorMessage = ""
     @Published var isProcessing = false
+    @Published var userRecipes: [SharedRecipe] = []
+    @Published var isLoadingRecipes = false
+    @Published var connections: [ManagedConnection] = []
+    @Published var isLoadingConnections = false
+    @Published var usersMap: [UUID: User] = [:]
 
     let user: User
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
+
+    // Recipe caching
+    private var lastRecipeLoadTime: Date?
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+    private var lastConnectionState: ConnectionState?
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -44,10 +54,14 @@ class UserProfileViewModel: ObservableObject {
 
         // Subscribe to connection manager updates for real-time state changes
         dependencies.connectionManager.$connections
-            .sink { [weak self] _ in
+            .sink { [weak self] connections in
                 guard let self = self else { return }
                 Task { @MainActor in
                     await self.updateConnectionState()
+                    // Update connections list if viewing current user
+                    if self.isCurrentUser {
+                        self.connections = connections.values.filter { $0.connection.isAccepted }
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -55,6 +69,29 @@ class UserProfileViewModel: ObservableObject {
 
     func loadConnectionStatus() async {
         await updateConnectionState()
+    }
+
+    func loadConnections() async {
+        // Only load connections for current user
+        guard isCurrentUser else { return }
+
+        isLoadingConnections = true
+        defer { isLoadingConnections = false }
+
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
+        connections = dependencies.connectionManager.connections.values.filter { $0.connection.isAccepted }
+
+        // Load user details for all connections
+        for managedConnection in connections {
+            if let otherUserId = managedConnection.connection.otherUserId(currentUserId: currentUserId) {
+                do {
+                    let user = try await dependencies.cloudKitService.fetchUser(byUserId: otherUserId)
+                    usersMap[otherUserId] = user
+                } catch {
+                    AppLogger.general.error("Failed to load user \(otherUserId): \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     private func updateConnectionState() async {
@@ -177,5 +214,99 @@ class UserProfileViewModel: ObservableObject {
             errorMessage = "Failed to cancel request: \(error.localizedDescription)"
             showError = true
         }
+    }
+
+    // MARK: - Recipe Fetching
+
+    func loadUserRecipes(forceRefresh: Bool = false) async {
+        // Check cache validity
+        if !forceRefresh, let lastLoadTime = lastRecipeLoadTime,
+           Date().timeIntervalSince(lastLoadTime) < cacheValidityDuration,
+           lastConnectionState == connectionState {
+            AppLogger.general.info("Using cached recipes for \(self.user.username)")
+            return
+        }
+
+        // Invalidate cache if connection state changed
+        if lastConnectionState != connectionState {
+            AppLogger.general.info("Connection state changed, invalidating recipe cache")
+            lastConnectionState = connectionState
+        }
+
+        // Only show loading state when actually fetching
+        isLoadingRecipes = true
+
+        do {
+            userRecipes = try await fetchUserRecipes()
+            lastRecipeLoadTime = Date()
+            lastConnectionState = connectionState
+            AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
+        } catch {
+            AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
+            errorMessage = "Failed to load recipes: \(error.localizedDescription)"
+            showError = true
+        }
+
+        isLoadingRecipes = false
+    }
+
+    private func fetchUserRecipes() async throws -> [SharedRecipe] {
+        var allRecipes: [SharedRecipe] = []
+
+        // Get current user to check connection status
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return []
+        }
+
+        // Determine if we're connected to this user
+        let isConnected = connectionState == .connected
+
+        // Fetch public recipes from this user
+        let publicRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+            ownerIds: [user.id],
+            visibility: .publicRecipe
+        )
+        AppLogger.general.info("Found \(publicRecipes.count) public recipes from \(self.user.username)")
+
+        // Convert to SharedRecipe
+        for recipe in publicRecipes {
+            let sharedRecipe = SharedRecipe(
+                id: UUID(),
+                recipe: recipe,
+                sharedBy: user,
+                sharedAt: recipe.updatedAt
+            )
+            allRecipes.append(sharedRecipe)
+        }
+
+        // If connected, also fetch friends-only recipes
+        if isConnected {
+            let friendsRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: [user.id],
+                visibility: .friendsOnly
+            )
+            AppLogger.general.info("Found \(friendsRecipes.count) friends-only recipes from \(self.user.username)")
+
+            for recipe in friendsRecipes {
+                let sharedRecipe = SharedRecipe(
+                    id: UUID(),
+                    recipe: recipe,
+                    sharedBy: user,
+                    sharedAt: recipe.updatedAt
+                )
+                allRecipes.append(sharedRecipe)
+            }
+        }
+
+        // Sort by updated date (most recent first)
+        return allRecipes.sorted { $0.sharedAt > $1.sharedAt }
+    }
+
+    var filteredRecipes: [SharedRecipe] {
+        return userRecipes
+    }
+
+    var displayedConnections: [ManagedConnection] {
+        return Array(connections.prefix(6))
     }
 }
