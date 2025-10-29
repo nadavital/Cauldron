@@ -246,31 +246,20 @@ struct UserProfileView: View {
     }
 
     private var connectedSection: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                    .font(.title3)
-                Text("Friends")
-                    .font(.headline)
+        Button(role: .destructive) {
+            Task {
+                await viewModel.removeConnection()
             }
-            .padding(.bottom, 8)
-
-            Button(role: .destructive) {
-                Task {
-                    await viewModel.removeConnection()
-                }
-            } label: {
-                Label("Remove Friend", systemImage: "person.badge.minus")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.red.opacity(0.1))
-                    .foregroundColor(.red)
-                    .cornerRadius(12)
-            }
-            .disabled(viewModel.isProcessing)
+        } label: {
+            Label("Remove Friend", systemImage: "person.badge.minus")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.red.opacity(0.1))
+                .foregroundColor(.red)
+                .cornerRadius(12)
         }
+        .disabled(viewModel.isProcessing)
     }
 
     private var pendingText: some View {

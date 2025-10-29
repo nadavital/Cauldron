@@ -260,7 +260,9 @@ class CurrentUserSession: ObservableObject {
             id: currentUser.id,
             username: username,
             displayName: displayName,
+            email: currentUser.email,
             cloudRecordName: currentUser.cloudRecordName,
+            createdAt: currentUser.createdAt,
             profileEmoji: profileEmoji,
             profileColor: profileColor
         )
