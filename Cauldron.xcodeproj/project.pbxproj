@@ -32,11 +32,6 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		505171B42DCB0D4B0077095A /* Cauldron */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Cauldron;
-			sourceTree = "<group>";
-		};
 		50F5BA832E937E2C00E4A5C4 /* Cauldron */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -68,7 +63,6 @@
 		505171A92DCB0D4B0077095A = {
 			isa = PBXGroup;
 			children = (
-				505171B42DCB0D4B0077095A /* Cauldron */,
 				50F5BA832E937E2C00E4A5C4 /* Cauldron */,
 				505171B32DCB0D4B0077095A /* Products */,
 			);
