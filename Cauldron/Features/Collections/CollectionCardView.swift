@@ -18,7 +18,7 @@ struct CollectionCardView: View {
                 if collection.coverImageType == .emoji, let emoji = collection.emoji {
                     // Show emoji
                     collectionColor
-                        .aspectRatio(1, contentMode: .fill)
+                        .frame(width: 160, height: 160)
                         .overlay(
                             Text(emoji)
                                 .font(.system(size: 60))
@@ -26,7 +26,7 @@ struct CollectionCardView: View {
                 } else if collection.coverImageType == .color {
                     // Show solid color
                     collectionColor
-                        .aspectRatio(1, contentMode: .fill)
+                        .frame(width: 160, height: 160)
                         .overlay(
                             VStack(spacing: 4) {
                                 Image(systemName: "folder.fill")
@@ -44,6 +44,7 @@ struct CollectionCardView: View {
                 } else {
                     // Default: Show 2x2 grid of recipe images
                     recipeGridView
+                        .frame(width: 160, height: 160)
                 }
             }
             .cornerRadius(12)
@@ -66,15 +67,17 @@ struct CollectionCardView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .frame(width: 160, alignment: .leading)
             .padding(.top, 8)
         }
+        .frame(width: 160)
     }
 
     // MARK: - Recipe Grid View
 
     private var recipeGridView: some View {
-        GeometryReader { geometry in
-            let size = geometry.size.width / 2
+        Group {
+            let size: CGFloat = 80  // 160 / 2 for the 2x2 grid
 
             if recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
                 // Empty state - show placeholder
@@ -103,7 +106,6 @@ struct CollectionCardView: View {
                 }
             }
         }
-        .aspectRatio(1, contentMode: .fill)
     }
 
     private func recipeImageTile(at index: Int, size: CGFloat) -> some View {

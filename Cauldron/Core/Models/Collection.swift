@@ -140,6 +140,16 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     var isShared: Bool {
         visibility != .privateRecipe
     }
+
+    // MARK: - Hashable & Equatable
+
+    static func == (lhs: Collection, rhs: Collection) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
 }
 
 /// How the collection cover should be displayed
