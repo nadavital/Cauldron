@@ -9,15 +9,22 @@ import SwiftUI
 import os
 
 struct CollectionDetailView: View {
-    let collection: Collection
+    let initialCollection: Collection
     let dependencies: DependencyContainer
 
+    @State private var collection: Collection
     @State private var recipes: [Recipe] = []
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var showingEditSheet = false
     @State private var errorMessage: String?
     @State private var showError = false
+
+    init(collection: Collection, dependencies: DependencyContainer) {
+        self.initialCollection = collection
+        self.dependencies = dependencies
+        self._collection = State(initialValue: collection)
+    }
 
     var filteredRecipes: [Recipe] {
         if searchText.isEmpty {
@@ -183,6 +190,13 @@ struct CollectionDetailView: View {
         defer { isLoading = false }
 
         do {
+            // IMPORTANT: Refresh the collection object from the database first
+            // This ensures we have the latest recipeIds array after any updates
+            if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
+                collection = updatedCollection
+                AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
+            }
+
             // Fetch all recipes (owned + referenced)
             var allRecipes = try await dependencies.recipeRepository.fetchAll()
 

@@ -89,11 +89,14 @@ actor CollectionRepository {
         let descriptor = FetchDescriptor(predicate: predicate)
 
         guard let existingModel = try context.fetch(descriptor).first else {
+            logger.error("❌ Cannot update - collection not found in database: \(collection.id)")
             throw CollectionRepositoryError.collectionNotFound
         }
 
         // Update the model
         let updatedModel = try CollectionModel.from(collection)
+
+        logger.info("🔄 Updating collection '\(collection.name)' with \(collection.recipeCount) recipes")
 
         // Copy properties (SwiftData doesn't support direct replacement)
         existingModel.name = updatedModel.name
@@ -106,7 +109,14 @@ actor CollectionRepository {
         existingModel.updatedAt = Date()
 
         try context.save()
-        logger.info("✅ Updated collection: \(collection.name)")
+        logger.info("✅ Updated collection in local database: \(collection.name)")
+
+        // Verify the save by reading it back
+        let verifyDescriptor = FetchDescriptor(predicate: predicate)
+        if let verified = try context.fetch(verifyDescriptor).first {
+            let verifiedCollection = try verified.toDomain()
+            logger.info("✅ Verification: collection now has \(verifiedCollection.recipeCount) recipes")
+        }
 
         // Sync to CloudKit
         await syncCollectionToCloudKit(collection)
@@ -115,11 +125,18 @@ actor CollectionRepository {
     /// Add a recipe to a collection
     func addRecipe(_ recipeId: UUID, to collectionId: UUID) async throws {
         guard let collection = try await fetch(id: collectionId) else {
+            logger.error("❌ Collection not found: \(collectionId)")
             throw CollectionRepositoryError.collectionNotFound
         }
 
+        logger.info("➕ Adding recipe \(recipeId) to collection '\(collection.name)'")
+        logger.info("📊 Collection currently has \(collection.recipeCount) recipes: \(collection.recipeIds)")
+
         let updated = collection.addingRecipe(recipeId)
+        logger.info("📊 After adding: collection will have \(updated.recipeCount) recipes: \(updated.recipeIds)")
+
         try await update(updated)
+        logger.info("✅ Successfully added recipe to collection '\(collection.name)'")
     }
 
     /// Remove a recipe from a collection
