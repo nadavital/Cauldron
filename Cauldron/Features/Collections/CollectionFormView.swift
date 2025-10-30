@@ -20,8 +20,11 @@ struct CollectionFormView: View {
     @State private var emoji: String?
     @State private var color: String?
     @State private var visibility: RecipeVisibility
+    @State private var selectedRecipeIds: Set<UUID>
     @State private var showingEmojiPicker = false
     @State private var isSaving = false
+    @State private var showingRecipeSelector = false
+    @State private var allRecipes: [Recipe] = []
 
     init(collectionToEdit: Collection? = nil) {
         self.collectionToEdit = collectionToEdit
@@ -31,6 +34,7 @@ struct CollectionFormView: View {
         _emoji = State(initialValue: collectionToEdit?.emoji)
         _color = State(initialValue: collectionToEdit?.color)
         _visibility = State(initialValue: collectionToEdit?.visibility ?? .privateRecipe)
+        _selectedRecipeIds = State(initialValue: Set(collectionToEdit?.recipeIds ?? []))
     }
 
     var isEditing: Bool {
@@ -44,6 +48,49 @@ struct CollectionFormView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Preview Section (moved to top)
+                Section {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            if let emoji = emoji {
+                                ZStack {
+                                    Circle()
+                                        .fill(selectedColor.opacity(0.15))
+                                        .frame(width: 80, height: 80)
+
+                                    Text(emoji)
+                                        .font(.system(size: 50))
+                                }
+                            } else {
+                                ZStack {
+                                    Circle()
+                                        .fill(selectedColor.opacity(0.15))
+                                        .frame(width: 80, height: 80)
+
+                                    Image(systemName: "folder.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(selectedColor)
+                                }
+                            }
+
+                            Text(name.isEmpty ? "Collection Name" : name)
+                                .font(.headline)
+                                .foregroundColor(name.isEmpty ? .secondary : .primary)
+
+                            if !selectedRecipeIds.isEmpty {
+                                Text("\(selectedRecipeIds.count) recipe\(selectedRecipeIds.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        Spacer()
+                    }
+                } header: {
+                    Text("Preview")
+                }
+
                 // Basic Info Section
                 Section {
                     TextField("Collection Name", text: $name)
@@ -93,6 +140,69 @@ struct CollectionFormView: View {
                     Text("Details")
                 }
 
+                // Recipes Section
+                Section {
+                    Button {
+                        showingRecipeSelector = true
+                    } label: {
+                        HStack {
+                            Label("Add Recipes", systemImage: "plus.circle.fill")
+                                .foregroundColor(.cauldronOrange)
+                            Spacer()
+                            if !selectedRecipeIds.isEmpty {
+                                Text("\(selectedRecipeIds.count)")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if !selectedRecipeIds.isEmpty {
+                        ForEach(selectedRecipes) { recipe in
+                            HStack {
+                                if let imageURL = recipe.imageURL {
+                                    RecipeImageView(thumbnailImageURL: imageURL)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.gray.opacity(0.2))
+                                        .frame(width: 60, height: 60)
+                                        .overlay(
+                                            Image(systemName: "photo")
+                                                .foregroundColor(.secondary)
+                                        )
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(recipe.title)
+                                        .font(.body)
+                                        .lineLimit(2)
+
+                                    if !recipe.tags.isEmpty {
+                                        Text(recipe.tags.first!.name)
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Button {
+                                    selectedRecipeIds.remove(recipe.id)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Recipes")
+                } footer: {
+                    if selectedRecipeIds.isEmpty {
+                        Text("Add recipes to your collection")
+                    }
+                }
+
                 // Visibility Section
                 Section {
                     Picker("Visibility", selection: $visibility) {
@@ -125,45 +235,6 @@ struct CollectionFormView: View {
                 } header: {
                     Text("Sharing")
                 }
-
-                // Preview Section
-                if canSave {
-                    Section {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 12) {
-                                if let emoji = emoji {
-                                    ZStack {
-                                        Circle()
-                                            .fill(selectedColor.opacity(0.15))
-                                            .frame(width: 80, height: 80)
-
-                                        Text(emoji)
-                                            .font(.system(size: 50))
-                                    }
-                                } else {
-                                    ZStack {
-                                        Circle()
-                                            .fill(selectedColor.opacity(0.15))
-                                            .frame(width: 80, height: 80)
-
-                                        Image(systemName: "folder.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(selectedColor)
-                                    }
-                                }
-
-                                Text(name.isEmpty ? "Collection Name" : name)
-                                    .font(.headline)
-                                    .foregroundColor(name.isEmpty ? .secondary : .primary)
-                            }
-                            .padding(.vertical, 8)
-                            Spacer()
-                        }
-                    } header: {
-                        Text("Preview")
-                    }
-                }
             }
             .navigationTitle(isEditing ? "Edit Collection" : "New Collection")
             .navigationBarTitleDisplayMode(.inline)
@@ -186,10 +257,29 @@ struct CollectionFormView: View {
             .sheet(isPresented: $showingEmojiPicker) {
                 EmojiPickerView(selectedEmoji: $emoji)
             }
+            .sheet(isPresented: $showingRecipeSelector) {
+                RecipeSelectorSheet(
+                    selectedRecipeIds: $selectedRecipeIds,
+                    allRecipes: allRecipes,
+                    dependencies: dependencies
+                )
+            }
+            .task {
+                await loadRecipes()
+            }
         }
     }
 
     // MARK: - Actions
+
+    private func loadRecipes() async {
+        do {
+            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("✅ Loaded \(allRecipes.count) recipes")
+        } catch {
+            AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
+        }
+    }
 
     private func saveCollection() async {
         isSaving = true
@@ -202,11 +292,13 @@ struct CollectionFormView: View {
 
         do {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let recipeIds = Array(selectedRecipeIds)
 
             if let existingCollection = collectionToEdit {
                 // Update existing collection
                 let updated = existingCollection.updated(
                     name: trimmedName,
+                    recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: emoji,
                     color: color
@@ -218,6 +310,7 @@ struct CollectionFormView: View {
                 let newCollection = Collection(
                     name: trimmedName,
                     userId: userId,
+                    recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: emoji,
                     color: color
@@ -234,11 +327,126 @@ struct CollectionFormView: View {
 
     // MARK: - Helpers
 
+    private var selectedRecipes: [Recipe] {
+        allRecipes.filter { selectedRecipeIds.contains($0.id) }
+    }
+
     private var selectedColor: Color {
         if let colorHex = color {
             return Color(hex: colorHex) ?? .cauldronOrange
         }
         return .cauldronOrange
+    }
+}
+
+// MARK: - Recipe Selector Sheet
+
+struct RecipeSelectorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedRecipeIds: Set<UUID>
+    let allRecipes: [Recipe]
+    let dependencies: DependencyContainer
+
+    @State private var searchText = ""
+
+    var filteredRecipes: [Recipe] {
+        if searchText.isEmpty {
+            return allRecipes
+        } else {
+            let lowercased = searchText.lowercased()
+            return allRecipes.filter { recipe in
+                recipe.title.lowercased().contains(lowercased) ||
+                recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) })
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if allRecipes.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(filteredRecipes) { recipe in
+                            Button {
+                                toggleRecipe(recipe.id)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    RecipeImageView(thumbnailImageURL: recipe.imageURL)
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(recipe.title)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
+
+                                        if !recipe.tags.isEmpty {
+                                            Text(recipe.tags.first!.name)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    if selectedRecipeIds.contains(recipe.id) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.cauldronOrange)
+                                    } else {
+                                        Image(systemName: "circle")
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .searchable(text: $searchText, prompt: "Search recipes")
+                }
+            }
+            .navigationTitle("Select Recipes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 50))
+                .foregroundColor(.secondary)
+
+            Text("No Recipes Yet")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Create some recipes first to add them to collections")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+
+    private func toggleRecipe(_ recipeId: UUID) {
+        if selectedRecipeIds.contains(recipeId) {
+            selectedRecipeIds.remove(recipeId)
+        } else {
+            selectedRecipeIds.insert(recipeId)
+        }
     }
 }
 

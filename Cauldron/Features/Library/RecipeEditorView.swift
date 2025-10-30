@@ -100,22 +100,13 @@ struct RecipeEditorView: View {
                     }
 
                     // Visibility dropdown
-                    Menu {
-                        Picker("Visibility", selection: $viewModel.visibility) {
-                            ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                                Label(visibility.displayName, systemImage: visibility.icon)
-                                    .tag(visibility)
-                            }
-                        }
-                        .labelsHidden()
-                    } label: {
-                        HStack {
-                            Text("Visibility")
-                            Spacer()
-                            Label(viewModel.visibility.displayName, systemImage: viewModel.visibility.icon)
-                                .foregroundColor(.secondary)
+                    Picker("Visibility", selection: $viewModel.visibility) {
+                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                            Label(visibility.displayName, systemImage: visibility.icon)
+                                .tag(visibility)
                         }
                     }
+                    .pickerStyle(.menu)
                 }
                 
                 // Notes at the top

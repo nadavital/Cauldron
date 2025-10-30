@@ -100,30 +100,50 @@ struct EditProfileView: View {
                         }
 
                         // Custom emoji picker and action buttons
-                        HStack(spacing: 8) {
-                            Button {
-                                showingEmojiPicker = true
-                            } label: {
-                                Label("Choose Emoji", systemImage: "face.smiling")
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
+                                Button {
+                                    showingEmojiPicker = true
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "face.smiling")
+                                            .font(.body)
+                                        Text("Choose")
+                                            .font(.subheadline)
+                                    }
                                     .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
+                                    .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.bordered)
 
-                            Button {
-                                profileEmoji = allEmojis.randomElement()
-                            } label: {
-                                Label("Random", systemImage: "shuffle")
+                                Button {
+                                    profileEmoji = allEmojis.randomElement()
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "shuffle")
+                                            .font(.body)
+                                        Text("Random")
+                                            .font(.subheadline)
+                                    }
                                     .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.cauldronOrange)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(.cauldronOrange)
 
                             if profileEmoji != nil {
                                 Button {
                                     profileEmoji = nil
                                 } label: {
-                                    Label("Clear", systemImage: "xmark.circle")
-                                        .frame(maxWidth: .infinity)
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "xmark.circle")
+                                            .font(.body)
+                                        Text("Clear Emoji")
+                                            .font(.subheadline)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(.red)
@@ -137,14 +157,14 @@ struct EditProfileView: View {
                 // Color picker
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
                             ForEach(Color.allProfileColors, id: \.self) { color in
                                 Button {
                                     profileColor = color.toHex()
                                 } label: {
                                     Circle()
                                         .fill(color.opacity(0.3))
-                                        .frame(width: 44, height: 44)
+                                        .frame(width: 50, height: 50)
                                         .overlay(
                                             Circle()
                                                 .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
@@ -153,6 +173,7 @@ struct EditProfileView: View {
                                             Image(systemName: "checkmark")
                                                 .foregroundColor(color)
                                                 .font(.headline)
+                                                .fontWeight(.bold)
                                                 .opacity(profileColor == color.toHex() ? 1 : 0)
                                         )
                                 }
@@ -163,8 +184,14 @@ struct EditProfileView: View {
                         Button {
                             profileColor = Color.allProfileColors.randomElement()?.toHex()
                         } label: {
-                            Label("Random Color", systemImage: "shuffle")
-                                .frame(maxWidth: .infinity)
+                            HStack(spacing: 4) {
+                                Image(systemName: "shuffle")
+                                    .font(.body)
+                                Text("Random Color")
+                                    .font(.subheadline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
                         }
                         .buttonStyle(.bordered)
                         .tint(.cauldronOrange)

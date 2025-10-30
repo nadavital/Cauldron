@@ -1447,18 +1447,27 @@ actor CloudKitService {
         let query = CKQuery(recordType: collectionRecordType, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
 
-        let results = try await db.records(matching: query)
+        do {
+            let results = try await db.records(matching: query)
 
-        var collections: [Collection] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let collection = try? collectionFromRecord(record) {
-                collections.append(collection)
+            var collections: [Collection] = []
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let collection = try? collectionFromRecord(record) {
+                    collections.append(collection)
+                }
             }
-        }
 
-        logger.info("✅ Fetched \(collections.count) shared collections")
-        return collections
+            logger.info("✅ Fetched \(collections.count) shared collections")
+            return collections
+        } catch let error as CKError {
+            // Handle schema not yet deployed - record type doesn't exist until first save
+            if error.code == .unknownItem || error.errorCode == 11 { // 11 = unknown record type
+                logger.info("Collection record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
     }
 
     /// Delete collection from PUBLIC database
@@ -1508,18 +1517,27 @@ actor CloudKitService {
         let query = CKQuery(recordType: collectionReferenceRecordType, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "savedAt", ascending: false)]
 
-        let results = try await db.records(matching: query)
+        do {
+            let results = try await db.records(matching: query)
 
-        var references: [CollectionReference] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let reference = try? collectionReferenceFromRecord(record) {
-                references.append(reference)
+            var references: [CollectionReference] = []
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let reference = try? collectionReferenceFromRecord(record) {
+                    references.append(reference)
+                }
             }
-        }
 
-        logger.info("✅ Fetched \(references.count) collection references")
-        return references
+            logger.info("✅ Fetched \(references.count) collection references")
+            return references
+        } catch let error as CKError {
+            // Handle schema not yet deployed - record type doesn't exist until first save
+            if error.code == .unknownItem || error.errorCode == 11 { // 11 = unknown record type
+                logger.info("CollectionReference record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
     }
 
     /// Delete a collection reference
