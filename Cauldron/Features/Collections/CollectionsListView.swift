@@ -32,7 +32,7 @@ struct CollectionsListView: View {
                                 GridItem(.flexible(), spacing: 16)
                             ], spacing: 20) {
                                 ForEach(viewModel.filteredOwnedCollections) { collection in
-                                    NavigationLink(value: CollectionDestination.owned(collection)) {
+                                    NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                                         CollectionCardView(
                                             collection: collection,
                                             recipeImages: []  // TODO: Fetch first 4 recipe images
@@ -73,7 +73,8 @@ struct CollectionsListView: View {
                                 GridItem(.flexible(), spacing: 16)
                             ], spacing: 20) {
                                 ForEach(viewModel.filteredReferencedCollections) { reference in
-                                    NavigationLink(value: CollectionDestination.referenced(reference)) {
+                                    // TODO: Create view for referenced collections
+                                    NavigationLink(destination: Text("Referenced Collection: \(reference.collectionName)")) {
                                         CollectionReferenceCardView(
                                             reference: reference,
                                             recipeImages: []  // TODO: Fetch first 4 recipe images
@@ -159,13 +160,6 @@ struct CollectionsListView: View {
             await viewModel.loadCollections()
         }
     }
-}
-
-// MARK: - Navigation
-
-enum CollectionDestination: Hashable {
-    case owned(Collection)
-    case referenced(CollectionReference)
 }
 
 #Preview {

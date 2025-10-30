@@ -113,15 +113,6 @@ struct CookTabView: View {
                     await viewModel.loadData()
                 }
             }
-            .navigationDestination(for: CollectionDestination.self) { destination in
-                switch destination {
-                case .owned(let collection):
-                    CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)
-                case .referenced(let reference):
-                    // TODO: Create view for referenced collections
-                    Text("Referenced Collection: \(reference.collectionName)")
-                }
-            }
         }
     }
 
@@ -243,7 +234,7 @@ struct CookTabView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(collections.prefix(10)) { collection in
-                            NavigationLink(value: CollectionDestination.owned(collection)) {
+                            NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
                                     recipeImages: []
