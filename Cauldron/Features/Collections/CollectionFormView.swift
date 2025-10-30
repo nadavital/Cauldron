@@ -348,13 +348,15 @@ struct RecipeSelectorSheet: View {
     let dependencies: DependencyContainer
 
     @State private var searchText = ""
+    @State private var recipes: [Recipe] = []
+    @State private var isLoading = true
 
     var filteredRecipes: [Recipe] {
         if searchText.isEmpty {
-            return allRecipes
+            return recipes
         } else {
             let lowercased = searchText.lowercased()
-            return allRecipes.filter { recipe in
+            return recipes.filter { recipe in
                 recipe.title.lowercased().contains(lowercased) ||
                 recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) })
             }
@@ -364,7 +366,9 @@ struct RecipeSelectorSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if allRecipes.isEmpty {
+                if isLoading {
+                    ProgressView("Loading recipes...")
+                } else if recipes.isEmpty {
                     emptyState
                 } else {
                     List {
@@ -409,17 +413,33 @@ struct RecipeSelectorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         dismiss()
                     }
                 }
             }
+            .task {
+                await loadRecipes()
+            }
+        }
+    }
+
+    private func loadRecipes() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            // Load fresh recipes from repository
+            recipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("✅ Loaded \(recipes.count) recipes for selector")
+        } catch {
+            AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")
         }
     }
 

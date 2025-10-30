@@ -20,12 +20,9 @@ struct OnboardingView: View {
     @State private var errorMessage: String?
     @State private var showingEmojiPicker = false
 
-    // Preset food emojis for quick selection
-    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐"]
-
-    // Additional emojis for random selection
-    private let allEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
-                            "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
+    // Preset food emojis for quick selection and random selection
+    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
+                             "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
 
     var isValid: Bool {
         username.count >= 3 && username.count <= 20 &&
@@ -127,7 +124,7 @@ struct OnboardingView: View {
                             .buttonStyle(.bordered)
 
                             Button {
-                                profileEmoji = allEmojis.randomElement()
+                                profileEmoji = foodEmojis.randomElement()
                             } label: {
                                 Label("Random", systemImage: "shuffle")
                                     .frame(maxWidth: .infinity)

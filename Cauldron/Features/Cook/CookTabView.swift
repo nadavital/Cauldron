@@ -19,6 +19,7 @@ struct CookTabView: View {
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
     @State private var isAIAvailable = false
+    @State private var collections: [Collection] = []
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
@@ -97,16 +98,40 @@ struct CookTabView: View {
             .task {
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
+
+                // Load collections
+                await loadCollections()
             }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
+                await loadCollections()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
                 // Refresh when a recipe is added from another tab
                 Task {
                     await viewModel.loadData()
                 }
+            }
+            .navigationDestination(for: CollectionDestination.self) { destination in
+                switch destination {
+                case .owned(let collection):
+                    CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)
+                case .referenced(let reference):
+                    // TODO: Create view for referenced collections
+                    Text("Referenced Collection: \(reference.collectionName)")
+                }
+            }
+        }
+    }
+
+    private func loadCollections() async {
+        if let userId = CurrentUserSession.shared.userId {
+            do {
+                let allCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
+                collections = allCollections.filter { $0.userId == userId }
+            } catch {
+                AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
             }
         }
     }
@@ -204,17 +229,32 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: CollectionsListView(dependencies: viewModel.dependencies)) {
-                    Text("View All")
+                    Text("See All")
                         .font(.subheadline)
                         .foregroundColor(.cauldronOrange)
                 }
             }
 
-            // TODO: Load actual collections from repository
-            // For now, show a placeholder
-            Text("Organize your recipes into collections")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if collections.isEmpty {
+                Text("Organize your recipes into collections")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(collections.prefix(10)) { collection in
+                            NavigationLink(value: CollectionDestination.owned(collection)) {
+                                CollectionCardView(
+                                    collection: collection,
+                                    recipeImages: []
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
         }
     }
 

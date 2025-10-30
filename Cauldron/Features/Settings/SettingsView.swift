@@ -21,12 +21,9 @@ struct EditProfileView: View {
     @State private var errorMessage: String?
     @State private var showingEmojiPicker = false
 
-    // Preset food emojis for quick selection
-    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐"]
-
-    // Additional emojis for random selection
-    private let allEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
-                            "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
+    // Preset food emojis for quick selection and random selection
+    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
+                             "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
 
     var hasChanges: Bool {
         guard let user = userSession.currentUser else { return false }
@@ -117,7 +114,7 @@ struct EditProfileView: View {
                                 .buttonStyle(.bordered)
 
                                 Button {
-                                    profileEmoji = allEmojis.randomElement()
+                                    profileEmoji = foodEmojis.randomElement()
                                 } label: {
                                     HStack(spacing: 4) {
                                         Image(systemName: "shuffle")

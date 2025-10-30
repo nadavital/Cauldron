@@ -17,8 +17,7 @@ struct CollectionsListView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        ScrollView {
                 VStack(spacing: 24) {
                     // My Collections Section
                     if !viewModel.filteredOwnedCollections.isEmpty {
@@ -129,45 +128,44 @@ struct CollectionsListView: View {
                     }
                 }
                 .padding(.vertical)
-            }
-            .navigationTitle("Collections")
-            .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $viewModel.searchText, prompt: "Search collections")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingCreateSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
+        }
+        .navigationTitle("Collections")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $viewModel.searchText, prompt: "Search collections")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingCreateSheet = true
+                } label: {
+                    Image(systemName: "plus")
                 }
             }
-            .navigationDestination(for: CollectionDestination.self) { destination in
-                switch destination {
-                case .owned(let collection):
-                    CollectionDetailView(collection: collection, dependencies: dependencies)
-                case .referenced(let reference):
-                    // TODO: Create view for referenced collections
-                    Text("Referenced Collection: \(reference.collectionName)")
-                }
+        }
+        .navigationDestination(for: CollectionDestination.self) { destination in
+            switch destination {
+            case .owned(let collection):
+                CollectionDetailView(collection: collection, dependencies: dependencies)
+            case .referenced(let reference):
+                // TODO: Create view for referenced collections
+                Text("Referenced Collection: \(reference.collectionName)")
             }
-            .sheet(isPresented: $showingCreateSheet) {
-                CollectionFormView()
-                    .environment(\.dependencies, dependencies)
+        }
+        .sheet(isPresented: $showingCreateSheet) {
+            CollectionFormView()
+                .environment(\.dependencies, dependencies)
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
             }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                if let errorMessage = viewModel.errorMessage {
-                    Text(errorMessage)
-                }
-            }
-            .task {
-                await viewModel.loadCollections()
-            }
-            .refreshable {
-                await viewModel.loadCollections()
-            }
+        }
+        .task {
+            await viewModel.loadCollections()
+        }
+        .refreshable {
+            await viewModel.loadCollections()
         }
     }
 }
