@@ -141,6 +141,15 @@ struct CollectionsListView: View {
                 }
             }
         }
+        .navigationDestination(for: CollectionDestination.self) { destination in
+            switch destination {
+            case .owned(let collection):
+                CollectionDetailView(collection: collection, dependencies: dependencies)
+            case .referenced(let reference):
+                // TODO: Create view for referenced collections
+                Text("Referenced Collection: \(reference.collectionName)")
+            }
+        }
         .sheet(isPresented: $showingCreateSheet) {
             CollectionFormView()
                 .environment(\.dependencies, dependencies)
