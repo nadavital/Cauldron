@@ -15,6 +15,7 @@ class SharingTabViewModel: ObservableObject {
     static let shared = SharingTabViewModel()
 
     @Published var sharedRecipes: [SharedRecipe] = []
+    @Published var sharedCollections: [Collection] = []
     @Published var isLoading = false
     @Published var showSuccessAlert = false
     @Published var showErrorAlert = false
@@ -57,10 +58,44 @@ class SharingTabViewModel: ObservableObject {
 
             // Load RecipeReferences to track which recipes have been saved
             await loadSavedReferences()
+
+            // Load shared collections from friends
+            await loadSharedCollections()
         } catch {
             AppLogger.general.error("Failed to load shared recipes: \(error.localizedDescription)")
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
             showErrorAlert = true
+        }
+    }
+
+    /// Load shared collections from friends
+    private func loadSharedCollections() async {
+        guard let dependencies = dependencies else { return }
+
+        do {
+            // Get list of friend user IDs
+            let connections = try await dependencies.connectionRepository.fetchAll()
+            guard let currentUserId = CurrentUserSession.shared.userId else {
+                sharedCollections = []
+                return
+            }
+
+            let friendIds = connections.compactMap { connection in
+                connection.otherUserId(currentUserId: currentUserId)
+            }
+
+            guard !friendIds.isEmpty else {
+                sharedCollections = []
+                return
+            }
+
+            // Fetch shared collections from friends
+            sharedCollections = try await dependencies.cloudKitService.fetchSharedCollections(friendIds: friendIds)
+            AppLogger.general.info("Loaded \(self.sharedCollections.count) shared collections")
+        } catch {
+            AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
+            sharedCollections = []
+            // Non-critical failure - don't show error alert
         }
     }
 

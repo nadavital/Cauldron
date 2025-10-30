@@ -169,13 +169,13 @@ struct CollectionFormView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isEditing ? "Save" : "Create") {
+                    Button(isEditing ? "Save" : "Create", systemImage: "checkmark") {
                         Task {
                             await saveCollection()
                         }

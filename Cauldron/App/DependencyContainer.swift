@@ -116,7 +116,8 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self
+            CollectionModel.self,
+            CollectionReferenceModel.self
         ])
         
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -136,7 +137,8 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self
+            CollectionModel.self,
+            CollectionReferenceModel.self
         ])
 
         // Ensure Application Support directory exists
