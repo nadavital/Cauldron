@@ -28,6 +28,10 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
     let fromUsername: String?
     let fromDisplayName: String?
 
+    // Cached receiver/acceptor info for acceptance notifications (denormalized for performance)
+    let toUsername: String?
+    let toDisplayName: String?
+
     init(
         id: UUID = UUID(),
         fromUserId: UUID,
@@ -36,7 +40,9 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         fromUsername: String? = nil,
-        fromDisplayName: String? = nil
+        fromDisplayName: String? = nil,
+        toUsername: String? = nil,
+        toDisplayName: String? = nil
     ) {
         self.id = id
         self.fromUserId = fromUserId
@@ -46,6 +52,8 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
         self.updatedAt = updatedAt
         self.fromUsername = fromUsername
         self.fromDisplayName = fromDisplayName
+        self.toUsername = toUsername
+        self.toDisplayName = toDisplayName
     }
     
     /// Check if this is an accepted connection

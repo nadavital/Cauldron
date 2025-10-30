@@ -49,25 +49,57 @@ extension Color {
     // MARK: - Profile Colors
 
     /// Profile color options for user customization
-    static let profileOrange = Color(red: 1.0, green: 0.6, blue: 0.2)
-    static let profileBlue = Color(red: 0.2, green: 0.6, blue: 1.0)
-    static let profilePurple = Color(red: 0.7, green: 0.3, blue: 0.9)
-    static let profileGreen = Color(red: 0.3, green: 0.8, blue: 0.4)
-    static let profilePink = Color(red: 1.0, green: 0.4, blue: 0.7)
-    static let profileTeal = Color(red: 0.2, green: 0.8, blue: 0.8)
-    static let profileRed = Color(red: 1.0, green: 0.3, blue: 0.3)
-    static let profileIndigo = Color(red: 0.4, green: 0.4, blue: 0.9)
+    /// Organized in a distinct, well-spaced palette with clear visual differences
 
-    /// All available profile colors
+    // Warm colors
+    static let profileOrange = Color(red: 1.0, green: 0.55, blue: 0.0)
+    static let profileRed = Color(red: 0.95, green: 0.25, blue: 0.25)
+    static let profilePink = Color(red: 1.0, green: 0.35, blue: 0.65)
+    static let profileCoral = Color(red: 0.95, green: 0.45, blue: 0.35)
+
+    // Cool colors
+    static let profileBlue = Color(red: 0.2, green: 0.55, blue: 0.95)
+    static let profileTeal = Color(red: 0.15, green: 0.75, blue: 0.7)
+    static let profileSky = Color(red: 0.4, green: 0.75, blue: 1.0)
+    static let profileMint = Color(red: 0.25, green: 0.85, blue: 0.65)
+
+    // Purples
+    static let profilePurple = Color(red: 0.65, green: 0.3, blue: 0.85)
+    static let profileIndigo = Color(red: 0.4, green: 0.35, blue: 0.9)
+    static let profileLavender = Color(red: 0.75, green: 0.55, blue: 0.9)
+    static let profileMagenta = Color(red: 0.85, green: 0.25, blue: 0.75)
+
+    // Greens & Yellows
+    static let profileGreen = Color(red: 0.25, green: 0.75, blue: 0.35)
+    static let profileLime = Color(red: 0.55, green: 0.85, blue: 0.2)
+    static let profileYellow = Color(red: 0.95, green: 0.75, blue: 0.15)
+    static let profileAmber = Color(red: 1.0, green: 0.65, blue: 0.0)
+
+    /// All available profile colors organized by color family
     static let allProfileColors: [Color] = [
-        .profileOrange,
-        .profileBlue,
-        .profilePurple,
-        .profileGreen,
-        .profilePink,
-        .profileTeal,
+        // Row 1: Warm colors
         .profileRed,
-        .profileIndigo
+        .profileCoral,
+        .profileOrange,
+        .profileAmber,
+
+        // Row 2: Pinks & Purples
+        .profilePink,
+        .profileMagenta,
+        .profilePurple,
+        .profileLavender,
+
+        // Row 3: Blues
+        .profileIndigo,
+        .profileBlue,
+        .profileSky,
+        .profileTeal,
+
+        // Row 4: Greens & Yellows
+        .profileMint,
+        .profileGreen,
+        .profileLime,
+        .profileYellow
     ]
 
     /// Convert Color to hex string
@@ -98,6 +130,32 @@ extension Color {
         let b = Double(rgb & 0x0000FF) / 255.0
 
         return Color(red: r, green: g, blue: b)
+    }
+
+    /// Initialize Color from hex string
+    init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            return nil
+        }
+
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue:  Double(b) / 255,
+            opacity: Double(a) / 255
+        )
     }
 }
 

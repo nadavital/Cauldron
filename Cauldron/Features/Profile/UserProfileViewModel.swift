@@ -22,6 +22,7 @@ class UserProfileViewModel: ObservableObject {
     @Published var connections: [ManagedConnection] = []
     @Published var isLoadingConnections = false
     @Published var usersMap: [UUID: User] = [:]
+    @Published var searchText = ""
 
     let user: User
     let dependencies: DependencyContainer
@@ -303,7 +304,14 @@ class UserProfileViewModel: ObservableObject {
     }
 
     var filteredRecipes: [SharedRecipe] {
-        return userRecipes
+        guard !searchText.isEmpty else { return userRecipes }
+
+        let lowercased = searchText.lowercased()
+        return userRecipes.filter { sharedRecipe in
+            sharedRecipe.recipe.title.lowercased().contains(lowercased) ||
+            sharedRecipe.recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
+            sharedRecipe.recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
+        }
     }
 
     var displayedConnections: [ManagedConnection] {

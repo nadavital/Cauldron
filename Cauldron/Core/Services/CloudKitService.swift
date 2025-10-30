@@ -74,6 +74,8 @@ actor CloudKitService {
     private let connectionRecordType = "Connection"
     private let sharedRecipeRecordType = "SharedRecipe"  // PUBLIC database
     private let recipeReferenceRecordType = "RecipeReference"  // PUBLIC database
+    private let collectionRecordType = "Collection"  // PUBLIC database
+    private let collectionReferenceRecordType = "CollectionReference"  // PUBLIC database
 
     init() {
         // Try to initialize CloudKit, but don't crash if it fails
@@ -950,6 +952,14 @@ actor CloudKitService {
             record["fromDisplayName"] = fromDisplayName as CKRecordValue
         }
 
+        // Acceptor info for acceptance notifications
+        if let toUsername = connection.toUsername {
+            record["toUsername"] = toUsername as CKRecordValue
+        }
+        if let toDisplayName = connection.toDisplayName {
+            record["toDisplayName"] = toDisplayName as CKRecordValue
+        }
+
         // Use modifyRecords with .changedKeys to allow any authenticated user to update
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
@@ -1092,6 +1102,10 @@ actor CloudKitService {
         let fromUsername = record["fromUsername"] as? String
         let fromDisplayName = record["fromDisplayName"] as? String
 
+        // Optional acceptor/receiver info for acceptance notifications
+        let toUsername = record["toUsername"] as? String
+        let toDisplayName = record["toDisplayName"] as? String
+
         return Connection(
             id: connectionId,
             fromUserId: fromUserId,
@@ -1100,7 +1114,9 @@ actor CloudKitService {
             createdAt: createdAt,
             updatedAt: updatedAt,
             fromUsername: fromUsername,
-            fromDisplayName: fromDisplayName
+            fromDisplayName: fromDisplayName,
+            toUsername: toUsername,
+            toDisplayName: toDisplayName
         )
     }
     
@@ -1142,7 +1158,7 @@ actor CloudKitService {
         notification.alertLocalizationArgs = ["fromDisplayName"]
 
         // Fallback message if localization fails (shouldn't happen if Localizable.strings exists)
-        notification.alertBody = "You have a new connection request!"
+        notification.alertBody = "You have a new friend request!"
 
         notification.soundName = "default"
         notification.shouldBadge = true
@@ -1173,6 +1189,75 @@ actor CloudKitService {
             logger.info("Unsubscribed from connection requests")
         } catch {
             logger.warning("Failed to unsubscribe: \(error.localizedDescription)")
+        }
+    }
+
+    /// Subscribe to connection acceptances for push notifications
+    /// This sets up a CloudKit subscription so the user gets notified when someone accepts their friend request
+    func subscribeToConnectionAcceptances(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-acceptances-\(userId.uuidString)"
+
+        // Delete existing subscription first (if any) to ensure we use the latest notification format
+        let db = try getPublicDatabase()
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Deleted old connection acceptance subscription")
+        } catch {
+            // Subscription doesn't exist yet, that's fine
+            logger.info("No existing acceptance subscription to delete (creating fresh)")
+        }
+
+        // Create predicate: fromUserId == current user AND status == accepted
+        let predicate = NSPredicate(format: "fromUserId == %@ AND status == %@", userId.uuidString, "accepted")
+
+        // Create query subscription
+        let subscription = CKQuerySubscription(
+            recordType: connectionRecordType,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordUpdate]  // Fires when status changes to accepted
+        )
+
+        // Configure notification with personalized message
+        let notification = CKSubscription.NotificationInfo()
+
+        // Use localization with field substitution to show acceptor's display name
+        // The %@ placeholder will be replaced with the value from the toUsername field
+        notification.alertLocalizationKey = "CONNECTION_ACCEPTED_ALERT"
+        notification.alertLocalizationArgs = ["toUsername"]
+
+        // Fallback message if localization fails
+        notification.alertBody = "Your friend request was accepted!"
+
+        notification.soundName = "default"
+        notification.shouldBadge = false  // Don't badge for acceptances, only for incoming requests
+        notification.shouldSendContentAvailable = true
+
+        // Include connection data in userInfo for navigation
+        notification.desiredKeys = ["connectionId", "toUserId", "toUsername", "toDisplayName"]
+
+        subscription.notificationInfo = notification
+
+        // Save subscription
+        do {
+            _ = try await db.save(subscription)
+            logger.info("Successfully subscribed to connection acceptances")
+        } catch {
+            logger.error("Failed to save connection acceptance subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Unsubscribe from connection acceptance notifications
+    func unsubscribeFromConnectionAcceptances(forUserId userId: UUID) async throws {
+        let subscriptionID = "connection-acceptances-\(userId.uuidString)"
+        let db = try getPublicDatabase()
+
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Unsubscribed from connection acceptances")
+        } catch {
+            logger.warning("Failed to unsubscribe from acceptances: \(error.localizedDescription)")
         }
     }
 
@@ -1276,6 +1361,268 @@ actor CloudKitService {
             isCopy: isCopy,
             recipeTitle: recipeTitle,
             recipeTags: recipeTags
+        )
+    }
+
+    // MARK: - Collections
+
+    /// Save collection to PUBLIC database (for sharing)
+    func saveCollection(_ collection: Collection) async throws {
+        logger.info("💾 Saving collection: \(collection.name)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collection.id.uuidString)
+        let record = CKRecord(recordType: collectionRecordType, recordID: recordID)
+
+        // Core fields
+        record["collectionId"] = collection.id.uuidString as CKRecordValue
+        record["name"] = collection.name as CKRecordValue
+        record["userId"] = collection.userId.uuidString as CKRecordValue
+        record["visibility"] = collection.visibility.rawValue as CKRecordValue
+        record["createdAt"] = collection.createdAt as CKRecordValue
+        record["updatedAt"] = collection.updatedAt as CKRecordValue
+
+        // Optional fields
+        if let description = collection.description {
+            record["description"] = description as CKRecordValue
+        }
+        if let emoji = collection.emoji {
+            record["emoji"] = emoji as CKRecordValue
+        }
+        if let color = collection.color {
+            record["color"] = color as CKRecordValue
+        }
+        record["coverImageType"] = collection.coverImageType.rawValue as CKRecordValue
+
+        // Recipe IDs stored as JSON string
+        if let recipeIdsJSON = try? JSONEncoder().encode(collection.recipeIds),
+           let recipeIdsString = String(data: recipeIdsJSON, encoding: .utf8) {
+            record["recipeIds"] = recipeIdsString as CKRecordValue
+        }
+
+        _ = try await db.save(record)
+        logger.info("✅ Saved collection to PUBLIC database")
+    }
+
+    /// Fetch user's own collections
+    func fetchCollections(forUserId userId: UUID) async throws -> [Collection] {
+        logger.info("📥 Fetching collections for user: \(userId)")
+
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
+        let query = CKQuery(recordType: collectionRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        let results = try await db.records(matching: query)
+
+        var collections: [Collection] = []
+        for (_, result) in results.matchResults {
+            if let record = try? result.get(),
+               let collection = try? collectionFromRecord(record) {
+                collections.append(collection)
+            }
+        }
+
+        logger.info("✅ Fetched \(collections.count) collections")
+        return collections
+    }
+
+    /// Fetch shared collections from friends (friends-only and public visibility)
+    func fetchSharedCollections(friendIds: [UUID]) async throws -> [Collection] {
+        logger.info("📥 Fetching shared collections from \(friendIds.count) friends")
+
+        guard !friendIds.isEmpty else { return [] }
+
+        let db = try getPublicDatabase()
+
+        // Query for collections where:
+        // - userId is in friendIds AND
+        // - visibility is NOT private
+        let friendIdStrings = friendIds.map { $0.uuidString }
+        let predicate = NSPredicate(
+            format: "userId IN %@ AND visibility != %@",
+            friendIdStrings,
+            RecipeVisibility.privateRecipe.rawValue
+        )
+        let query = CKQuery(recordType: collectionRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        do {
+            let results = try await db.records(matching: query)
+
+            var collections: [Collection] = []
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let collection = try? collectionFromRecord(record) {
+                    collections.append(collection)
+                }
+            }
+
+            logger.info("✅ Fetched \(collections.count) shared collections")
+            return collections
+        } catch let error as CKError {
+            // Handle schema not yet deployed - record type doesn't exist until first save
+            if error.code == .unknownItem || error.errorCode == 11 { // 11 = unknown record type
+                logger.info("Collection record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
+    }
+
+    /// Delete collection from PUBLIC database
+    func deleteCollection(_ collectionId: UUID) async throws {
+        logger.info("🗑️ Deleting collection: \(collectionId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        try await db.deleteRecord(withID: recordID)
+        logger.info("✅ Deleted collection")
+    }
+
+    // MARK: - Collection References
+
+    /// Save collection reference to PUBLIC database
+    func saveCollectionReference(_ reference: CollectionReference) async throws {
+        logger.info("💾 Saving collection reference: \(reference.collectionName)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: reference.id.uuidString)
+        let record = CKRecord(recordType: collectionReferenceRecordType, recordID: recordID)
+
+        // Core fields
+        record["userId"] = reference.userId.uuidString as CKRecordValue
+        record["originalCollectionId"] = reference.originalCollectionId.uuidString as CKRecordValue
+        record["originalOwnerId"] = reference.originalOwnerId.uuidString as CKRecordValue
+        record["savedAt"] = reference.savedAt as CKRecordValue
+
+        // Cached metadata
+        record["collectionName"] = reference.collectionName as CKRecordValue
+        if let emoji = reference.collectionEmoji {
+            record["collectionEmoji"] = emoji as CKRecordValue
+        }
+        record["recipeCount"] = reference.recipeCount as CKRecordValue
+
+        _ = try await db.save(record)
+        logger.info("✅ Saved collection reference to PUBLIC database")
+    }
+
+    /// Fetch user's saved collection references
+    func fetchCollectionReferences(forUserId userId: UUID) async throws -> [CollectionReference] {
+        logger.info("📥 Fetching collection references for user: \(userId)")
+
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
+        let query = CKQuery(recordType: collectionReferenceRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "savedAt", ascending: false)]
+
+        do {
+            let results = try await db.records(matching: query)
+
+            var references: [CollectionReference] = []
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let reference = try? collectionReferenceFromRecord(record) {
+                    references.append(reference)
+                }
+            }
+
+            logger.info("✅ Fetched \(references.count) collection references")
+            return references
+        } catch let error as CKError {
+            // Handle schema not yet deployed - record type doesn't exist until first save
+            if error.code == .unknownItem || error.errorCode == 11 { // 11 = unknown record type
+                logger.info("CollectionReference record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
+    }
+
+    /// Delete a collection reference
+    func deleteCollectionReference(_ referenceId: UUID) async throws {
+        logger.info("🗑️ Deleting collection reference: \(referenceId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: referenceId.uuidString)
+
+        try await db.deleteRecord(withID: recordID)
+        logger.info("✅ Deleted collection reference")
+    }
+
+    // MARK: - Private Helpers for Collections
+
+    private func collectionFromRecord(_ record: CKRecord) throws -> Collection {
+        guard let collectionIdString = record["collectionId"] as? String,
+              let collectionId = UUID(uuidString: collectionIdString),
+              let name = record["name"] as? String,
+              let userIdString = record["userId"] as? String,
+              let userId = UUID(uuidString: userIdString),
+              let visibilityString = record["visibility"] as? String,
+              let visibility = RecipeVisibility(rawValue: visibilityString),
+              let createdAt = record["createdAt"] as? Date,
+              let updatedAt = record["updatedAt"] as? Date else {
+            throw CloudKitError.invalidRecord
+        }
+
+        // Parse recipe IDs from JSON string
+        let recipeIds: [UUID]
+        if let recipeIdsString = record["recipeIds"] as? String,
+           let recipeIdsData = recipeIdsString.data(using: .utf8),
+           let ids = try? JSONDecoder().decode([UUID].self, from: recipeIdsData) {
+            recipeIds = ids
+        } else {
+            recipeIds = []
+        }
+
+        let description = record["description"] as? String
+        let emoji = record["emoji"] as? String
+        let color = record["color"] as? String
+        let coverImageTypeString = record["coverImageType"] as? String
+        let coverImageType = coverImageTypeString.flatMap { CoverImageType(rawValue: $0) } ?? .recipeGrid
+
+        return Collection(
+            id: collectionId,
+            name: name,
+            description: description,
+            userId: userId,
+            recipeIds: recipeIds,
+            visibility: visibility,
+            emoji: emoji,
+            color: color,
+            coverImageType: coverImageType,
+            cloudRecordName: record.recordID.recordName,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func collectionReferenceFromRecord(_ record: CKRecord) throws -> CollectionReference {
+        guard let userIdString = record["userId"] as? String,
+              let userId = UUID(uuidString: userIdString),
+              let originalCollectionIdString = record["originalCollectionId"] as? String,
+              let originalCollectionId = UUID(uuidString: originalCollectionIdString),
+              let originalOwnerIdString = record["originalOwnerId"] as? String,
+              let originalOwnerId = UUID(uuidString: originalOwnerIdString),
+              let savedAt = record["savedAt"] as? Date,
+              let collectionName = record["collectionName"] as? String,
+              let recipeCount = record["recipeCount"] as? Int else {
+            throw CloudKitError.invalidRecord
+        }
+
+        let collectionEmoji = record["collectionEmoji"] as? String
+
+        return CollectionReference(
+            id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
+            userId: userId,
+            originalCollectionId: originalCollectionId,
+            originalOwnerId: originalOwnerId,
+            savedAt: savedAt,
+            collectionName: collectionName,
+            collectionEmoji: collectionEmoji,
+            recipeCount: recipeCount,
+            cloudRecordName: record.recordID.recordName
         )
     }
 }

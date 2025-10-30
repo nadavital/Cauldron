@@ -20,8 +20,9 @@ struct OnboardingView: View {
     @State private var errorMessage: String?
     @State private var showingEmojiPicker = false
 
-    // Preset food emojis for quick selection
-    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐"]
+    // Preset food emojis for quick selection and random selection
+    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
+                             "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
 
     var isValid: Bool {
         username.count >= 3 && username.count <= 20 &&
@@ -112,6 +113,25 @@ struct OnboardingView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                showingEmojiPicker = true
+                            } label: {
+                                Label("Choose Emoji", systemImage: "face.smiling")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                profileEmoji = foodEmojis.randomElement()
+                            } label: {
+                                Label("Random", systemImage: "shuffle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.cauldronOrange)
+                        }
                     }
 
                     // Color picker
@@ -142,6 +162,15 @@ struct OnboardingView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+
+                        Button {
+                            profileColor = Color.allProfileColors.randomElement()?.toHex()
+                        } label: {
+                            Label("Random Color", systemImage: "shuffle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.cauldronOrange)
                     }
 
                     if let error = errorMessage {
@@ -184,6 +213,9 @@ struct OnboardingView: View {
                 .padding(.bottom, 32)
             }
             .navigationBarHidden(true)
+            .sheet(isPresented: $showingEmojiPicker) {
+                EmojiPickerView(selectedEmoji: $profileEmoji)
+            }
         }
     }
     

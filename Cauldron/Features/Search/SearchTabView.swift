@@ -111,6 +111,7 @@ struct SearchTabView: View {
                         if let recipes = viewModel.recipesByTag[tagName], !recipes.isEmpty {
                             NavigationLink(destination: CategoryRecipesListView(categoryName: tagName, recipes: recipes, dependencies: viewModel.dependencies)) {
                                 CategoryCardView(categoryName: tagName, recipeCount: recipes.count)
+                                    .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.plain)
                         }

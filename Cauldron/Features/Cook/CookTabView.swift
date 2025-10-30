@@ -19,6 +19,7 @@ struct CookTabView: View {
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
     @State private var isAIAvailable = false
+    @State private var collections: [Collection] = []
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
@@ -28,6 +29,9 @@ struct CookTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    // My Collections
+                    collectionsSection
+
                     // What Can I Cook?
                     if !viewModel.cookableRecipes.isEmpty {
                         whatCanICookSection
@@ -94,16 +98,31 @@ struct CookTabView: View {
             .task {
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
+
+                // Load collections
+                await loadCollections()
             }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
+                await loadCollections()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
                 // Refresh when a recipe is added from another tab
                 Task {
                     await viewModel.loadData()
                 }
+            }
+        }
+    }
+
+    private func loadCollections() async {
+        if let userId = CurrentUserSession.shared.userId {
+            do {
+                let allCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
+                collections = allCollections.filter { $0.userId == userId }
+            } catch {
+                AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
             }
         }
     }
@@ -189,7 +208,47 @@ struct CookTabView: View {
             }
         }
     }
-    
+
+    private var collectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "folder.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("My Collections")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: CollectionsListView(dependencies: viewModel.dependencies)) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+
+            if collections.isEmpty {
+                Text("Organize your recipes into collections")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(collections.prefix(10)) { collection in
+                            NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
+                                CollectionCardView(
+                                    collection: collection,
+                                    recipeImages: []
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+        }
+    }
+
     private var allRecipesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -403,7 +462,7 @@ struct CategoryCardView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .frame(width: 140)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(12)

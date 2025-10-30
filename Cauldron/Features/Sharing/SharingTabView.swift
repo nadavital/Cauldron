@@ -35,7 +35,7 @@ struct SharingTabView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             combinedFeedSection
-            .navigationTitle("Sharing")
+            .navigationTitle("Friends")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if let user = userSession.currentUser {
@@ -92,9 +92,14 @@ struct SharingTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 
+                // Shared collections section (only show if there are collections)
+                if !viewModel.sharedCollections.isEmpty {
+                    sharedCollectionsSection
+                }
+
                 // Shared recipes section
                 VStack(spacing: 0) {
-                    SectionHeader(title: "Shared Recipes", icon: "book.fill", color: .cauldronOrange)
+                    SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
 
                     if viewModel.isLoading {
                         HStack {
@@ -127,10 +132,10 @@ struct SharingTabView: View {
                                     )
                             }
 
-                            Text("No Shared Recipes Yet")
+                            Text("No Friends' Recipes Yet")
                                 .font(.headline)
 
-                            Text("When your friends share recipes,\nthey'll appear here")
+                            Text("Add friends and their shared recipes\nwill appear here")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -171,6 +176,25 @@ struct SharingTabView: View {
         .background(Color.cauldronBackground.ignoresSafeArea())
     }
 
+    private var sharedCollectionsSection: some View {
+        VStack(spacing: 0) {
+            SectionHeader(title: "Shared Collections", icon: "folder.fill", color: .purple)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(viewModel.sharedCollections) { collection in
+                        SharedCollectionCard(collection: collection)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+            }
+        }
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+        .padding(.horizontal, 16)
+    }
+
     private var recipesSection: some View {
         Group {
             if viewModel.isLoading {
@@ -189,11 +213,11 @@ struct SharingTabView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
             
-            Text("No Shared Recipes")
+            Text("No Friends' Recipes")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
-            Text("Recipes shared with you will appear here")
+
+            Text("Add friends to see their shared recipes here")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
@@ -408,6 +432,53 @@ struct ConnectionsInlineView: View {
         .task {
             await viewModel.loadConnections()
         }
+    }
+}
+
+// MARK: - Shared Collection Card
+
+struct SharedCollectionCard: View {
+    let collection: Collection
+
+    var body: some View {
+        VStack(spacing: 8) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(selectedColor.opacity(0.15))
+                    .frame(width: 60, height: 60)
+
+                if let emoji = collection.emoji {
+                    Text(emoji)
+                        .font(.system(size: 32))
+                } else {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(selectedColor)
+                }
+            }
+
+            // Collection name
+            Text(collection.name)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 80)
+
+            // Recipe count
+            Text("\(collection.recipeCount) recipes")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var selectedColor: Color {
+        if let colorHex = collection.color {
+            return Color(hex: colorHex) ?? .purple
+        }
+        return .purple
     }
 }
 

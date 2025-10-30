@@ -555,9 +555,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         AppLogger.general.info("CloudKit notification type: \(notification.notificationType.rawValue)")
 
-        // Handle query notification (for connection requests)
+        // Handle query notification (for connection requests and acceptances)
         if notification.notificationType == .query {
-            AppLogger.general.info("🔔 Connection request notification received - syncing connections")
+            AppLogger.general.info("🔔 Connection notification received - syncing connections")
 
             // Post notification to trigger connection refresh
             DispatchQueue.main.async {

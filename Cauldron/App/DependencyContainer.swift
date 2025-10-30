@@ -22,6 +22,7 @@ class DependencyContainer: ObservableObject {
     let cookingHistoryRepository: CookingHistoryRepository
     let sharingRepository: SharingRepository
     let connectionRepository: ConnectionRepository
+    let collectionRepository: CollectionRepository
     
     // Services (actors - thread-safe)
     let unitsService: UnitsService
@@ -50,10 +51,15 @@ class DependencyContainer: ObservableObject {
 
         // Initialize repositories (now with CloudKit service)
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
+        self.collectionRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitService: cloudKitService
+        )
         self.recipeRepository = RecipeRepository(
             modelContainer: modelContainer,
             cloudKitService: cloudKitService,
-            deletedRecipeRepository: deletedRecipeRepository
+            deletedRecipeRepository: deletedRecipeRepository,
+            collectionRepository: collectionRepository
         )
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
@@ -109,7 +115,9 @@ class DependencyContainer: ObservableObject {
             CookingHistoryModel.self,
             UserModel.self,
             SharedRecipeModel.self,
-            ConnectionModel.self
+            ConnectionModel.self,
+            CollectionModel.self,
+            CollectionReferenceModel.self
         ])
         
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -128,7 +136,9 @@ class DependencyContainer: ObservableObject {
             CookingHistoryModel.self,
             UserModel.self,
             SharedRecipeModel.self,
-            ConnectionModel.self
+            ConnectionModel.self,
+            CollectionModel.self,
+            CollectionReferenceModel.self
         ])
 
         // Ensure Application Support directory exists
