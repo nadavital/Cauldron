@@ -73,12 +73,13 @@ class SharingTabViewModel: ObservableObject {
         guard let dependencies = dependencies else { return }
 
         do {
-            // Get list of friend user IDs
-            let connections = try await dependencies.connectionRepository.fetchAll()
             guard let currentUserId = CurrentUserSession.shared.userId else {
                 sharedCollections = []
                 return
             }
+
+            // Get list of friend user IDs
+            let connections = try await dependencies.connectionRepository.fetchAcceptedConnections(forUserId: currentUserId)
 
             let friendIds = connections.compactMap { connection in
                 connection.otherUserId(currentUserId: currentUserId)
