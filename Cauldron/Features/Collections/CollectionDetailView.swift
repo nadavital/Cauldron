@@ -79,46 +79,58 @@ struct CollectionDetailView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    // Visibility picker
-                    Menu {
-                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                            Button {
-                                Task {
-                                    await updateVisibility(to: visibility)
+                    // Action buttons - Horizontal layout
+                    HStack(spacing: 12) {
+                        // Visibility picker
+                        Menu {
+                            ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                                Button {
+                                    Task {
+                                        await updateVisibility(to: visibility)
+                                    }
+                                } label: {
+                                    Label(visibility.displayName, systemImage: visibility.icon)
                                 }
-                            } label: {
-                                Label(visibility.displayName, systemImage: visibility.icon)
                             }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: selectedVisibility.icon)
+                                    .font(.subheadline)
+                                Text(selectedVisibility.displayName)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                            }
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(10)
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: selectedVisibility.icon)
-                                .font(.caption)
-                            Text(selectedVisibility.displayName)
-                                .font(.caption)
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                    .disabled(isUpdatingVisibility)
+                        .disabled(isUpdatingVisibility)
 
-                    // Add Recipes button
-                    Button {
-                        showingRecipeSelector = true
-                    } label: {
-                        Label("Add Recipes", systemImage: "plus.circle.fill")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                        // Add Recipes button
+                        Button {
+                            showingRecipeSelector = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.subheadline)
+                                Text("Add Recipes")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
                             .foregroundColor(.cauldronOrange)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Color.cauldronOrange.opacity(0.1))
+                            .cornerRadius(10)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.cauldronOrange.opacity(0.15))
-                    .controlSize(.small)
+                    .padding(.horizontal, 16)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -173,6 +185,7 @@ struct CollectionDetailView: View {
                             } label: {
                                 Label("Remove", systemImage: "trash")
                             }
+                            .tint(.red)
                         }
                     }
                 }
@@ -408,21 +421,27 @@ struct CollectionRecipeSelectorSheet: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     RecipeImageView(thumbnailImageURL: recipe.imageURL)
+                                        .overlay(
+                                            Group {
+                                                if recipe.isReference {
+                                                    // Reference badge in top-left corner
+                                                    Image(systemName: "bookmark.fill")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.white)
+                                                        .padding(5)
+                                                        .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.9))
+                                                        .clipShape(Circle())
+                                                        .shadow(radius: 2)
+                                                }
+                                            },
+                                            alignment: .topLeading
+                                        )
 
                                     VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 6) {
-                                            Text(recipe.title)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                                .lineLimit(2)
-
-                                            // Reference indicator
-                                            if recipe.isReference {
-                                                Image(systemName: "bookmark.fill")
-                                                    .font(.caption2)
-                                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-                                            }
-                                        }
+                                        Text(recipe.title)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
 
                                         if !recipe.tags.isEmpty {
                                             Text(recipe.tags.first!.name)
@@ -452,13 +471,13 @@ struct CollectionRecipeSelectorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         Task {
                             await saveChanges()
                         }

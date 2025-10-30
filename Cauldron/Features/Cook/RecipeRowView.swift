@@ -13,9 +13,25 @@ struct RecipeRowView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Thumbnail image
+            // Thumbnail image with reference badge overlay
             RecipeImageView(thumbnailImageURL: recipe.imageURL)
-            
+                .overlay(
+                    Group {
+                        if recipe.isReference {
+                            // Reference badge in top-left corner
+                            Image(systemName: "bookmark.fill")
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                                .padding(5)
+                                .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.9))
+                                .clipShape(Circle())
+                                .shadow(radius: 2)
+                        }
+                    },
+                    alignment: .topLeading
+                )
+                .padding(recipe.isReference ? 4 : 0)
+
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Text(recipe.title)
@@ -24,23 +40,13 @@ struct RecipeRowView: View {
                         .truncationMode(.tail)
                         .layoutPriority(1)
 
-                    // Indicators
-                    HStack(spacing: 4) {
-                        // Reference indicator
-                        if recipe.isReference {
-                            Image(systemName: "bookmark.fill")
-                                .font(.caption)
-                                .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-                        }
-
-                        // Favorite indicator
-                        if recipe.isFavorite {
-                            Image(systemName: "star.fill")
-                                .font(.caption)
-                                .foregroundColor(.yellow)
-                        }
+                    // Favorite indicator
+                    if recipe.isFavorite {
+                        Image(systemName: "star.fill")
+                            .font(.caption)
+                            .foregroundColor(.yellow)
+                            .fixedSize()
                     }
-                    .fixedSize()
                 }
 
                 HStack(spacing: 8) {

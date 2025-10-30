@@ -414,21 +414,27 @@ struct RecipeSelectorSheet: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     RecipeImageView(thumbnailImageURL: recipe.imageURL)
+                                        .overlay(
+                                            Group {
+                                                if recipe.isReference {
+                                                    // Reference badge in top-left corner
+                                                    Image(systemName: "bookmark.fill")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.white)
+                                                        .padding(5)
+                                                        .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.9))
+                                                        .clipShape(Circle())
+                                                        .shadow(radius: 2)
+                                                }
+                                            },
+                                            alignment: .topLeading
+                                        )
 
                                     VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 6) {
-                                            Text(recipe.title)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                                .lineLimit(2)
-
-                                            // Reference indicator
-                                            if recipe.isReference {
-                                                Image(systemName: "bookmark.fill")
-                                                    .font(.caption2)
-                                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-                                            }
-                                        }
+                                        Text(recipe.title)
+                                            .font(.body)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
 
                                         if !recipe.tags.isEmpty {
                                             Text(recipe.tags.first!.name)
