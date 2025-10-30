@@ -416,10 +416,19 @@ struct RecipeSelectorSheet: View {
                                     RecipeImageView(thumbnailImageURL: recipe.imageURL)
 
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(recipe.title)
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                            .lineLimit(2)
+                                        HStack(spacing: 6) {
+                                            Text(recipe.title)
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                                .lineLimit(2)
+
+                                            // Reference indicator
+                                            if recipe.isReference {
+                                                Image(systemName: "bookmark.fill")
+                                                    .font(.caption2)
+                                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
+                                            }
+                                        }
 
                                         if !recipe.tags.isEmpty {
                                             Text(recipe.tags.first!.name)
