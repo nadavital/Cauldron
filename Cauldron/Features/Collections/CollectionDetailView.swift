@@ -205,12 +205,6 @@ struct CollectionDetailView: View {
                         Label("Edit Collection", systemImage: "pencil")
                     }
 
-                    Button {
-                        shareCollection()
-                    } label: {
-                        Label("Share Collection", systemImage: "square.and.arrow.up")
-                    }
-
                     Divider()
 
                     Button(role: .destructive) {
@@ -337,11 +331,6 @@ struct CollectionDetailView: View {
             errorMessage = "Failed to remove recipe: \(error.localizedDescription)"
             showError = true
         }
-    }
-
-    private func shareCollection() {
-        // TODO: Implement collection sharing
-        AppLogger.general.info("Share collection: \(collection.name)")
     }
 
     private func updateVisibility(to newVisibility: RecipeVisibility) async {

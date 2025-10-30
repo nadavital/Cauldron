@@ -73,8 +73,12 @@ struct CollectionsListView: View {
                                 GridItem(.flexible(), spacing: 16)
                             ], spacing: 20) {
                                 ForEach(viewModel.filteredReferencedCollections) { reference in
-                                    // TODO: Create view for referenced collections
-                                    NavigationLink(destination: Text("Referenced Collection: \(reference.collectionName)")) {
+                                    NavigationLink {
+                                        ReferencedCollectionDetailView(
+                                            reference: reference,
+                                            dependencies: dependencies
+                                        )
+                                    } label: {
                                         CollectionReferenceCardView(
                                             reference: reference,
                                             recipeImages: []  // TODO: Fetch first 4 recipe images
