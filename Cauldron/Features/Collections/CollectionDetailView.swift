@@ -22,6 +22,8 @@ struct CollectionDetailView: View {
     @State private var showingRecipeSelector = false
     @State private var selectedVisibility: RecipeVisibility
     @State private var isUpdatingVisibility = false
+    @State private var showingDeleteConfirmation = false
+    @Environment(\.dismiss) private var dismiss
 
     init(collection: Collection, dependencies: DependencyContainer) {
         self.initialCollection = collection
@@ -208,6 +210,14 @@ struct CollectionDetailView: View {
                     } label: {
                         Label("Share Collection", systemImage: "square.and.arrow.up")
                     }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Collection", systemImage: "trash")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -236,6 +246,20 @@ struct CollectionDetailView: View {
             if let errorMessage = errorMessage {
                 Text(errorMessage)
             }
+        }
+        .confirmationDialog(
+            "Delete Collection?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteCollection()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete \"\(collection.name)\" and remove all recipes from it. The recipes themselves will not be deleted.")
         }
         .task {
             await loadRecipes()
@@ -342,6 +366,20 @@ struct CollectionDetailView: View {
         }
     }
 
+    private func deleteCollection() async {
+        do {
+            try await dependencies.collectionRepository.delete(id: collection.id)
+            AppLogger.general.info("✅ Deleted collection: \(collection.name)")
+
+            // Dismiss the view after successful deletion
+            dismiss()
+        } catch {
+            AppLogger.general.error("❌ Failed to delete collection: \(error.localizedDescription)")
+            errorMessage = "Failed to delete collection: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+
     // MARK: - Helpers
 
     private var collectionColor: Color {
@@ -426,12 +464,11 @@ struct CollectionRecipeSelectorSheet: View {
                                                 if recipe.isReference {
                                                     // Reference badge in top-left corner
                                                     Image(systemName: "bookmark.fill")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.white)
-                                                        .padding(5)
-                                                        .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.9))
-                                                        .clipShape(Circle())
-                                                        .shadow(radius: 2)
+                                                        .font(.caption)
+                                                        .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
+                                                        .padding(6)
+                                                        .background(Circle().fill(.ultraThinMaterial))
+                                                        .padding(6)
                                                 }
                                             },
                                             alignment: .topLeading

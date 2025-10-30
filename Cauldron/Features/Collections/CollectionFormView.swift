@@ -419,12 +419,11 @@ struct RecipeSelectorSheet: View {
                                                 if recipe.isReference {
                                                     // Reference badge in top-left corner
                                                     Image(systemName: "bookmark.fill")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.white)
-                                                        .padding(5)
-                                                        .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.9))
-                                                        .clipShape(Circle())
-                                                        .shadow(radius: 2)
+                                                        .font(.caption)
+                                                        .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
+                                                        .padding(6)
+                                                        .background(Circle().fill(.ultraThinMaterial))
+                                                        .padding(6)
                                                 }
                                             },
                                             alignment: .topLeading
