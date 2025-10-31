@@ -14,6 +14,7 @@ struct AIRecipeGeneratorView: View {
     @StateObject private var viewModel: AIRecipeGeneratorViewModel
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
+    @State private var isInputExpanded: Bool = true
 
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: AIRecipeGeneratorViewModel(dependencies: dependencies))
@@ -29,8 +30,15 @@ struct AIRecipeGeneratorView: View {
                         if !isAvailable {
                             unavailableSection
                         } else {
-                            // Combined prompt and category section
-                            combinedInputSection
+                            // Show collapsed summary when recipe is generated and input is collapsed
+                            if !isInputExpanded && viewModel.generatedRecipe != nil {
+                                collapsedInputSummary
+                            }
+
+                            // Combined prompt and category section (only when expanded or no recipe yet)
+                            if isInputExpanded {
+                                combinedInputSection
+                            }
 
                             if viewModel.isGenerating || viewModel.generatedRecipe != nil {
                                 progressSection
@@ -89,10 +97,82 @@ struct AIRecipeGeneratorView: View {
             .task {
                 isAvailable = await viewModel.checkAvailability()
             }
+            .onChange(of: viewModel.generatedRecipe) { oldValue, newValue in
+                // Auto-collapse input section when recipe generation completes
+                if oldValue == nil && newValue != nil {
+                    withAnimation(.spring(response: 0.4)) {
+                        isInputExpanded = false
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Sections
+
+    private var collapsedInputSummary: some View {
+        Button {
+            withAnimation(.spring(response: 0.3)) {
+                isInputExpanded = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                // Mini Apple Intelligence icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.18, green: 0.28, blue: 0.99),
+                                    Color(red: 0.57, green: 0.14, blue: 1.0)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+
+                    Image(systemName: "apple.intelligence")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recipe for:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    // Show either prompt or selected categories as summary
+                    if !viewModel.prompt.isEmpty {
+                        Text(viewModel.prompt)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                    } else if viewModel.hasSelectedCategories {
+                        Text(viewModel.selectedCategoriesSummary)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .lineLimit(1)
+                    } else {
+                        Text("Custom recipe")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+    }
 
     private var headerSection: some View {
         VStack(spacing: 20) {
@@ -365,6 +445,9 @@ struct AIRecipeGeneratorView: View {
 
                 if viewModel.generatedRecipe != nil {
                     Button {
+                        withAnimation(.spring(response: 0.3)) {
+                            isInputExpanded = true
+                        }
                         viewModel.regenerate()
                     } label: {
                         Label("Regenerate", systemImage: "arrow.clockwise")
@@ -380,137 +463,107 @@ struct AIRecipeGeneratorView: View {
 
     private func recipePreviewSection(partial: GeneratedRecipe.PartiallyGenerated) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Recipe Preview")
-                .font(.headline)
-
+            // Title and Metadata Card
             if let title = partial.title {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Title")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
-
-                    Text(title)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronSecondaryBackground)
-                )
-            }
-
-            if partial.yields != nil || partial.totalMinutes != nil {
-                HStack(spacing: 16) {
-                    if let yields = partial.yields, !yields.isEmpty {
-                        Label(yields, systemImage: "person.2")
-                    }
-
-                    if let minutes = partial.totalMinutes {
-                        Label("\(minutes) min", systemImage: "clock")
-                    }
-                }
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            }
-
-            if let ingredients = partial.ingredients, !ingredients.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Ingredients")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
+                    Text(title)
+                        .font(.title2)
+                        .fontWeight(.bold)
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(ingredients.indices, id: \.self) { index in
-                            let ingredient = ingredients[index]
+                    // Time & Servings metadata
+                    HStack(spacing: 16) {
+                        if let minutes = partial.totalMinutes {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock")
+                                    .foregroundColor(.cauldronOrange)
+                                Text("\(minutes) min")
+                            }
+                        }
 
-                            HStack(alignment: .top, spacing: 12) {
-                                Circle()
-                                    .fill(Color.cauldronOrange.opacity(0.25))
-                                    .frame(width: 8, height: 8)
-                                    .padding(.top, 6)
+                        if let yields = partial.yields, !yields.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.2")
+                                    .foregroundColor(.cauldronOrange)
+                                Text(yields)
+                            }
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    if let value = ingredient.quantityValue,
-                                       let unit = ingredient.quantityUnit {
-                                        Text("\(value, specifier: "%.1f") \(unit)")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Text(ingredient.name ?? "")
-                                        .font(.body)
-
-                                    if let note = ingredient.note {
-                                        Text(note)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
+                    // Tags
+                    if let tags = partial.tags, !tags.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(tags, id: \.self) { tag in
+                                    Text(tag)
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.cauldronOrange.opacity(0.15))
+                                        .foregroundColor(.cauldronOrange)
+                                        .cornerRadius(8)
                                 }
                             }
                         }
                     }
                 }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronSecondaryBackground)
-                )
+                .padding()
+                .cardStyle()
             }
 
+            // Ingredients Card
+            if let ingredients = partial.ingredients, !ingredients.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Ingredients")
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    ForEach(Array(ingredients.enumerated()), id: \.offset) { index, ingredient in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .foregroundColor(.cauldronOrange)
+                                .padding(.top, 6)
+
+                            Text(formatIngredient(ingredient))
+                                .font(.body)
+                                .lineLimit(nil)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding()
+                .cardStyle()
+            }
+
+            // Instructions Card
             if let steps = partial.steps, !steps.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Instructions")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
+                        .font(.title2)
+                        .fontWeight(.bold)
 
-                    VStack(alignment: .leading, spacing: 16) {
-                        ForEach(steps.indices, id: \.self) { index in
-                            let step = steps[index]
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Color.cauldronOrange)
+                                .clipShape(Circle())
 
-                            HStack(alignment: .top, spacing: 12) {
-                                Text("\(index + 1)")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .padding(8)
-                                    .background(Circle().fill(Color.cauldronOrange.opacity(0.15)))
-                                    .foregroundColor(.cauldronOrange)
-
-                                Text(step.text ?? "")
-                                    .font(.body)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            Text(step.text ?? "")
+                                .font(.body)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.cauldronSecondaryBackground)
-                )
-            }
-
-            if let tags = partial.tags, !tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.caption)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.cauldronOrange.opacity(0.15))
-                                .foregroundColor(.cauldronOrange)
-                                .cornerRadius(10)
-                        }
-                    }
-                }
+                .padding()
+                .cardStyle()
             }
         }
-        .padding(20)
-        .cardStyle()
     }
 
     private func errorSection(error: String) -> some View {
@@ -538,6 +591,32 @@ struct AIRecipeGeneratorView: View {
             let trimmed = viewModel.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             viewModel.prompt = trimmed + (trimmed.hasSuffix(",") ? " " : ", ") + tag
         }
+    }
+
+    // Helper function to format ingredient for display (matching RecipeDetailView style)
+    private func formatIngredient(_ ingredient: GeneratedIngredient.PartiallyGenerated) -> String {
+        var parts: [String] = []
+
+        // Add quantity and unit if available
+        if let value = ingredient.quantityValue,
+           let unit = ingredient.quantityUnit {
+            let formattedValue = value.truncatingRemainder(dividingBy: 1) == 0
+                ? String(format: "%.0f", value)
+                : String(format: "%.1f", value)
+            parts.append("\(formattedValue) \(unit)")
+        }
+
+        // Add name
+        if let name = ingredient.name {
+            parts.append(name)
+        }
+
+        // Add note if available
+        if let note = ingredient.note {
+            parts.append("(\(note))")
+        }
+
+        return parts.joined(separator: " ")
     }
 }
 

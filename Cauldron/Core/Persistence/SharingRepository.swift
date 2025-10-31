@@ -72,6 +72,8 @@ actor SharingRepository {
             // Update existing
             existingModel.username = user.username
             existingModel.displayName = user.displayName
+            existingModel.profileEmoji = user.profileEmoji
+            existingModel.profileColor = user.profileColor
         } else {
             // Insert new
             let model = UserModel.from(user)
