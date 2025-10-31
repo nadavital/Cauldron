@@ -11,7 +11,6 @@ import SwiftUI
 struct CookModeBanner: View {
     @Environment(\.dependencies) private var dependencies
     let coordinator: CookModeCoordinator
-    let namespace: Namespace.ID
 
     var body: some View {
         HStack(spacing: 12) {
@@ -46,7 +45,6 @@ struct CookModeBanner: View {
             .ultraThinMaterial,
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
-        .matchedGeometryEffect(id: "cookModeContainer", in: namespace)
     }
 
     // MARK: - Subviews
@@ -99,8 +97,6 @@ struct CookModeBanner: View {
 // MARK: - Preview
 
 #Preview {
-    @Previewable @Namespace var namespace
-
     VStack {
         Spacer()
 
@@ -127,8 +123,7 @@ struct CookModeBanner: View {
                 }
 
                 return coordinator
-            }(),
-            namespace: namespace
+            }()
         )
         .frame(maxWidth: .infinity)
     }

@@ -22,64 +22,46 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
-    @Namespace private var cookModeNamespace
-    @State private var dragOffset: CGFloat = 0
 
     var body: some View {
-        Group {
-            TabView(selection: $selectedTab) {
-                Tab("Cook", systemImage: "flame.fill", value: .cook) {
-                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
-                }
-
-                Tab("Groceries", systemImage: "cart", value: .groceries) {
-                    GroceriesView(dependencies: dependencies)
-                }
-
-                Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                    SharingTabView(dependencies: dependencies)
-                }
-
-                Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                    SearchTabView(dependencies: dependencies)
-                }
+        TabView(selection: $selectedTab) {
+            Tab("Cook", systemImage: "flame.fill", value: .cook) {
+                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
-            .if(dependencies.cookModeCoordinator.isActive) { view in
-                view.tabViewBottomAccessory {
-                    CookModeBanner(
-                        coordinator: dependencies.cookModeCoordinator,
-                        namespace: cookModeNamespace
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        openExpanded()
-                    }
-                }
+
+            Tab("Groceries", systemImage: "cart", value: .groceries) {
+                GroceriesView(dependencies: dependencies)
+            }
+
+            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
+                SharingTabView(dependencies: dependencies)
+            }
+
+            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+                SearchTabView(dependencies: dependencies)
             }
         }
-        // Expanded overlay (same hierarchy allows matchedGeometryEffect to work)
-        .overlay(alignment: .bottom) {
-            if dependencies.cookModeCoordinator.showFullScreen,
-               let recipe = dependencies.cookModeCoordinator.currentRecipe {
+        .if(dependencies.cookModeCoordinator.isActive) { view in
+            view.tabViewBottomAccessory {
+                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dependencies.cookModeCoordinator.expandToFullScreen()
+                    }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { dependencies.cookModeCoordinator.showFullScreen },
+            set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
+        )) {
+            if let recipe = dependencies.cookModeCoordinator.currentRecipe {
                 NavigationStack {
                     CookModeView(
                         recipe: recipe,
                         coordinator: dependencies.cookModeCoordinator,
-                        dependencies: dependencies,
-                        namespace: cookModeNamespace
+                        dependencies: dependencies
                     )
                 }
-                .offset(y: dragOffset)
-                .gesture(dragToDismiss)
-                .transition(.identity)
-                .zIndex(1)
-                .background(
-                    Color.black.opacity(0.2)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            closeExpanded()
-                        }
-                )
             }
         }
         .tint(.cauldronOrange)
@@ -88,45 +70,6 @@ struct MainTabView: View {
             AppLogger.general.info("📍 Switching to Friends tab from notification")
             selectedTab = .sharing
         }
-    }
-
-    // MARK: - Gestures & Helpers
-
-    private var dragToDismiss: some Gesture {
-        DragGesture(minimumDistance: 5)
-            .onChanged { value in
-                dragOffset = max(value.translation.height, 0)
-            }
-            .onEnded { value in
-                let shouldClose = value.translation.height > 120 || value.predictedEndTranslation.height > 200
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) {
-                    if shouldClose {
-                        dependencies.cookModeCoordinator.minimizeToBackground()
-                    }
-                    dragOffset = 0
-                }
-                if shouldClose {
-                    lightHaptic()
-                }
-            }
-    }
-
-    private func openExpanded() {
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
-            dependencies.cookModeCoordinator.expandToFullScreen()
-        }
-        lightHaptic()
-    }
-
-    private func closeExpanded() {
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) {
-            dependencies.cookModeCoordinator.minimizeToBackground()
-            dragOffset = 0
-        }
-    }
-
-    private func lightHaptic() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }
 

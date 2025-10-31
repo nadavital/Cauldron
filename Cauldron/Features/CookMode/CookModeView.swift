@@ -13,33 +13,24 @@ struct CookModeView: View {
     let recipe: Recipe
     let coordinator: CookModeCoordinator
     let dependencies: DependencyContainer
-    let namespace: Namespace.ID
 
     @ObservedObject private var timerManager: TimerManager
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
 
-    init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer, namespace: Namespace.ID) {
+    init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer) {
         self.recipe = recipe
         self.coordinator = coordinator
         self.dependencies = dependencies
-        self.namespace = namespace
         _timerManager = ObservedObject(wrappedValue: dependencies.timerManager)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Drag indicator
-            Capsule()
-                .frame(width: 40, height: 5)
-                .opacity(0.25)
-                .padding(.top, 12)
-
             // Progress bar
             ProgressView(value: coordinator.progress)
                 .tint(Color.cauldronOrange)
-                .padding(.top, 8)
 
             // Current step
             ScrollView {
@@ -56,14 +47,6 @@ struct CookModeView: View {
             // Navigation controls
             navigationControls
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            .regularMaterial,
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-        )
-        .shadow(radius: 12)
-        .ignoresSafeArea(edges: .bottom)
-        .matchedGeometryEffect(id: "cookModeContainer", in: namespace)
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -285,7 +268,6 @@ struct CookModeView: View {
 }
 
 #Preview {
-    @Previewable @Namespace var namespace
     let container = DependencyContainer.preview()
     let coordinator = CookModeCoordinator(dependencies: container)
     let recipe = Recipe(
@@ -305,8 +287,7 @@ struct CookModeView: View {
         CookModeView(
             recipe: recipe,
             coordinator: coordinator,
-            dependencies: container,
-            namespace: namespace
+            dependencies: container
         )
     }
     .dependencies(container)
