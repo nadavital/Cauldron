@@ -22,7 +22,6 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
-    @Namespace private var cookModeNamespace
 
     var body: some View {
         Group {
@@ -45,10 +44,7 @@ struct MainTabView: View {
             }
             .if(dependencies.cookModeCoordinator.isActive) { view in
                 view.tabViewBottomAccessory {
-                    CookModeBanner(
-                        coordinator: dependencies.cookModeCoordinator,
-                        namespace: cookModeNamespace
-                    )
+                    CookModeBanner(coordinator: dependencies.cookModeCoordinator)
                 }
             }
         }
@@ -62,8 +58,7 @@ struct MainTabView: View {
                     CookModeView(
                         recipe: recipe,
                         coordinator: dependencies.cookModeCoordinator,
-                        dependencies: dependencies,
-                        namespace: cookModeNamespace
+                        dependencies: dependencies
                     )
                 }
                 .presentationDetents([.large])
