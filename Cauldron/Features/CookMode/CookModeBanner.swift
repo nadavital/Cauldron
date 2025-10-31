@@ -11,12 +11,14 @@ import SwiftUI
 struct CookModeBanner: View {
     @Environment(\.dependencies) private var dependencies
     let coordinator: CookModeCoordinator
+    let namespace: Namespace.ID
 
     var body: some View {
         HStack(spacing: 12) {
             // Recipe icon
             recipeIcon
                 .frame(width: 36, height: 36)
+                .matchedGeometryEffect(id: "cookModeIcon", in: namespace)
 
             // Recipe info
             VStack(alignment: .leading, spacing: 2) {
@@ -25,11 +27,13 @@ struct CookModeBanner: View {
                     .fontWeight(.semibold)
                     .lineLimit(1)
                     .foregroundStyle(.primary)
+                    .matchedGeometryEffect(id: "cookModeTitle", in: namespace)
 
                 Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
                     .font(.caption)
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
+                    .matchedGeometryEffect(id: "cookModeProgress", in: namespace)
             }
 
             Spacer(minLength: 8)
@@ -41,9 +45,12 @@ struct CookModeBanner: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 20)
+        .matchedGeometryEffect(id: "cookModeBanner", in: namespace, properties: .frame, isSource: true)
         .contentShape(Rectangle()) // Make entire area tappable
         .onTapGesture {
-            coordinator.expandToFullScreen()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                coordinator.expandToFullScreen()
+            }
         }
     }
 
@@ -97,32 +104,37 @@ struct CookModeBanner: View {
 // MARK: - Preview
 
 #Preview {
+    @Previewable @Namespace var namespace
+
     VStack {
         Spacer()
 
-        CookModeBanner(coordinator: {
-            let container = DependencyContainer.preview()
-            let coordinator = CookModeCoordinator(dependencies: container)
+        CookModeBanner(
+            coordinator: {
+                let container = DependencyContainer.preview()
+                let coordinator = CookModeCoordinator(dependencies: container)
 
-            // Simulate active session
-            let recipe = Recipe(
-                title: "Spaghetti Carbonara",
-                ingredients: [],
-                steps: [
-                    CookStep(index: 0, text: "Boil pasta"),
-                    CookStep(index: 1, text: "Cook bacon"),
-                    CookStep(index: 2, text: "Mix eggs"),
-                    CookStep(index: 3, text: "Combine"),
-                ]
-            )
+                // Simulate active session
+                let recipe = Recipe(
+                    title: "Spaghetti Carbonara",
+                    ingredients: [],
+                    steps: [
+                        CookStep(index: 0, text: "Boil pasta"),
+                        CookStep(index: 1, text: "Cook bacon"),
+                        CookStep(index: 2, text: "Mix eggs"),
+                        CookStep(index: 3, text: "Combine"),
+                    ]
+                )
 
-            Task { @MainActor in
-                await coordinator.startCooking(recipe)
-                coordinator.minimizeToBackground()
-            }
+                Task { @MainActor in
+                    await coordinator.startCooking(recipe)
+                    coordinator.minimizeToBackground()
+                }
 
-            return coordinator
-        }())
+                return coordinator
+            }(),
+            namespace: namespace
+        )
         .frame(maxWidth: .infinity)
     }
     .dependencies(.preview())

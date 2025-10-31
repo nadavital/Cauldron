@@ -13,16 +13,18 @@ struct CookModeView: View {
     let recipe: Recipe
     let coordinator: CookModeCoordinator
     let dependencies: DependencyContainer
+    let namespace: Namespace.ID
 
     @ObservedObject private var timerManager: TimerManager
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
 
-    init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer) {
+    init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer, namespace: Namespace.ID) {
         self.recipe = recipe
         self.coordinator = coordinator
         self.dependencies = dependencies
+        self.namespace = namespace
         _timerManager = ObservedObject(wrappedValue: dependencies.timerManager)
     }
 
@@ -49,6 +51,17 @@ struct CookModeView: View {
         }
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
+        .background(
+            // Hidden matched geometry elements for smooth transition
+            VStack {
+                Text(recipe.title)
+                    .matchedGeometryEffect(id: "cookModeTitle", in: namespace)
+                    .hidden()
+                Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
+                    .matchedGeometryEffect(id: "cookModeProgress", in: namespace)
+                    .hidden()
+            }
+        )
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Minimize", systemImage: "chevron.down") {
@@ -268,6 +281,7 @@ struct CookModeView: View {
 }
 
 #Preview {
+    @Previewable @Namespace var namespace
     let container = DependencyContainer.preview()
     let coordinator = CookModeCoordinator(dependencies: container)
     let recipe = Recipe(
@@ -287,7 +301,8 @@ struct CookModeView: View {
         CookModeView(
             recipe: recipe,
             coordinator: coordinator,
-            dependencies: container
+            dependencies: container,
+            namespace: namespace
         )
     }
     .dependencies(container)

@@ -22,29 +22,34 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
+    @Namespace private var cookModeNamespace
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab("Cook", systemImage: "flame.fill", value: .cook) {
-                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
-            }
+        Group {
+            TabView(selection: $selectedTab) {
+                Tab("Cook", systemImage: "flame.fill", value: .cook) {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
 
-            Tab("Groceries", systemImage: "cart", value: .groceries) {
-                GroceriesView(dependencies: dependencies)
-            }
+                Tab("Groceries", systemImage: "cart", value: .groceries) {
+                    GroceriesView(dependencies: dependencies)
+                }
 
-            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                SharingTabView(dependencies: dependencies)
-            }
+                Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
+                    SharingTabView(dependencies: dependencies)
+                }
 
-            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                SearchTabView(dependencies: dependencies)
+                Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+                    SearchTabView(dependencies: dependencies)
+                }
             }
-        }
-        .tabViewBottomAccessory {
-            // Persistent cook mode banner (only visible when cook mode is active)
-            if dependencies.cookModeCoordinator.isActive {
-                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+            .if(dependencies.cookModeCoordinator.isActive) { view in
+                view.tabViewBottomAccessory {
+                    CookModeBanner(
+                        coordinator: dependencies.cookModeCoordinator,
+                        namespace: cookModeNamespace
+                    )
+                }
             }
         }
         .sheet(isPresented: Binding(
@@ -57,11 +62,14 @@ struct MainTabView: View {
                     CookModeView(
                         recipe: recipe,
                         coordinator: dependencies.cookModeCoordinator,
-                        dependencies: dependencies
+                        dependencies: dependencies,
+                        namespace: cookModeNamespace
                     )
                 }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(.ultraThinMaterial)
+                .presentationCornerRadius(20)
             }
         }
         .tint(.cauldronOrange)
