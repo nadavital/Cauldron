@@ -41,18 +41,17 @@ struct MainTabView: View {
                 SearchTabView(dependencies: dependencies)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .tabViewBottomAccessory {
             // Persistent cook mode banner (only visible when cook mode is active)
             if dependencies.cookModeCoordinator.isActive {
                 CookModeBanner(coordinator: dependencies.cookModeCoordinator)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .fullScreenCover(isPresented: Binding(
+        .sheet(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
             set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
         )) {
-            // Full screen cook mode (presented when banner is tapped or cook mode starts)
+            // Sheet presentation for cook mode (presented when banner is tapped or cook mode starts)
             if let recipe = dependencies.cookModeCoordinator.currentRecipe {
                 NavigationStack {
                     CookModeView(
@@ -61,6 +60,8 @@ struct MainTabView: View {
                         dependencies: dependencies
                     )
                 }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
         }
         .tint(.cauldronOrange)

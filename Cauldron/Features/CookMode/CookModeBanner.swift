@@ -14,9 +14,9 @@ struct CookModeBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Recipe emoji or icon
+            // Recipe icon
             recipeIcon
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
 
             // Recipe info
             VStack(alignment: .leading, spacing: 2) {
@@ -24,35 +24,23 @@ struct CookModeBanner: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
-                    .foregroundColor(.primary)
+                    .foregroundStyle(.primary)
 
                 Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             // Timer badge (if timers active)
             if !dependencies.timerManager.activeTimers.isEmpty {
                 timerBadge
             }
-
-            // Chevron indicator
-            Image(systemName: "chevron.up")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .imageScale(.small)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
-        .overlay(
-            Rectangle()
-                .fill(Color.cauldronOrange.opacity(0.3))
-                .frame(height: 2),
-            alignment: .top
-        )
+        .padding(.vertical, 6)
+        .padding(.horizontal, 20)
         .contentShape(Rectangle()) // Make entire area tappable
         .onTapGesture {
             coordinator.expandToFullScreen()
@@ -78,9 +66,9 @@ struct CookModeBanner: View {
         let activeTimers = dependencies.timerManager.activeTimers
         let shortestTimer = activeTimers.min(by: { $0.remainingSeconds < $1.remainingSeconds })
 
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Image(systemName: "timer")
-                .font(.caption)
+                .font(.system(size: 16))
 
             if let shortest = shortestTimer {
                 Text(formatTime(shortest.remainingSeconds))
@@ -92,16 +80,9 @@ struct CookModeBanner: View {
             if activeTimers.count > 1 {
                 Text("+\(activeTimers.count - 1)")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
             }
         }
-        .foregroundColor(.cauldronOrange)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(Color.cauldronOrange.opacity(0.15))
-        )
+        .foregroundStyle(.secondary)
     }
 
     // MARK: - Helpers
