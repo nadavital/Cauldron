@@ -89,6 +89,12 @@ class AIRecipeGeneratorViewModel: ObservableObject {
         !selectedTimes.isEmpty || !selectedTypes.isEmpty
     }
 
+    var selectedCategoriesSummary: String {
+        let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
+                           Array(selectedTimes) + Array(selectedTypes)
+        return allCategories.joined(separator: ", ")
+    }
+
     private var generationPrompt: String {
         var promptParts: [String] = []
 

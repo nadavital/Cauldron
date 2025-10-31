@@ -183,7 +183,15 @@ struct SharingTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(viewModel.sharedCollections) { collection in
-                        SharedCollectionCard(collection: collection)
+                        NavigationLink {
+                            SharedCollectionDetailView(
+                                collection: collection,
+                                dependencies: dependencies
+                            )
+                        } label: {
+                            SharedCollectionCard(collection: collection)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)
