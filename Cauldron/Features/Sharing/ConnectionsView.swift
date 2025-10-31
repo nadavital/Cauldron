@@ -329,6 +329,8 @@ class ConnectionsViewModel: ObservableObject {
 
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
+    private var userDetailsCacheTimestamp: Date?
+    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
 
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
@@ -367,10 +369,19 @@ class ConnectionsViewModel: ObservableObject {
         await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
 
         // Load user details for all connections
-        await loadUserDetails()
+        await loadUserDetails(forceRefresh: forceRefresh)
     }
 
-    private func loadUserDetails() async {
+    private func loadUserDetails(forceRefresh: Bool = false) async {
+        // Check if cache is still valid
+        if !forceRefresh, let timestamp = userDetailsCacheTimestamp {
+            let timeSinceLastSync = Date().timeIntervalSince(timestamp)
+            if timeSinceLastSync < cacheValidityDuration {
+                AppLogger.general.info("📦 Using cached user details (synced \(Int(timeSinceLastSync))s ago)")
+                return
+            }
+        }
+
         // Get all unique user IDs from connections
         var userIds = Set<UUID>()
         for connection in connections + receivedRequests + sentRequests {
@@ -378,27 +389,24 @@ class ConnectionsViewModel: ObservableObject {
             userIds.insert(connection.toUserId)
         }
 
-        // Fetch users - try local cache first, then CloudKit
+        // Fetch users from CloudKit when forcing refresh or cache expired
         for userId in userIds {
-            // Skip if already loaded
-            guard usersMap[userId] == nil else { continue }
-
-            // Try to get from local cache first
-            if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+            if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
+                usersMap[userId] = cloudUser
+                try? await dependencies.sharingRepository.save(cloudUser)
+                AppLogger.general.info("Fetched and cached user from CloudKit: \(cloudUser.username)")
+            } else if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                // Fallback to cache if CloudKit fetch fails
                 usersMap[userId] = cachedUser
+                AppLogger.general.info("Using cached user as fallback: \(cachedUser.username)")
             } else {
-                // If not cached, fetch from CloudKit and cache locally
-                if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
-                    usersMap[userId] = cloudUser
-                    try? await dependencies.sharingRepository.save(cloudUser)
-                    AppLogger.general.info("Fetched and cached user from CloudKit: \(cloudUser.username)")
-                } else {
-                    AppLogger.general.warning("Could not find user \(userId) in cache or CloudKit")
-                }
+                AppLogger.general.warning("Could not find user \(userId) in cache or CloudKit")
             }
         }
 
-        AppLogger.general.info("Loaded connections via ConnectionManager")
+        // Update cache timestamp
+        userDetailsCacheTimestamp = Date()
+        AppLogger.general.info("Loaded user details via CloudKit (forceRefresh: \(forceRefresh))")
     }
 
     func acceptRequest(_ connection: Connection) async {

@@ -419,7 +419,7 @@ struct RecipeCard: View {
                     .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 250, alignment: .top)
         .padding(12)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(12)
