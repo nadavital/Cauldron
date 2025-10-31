@@ -14,8 +14,8 @@ struct RecipeDetailView: View {
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showingCookMode = false
     @State private var showingEditSheet = false
+    @State private var showSessionConflictAlert = false
     @State private var scaleFactor: Double = 1.0
     @State private var localIsFavorite: Bool
     @State private var scalingWarnings: [ScalingWarning] = []
@@ -91,7 +91,7 @@ struct RecipeDetailView: View {
                 Spacer()
 
                 Button {
-                    showingCookMode = true
+                    handleCookButtonTap()
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "flame.fill")
@@ -235,8 +235,17 @@ struct RecipeDetailView: View {
                 Text("This will remove the recipe reference from your collection. The original recipe will remain in the owner's collection.")
             }
         }
-        .sheet(isPresented: $showingCookMode) {
-            CookModeView(recipe: recipe, dependencies: dependencies)
+        .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("End & Start New") {
+                Task {
+                    await dependencies.cookModeCoordinator.startPendingRecipe()
+                }
+            }
+        } message: {
+            if let currentRecipe = dependencies.cookModeCoordinator.currentRecipe {
+                Text("End '\(currentRecipe.title)' to start cooking '\(recipe.title)'?")
+            }
         }
         .sheet(isPresented: $showingEditSheet) {
             RecipeEditorView(
@@ -580,6 +589,22 @@ struct RecipeDetailView: View {
         return attributedString
     }
     
+    private func handleCookButtonTap() {
+        // Check if different recipe is already cooking
+        if dependencies.cookModeCoordinator.isActive,
+           let currentRecipe = dependencies.cookModeCoordinator.currentRecipe,
+           currentRecipe.id != recipe.id {
+            // Show conflict alert
+            dependencies.cookModeCoordinator.pendingRecipe = recipe
+            showSessionConflictAlert = true
+        } else {
+            // Start cooking
+            Task {
+                await dependencies.cookModeCoordinator.startCooking(recipe)
+            }
+        }
+    }
+
     private func addToGroceryList() async {
         do {
             // Convert ingredients to the format needed

@@ -78,7 +78,10 @@ struct ContentView: View {
                 preloadedData = await performInitialLoad()
             }
 
-            // Step 3: Signal that we're ready to show UI with populated data
+            // Step 3: Restore cook mode session if exists
+            await dependencies.cookModeCoordinator.restoreState()
+
+            // Step 4: Signal that we're ready to show UI with populated data
             // Only NOW will the view hierarchy render, and CookTabViewModel will
             // receive preloadedData in its initializer, preventing empty arrays
             isDataReady = true

@@ -37,6 +37,7 @@ class DependencyContainer: ObservableObject {
 
     // UI Services (MainActor)
     let timerManager: TimerManager
+    lazy var cookModeCoordinator: CookModeCoordinator = CookModeCoordinator(dependencies: self)
     lazy var connectionManager: ConnectionManager = ConnectionManager(dependencies: self)
 
     // Parsers
@@ -99,7 +100,7 @@ class DependencyContainer: ObservableObject {
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
 
-        // Note: connectionManager is lazy and will be initialized on first access
+        // Note: cookModeCoordinator and connectionManager are lazy and will be initialized on first access
 
         // Start periodic sync after initialization
         self.recipeSyncService.startPeriodicSync()

@@ -14,10 +14,10 @@ struct CookTabView: View {
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
-    @State private var showingCookMode = false
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
+    @State private var showSessionConflictAlert = false
     @State private var isAIAvailable = false
     @State private var collections: [Collection] = []
 
@@ -82,9 +82,17 @@ struct CookTabView: View {
             }) {
                 AIRecipeGeneratorView(dependencies: viewModel.dependencies)
             }
-            .sheet(isPresented: $showingCookMode) {
-                if let recipe = selectedRecipe {
-                    CookModeView(recipe: recipe, dependencies: viewModel.dependencies)
+            .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("End & Start New") {
+                    Task {
+                        await viewModel.dependencies.cookModeCoordinator.startPendingRecipe()
+                    }
+                }
+            } message: {
+                if let currentRecipe = viewModel.dependencies.cookModeCoordinator.currentRecipe,
+                   let pendingRecipe = selectedRecipe {
+                    Text("End '\(currentRecipe.title)' to start cooking '\(pendingRecipe.title)'?")
                 }
             }
             .alert("Delete Recipe?", isPresented: $showDeleteConfirmation, presenting: recipeToDelete) { recipe in
@@ -349,8 +357,7 @@ struct CookTabView: View {
     @ViewBuilder
     private func recipeContextMenu(for recipe: Recipe) -> some View {
         Button {
-            selectedRecipe = recipe
-            showingCookMode = true
+            handleStartCooking(recipe: recipe)
         } label: {
             Label("Start Cooking", systemImage: "flame.fill")
         }
@@ -379,6 +386,23 @@ struct CookTabView: View {
         }
     }
     
+    private func handleStartCooking(recipe: Recipe) {
+        // Check if different recipe is already cooking
+        if viewModel.dependencies.cookModeCoordinator.isActive,
+           let currentRecipe = viewModel.dependencies.cookModeCoordinator.currentRecipe,
+           currentRecipe.id != recipe.id {
+            // Show conflict alert
+            selectedRecipe = recipe
+            viewModel.dependencies.cookModeCoordinator.pendingRecipe = recipe
+            showSessionConflictAlert = true
+        } else {
+            // Start cooking
+            Task {
+                await viewModel.dependencies.cookModeCoordinator.startCooking(recipe)
+            }
+        }
+    }
+
     private func deleteRecipe(_ recipe: Recipe) {
         Task {
             do {

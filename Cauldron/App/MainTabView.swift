@@ -41,6 +41,28 @@ struct MainTabView: View {
                 SearchTabView(dependencies: dependencies)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Persistent cook mode banner (only visible when cook mode is active)
+            if dependencies.cookModeCoordinator.isActive {
+                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { dependencies.cookModeCoordinator.showFullScreen },
+            set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
+        )) {
+            // Full screen cook mode (presented when banner is tapped or cook mode starts)
+            if let recipe = dependencies.cookModeCoordinator.currentRecipe {
+                NavigationStack {
+                    CookModeView(
+                        recipe: recipe,
+                        coordinator: dependencies.cookModeCoordinator,
+                        dependencies: dependencies
+                    )
+                }
+            }
+        }
         .tint(.cauldronOrange)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
             // Switch to Friends tab when connection notification is tapped
