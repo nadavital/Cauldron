@@ -41,176 +41,178 @@ struct OnboardingView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 32) {
-                Spacer()
-                
-                // Welcome illustration
-                VStack(spacing: 16) {
-                    // Profile preview with avatar
-                    ProfileAvatar(user: previewUser, size: 100)
+            ScrollView {
+                VStack(spacing: 32) {
+                    Spacer()
 
-                    Text("Welcome to Cauldron")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                    // Welcome illustration
+                    VStack(spacing: 16) {
+                        // Profile preview with avatar
+                        ProfileAvatar(user: previewUser, size: 100)
 
-                    Text("Let's set up your profile")
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Profile form
-                VStack(spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Username")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        
-                        TextField("username", text: $username)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding()
-                            .background(Color.cauldronSecondaryBackground)
-                            .cornerRadius(12)
-                        
-                        Text("3-20 characters, letters, numbers, and underscores only")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Display Name")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
+                        Text("Welcome to Cauldron")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
 
-                        TextField("Your Name", text: $displayName)
-                            .textInputAutocapitalization(.words)
-                            .padding()
-                            .background(Color.cauldronSecondaryBackground)
-                            .cornerRadius(12)
-
-                        Text("This is how others will see you")
-                            .font(.caption)
+                        Text("Let's set up your profile")
+                            .font(.title3)
                             .foregroundColor(.secondary)
                     }
 
-                    // Emoji picker
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Profile Emoji (Optional)")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
+                    // Profile form
+                    VStack(spacing: 24) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Username")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
 
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
-                            ForEach(foodEmojis, id: \.self) { emoji in
-                                Button {
-                                    profileEmoji = emoji
-                                } label: {
-                                    Text(emoji)
-                                        .font(.title2)
-                                        .frame(width: 44, height: 44)
-                                        .background(profileEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.cauldronSecondaryBackground)
-                                        .cornerRadius(8)
+                            TextField("username", text: $username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+
+                            Text("3-20 characters, letters, numbers, and underscores only")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Display Name")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            TextField("Your Name", text: $displayName)
+                                .textInputAutocapitalization(.words)
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+
+                            Text("This is how others will see you")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Emoji picker
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Profile Emoji (Optional)")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
+                                ForEach(foodEmojis, id: \.self) { emoji in
+                                    Button {
+                                        profileEmoji = emoji
+                                    } label: {
+                                        Text(emoji)
+                                            .font(.title2)
+                                            .frame(width: 44, height: 44)
+                                            .background(profileEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.cauldronSecondaryBackground)
+                                            .cornerRadius(8)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                            }
+
+                            HStack(spacing: 8) {
+                                Button {
+                                    showingEmojiPicker = true
+                                } label: {
+                                    Label("Choose Emoji", systemImage: "face.smiling")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button {
+                                    profileEmoji = foodEmojis.randomElement()
+                                } label: {
+                                    Label("Random", systemImage: "shuffle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.cauldronOrange)
                             }
                         }
 
-                        HStack(spacing: 8) {
-                            Button {
-                                showingEmojiPicker = true
-                            } label: {
-                                Label("Choose Emoji", systemImage: "face.smiling")
-                                    .frame(maxWidth: .infinity)
+                        // Color picker
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Profile Color (Optional)")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
+                                ForEach(Color.allProfileColors, id: \.self) { color in
+                                    Button {
+                                        profileColor = color.toHex()
+                                    } label: {
+                                        Circle()
+                                            .fill(color.opacity(0.3))
+                                            .frame(width: 44, height: 44)
+                                            .overlay(
+                                                Circle()
+                                                    .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
+                                            )
+                                            .overlay(
+                                                Image(systemName: "checkmark")
+                                                    .foregroundColor(color)
+                                                    .font(.headline)
+                                                    .opacity(profileColor == color.toHex() ? 1 : 0)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
-                            .buttonStyle(.bordered)
 
                             Button {
-                                profileEmoji = foodEmojis.randomElement()
+                                profileColor = Color.allProfileColors.randomElement()?.toHex()
                             } label: {
-                                Label("Random", systemImage: "shuffle")
+                                Label("Random Color", systemImage: "shuffle")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
                             .tint(.cauldronOrange)
                         }
+
+                        if let error = errorMessage {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(8)
+                        }
                     }
+                    .padding(.horizontal)
 
-                    // Color picker
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Profile Color (Optional)")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
+                    Spacer()
 
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
-                            ForEach(Color.allProfileColors, id: \.self) { color in
-                                Button {
-                                    profileColor = color.toHex()
-                                } label: {
-                                    Circle()
-                                        .fill(color.opacity(0.3))
-                                        .frame(width: 44, height: 44)
-                                        .overlay(
-                                            Circle()
-                                                .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
-                                        )
-                                        .overlay(
-                                            Image(systemName: "checkmark")
-                                                .foregroundColor(color)
-                                                .font(.headline)
-                                                .opacity(profileColor == color.toHex() ? 1 : 0)
-                                        )
-                                }
-                                .buttonStyle(.plain)
+                    // Continue button
+                    Button {
+                        Task {
+                            await createUser()
+                        }
+                    } label: {
+                        HStack {
+                            if isCreating {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Text("Get Started")
+                                    .fontWeight(.semibold)
                             }
                         }
-
-                        Button {
-                            profileColor = Color.allProfileColors.randomElement()?.toHex()
-                        } label: {
-                            Label("Random Color", systemImage: "shuffle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.cauldronOrange)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isValid ? Color.cauldronOrange : Color.gray)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
                     }
-
-                    if let error = errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.red.opacity(0.1))
-                            .cornerRadius(8)
-                    }
+                    .disabled(!isValid || isCreating)
+                    .padding(.horizontal)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal)
-                
-                Spacer()
-                
-                // Continue button
-                Button {
-                    Task {
-                        await createUser()
-                    }
-                } label: {
-                    HStack {
-                        if isCreating {
-                            ProgressView()
-                                .tint(.white)
-                        } else {
-                            Text("Get Started")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(isValid ? Color.cauldronOrange : Color.gray)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-                .disabled(!isValid || isCreating)
-                .padding(.horizontal)
-                .padding(.bottom, 32)
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingEmojiPicker) {
@@ -219,6 +221,7 @@ struct OnboardingView: View {
         }
     }
     
+    @MainActor
     private func createUser() async {
         isCreating = true
         errorMessage = nil
