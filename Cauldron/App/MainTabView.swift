@@ -24,35 +24,36 @@ struct MainTabView: View {
     @State private var selectedTab: AppTab = .cook
 
     var body: some View {
-        Group {
-            TabView(selection: $selectedTab) {
-                Tab("Cook", systemImage: "flame.fill", value: .cook) {
-                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
-                }
-
-                Tab("Groceries", systemImage: "cart", value: .groceries) {
-                    GroceriesView(dependencies: dependencies)
-                }
-
-                Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                    SharingTabView(dependencies: dependencies)
-                }
-
-                Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                    SearchTabView(dependencies: dependencies)
-                }
+        TabView(selection: $selectedTab) {
+            Tab("Cook", systemImage: "flame.fill", value: .cook) {
+                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
-            .if(dependencies.cookModeCoordinator.isActive) { view in
-                view.tabViewBottomAccessory {
-                    CookModeBanner(coordinator: dependencies.cookModeCoordinator)
-                }
+
+            Tab("Groceries", systemImage: "cart", value: .groceries) {
+                GroceriesView(dependencies: dependencies)
+            }
+
+            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
+                SharingTabView(dependencies: dependencies)
+            }
+
+            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+                SearchTabView(dependencies: dependencies)
+            }
+        }
+        .if(dependencies.cookModeCoordinator.isActive) { view in
+            view.tabViewBottomAccessory {
+                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dependencies.cookModeCoordinator.expandToFullScreen()
+                    }
             }
         }
         .sheet(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
             set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
         )) {
-            // Sheet presentation for cook mode (presented when banner is tapped or cook mode starts)
             if let recipe = dependencies.cookModeCoordinator.currentRecipe {
                 NavigationStack {
                     CookModeView(
@@ -61,10 +62,6 @@ struct MainTabView: View {
                         dependencies: dependencies
                     )
                 }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(.ultraThinMaterial)
-                .presentationCornerRadius(20)
             }
         }
         .tint(.cauldronOrange)

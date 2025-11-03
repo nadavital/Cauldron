@@ -41,10 +41,10 @@ struct CookModeBanner: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 20)
-        .contentShape(Rectangle()) // Make entire area tappable
-        .onTapGesture {
-            coordinator.expandToFullScreen()
-        }
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
     }
 
     // MARK: - Subviews
