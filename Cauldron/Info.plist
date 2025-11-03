@@ -22,9 +22,13 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIImageName</key>
-		<string>LaunchIcon</string>
+		<string>CauldronIconSmall</string>
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<true/>
+		<key>UIColorName</key>
+		<string></string>
 	</dict>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

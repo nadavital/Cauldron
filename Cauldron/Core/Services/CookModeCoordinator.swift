@@ -44,8 +44,11 @@ class CookModeCoordinator {
     private let dependencies: DependencyContainer
     private let storageKey = "activeCookSession"
 
-    // Live Activity support (will be implemented in Phase 4)
-    // private var currentActivity: Activity<CookModeActivityAttributes>?
+    // Live Activity support
+    private var currentActivity: Activity<CookModeActivityAttributes>?
+
+    // Shared UserDefaults for App Group communication
+    private let sharedDefaults = UserDefaults(suiteName: "group.Nadav.Cauldron")
 
     // MARK: - Initialization
 
@@ -81,8 +84,8 @@ class CookModeCoordinator {
         // Show full screen cook mode
         showFullScreen = true
 
-        // Start Live Activity (Phase 4)
-        // await startLiveActivity()
+        // Start Live Activity
+        await startLiveActivity()
 
         AppLogger.general.info("✅ Started cooking session: \(recipe.title)")
     }
@@ -110,8 +113,8 @@ class CookModeCoordinator {
         currentStepIndex += 1
         saveState()
 
-        // Update Live Activity (Phase 4)
-        // Task { await updateLiveActivity() }
+        // Update Live Activity
+        Task { await updateLiveActivity() }
 
         // Haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .light)
@@ -127,8 +130,8 @@ class CookModeCoordinator {
         currentStepIndex -= 1
         saveState()
 
-        // Update Live Activity (Phase 4)
-        // Task { await updateLiveActivity() }
+        // Update Live Activity
+        Task { await updateLiveActivity() }
 
         // Haptic feedback
         let generator = UIImpactFeedbackGenerator(style: .light)
@@ -171,8 +174,8 @@ class CookModeCoordinator {
             await dependencies.cookSessionManager.endSession()
         }
 
-        // End Live Activity (Phase 4)
-        // Task { await endLiveActivity() }
+        // End Live Activity
+        Task { await endLiveActivity() }
 
         AppLogger.general.info("🛑 Ended cooking session: \(recipeName)")
     }
@@ -180,13 +183,13 @@ class CookModeCoordinator {
     /// Restore session from persistent storage
     func restoreState() async {
         // Check if we have a saved session
-        guard let recipeIdString = UserDefaults.standard.string(forKey: "\(storageKey).recipeId"),
+        guard let recipeIdString = sharedDefaults?.string(forKey: "\(storageKey).recipeId"),
               let recipeId = UUID(uuidString: recipeIdString) else {
             AppLogger.general.info("No saved cooking session to restore")
             return
         }
 
-        let stepIndex = UserDefaults.standard.integer(forKey: "\(storageKey).stepIndex")
+        let stepIndex = sharedDefaults?.integer(forKey: "\(storageKey).stepIndex") ?? 0
 
         // Fetch recipe from repository
         do {
@@ -250,26 +253,25 @@ class CookModeCoordinator {
             return
         }
 
-        UserDefaults.standard.set(recipe.id.uuidString, forKey: "\(storageKey).recipeId")
-        UserDefaults.standard.set(currentStepIndex, forKey: "\(storageKey).stepIndex")
-        UserDefaults.standard.set(totalSteps, forKey: "\(storageKey).totalSteps")
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "\(storageKey).timestamp")
+        sharedDefaults?.set(recipe.id.uuidString, forKey: "\(storageKey).recipeId")
+        sharedDefaults?.set(currentStepIndex, forKey: "\(storageKey).stepIndex")
+        sharedDefaults?.set(totalSteps, forKey: "\(storageKey).totalSteps")
+        sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "\(storageKey).timestamp")
 
         AppLogger.general.debug("💾 Saved cook session state")
     }
 
     private func clearState() {
-        UserDefaults.standard.removeObject(forKey: "\(storageKey).recipeId")
-        UserDefaults.standard.removeObject(forKey: "\(storageKey).stepIndex")
-        UserDefaults.standard.removeObject(forKey: "\(storageKey).totalSteps")
-        UserDefaults.standard.removeObject(forKey: "\(storageKey).timestamp")
+        sharedDefaults?.removeObject(forKey: "\(storageKey).recipeId")
+        sharedDefaults?.removeObject(forKey: "\(storageKey).stepIndex")
+        sharedDefaults?.removeObject(forKey: "\(storageKey).totalSteps")
+        sharedDefaults?.removeObject(forKey: "\(storageKey).timestamp")
 
         AppLogger.general.debug("🗑️ Cleared cook session state")
     }
 
-    // MARK: - Live Activity Methods (Phase 4)
+    // MARK: - Live Activity Methods
 
-    /*
     private func startLiveActivity() async {
         guard let recipe = currentRecipe,
               ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -279,7 +281,8 @@ class CookModeCoordinator {
         let attributes = CookModeActivityAttributes(
             recipeId: recipe.id.uuidString,
             recipeName: recipe.title,
-            recipeEmoji: recipe.emoji
+            recipeEmoji: nil, // Recipe model doesn't have emoji - using Cauldron icon from assets
+            sessionStartTime: sessionStartTime ?? Date()
         )
 
         let contentState = CookModeActivityAttributes.ContentState(
@@ -288,7 +291,8 @@ class CookModeCoordinator {
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
             primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
-            progressPercentage: progress
+            progressPercentage: progress,
+            lastUpdated: Date()
         )
 
         do {
@@ -314,7 +318,8 @@ class CookModeCoordinator {
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
             primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
-            progressPercentage: progress
+            progressPercentage: progress,
+            lastUpdated: Date()
         )
 
         await activity.update(
@@ -335,5 +340,10 @@ class CookModeCoordinator {
         currentActivity = nil
         AppLogger.general.info("🛑 Ended Live Activity")
     }
-    */
+
+    /// Update Live Activity when timers change
+    func updateLiveActivityForTimerChange() {
+        guard isActive else { return }
+        Task { await updateLiveActivity() }
+    }
 }
