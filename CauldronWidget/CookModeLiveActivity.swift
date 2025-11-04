@@ -142,38 +142,9 @@ struct CookModeLiveActivity: Widget {
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
-                // ALWAYS show debug - make it very obvious
-                VStack(spacing: 2) {
-                    if let timerEndDate = context.state.primaryTimerEndDate {
-                        let interval = timerEndDate.timeIntervalSinceNow
-
-                        Image(systemName: "timer")
-                            .font(.system(size: 16))
-                            .foregroundColor(.orange)
-
-                        // Show interval value - LARGE and OBVIOUS
-                        Text("\(Int(interval))s")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(interval > 1.0 ? .green : .red)
-
-                        if interval > 1.0 {
-                            Text(timerEndDate, style: .timer)
-                                .font(.system(size: 8))
-                                .monospacedDigit()
-                        } else {
-                            Text("FAIL")
-                                .font(.system(size: 8))
-                                .foregroundColor(.red)
-                        }
-                    } else {
-                        Image("CauldronIcon")
-                            .resizable()
-                            .frame(width: 20, height: 20)
-                        Text("NO TIMER")
-                            .font(.system(size: 8))
-                            .foregroundColor(.red)
-                    }
-                }
+                Image(systemName: "timer")
+                    .font(.system(size: 16))
+                    .foregroundColor(.orange)
             }
         }
     }
