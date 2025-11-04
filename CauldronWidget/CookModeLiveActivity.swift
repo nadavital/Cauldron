@@ -8,6 +8,7 @@
 import ActivityKit
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 /// Live Activity widget for Cook Mode
 struct CookModeLiveActivity: Widget {
@@ -86,18 +87,26 @@ struct CookModeLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    // Step navigation hint
+                    // Step navigation buttons
                     HStack(spacing: 16) {
-                        Label("Previous", systemImage: "chevron.left")
-                            .font(.caption2)
-                            .foregroundStyle(context.state.currentStep > 0 ? .primary : .tertiary)
+                        // Previous button
+                        Button(intent: PreviousStepIntent()) {
+                            Label("Previous", systemImage: "chevron.left")
+                                .font(.caption2)
+                        }
+                        .disabled(context.state.currentStep == 0)
+                        .foregroundStyle(context.state.currentStep > 0 ? .primary : .tertiary)
 
                         Spacer()
 
-                        Label("Next", systemImage: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(context.state.currentStep < context.state.totalSteps - 1 ? .primary : .tertiary)
-                            .labelStyle(.trailingIcon)
+                        // Next button
+                        Button(intent: NextStepIntent()) {
+                            Label("Next", systemImage: "chevron.right")
+                                .font(.caption2)
+                                .labelStyle(.trailingIcon)
+                        }
+                        .disabled(context.state.currentStep >= context.state.totalSteps - 1)
+                        .foregroundStyle(context.state.currentStep < context.state.totalSteps - 1 ? .primary : .tertiary)
                     }
                     .padding(.horizontal)
                 }
@@ -211,6 +220,34 @@ struct LockScreenLiveActivityView: View {
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            // Navigation buttons
+            HStack(spacing: 12) {
+                // Previous button
+                Button(intent: PreviousStepIntent()) {
+                    HStack {
+                        Image(systemName: "chevron.left")
+                        Text("Previous")
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(context.state.currentStep == 0)
+                .tint(.orange)
+
+                // Next button
+                Button(intent: NextStepIntent()) {
+                    HStack {
+                        Text("Next")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(context.state.currentStep >= context.state.totalSteps - 1)
+                .tint(.orange)
+            }
+            .buttonStyle(.bordered)
         }
         .padding(16)
         .activityBackgroundTint(Color(white: 0.1))

@@ -54,6 +54,69 @@ class CookModeCoordinator {
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+
+        // Set up timer change callback
+        dependencies.timerManager.onTimersChanged = { [weak self] in
+            self?.updateLiveActivityForTimerChange()
+        }
+
+        // Listen for recipe deletion notifications
+        Task { @MainActor in
+            for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("RecipeDeleted")) {
+                if let deletedRecipeId = notification.object as? UUID {
+                    await handleRecipeDeletion(deletedRecipeId: deletedRecipeId)
+                }
+            }
+        }
+
+        // Listen for step changes from Live Activity
+        Task { @MainActor in
+            for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("CookModeStepChanged")) {
+                if let userInfo = notification.object as? [String: Int],
+                   let newStep = userInfo["step"] {
+                    handleStepChangeFromLiveActivity(newStep: newStep)
+                }
+            }
+        }
+    }
+
+    /// Handle recipe deletion - check if current recipe was deleted
+    private func handleRecipeDeletion(deletedRecipeId: UUID) async {
+        guard isActive, let currentRecipeId = currentRecipe?.id else { return }
+
+        // Check if the deleted recipe matches our current cooking recipe
+        if deletedRecipeId == currentRecipeId {
+            let recipeName = currentRecipe?.title ?? "Unknown"
+            AppLogger.general.warning("⚠️ Recipe '\(recipeName)' was deleted - ending cook session")
+
+            // End the session
+            endSession()
+
+            // TODO: Show user notification/toast that recipe was deleted
+        }
+    }
+
+    /// Handle step change initiated from Live Activity
+    private func handleStepChangeFromLiveActivity(newStep: Int) {
+        guard isActive,
+              let recipe = currentRecipe,
+              newStep >= 0,
+              newStep < recipe.steps.count else {
+            return
+        }
+
+        // Update current step
+        currentStepIndex = newStep
+        saveState()
+
+        // Update Live Activity
+        Task { await updateLiveActivity() }
+
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+
+        AppLogger.general.info("🔄 Step changed from Live Activity: \(newStep + 1)/\(self.totalSteps)")
     }
 
     // MARK: - Public Methods
@@ -308,7 +371,7 @@ class CookModeCoordinator {
 
     private func updateLiveActivity() async {
         guard let activity = currentActivity,
-              let recipe = currentRecipe else {
+              let _ = currentRecipe else {
             return
         }
 

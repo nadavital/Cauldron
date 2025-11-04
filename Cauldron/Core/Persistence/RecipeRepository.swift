@@ -306,6 +306,9 @@ actor RecipeRepository {
         // Also delete from PUBLIC database if it was shared
         await deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
 
+        // Post notification that recipe was deleted
+        NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
+
         logger.info("Deleted recipe and created tombstone: \(recipe.title)")
     }
 

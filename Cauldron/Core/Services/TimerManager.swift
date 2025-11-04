@@ -38,9 +38,12 @@ struct ActiveTimer: Identifiable {
 @MainActor
 class TimerManager: ObservableObject {
     @Published var activeTimers: [ActiveTimer] = []
-    
+
     private var timerTasks: [UUID: Task<Void, Never>] = [:]
-    
+
+    /// Callback for when timers change (used by CookModeCoordinator)
+    var onTimersChanged: (() -> Void)?
+
     nonisolated init() {
         requestNotificationPermissions()
     }
@@ -51,16 +54,19 @@ class TimerManager: ObservableObject {
     func startTimer(spec: TimerSpec, stepIndex: Int, recipeName: String) {
         let timer = ActiveTimer(spec: spec, recipeName: recipeName, stepIndex: stepIndex)
         activeTimers.append(timer)
-        
+
         // Start countdown task
         let task = Task {
             await runTimer(id: timer.id)
         }
         timerTasks[timer.id] = task
-        
+
         // Schedule notification
         scheduleNotification(for: timer)
-        
+
+        // Notify listeners
+        onTimersChanged?()
+
         AppLogger.general.info("Started timer: \(spec.label) for \(spec.seconds)s")
     }
     
@@ -68,20 +74,23 @@ class TimerManager: ObservableObject {
     func pauseTimer(id: UUID) {
         guard let index = activeTimers.firstIndex(where: { $0.id == id }),
               activeTimers[index].isRunning else { return }
-        
+
         // Calculate and save remaining time before pausing
         let remaining = getRemainingTime(id: id)
         activeTimers[index].remainingSeconds = remaining
         activeTimers[index].isRunning = false
         activeTimers[index].pausedAt = Date()
-        
+
         // Cancel the timer task
         timerTasks[id]?.cancel()
         timerTasks.removeValue(forKey: id)
-        
+
         // Cancel scheduled notification
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id.uuidString])
-        
+
+        // Notify listeners
+        onTimersChanged?()
+
         AppLogger.general.info("Paused timer: \(id) with \(remaining)s remaining")
     }
     
@@ -89,37 +98,43 @@ class TimerManager: ObservableObject {
     func resumeTimer(id: UUID) {
         guard let index = activeTimers.firstIndex(where: { $0.id == id }),
               !activeTimers[index].isRunning else { return }
-        
+
         // Update startedAt to current time (reset the timer start point)
         activeTimers[index].startedAt = Date()
         activeTimers[index].isRunning = true
         activeTimers[index].pausedAt = nil
-        
+
         // Restart countdown task
         let task = Task {
             await runTimer(id: id)
         }
         timerTasks[id] = task
-        
+
         // Reschedule notification with remaining time
         if let timer = activeTimers.first(where: { $0.id == id }) {
             scheduleNotification(for: timer)
         }
-        
+
+        // Notify listeners
+        onTimersChanged?()
+
         AppLogger.general.info("Resumed timer: \(id)")
     }
     
     /// Stop and remove a timer
     func stopTimer(id: UUID) {
         guard let index = activeTimers.firstIndex(where: { $0.id == id }) else { return }
-        
+
         activeTimers.remove(at: index)
         timerTasks[id]?.cancel()
         timerTasks.removeValue(forKey: id)
-        
+
         // Cancel notification
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id.uuidString])
-        
+
+        // Notify listeners
+        onTimersChanged?()
+
         AppLogger.general.info("Stopped timer: \(id)")
     }
     
