@@ -6,19 +6,41 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AE678DA22EB9545B00786709 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE678DA12EB9545B00786709 /* WidgetKit.framework */; };
+		AE678DA42EB9545B00786709 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AE678DA32EB9545B00786709 /* SwiftUI.framework */; };
+		AE678DB52EB9545C00786709 /* CauldronWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
-		AE25A62B2EB1E26F00EC6346 /* PBXContainerItemProxy */ = {
+		AE678DB32EB9545C00786709 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 505171AA2DCB0D4B0077095A /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 50F5BA812E937E2C00E4A5C4;
-			remoteInfo = Cauldron;
+			remoteGlobalIDString = AE678D9E2EB9545B00786709;
+			remoteInfo = CauldronWidgetExtension;
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		AE678DBA2EB9545C00786709 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AE678DB52EB9545C00786709 /* CauldronWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		50F5BA822E937E2C00E4A5C4 /* Cauldron.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cauldron.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CauldronTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CauldronWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE678DA12EB9545B00786709 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		AE678DA32EB9545B00786709 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -29,6 +51,21 @@
 			);
 			target = 50F5BA812E937E2C00E4A5C4 /* Cauldron */;
 		};
+		AE678DB92EB9545C00786709 /* Exceptions for "CauldronWidget" folder in "CauldronWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */;
+		};
+		AE678DC12EB9658600786709 /* Exceptions for "Cauldron" folder in "CauldronWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				Core/Models/CookModeActivityAttributes.swift,
+			);
+			target = AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -36,8 +73,17 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				50F5BB3F2E937E7400E4A5C4 /* Exceptions for "Cauldron" folder in "Cauldron" target */,
+				AE678DC12EB9658600786709 /* Exceptions for "Cauldron" folder in "CauldronWidgetExtension" target */,
 			);
 			path = Cauldron;
+			sourceTree = "<group>";
+		};
+		AE678DA52EB9545B00786709 /* CauldronWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AE678DB92EB9545C00786709 /* Exceptions for "CauldronWidget" folder in "CauldronWidgetExtension" target */,
+			);
+			path = CauldronWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -50,10 +96,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AE25A6242EB1E26F00EC6346 /* Frameworks */ = {
+		AE678D9C2EB9545B00786709 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AE678DA42EB9545B00786709 /* SwiftUI.framework in Frameworks */,
+				AE678DA22EB9545B00786709 /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -64,6 +112,8 @@
 			isa = PBXGroup;
 			children = (
 				50F5BA832E937E2C00E4A5C4 /* Cauldron */,
+				AE678DA52EB9545B00786709 /* CauldronWidget */,
+				AE678DA02EB9545B00786709 /* Frameworks */,
 				505171B32DCB0D4B0077095A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -72,9 +122,18 @@
 			isa = PBXGroup;
 			children = (
 				50F5BA822E937E2C00E4A5C4 /* Cauldron.app */,
-				AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */,
+				AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		AE678DA02EB9545B00786709 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				AE678DA12EB9545B00786709 /* WidgetKit.framework */,
+				AE678DA32EB9545B00786709 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -87,10 +146,12 @@
 				50F5BA7E2E937E2C00E4A5C4 /* Sources */,
 				50F5BA7F2E937E2C00E4A5C4 /* Frameworks */,
 				50F5BA802E937E2C00E4A5C4 /* Resources */,
+				AE678DBA2EB9545C00786709 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AE678DB42EB9545C00786709 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				50F5BA832E937E2C00E4A5C4 /* Cauldron */,
@@ -102,25 +163,27 @@
 			productReference = 50F5BA822E937E2C00E4A5C4 /* Cauldron.app */;
 			productType = "com.apple.product-type.application";
 		};
-		AE25A6262EB1E26F00EC6346 /* CauldronTests */ = {
+		AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AE25A62F2EB1E26F00EC6346 /* Build configuration list for PBXNativeTarget "CauldronTests" */;
+			buildConfigurationList = AE678DB62EB9545C00786709 /* Build configuration list for PBXNativeTarget "CauldronWidgetExtension" */;
 			buildPhases = (
-				AE25A6232EB1E26F00EC6346 /* Sources */,
-				AE25A6242EB1E26F00EC6346 /* Frameworks */,
-				AE25A6252EB1E26F00EC6346 /* Resources */,
+				AE678D9B2EB9545B00786709 /* Sources */,
+				AE678D9C2EB9545B00786709 /* Frameworks */,
+				AE678D9D2EB9545B00786709 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				AE25A62C2EB1E26F00EC6346 /* PBXTargetDependency */,
 			);
-			name = CauldronTests;
+			fileSystemSynchronizedGroups = (
+				AE678DA52EB9545B00786709 /* CauldronWidget */,
+			);
+			name = CauldronWidgetExtension;
 			packageProductDependencies = (
 			);
-			productName = CauldronTests;
-			productReference = AE25A6272EB1E26F00EC6346 /* CauldronTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
+			productName = CauldronWidgetExtension;
+			productReference = AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -135,9 +198,8 @@
 					50F5BA812E937E2C00E4A5C4 = {
 						CreatedOnToolsVersion = 26.0.1;
 					};
-					AE25A6262EB1E26F00EC6346 = {
+					AE678D9E2EB9545B00786709 = {
 						CreatedOnToolsVersion = 26.0.1;
-						TestTargetID = 50F5BA812E937E2C00E4A5C4;
 					};
 				};
 			};
@@ -158,7 +220,7 @@
 			projectRoot = "";
 			targets = (
 				50F5BA812E937E2C00E4A5C4 /* Cauldron */,
-				AE25A6262EB1E26F00EC6346 /* CauldronTests */,
+				AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -171,7 +233,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AE25A6252EB1E26F00EC6346 /* Resources */ = {
+		AE678D9D2EB9545B00786709 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -188,7 +250,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AE25A6232EB1E26F00EC6346 /* Sources */ = {
+		AE678D9B2EB9545B00786709 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -198,10 +260,10 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		AE25A62C2EB1E26F00EC6346 /* PBXTargetDependency */ = {
+		AE678DB42EB9545C00786709 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 50F5BA812E937E2C00E4A5C4 /* Cauldron */;
-			targetProxy = AE25A62B2EB1E26F00EC6346 /* PBXContainerItemProxy */;
+			target = AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */;
+			targetProxy = AE678DB32EB9545C00786709 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -406,45 +468,63 @@
 			};
 			name = Release;
 		};
-		AE25A62D2EB1E26F00EC6346 /* Debug */ = {
+		AE678DB72EB9545C00786709 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = C4MRP56MF5;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CauldronWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CauldronWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.Cauldron.CauldronWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
 			};
 			name = Debug;
 		};
-		AE25A62E2EB1E26F00EC6346 /* Release */ = {
+		AE678DB82EB9545C00786709 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = C4MRP56MF5;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CauldronWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CauldronWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.Cauldron.CauldronWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
 			};
 			name = Release;
 		};
@@ -469,11 +549,11 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AE25A62F2EB1E26F00EC6346 /* Build configuration list for PBXNativeTarget "CauldronTests" */ = {
+		AE678DB62EB9545C00786709 /* Build configuration list for PBXNativeTarget "CauldronWidgetExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AE25A62D2EB1E26F00EC6346 /* Debug */,
-				AE25A62E2EB1E26F00EC6346 /* Release */,
+				AE678DB72EB9545C00786709 /* Debug */,
+				AE678DB82EB9545C00786709 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

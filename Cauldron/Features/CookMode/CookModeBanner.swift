@@ -41,24 +41,15 @@ struct CookModeBanner: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 20)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
     }
 
     // MARK: - Subviews
 
     @ViewBuilder
     private var recipeIcon: some View {
-        ZStack {
-            Circle()
-                .fill(Color.cauldronOrange.opacity(0.2))
-
-            Image(systemName: "flame.fill")
-                .font(.callout)
-                .foregroundColor(.cauldronOrange)
-        }
+        Image("CauldronIconTiny")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
     }
 
     @ViewBuilder
