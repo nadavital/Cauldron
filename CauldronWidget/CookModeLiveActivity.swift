@@ -144,36 +144,35 @@ struct CookModeLiveActivity: Widget {
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
-                // DEBUG: Show what we're receiving
-                let hasTimer = context.state.primaryTimerEndDate != nil
-                let interval = context.state.primaryTimerEndDate?.timeIntervalSinceNow ?? 0
-                let passesCheck = interval > 1.0
+                // ALWAYS show debug - make it very obvious
+                VStack(spacing: 2) {
+                    if let timerEndDate = context.state.primaryTimerEndDate {
+                        let interval = timerEndDate.timeIntervalSinceNow
 
-                if let timerEndDate = context.state.primaryTimerEndDate,
-                   timerEndDate.timeIntervalSinceNow > 1.0 {
-                    // Show timer countdown when timer is active
-                    VStack(spacing: 0) {
                         Image(systemName: "timer")
-                            .font(.system(size: 10))
-                        Text(timerEndDate, style: .timer)
-                            .font(.system(size: 8))
-                            .monospacedDigit()
-                        // TEMP DEBUG - Remove after testing
-                        Text("✓\(Int(interval))s")
-                            .font(.system(size: 6))
-                            .foregroundColor(.green)
-                    }
-                } else {
-                    // Show Cauldron icon with debug info
-                    VStack(spacing: 0) {
+                            .font(.system(size: 16))
+                            .foregroundColor(.orange)
+
+                        // Show interval value - LARGE and OBVIOUS
+                        Text("\(Int(interval))s")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(interval > 1.0 ? .green : .red)
+
+                        if interval > 1.0 {
+                            Text(timerEndDate, style: .timer)
+                                .font(.system(size: 8))
+                                .monospacedDigit()
+                        } else {
+                            Text("FAIL")
+                                .font(.system(size: 8))
+                                .foregroundColor(.red)
+                        }
+                    } else {
                         Image("CauldronIcon")
                             .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 18, height: 18)
-                            .clipShape(Circle())
-                        // TEMP DEBUG - Remove after testing
-                        Text(hasTimer ? "✗\(Int(interval))s" : "ø")
-                            .font(.system(size: 6))
+                            .frame(width: 20, height: 20)
+                        Text("NO TIMER")
+                            .font(.system(size: 8))
                             .foregroundColor(.red)
                     }
                 }

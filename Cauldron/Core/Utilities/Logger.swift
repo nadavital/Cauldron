@@ -27,7 +27,7 @@ extension Logger {
     /// Log info message (visible in Xcode console in debug builds)
     func info(_ message: String) {
         #if DEBUG
-        print("ℹ️ [\(self)] \(message)")
+        print("ℹ️  \(message)")
         #else
         self.log(level: .info, "\(message)")
         #endif
@@ -36,7 +36,7 @@ extension Logger {
     /// Log debug message (visible in Xcode console in debug builds)
     func debug(_ message: String) {
         #if DEBUG
-        print("🔍 [\(self)] \(message)")
+        print("🔍 \(message)")
         #else
         self.log(level: .debug, "\(message)")
         #endif
@@ -45,7 +45,7 @@ extension Logger {
     /// Log error message (visible in Xcode console in debug builds)
     func error(_ message: String) {
         #if DEBUG
-        print("❌ [\(self)] \(message)")
+        print("❌ \(message)")
         #else
         self.log(level: .error, "\(message)")
         #endif
@@ -54,7 +54,7 @@ extension Logger {
     /// Log warning message (visible in Xcode console in debug builds)
     func warning(_ message: String) {
         #if DEBUG
-        print("⚠️ [\(self)] \(message)")
+        print("⚠️  \(message)")
         #else
         self.log(level: .default, "\(message)")
         #endif
