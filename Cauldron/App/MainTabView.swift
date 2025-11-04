@@ -41,6 +41,7 @@ struct MainTabView: View {
                 SearchTabView(dependencies: dependencies)
             }
         }
+        .tabBarMinimizeBehavior(.onScrollDown)
         .if(dependencies.cookModeCoordinator.isActive) { view in
             view.tabViewBottomAccessory {
                 CookModeBanner(coordinator: dependencies.cookModeCoordinator)
