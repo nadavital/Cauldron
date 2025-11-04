@@ -28,31 +28,35 @@ extension Logger {
     func info(_ message: String) {
         #if DEBUG
         print("ℹ️ [\(self)] \(message)")
-        #endif
+        #else
         self.log(level: .info, "\(message)")
+        #endif
     }
 
     /// Log debug message (visible in Xcode console in debug builds)
     func debug(_ message: String) {
         #if DEBUG
         print("🔍 [\(self)] \(message)")
-        #endif
+        #else
         self.log(level: .debug, "\(message)")
+        #endif
     }
 
     /// Log error message (visible in Xcode console in debug builds)
     func error(_ message: String) {
         #if DEBUG
         print("❌ [\(self)] \(message)")
-        #endif
+        #else
         self.log(level: .error, "\(message)")
+        #endif
     }
 
     /// Log warning message (visible in Xcode console in debug builds)
     func warning(_ message: String) {
         #if DEBUG
         print("⚠️ [\(self)] \(message)")
-        #endif
+        #else
         self.log(level: .default, "\(message)")
+        #endif
     }
 }

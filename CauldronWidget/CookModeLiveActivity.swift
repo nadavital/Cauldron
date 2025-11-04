@@ -144,6 +144,11 @@ struct CookModeLiveActivity: Widget {
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
+                // DEBUG: Show what we're receiving
+                let hasTimer = context.state.primaryTimerEndDate != nil
+                let interval = context.state.primaryTimerEndDate?.timeIntervalSinceNow ?? 0
+                let passesCheck = interval > 1.0
+
                 if let timerEndDate = context.state.primaryTimerEndDate,
                    timerEndDate.timeIntervalSinceNow > 1.0 {
                     // Show timer countdown when timer is active
@@ -153,14 +158,24 @@ struct CookModeLiveActivity: Widget {
                         Text(timerEndDate, style: .timer)
                             .font(.system(size: 8))
                             .monospacedDigit()
+                        // TEMP DEBUG - Remove after testing
+                        Text("✓\(Int(interval))s")
+                            .font(.system(size: 6))
+                            .foregroundColor(.green)
                     }
                 } else {
-                    // Show Cauldron icon
-                    Image("CauldronIcon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 18, height: 18)
-                        .clipShape(Circle())
+                    // Show Cauldron icon with debug info
+                    VStack(spacing: 0) {
+                        Image("CauldronIcon")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 18, height: 18)
+                            .clipShape(Circle())
+                        // TEMP DEBUG - Remove after testing
+                        Text(hasTimer ? "✗\(Int(interval))s" : "ø")
+                            .font(.system(size: 6))
+                            .foregroundColor(.red)
+                    }
                 }
             }
         }
