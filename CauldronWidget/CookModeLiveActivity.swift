@@ -47,7 +47,8 @@ struct CookModeLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     // Timer display
-                    if let timerEndDate = context.state.primaryTimerEndDate {
+                    if let timerEndDate = context.state.primaryTimerEndDate,
+                       timerEndDate > Date() {
                         VStack(alignment: .trailing, spacing: 2) {
                             Image(systemName: "timer")
                                 .font(.title3)
@@ -125,22 +126,26 @@ struct CookModeLiveActivity: Widget {
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
                 // Show timer when active, step count otherwise
-                if let timerEndDate = context.state.primaryTimerEndDate {
+                if let timerEndDate = context.state.primaryTimerEndDate,
+                   timerEndDate > Date() {
                     // Timer is running - show only timer
                     Text(timerEndDate, style: .timer)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .monospacedDigit()
+                        .frame(minWidth: 35, alignment: .trailing)
                 } else {
                     // No timer - show step progress
                     Text("\(context.state.currentStep + 1)/\(context.state.totalSteps)")
                         .font(.caption2)
                         .fontWeight(.medium)
                         .monospacedDigit()
+                        .frame(minWidth: 35, alignment: .trailing)
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
-                if let timerEndDate = context.state.primaryTimerEndDate {
+                if let timerEndDate = context.state.primaryTimerEndDate,
+                   timerEndDate > Date() {
                     // Show timer countdown when timer is active
                     VStack(spacing: 0) {
                         Image(systemName: "timer")
@@ -265,7 +270,7 @@ struct TimerBadgeView: View {
             Image(systemName: "timer")
                 .font(.caption2)
 
-            if let endDate = primaryEndDate {
+            if let endDate = primaryEndDate, endDate > Date() {
                 Text(endDate, style: .timer)
                     .font(.caption)
                     .fontWeight(.medium)
@@ -276,7 +281,7 @@ struct TimerBadgeView: View {
                     .fontWeight(.medium)
             }
         }
-        .fixedSize()  // Prevent extra space - wrap tightly around content
+        .fixedSize(horizontal: true, vertical: false)  // Only fix horizontal to prevent width expansion
         .padding(.horizontal, 6)  // Reduced from 8 for tighter fit
         .padding(.vertical, 4)
         .background(.orange.opacity(0.2))

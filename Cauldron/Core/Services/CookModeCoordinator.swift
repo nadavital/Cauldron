@@ -348,12 +348,17 @@ class CookModeCoordinator {
             sessionStartTime: sessionStartTime ?? Date()
         )
 
+        // Get shortest running timer with valid future end date
+        let shortestTimer = dependencies.timerManager.activeTimers
+            .filter { $0.isRunning && $0.endDate > Date() }
+            .min(by: { $0.endDate < $1.endDate })
+
         let contentState = CookModeActivityAttributes.ContentState(
             currentStep: currentStepIndex,
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerEndDate: dependencies.timerManager.activeTimers.first?.endDate,
+            primaryTimerEndDate: shortestTimer?.endDate,
             progressPercentage: progress,
             lastUpdated: Date()
         )
@@ -375,12 +380,17 @@ class CookModeCoordinator {
             return
         }
 
+        // Get shortest running timer with valid future end date
+        let shortestTimer = dependencies.timerManager.activeTimers
+            .filter { $0.isRunning && $0.endDate > Date() }
+            .min(by: { $0.endDate < $1.endDate })
+
         let contentState = CookModeActivityAttributes.ContentState(
             currentStep: currentStepIndex,
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerEndDate: dependencies.timerManager.activeTimers.first?.endDate,
+            primaryTimerEndDate: shortestTimer?.endDate,
             progressPercentage: progress,
             lastUpdated: Date()
         )
