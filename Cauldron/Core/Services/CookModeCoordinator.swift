@@ -54,6 +54,69 @@ class CookModeCoordinator {
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+
+        // Set up timer change callback
+        dependencies.timerManager.onTimersChanged = { [weak self] in
+            self?.updateLiveActivityForTimerChange()
+        }
+
+        // Listen for recipe deletion notifications
+        Task { @MainActor in
+            for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("RecipeDeleted")) {
+                if let deletedRecipeId = notification.object as? UUID {
+                    await handleRecipeDeletion(deletedRecipeId: deletedRecipeId)
+                }
+            }
+        }
+
+        // Listen for step changes from Live Activity
+        Task { @MainActor in
+            for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("CookModeStepChanged")) {
+                if let userInfo = notification.object as? [String: Int],
+                   let newStep = userInfo["step"] {
+                    handleStepChangeFromLiveActivity(newStep: newStep)
+                }
+            }
+        }
+    }
+
+    /// Handle recipe deletion - check if current recipe was deleted
+    private func handleRecipeDeletion(deletedRecipeId: UUID) async {
+        guard isActive, let currentRecipeId = currentRecipe?.id else { return }
+
+        // Check if the deleted recipe matches our current cooking recipe
+        if deletedRecipeId == currentRecipeId {
+            let recipeName = currentRecipe?.title ?? "Unknown"
+            AppLogger.general.warning("⚠️ Recipe '\(recipeName)' was deleted - ending cook session")
+
+            // End the session
+            endSession()
+
+            // TODO: Show user notification/toast that recipe was deleted
+        }
+    }
+
+    /// Handle step change initiated from Live Activity
+    private func handleStepChangeFromLiveActivity(newStep: Int) {
+        guard isActive,
+              let recipe = currentRecipe,
+              newStep >= 0,
+              newStep < recipe.steps.count else {
+            return
+        }
+
+        // Update current step
+        currentStepIndex = newStep
+        saveState()
+
+        // Update Live Activity
+        Task { await updateLiveActivity() }
+
+        // Haptic feedback
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+
+        AppLogger.general.info("🔄 Step changed from Live Activity: \(newStep + 1)/\(self.totalSteps)")
     }
 
     // MARK: - Public Methods
@@ -158,16 +221,21 @@ class CookModeCoordinator {
 
         let recipeName = currentRecipe?.title ?? "Unknown"
 
-        // Clear state
-        isActive = false
-        showFullScreen = false
-        currentRecipe = nil
-        currentStepIndex = 0
-        totalSteps = 0
-        sessionStartTime = nil
+        // Batch all state changes together to prevent cascading view updates
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isActive = false
+            showFullScreen = false
+            currentRecipe = nil
+            currentStepIndex = 0
+            totalSteps = 0
+            sessionStartTime = nil
+        }
 
         // Clear persisted state
         clearState()
+
+        // Stop all active timers and cancel their notifications
+        dependencies.timerManager.stopAllTimers()
 
         // End CookSessionManager session (legacy support)
         Task {
@@ -285,12 +353,18 @@ class CookModeCoordinator {
             sessionStartTime: sessionStartTime ?? Date()
         )
 
+        // Get shortest timer (running or paused)
+        let shortestTimer = dependencies.timerManager.activeTimers
+            .filter { $0.remainingSeconds() > 0 }
+            .min(by: { $0.remainingSeconds() < $1.remainingSeconds() })
+
         let contentState = CookModeActivityAttributes.ContentState(
             currentStep: currentStepIndex,
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
+            primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
+            primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
             progressPercentage: progress,
             lastUpdated: Date()
         )
@@ -308,8 +382,24 @@ class CookModeCoordinator {
 
     private func updateLiveActivity() async {
         guard let activity = currentActivity,
-              let recipe = currentRecipe else {
+              let _ = currentRecipe else {
             return
+        }
+
+        // Get shortest timer (running or paused)
+        let shortestTimer = dependencies.timerManager.activeTimers
+            .filter { $0.remainingSeconds() > 0 }
+            .min(by: { $0.remainingSeconds() < $1.remainingSeconds() })
+
+        // Debug logging
+        if dependencies.timerManager.activeTimers.isEmpty {
+            AppLogger.general.debug("🔄 Updating Live Activity - No active timers")
+        } else {
+            AppLogger.general.debug("🔄 Updating Live Activity - \(dependencies.timerManager.activeTimers.count) timer(s)")
+            if let timer = shortestTimer {
+                let status = timer.isRunning ? "RUNNING" : "PAUSED"
+                AppLogger.general.debug("   Primary timer: \(timer.spec.seconds)s total (\(status))")
+            }
         }
 
         let contentState = CookModeActivityAttributes.ContentState(
@@ -317,16 +407,20 @@ class CookModeCoordinator {
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
+            primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
+            primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
             progressPercentage: progress,
             lastUpdated: Date()
         )
 
-        await activity.update(
-            .init(state: contentState, staleDate: nil)
-        )
-
-        AppLogger.general.debug("🔄 Updated Live Activity")
+        do {
+            await activity.update(
+                .init(state: contentState, staleDate: nil)
+            )
+            AppLogger.general.debug("🔄 Updated Live Activity - Step \(currentStepIndex + 1)/\(totalSteps)")
+        } catch {
+            AppLogger.general.error("❌ Failed to update Live Activity: \(error.localizedDescription)")
+        }
     }
 
     private func endLiveActivity() async {

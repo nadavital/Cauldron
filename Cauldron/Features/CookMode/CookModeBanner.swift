@@ -38,6 +38,16 @@ struct CookModeBanner: View {
             if !dependencies.timerManager.activeTimers.isEmpty {
                 timerBadge
             }
+
+            // End session button
+            Button(action: {
+                coordinator.endSession()
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 20)
@@ -55,14 +65,17 @@ struct CookModeBanner: View {
     @ViewBuilder
     private var timerBadge: some View {
         let activeTimers = dependencies.timerManager.activeTimers
-        let shortestTimer = activeTimers.min(by: { $0.remainingSeconds < $1.remainingSeconds })
+        // Get shortest running timer with valid future end date
+        let shortestTimer = activeTimers
+            .filter { !$0.isPaused && $0.endDate > Date() }
+            .min(by: { $0.endDate < $1.endDate })
 
         HStack(spacing: 6) {
             Image(systemName: "timer")
                 .font(.system(size: 16))
 
             if let shortest = shortestTimer {
-                Text(formatTime(shortest.remainingSeconds))
+                Text(shortest.endDate, style: .timer)
                     .font(.caption)
                     .fontWeight(.medium)
                     .monospacedDigit()
@@ -74,14 +87,6 @@ struct CookModeBanner: View {
             }
         }
         .foregroundStyle(.secondary)
-    }
-
-    // MARK: - Helpers
-
-    private func formatTime(_ seconds: Int) -> String {
-        let mins = seconds / 60
-        let secs = seconds % 60
-        return String(format: "%d:%02d", mins, secs)
     }
 }
 

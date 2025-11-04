@@ -25,8 +25,9 @@ struct CookModeActivityAttributes: ActivityAttributes {
         /// Number of active timers currently running
         var activeTimerCount: Int
 
-        /// Remaining seconds on the primary (shortest) timer, if any
-        var primaryTimerSeconds: Int?
+        /// Primary timer information (if any)
+        var primaryTimerDurationSeconds: Int?
+        var primaryTimerIsRunning: Bool
 
         /// Overall progress through the recipe (0.0 to 1.0)
         var progressPercentage: Double
