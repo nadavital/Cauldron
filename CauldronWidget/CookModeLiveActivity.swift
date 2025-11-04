@@ -22,67 +22,78 @@ struct CookModeLiveActivity: Widget {
                 // Expanded Region
                 DynamicIslandExpandedRegion(.leading) {
                     // Recipe emoji/icon and name
-                    HStack(spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         if let emoji = context.attributes.recipeEmoji {
                             Text(emoji)
-                                .font(.title2)
+                                .font(.largeTitle)
                         } else {
                             Image("CauldronIcon")
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(width: 24, height: 24)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .frame(width: 40, height: 40)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(context.attributes.recipeName)
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .lineLimit(1)
-                            Text("Step \(context.state.currentStep + 1) of \(context.state.totalSteps)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                         }
                     }
+                    .frame(maxHeight: .infinity, alignment: .center)
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    // Timer display
-                    if let remainingSeconds = context.state.primaryTimerRemainingSeconds, remainingSeconds > 0 {
-                        let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Image(systemName: "timer")
-                                .font(.title3)
-                                .foregroundStyle(.orange)
-                            Text(endDate, style: .timer)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .monospacedDigit()
-                        }
-                    } else if context.state.activeTimerCount > 0 {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Image(systemName: "timer")
-                                .font(.title3)
-                                .foregroundStyle(.orange)
-                            Text("\(context.state.activeTimerCount) active")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                    // Step progress
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Step")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("\(context.state.currentStep + 1)/\(context.state.totalSteps)")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
                     }
+                    .frame(maxHeight: .infinity, alignment: .center)
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    // Progress bar
+                    // Progress bar and instruction
                     VStack(spacing: 8) {
                         ProgressView(value: context.state.progressPercentage)
                             .tint(.orange)
                             .frame(height: 6)
 
-                        // Current step instruction (truncated)
+                        // Current step instruction
                         Text(context.state.stepInstruction)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
+
+                        // Timer info below instruction
+                        if let durationSeconds = context.state.primaryTimerDurationSeconds {
+                            let minutes = durationSeconds / 60
+                            let seconds = durationSeconds % 60
+                            HStack(spacing: 4) {
+                                Image(systemName: "timer")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+
+                                Circle()
+                                    .fill(context.state.primaryTimerIsRunning ? Color.green : Color.orange)
+                                    .frame(width: 4, height: 4)
+
+                                Text(String(format: "%d:%02d", minutes, seconds))
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .monospacedDigit()
+
+                                Text(context.state.primaryTimerIsRunning ? "Running" : "Paused")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .padding(.horizontal, 8)
                 }
@@ -115,24 +126,37 @@ struct CookModeLiveActivity: Widget {
                 // Compact Leading (left side of notch)
                 if let emoji = context.attributes.recipeEmoji {
                     Text(emoji)
-                        .font(.caption)
+                        .font(.body)
                 } else {
                     Image("CauldronIcon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
                 // Show timer when active, step count otherwise
-                if let remainingSeconds = context.state.primaryTimerRemainingSeconds, remainingSeconds > 0 {
-                    let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
-                    Text(endDate, style: .timer)
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .monospacedDigit()
-                        .frame(minWidth: 35, alignment: .trailing)
+                if let durationSeconds = context.state.primaryTimerDurationSeconds {
+                    let minutes = durationSeconds / 60
+                    let seconds = durationSeconds % 60
+                    HStack(spacing: 2) {
+                        // Status indicator
+                        if context.state.primaryTimerIsRunning {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.green)
+                        } else {
+                            Image(systemName: "pause.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.orange)
+                        }
+                        Text(String(format: "%d:%02d", minutes, seconds))
+                            .fontWeight(.medium)
+                            .monospacedDigit()
+                    }
+                    .font(.caption2)
+                    .frame(minWidth: 35, alignment: .trailing)
                 } else {
                     // No timer - show step progress
                     Text("\(context.state.currentStep + 1)/\(context.state.totalSteps)")
@@ -142,10 +166,16 @@ struct CookModeLiveActivity: Widget {
                         .frame(minWidth: 35, alignment: .trailing)
                 }
             } minimal: {
-                // Minimal (single icon when collapsed)
-                Image(systemName: "timer")
-                    .font(.system(size: 16))
-                    .foregroundColor(.orange)
+                // Minimal (single icon when collapsed) - use Cauldron icon
+                if let emoji = context.attributes.recipeEmoji {
+                    Text(emoji)
+                        .font(.system(size: 20))
+                } else {
+                    Image("CauldronIcon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 20, height: 20)
+                }
             }
         }
     }
@@ -163,12 +193,12 @@ struct LockScreenLiveActivityView: View {
             HStack(spacing: 8) {
                 if let emoji = context.attributes.recipeEmoji {
                     Text(emoji)
-                        .font(.title3)
+                        .font(.title2)
                 } else {
                     Image("CauldronIcon")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 32, height: 32)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
 
@@ -189,7 +219,8 @@ struct LockScreenLiveActivityView: View {
                 if context.state.activeTimerCount > 0 {
                     TimerBadgeView(
                         count: context.state.activeTimerCount,
-                        primaryRemainingSeconds: context.state.primaryTimerRemainingSeconds
+                        durationSeconds: context.state.primaryTimerDurationSeconds,
+                        isRunning: context.state.primaryTimerIsRunning
                     )
                 }
             }
@@ -244,19 +275,23 @@ struct LockScreenLiveActivityView: View {
 
 // MARK: - Helper Views
 
-/// Timer badge showing active timer count and countdown
+/// Timer badge showing active timer count and status
 struct TimerBadgeView: View {
     let count: Int
-    let primaryRemainingSeconds: Int?
+    let durationSeconds: Int?
+    let isRunning: Bool
 
     var body: some View {
         HStack(spacing: 4) {
+            // Status-colored timer icon
             Image(systemName: "timer")
                 .font(.caption2)
+                .foregroundStyle(isRunning ? .green : .orange)
 
-            if let remainingSeconds = primaryRemainingSeconds, remainingSeconds > 0 {
-                let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
-                Text(endDate, style: .timer)
+            if let duration = durationSeconds {
+                let minutes = duration / 60
+                let seconds = duration % 60
+                Text(String(format: "%d:%02d", minutes, seconds))
                     .font(.caption)
                     .fontWeight(.medium)
                     .monospacedDigit()
@@ -266,11 +301,11 @@ struct TimerBadgeView: View {
                     .fontWeight(.medium)
             }
         }
-        .fixedSize(horizontal: true, vertical: false)  // Only fix horizontal to prevent width expansion
-        .padding(.horizontal, 6)  // Reduced from 8 for tighter fit
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(.orange.opacity(0.2))
-        .foregroundStyle(.orange)
+        .background(isRunning ? Color.green.opacity(0.15) : Color.orange.opacity(0.2))
+        .foregroundStyle(isRunning ? .green : .orange)
         .clipShape(Capsule())
     }
 }

@@ -350,19 +350,18 @@ class CookModeCoordinator {
             sessionStartTime: sessionStartTime ?? Date()
         )
 
-        // Get shortest running timer with valid future end date
-        // Add 1-second buffer to prevent race conditions where dates become stale immediately
-        let minValidDate = Date().addingTimeInterval(1.0)
+        // Get shortest timer (running or paused)
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { !$0.isPaused && $0.endDate > minValidDate }
-            .min(by: { $0.endDate < $1.endDate })
+            .filter { $0.remainingSeconds() > 0 }
+            .min(by: { $0.remainingSeconds() < $1.remainingSeconds() })
 
         let contentState = CookModeActivityAttributes.ContentState(
             currentStep: currentStepIndex,
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerRemainingSeconds: shortestTimer?.remainingSeconds(),
+            primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
+            primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
             progressPercentage: progress,
             lastUpdated: Date()
         )
@@ -384,21 +383,19 @@ class CookModeCoordinator {
             return
         }
 
-        // Get shortest running timer with remaining time
+        // Get shortest timer (running or paused)
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { !$0.isPaused && $0.remainingSeconds() > 0 }
+            .filter { $0.remainingSeconds() > 0 }
             .min(by: { $0.remainingSeconds() < $1.remainingSeconds() })
 
-        // Debug logging to diagnose timer issues
+        // Debug logging
         if dependencies.timerManager.activeTimers.isEmpty {
             AppLogger.general.debug("🔄 Updating Live Activity - No active timers")
         } else {
             AppLogger.general.debug("🔄 Updating Live Activity - \(dependencies.timerManager.activeTimers.count) timer(s)")
             if let timer = shortestTimer {
-                let remaining = timer.remainingSeconds()
-                AppLogger.general.debug("   Primary timer: \(remaining)s remaining")
-            } else {
-                AppLogger.general.debug("   No valid running timer (all paused or expired)")
+                let status = timer.isRunning ? "RUNNING" : "PAUSED"
+                AppLogger.general.debug("   Primary timer: \(timer.spec.seconds)s total (\(status))")
             }
         }
 
@@ -407,16 +404,20 @@ class CookModeCoordinator {
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerRemainingSeconds: shortestTimer?.remainingSeconds(),
+            primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
+            primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
             progressPercentage: progress,
             lastUpdated: Date()
         )
 
-        await activity.update(
-            .init(state: contentState, staleDate: nil)
-        )
-
-        AppLogger.general.debug("🔄 Updated Live Activity")
+        do {
+            await activity.update(
+                .init(state: contentState, staleDate: nil)
+            )
+            AppLogger.general.debug("🔄 Updated Live Activity - Step \(currentStepIndex + 1)/\(totalSteps)")
+        } catch {
+            AppLogger.general.error("❌ Failed to update Live Activity: \(error.localizedDescription)")
+        }
     }
 
     private func endLiveActivity() async {
