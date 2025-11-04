@@ -124,21 +124,19 @@ struct CookModeLiveActivity: Widget {
                 }
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
-                HStack(spacing: 4) {
-                    // Step progress
+                // Show timer when active, step count otherwise
+                if let timerEndDate = context.state.primaryTimerEndDate {
+                    // Timer is running - show only timer
+                    Text(timerEndDate, style: .timer)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .monospacedDigit()
+                } else {
+                    // No timer - show step progress
                     Text("\(context.state.currentStep + 1)/\(context.state.totalSteps)")
                         .font(.caption2)
                         .fontWeight(.medium)
                         .monospacedDigit()
-
-                    // Timer indicator
-                    if let timerEndDate = context.state.primaryTimerEndDate {
-                        Text("·")
-                            .foregroundStyle(.secondary)
-                        Text(timerEndDate, style: .timer)
-                            .font(.caption2)
-                            .monospacedDigit()
-                    }
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
@@ -278,7 +276,8 @@ struct TimerBadgeView: View {
                     .fontWeight(.medium)
             }
         }
-        .padding(.horizontal, 8)
+        .fixedSize()  // Prevent extra space - wrap tightly around content
+        .padding(.horizontal, 6)  // Reduced from 8 for tighter fit
         .padding(.vertical, 4)
         .background(.orange.opacity(0.2))
         .foregroundStyle(.orange)
