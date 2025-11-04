@@ -234,6 +234,9 @@ class CookModeCoordinator {
         // Clear persisted state
         clearState()
 
+        // Stop all active timers and cancel their notifications
+        dependencies.timerManager.stopAllTimers()
+
         // End CookSessionManager session (legacy support)
         Task {
             await dependencies.cookSessionManager.endSession()
