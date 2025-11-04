@@ -351,8 +351,10 @@ class CookModeCoordinator {
         )
 
         // Get shortest running timer with valid future end date
+        // Add 1-second buffer to prevent race conditions where dates become stale immediately
+        let minValidDate = Date().addingTimeInterval(1.0)
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { !$0.isPaused && $0.endDate > Date() }
+            .filter { !$0.isPaused && $0.endDate > minValidDate }
             .min(by: { $0.endDate < $1.endDate })
 
         let contentState = CookModeActivityAttributes.ContentState(
@@ -383,8 +385,10 @@ class CookModeCoordinator {
         }
 
         // Get shortest running timer with valid future end date
+        // Add 1-second buffer to prevent race conditions where dates become stale immediately
+        let minValidDate = Date().addingTimeInterval(1.0)
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { !$0.isPaused && $0.endDate > Date() }
+            .filter { !$0.isPaused && $0.endDate > minValidDate }
             .min(by: { $0.endDate < $1.endDate })
 
         // Debug logging to diagnose timer issues

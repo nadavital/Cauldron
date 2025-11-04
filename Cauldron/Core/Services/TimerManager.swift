@@ -26,6 +26,7 @@ struct ActiveTimer: Identifiable {
     var isPaused: Bool
     var pausedAt: Date?  // When the timer was paused (for UI display)
     var pausedRemainingSeconds: Int?  // Remaining seconds when paused
+    var pausedEndDate: Date?  // Stable end date snapshot when paused (for Live Activity)
 
     // MARK: - Initialization
 
@@ -38,11 +39,12 @@ struct ActiveTimer: Identifiable {
         self.isPaused = false
         self.pausedAt = nil
         self.pausedRemainingSeconds = nil
+        self.pausedEndDate = nil
     }
 
     // Internal initializer for resume functionality
     init(id: UUID, spec: TimerSpec, recipeName: String, stepIndex: Int,
-         originalEndDate: Date, isPaused: Bool, pausedAt: Date?, pausedRemainingSeconds: Int?) {
+         originalEndDate: Date, isPaused: Bool, pausedAt: Date?, pausedRemainingSeconds: Int?, pausedEndDate: Date? = nil) {
         self.id = id
         self.spec = spec
         self.recipeName = recipeName
@@ -51,6 +53,7 @@ struct ActiveTimer: Identifiable {
         self.isPaused = isPaused
         self.pausedAt = pausedAt
         self.pausedRemainingSeconds = pausedRemainingSeconds
+        self.pausedEndDate = pausedEndDate
     }
 
     // MARK: - Computed Properties
@@ -62,9 +65,9 @@ struct ActiveTimer: Identifiable {
 
     /// The effective end date (handles paused state)
     var endDate: Date {
-        if isPaused, let remaining = pausedRemainingSeconds {
-            // Paused: project from current time
-            return Date().addingTimeInterval(TimeInterval(remaining))
+        if isPaused, let pausedEnd = pausedEndDate {
+            // Paused: return stable snapshot date
+            return pausedEnd
         } else {
             // Running: use the original end date
             return originalEndDate
@@ -125,9 +128,11 @@ class TimerManager: ObservableObject {
 
         // Calculate and save remaining time before pausing
         let remaining = activeTimers[index].remainingSeconds()
+        let pausedEndDate = Date().addingTimeInterval(TimeInterval(remaining))
         activeTimers[index].isPaused = true
         activeTimers[index].pausedAt = Date()
         activeTimers[index].pausedRemainingSeconds = remaining
+        activeTimers[index].pausedEndDate = pausedEndDate
 
         // Cancel the timer task
         timerTasks[id]?.cancel()
@@ -160,7 +165,8 @@ class TimerManager: ObservableObject {
             originalEndDate: newEndDate,
             isPaused: false,
             pausedAt: nil,
-            pausedRemainingSeconds: nil
+            pausedRemainingSeconds: nil,
+            pausedEndDate: nil
         )
 
         // Restart countdown task
