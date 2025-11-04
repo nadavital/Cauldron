@@ -352,7 +352,7 @@ class CookModeCoordinator {
 
         // Get shortest running timer with valid future end date
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { $0.isRunning && $0.endDate > Date() }
+            .filter { !$0.isPaused && $0.endDate > Date() }
             .min(by: { $0.endDate < $1.endDate })
 
         let contentState = CookModeActivityAttributes.ContentState(
@@ -384,8 +384,21 @@ class CookModeCoordinator {
 
         // Get shortest running timer with valid future end date
         let shortestTimer = dependencies.timerManager.activeTimers
-            .filter { $0.isRunning && $0.endDate > Date() }
+            .filter { !$0.isPaused && $0.endDate > Date() }
             .min(by: { $0.endDate < $1.endDate })
+
+        // Debug logging to diagnose timer issues
+        if dependencies.timerManager.activeTimers.isEmpty {
+            AppLogger.general.debug("🔄 Updating Live Activity - No active timers")
+        } else {
+            AppLogger.general.debug("🔄 Updating Live Activity - \(dependencies.timerManager.activeTimers.count) timer(s)")
+            if let timer = shortestTimer {
+                let remaining = timer.endDate.timeIntervalSince(Date())
+                AppLogger.general.debug("   Primary timer ends in \(Int(remaining))s at \(timer.endDate)")
+            } else {
+                AppLogger.general.debug("   No valid running timer (all paused or expired)")
+            }
+        }
 
         let contentState = CookModeActivityAttributes.ContentState(
             currentStep: currentStepIndex,

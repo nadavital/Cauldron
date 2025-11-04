@@ -11,38 +11,73 @@ import AudioToolbox
 import os
 import Combine
 
-/// Represents an active running timer
+/// Represents an active timer (running or paused)
 struct ActiveTimer: Identifiable {
     let id: UUID
     let spec: TimerSpec
     let recipeName: String
     let stepIndex: Int
-    var startedAt: Date  // Made mutable for pause/resume
-    var pausedAt: Date?
-    var remainingSeconds: Int
-    var isRunning: Bool
+
+    // The absolute time when the timer will/would complete
+    // Set once when timer starts, never recalculated for running timers
+    let originalEndDate: Date
+
+    // Pause state
+    var isPaused: Bool
+    var pausedAt: Date?  // When the timer was paused (for UI display)
+    var pausedRemainingSeconds: Int?  // Remaining seconds when paused
+
+    // MARK: - Initialization
 
     init(spec: TimerSpec, recipeName: String, stepIndex: Int) {
         self.id = UUID()
         self.spec = spec
         self.recipeName = recipeName
         self.stepIndex = stepIndex
-        self.startedAt = Date()
+        self.originalEndDate = Date().addingTimeInterval(TimeInterval(spec.seconds))
+        self.isPaused = false
         self.pausedAt = nil
-        self.remainingSeconds = spec.seconds
-        self.isRunning = true
+        self.pausedRemainingSeconds = nil
     }
 
-    /// Calculate when the timer will end
+    // Internal initializer for resume functionality
+    init(id: UUID, spec: TimerSpec, recipeName: String, stepIndex: Int,
+         originalEndDate: Date, isPaused: Bool, pausedAt: Date?, pausedRemainingSeconds: Int?) {
+        self.id = id
+        self.spec = spec
+        self.recipeName = recipeName
+        self.stepIndex = stepIndex
+        self.originalEndDate = originalEndDate
+        self.isPaused = isPaused
+        self.pausedAt = pausedAt
+        self.pausedRemainingSeconds = pausedRemainingSeconds
+    }
+
+    // MARK: - Computed Properties
+
+    /// Whether the timer is currently running (not paused)
+    var isRunning: Bool {
+        !isPaused
+    }
+
+    /// The effective end date (handles paused state)
     var endDate: Date {
-        if isRunning {
-            // For running timers, calculate based on elapsed time
-            let elapsed = Date().timeIntervalSince(startedAt)
-            let remaining = max(0, TimeInterval(remainingSeconds) - elapsed)
-            return Date().addingTimeInterval(remaining)
+        if isPaused, let remaining = pausedRemainingSeconds {
+            // Paused: project from current time
+            return Date().addingTimeInterval(TimeInterval(remaining))
         } else {
-            // Paused - calculate from current time with remaining seconds
-            return Date().addingTimeInterval(TimeInterval(remainingSeconds))
+            // Running: use the original end date
+            return originalEndDate
+        }
+    }
+
+    /// Calculate remaining seconds (for UI and pause logic)
+    func remainingSeconds(at date: Date = Date()) -> Int {
+        if isPaused, let remaining = pausedRemainingSeconds {
+            return remaining
+        } else {
+            let remaining = originalEndDate.timeIntervalSince(date)
+            return max(0, Int(remaining))
         }
     }
 }
@@ -86,13 +121,13 @@ class TimerManager: ObservableObject {
     /// Pause a running timer
     func pauseTimer(id: UUID) {
         guard let index = activeTimers.firstIndex(where: { $0.id == id }),
-              activeTimers[index].isRunning else { return }
+              !activeTimers[index].isPaused else { return }
 
         // Calculate and save remaining time before pausing
-        let remaining = getRemainingTime(id: id)
-        activeTimers[index].remainingSeconds = remaining
-        activeTimers[index].isRunning = false
+        let remaining = activeTimers[index].remainingSeconds()
+        activeTimers[index].isPaused = true
         activeTimers[index].pausedAt = Date()
+        activeTimers[index].pausedRemainingSeconds = remaining
 
         // Cancel the timer task
         timerTasks[id]?.cancel()
@@ -110,12 +145,23 @@ class TimerManager: ObservableObject {
     /// Resume a paused timer
     func resumeTimer(id: UUID) {
         guard let index = activeTimers.firstIndex(where: { $0.id == id }),
-              !activeTimers[index].isRunning else { return }
+              activeTimers[index].isPaused,
+              let remaining = activeTimers[index].pausedRemainingSeconds else { return }
 
-        // Update startedAt to current time (reset the timer start point)
-        activeTimers[index].startedAt = Date()
-        activeTimers[index].isRunning = true
-        activeTimers[index].pausedAt = nil
+        // Create new timer with remaining time
+        let newEndDate = Date().addingTimeInterval(TimeInterval(remaining))
+
+        // Update to running state with new end date
+        activeTimers[index] = ActiveTimer(
+            id: activeTimers[index].id,
+            spec: activeTimers[index].spec,
+            recipeName: activeTimers[index].recipeName,
+            stepIndex: activeTimers[index].stepIndex,
+            originalEndDate: newEndDate,
+            isPaused: false,
+            pausedAt: nil,
+            pausedRemainingSeconds: nil
+        )
 
         // Restart countdown task
         let task = Task {
@@ -131,7 +177,7 @@ class TimerManager: ObservableObject {
         // Notify listeners
         onTimersChanged?()
 
-        AppLogger.general.info("Resumed timer: \(id)")
+        AppLogger.general.info("Resumed timer: \(id) with \(remaining)s remaining")
     }
     
     /// Stop and remove a timer
@@ -162,33 +208,27 @@ class TimerManager: ObservableObject {
     /// Get remaining time for a timer
     func getRemainingTime(id: UUID) -> Int {
         guard let timer = activeTimers.first(where: { $0.id == id }) else { return 0 }
-        
-        if timer.isRunning {
-            let elapsed = Int(Date().timeIntervalSince(timer.startedAt))
-            return max(0, timer.remainingSeconds - elapsed)
-        } else {
-            return timer.remainingSeconds
-        }
+        return timer.remainingSeconds()
     }
     
     // MARK: - Private Helpers
     
     private func runTimer(id: UUID) async {
         while !Task.isCancelled {
-            guard let index = activeTimers.firstIndex(where: { $0.id == id }),
-                  activeTimers[index].isRunning else {
+            guard let timer = activeTimers.first(where: { $0.id == id }),
+                  !timer.isPaused else {
                 return
             }
-            
-            let remaining = getRemainingTime(id: id)
-            
+
+            let remaining = timer.remainingSeconds()
+
             if remaining <= 0 {
                 await timerCompleted(id: id)
                 return
             }
-            
+
             // Sleep for 1 second
-            try? await Task.sleep(nanoseconds: 1_000_000_000) // Check every 1.0s
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
     
@@ -211,18 +251,19 @@ class TimerManager: ObservableObject {
         content.body = "\(timer.spec.label) - \(timer.recipeName)"
         content.sound = .default
         content.interruptionLevel = .timeSensitive
-        
+
+        let remaining = timer.remainingSeconds()
         let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: TimeInterval(timer.remainingSeconds),
+            timeInterval: TimeInterval(remaining),
             repeats: false
         )
-        
+
         let request = UNNotificationRequest(
             identifier: timer.id.uuidString,
             content: content,
             trigger: trigger
         )
-        
+
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
                 AppLogger.general.error("Failed to schedule notification: \(error.localizedDescription)")

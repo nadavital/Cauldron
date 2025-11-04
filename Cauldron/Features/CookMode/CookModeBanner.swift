@@ -67,7 +67,7 @@ struct CookModeBanner: View {
         let activeTimers = dependencies.timerManager.activeTimers
         // Get shortest running timer with valid future end date
         let shortestTimer = activeTimers
-            .filter { $0.isRunning && $0.endDate > Date() }
+            .filter { !$0.isPaused && $0.endDate > Date() }
             .min(by: { $0.endDate < $1.endDate })
 
         HStack(spacing: 6) {
