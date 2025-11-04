@@ -47,17 +47,7 @@ struct CookModeLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     // Timer display
-                    if let timerEndDate = context.state.primaryTimerEndDate {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Image(systemName: "timer")
-                                .font(.title3)
-                                .foregroundStyle(.orange)
-                            Text(timerEndDate, style: .timer)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .monospacedDigit()
-                        }
-                    } else if context.state.activeTimerCount > 0 {
+                    if context.state.activeTimerCount > 0 {
                         VStack(alignment: .trailing, spacing: 2) {
                             Image(systemName: "timer")
                                 .font(.title3)
@@ -125,12 +115,10 @@ struct CookModeLiveActivity: Widget {
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
                 // Show timer when active, step count otherwise
-                if let timerEndDate = context.state.primaryTimerEndDate {
-                    // Timer is running - show only timer
-                    Text(timerEndDate, style: .timer)
+                if context.state.activeTimerCount > 0 {
+                    // Has timer - show static "🔥"
+                    Text("🔥")
                         .font(.caption2)
-                        .fontWeight(.medium)
-                        .monospacedDigit()
                         .frame(minWidth: 35, alignment: .trailing)
                 } else {
                     // No timer - show step progress
@@ -253,16 +241,9 @@ struct TimerBadgeView: View {
             Image(systemName: "timer")
                 .font(.caption2)
 
-            if let endDate = primaryEndDate {
-                Text(endDate, style: .timer)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .monospacedDigit()
-            } else {
-                Text("\(count)")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
+            Text("\(count)")
+                .font(.caption)
+                .fontWeight(.medium)
         }
         .fixedSize(horizontal: true, vertical: false)  // Only fix horizontal to prevent width expansion
         .padding(.horizontal, 6)  // Reduced from 8 for tighter fit
