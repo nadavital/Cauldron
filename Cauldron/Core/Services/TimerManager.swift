@@ -36,9 +36,12 @@ struct ActiveTimer: Identifiable {
     /// Calculate when the timer will end
     var endDate: Date {
         if isRunning {
-            return startedAt.addingTimeInterval(TimeInterval(remainingSeconds))
+            // For running timers, calculate based on elapsed time
+            let elapsed = Date().timeIntervalSince(startedAt)
+            let remaining = max(0, TimeInterval(remainingSeconds) - elapsed)
+            return Date().addingTimeInterval(remaining)
         } else {
-            // Paused - calculate from current time
+            // Paused - calculate from current time with remaining seconds
             return Date().addingTimeInterval(TimeInterval(remainingSeconds))
         }
     }

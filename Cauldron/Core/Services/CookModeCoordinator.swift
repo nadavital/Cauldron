@@ -221,13 +221,15 @@ class CookModeCoordinator {
 
         let recipeName = currentRecipe?.title ?? "Unknown"
 
-        // Clear state
-        isActive = false
-        showFullScreen = false
-        currentRecipe = nil
-        currentStepIndex = 0
-        totalSteps = 0
-        sessionStartTime = nil
+        // Batch all state changes together to prevent cascading view updates
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isActive = false
+            showFullScreen = false
+            currentRecipe = nil
+            currentStepIndex = 0
+            totalSteps = 0
+            sessionStartTime = nil
+        }
 
         // Clear persisted state
         clearState()
