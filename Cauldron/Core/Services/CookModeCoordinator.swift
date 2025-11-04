@@ -353,7 +353,7 @@ class CookModeCoordinator {
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
+            primaryTimerEndDate: dependencies.timerManager.activeTimers.first?.endDate,
             progressPercentage: progress,
             lastUpdated: Date()
         )
@@ -380,7 +380,7 @@ class CookModeCoordinator {
             totalSteps: totalSteps,
             stepInstruction: currentStep?.text ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
-            primaryTimerSeconds: dependencies.timerManager.activeTimers.first?.remainingSeconds,
+            primaryTimerEndDate: dependencies.timerManager.activeTimers.first?.endDate,
             progressPercentage: progress,
             lastUpdated: Date()
         )

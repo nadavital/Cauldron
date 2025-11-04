@@ -21,7 +21,7 @@ struct ActiveTimer: Identifiable {
     var pausedAt: Date?
     var remainingSeconds: Int
     var isRunning: Bool
-    
+
     init(spec: TimerSpec, recipeName: String, stepIndex: Int) {
         self.id = UUID()
         self.spec = spec
@@ -31,6 +31,16 @@ struct ActiveTimer: Identifiable {
         self.pausedAt = nil
         self.remainingSeconds = spec.seconds
         self.isRunning = true
+    }
+
+    /// Calculate when the timer will end
+    var endDate: Date {
+        if isRunning {
+            return startedAt.addingTimeInterval(TimeInterval(remainingSeconds))
+        } else {
+            // Paused - calculate from current time
+            return Date().addingTimeInterval(TimeInterval(remainingSeconds))
+        }
     }
 }
 

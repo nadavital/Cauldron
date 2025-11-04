@@ -47,12 +47,12 @@ struct CookModeLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     // Timer display
-                    if let timerSeconds = context.state.primaryTimerSeconds {
+                    if let timerEndDate = context.state.primaryTimerEndDate {
                         VStack(alignment: .trailing, spacing: 2) {
                             Image(systemName: "timer")
                                 .font(.title3)
                                 .foregroundStyle(.orange)
-                            Text(formatTime(timerSeconds))
+                            Text(timerEndDate, style: .timer)
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .monospacedDigit()
@@ -132,22 +132,22 @@ struct CookModeLiveActivity: Widget {
                         .monospacedDigit()
 
                     // Timer indicator
-                    if let timerSeconds = context.state.primaryTimerSeconds {
+                    if let timerEndDate = context.state.primaryTimerEndDate {
                         Text("·")
                             .foregroundStyle(.secondary)
-                        Text(formatTime(timerSeconds))
+                        Text(timerEndDate, style: .timer)
                             .font(.caption2)
                             .monospacedDigit()
                     }
                 }
             } minimal: {
                 // Minimal (single icon when collapsed)
-                if let timerSeconds = context.state.primaryTimerSeconds {
+                if let timerEndDate = context.state.primaryTimerEndDate {
                     // Show timer countdown when timer is active
                     VStack(spacing: 0) {
                         Image(systemName: "timer")
                             .font(.system(size: 10))
-                        Text(formatTimeMinimal(timerSeconds))
+                        Text(timerEndDate, style: .timer)
                             .font(.system(size: 8))
                             .monospacedDigit()
                     }
@@ -202,7 +202,7 @@ struct LockScreenLiveActivityView: View {
                 if context.state.activeTimerCount > 0 {
                     TimerBadgeView(
                         count: context.state.activeTimerCount,
-                        primarySeconds: context.state.primaryTimerSeconds
+                        primaryEndDate: context.state.primaryTimerEndDate
                     )
                 }
             }
@@ -260,15 +260,15 @@ struct LockScreenLiveActivityView: View {
 /// Timer badge showing active timer count and countdown
 struct TimerBadgeView: View {
     let count: Int
-    let primarySeconds: Int?
+    let primaryEndDate: Date?
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "timer")
                 .font(.caption2)
 
-            if let seconds = primarySeconds {
-                Text(formatTime(seconds))
+            if let endDate = primaryEndDate {
+                Text(endDate, style: .timer)
                     .font(.caption)
                     .fontWeight(.medium)
                     .monospacedDigit()
@@ -299,26 +299,5 @@ struct TrailingIconLabelStyle: LabelStyle {
 extension LabelStyle where Self == TrailingIconLabelStyle {
     static var trailingIcon: TrailingIconLabelStyle {
         TrailingIconLabelStyle()
-    }
-}
-
-// MARK: - Helper Functions
-
-/// Format seconds into MM:SS format
-func formatTime(_ seconds: Int) -> String {
-    let minutes = seconds / 60
-    let remainingSeconds = seconds % 60
-    return String(format: "%d:%02d", minutes, remainingSeconds)
-}
-
-/// Format seconds into minimal format (M:SS or SS)
-func formatTimeMinimal(_ seconds: Int) -> String {
-    let minutes = seconds / 60
-    let remainingSeconds = seconds % 60
-
-    if minutes > 0 {
-        return String(format: "%d:%02d", minutes, remainingSeconds)
-    } else {
-        return String(format: "%02d", remainingSeconds)
     }
 }
