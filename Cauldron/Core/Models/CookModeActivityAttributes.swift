@@ -25,9 +25,9 @@ struct CookModeActivityAttributes: ActivityAttributes {
         /// Number of active timers currently running
         var activeTimerCount: Int
 
-        /// End date of the primary (shortest) timer, if any
-        /// iOS will automatically display countdown using Text(date, style: .timer)
-        var primaryTimerEndDate: Date?
+        /// Remaining seconds for the primary (shortest) timer, if any
+        /// Store as seconds to avoid Date serialization issues
+        var primaryTimerRemainingSeconds: Int?
 
         /// Overall progress through the recipe (0.0 to 1.0)
         var progressPercentage: Double

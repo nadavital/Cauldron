@@ -47,7 +47,18 @@ struct CookModeLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     // Timer display
-                    if context.state.activeTimerCount > 0 {
+                    if let remainingSeconds = context.state.primaryTimerRemainingSeconds, remainingSeconds > 0 {
+                        let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Image(systemName: "timer")
+                                .font(.title3)
+                                .foregroundStyle(.orange)
+                            Text(endDate, style: .timer)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .monospacedDigit()
+                        }
+                    } else if context.state.activeTimerCount > 0 {
                         VStack(alignment: .trailing, spacing: 2) {
                             Image(systemName: "timer")
                                 .font(.title3)
@@ -115,10 +126,12 @@ struct CookModeLiveActivity: Widget {
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
                 // Show timer when active, step count otherwise
-                if context.state.activeTimerCount > 0 {
-                    // Has timer - show static "🔥"
-                    Text("🔥")
+                if let remainingSeconds = context.state.primaryTimerRemainingSeconds, remainingSeconds > 0 {
+                    let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
+                    Text(endDate, style: .timer)
                         .font(.caption2)
+                        .fontWeight(.medium)
+                        .monospacedDigit()
                         .frame(minWidth: 35, alignment: .trailing)
                 } else {
                     // No timer - show step progress
@@ -176,7 +189,7 @@ struct LockScreenLiveActivityView: View {
                 if context.state.activeTimerCount > 0 {
                     TimerBadgeView(
                         count: context.state.activeTimerCount,
-                        primaryEndDate: context.state.primaryTimerEndDate
+                        primaryRemainingSeconds: context.state.primaryTimerRemainingSeconds
                     )
                 }
             }
@@ -234,16 +247,24 @@ struct LockScreenLiveActivityView: View {
 /// Timer badge showing active timer count and countdown
 struct TimerBadgeView: View {
     let count: Int
-    let primaryEndDate: Date?
+    let primaryRemainingSeconds: Int?
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "timer")
                 .font(.caption2)
 
-            Text("\(count)")
-                .font(.caption)
-                .fontWeight(.medium)
+            if let remainingSeconds = primaryRemainingSeconds, remainingSeconds > 0 {
+                let endDate = Date().addingTimeInterval(TimeInterval(remainingSeconds))
+                Text(endDate, style: .timer)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+            } else {
+                Text("\(count)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
         }
         .fixedSize(horizontal: true, vertical: false)  // Only fix horizontal to prevent width expansion
         .padding(.horizontal, 6)  // Reduced from 8 for tighter fit
