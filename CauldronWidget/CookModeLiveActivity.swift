@@ -47,8 +47,7 @@ struct CookModeLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     // Timer display
-                    if let timerEndDate = context.state.primaryTimerEndDate,
-                       timerEndDate.timeIntervalSinceNow > 1.0 {
+                    if let timerEndDate = context.state.primaryTimerEndDate {
                         VStack(alignment: .trailing, spacing: 2) {
                             Image(systemName: "timer")
                                 .font(.title3)
@@ -126,8 +125,7 @@ struct CookModeLiveActivity: Widget {
             } compactTrailing: {
                 // Compact Trailing (right side of notch)
                 // Show timer when active, step count otherwise
-                if let timerEndDate = context.state.primaryTimerEndDate,
-                   timerEndDate.timeIntervalSinceNow > 1.0 {
+                if let timerEndDate = context.state.primaryTimerEndDate {
                     // Timer is running - show only timer
                     Text(timerEndDate, style: .timer)
                         .font(.caption2)
@@ -284,7 +282,7 @@ struct TimerBadgeView: View {
             Image(systemName: "timer")
                 .font(.caption2)
 
-            if let endDate = primaryEndDate, endDate.timeIntervalSinceNow > 1.0 {
+            if let endDate = primaryEndDate {
                 Text(endDate, style: .timer)
                     .font(.caption)
                     .fontWeight(.medium)
