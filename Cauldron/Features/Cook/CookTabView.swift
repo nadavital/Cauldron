@@ -127,8 +127,42 @@ struct CookTabView: View {
     private func loadCollections() async {
         if let userId = CurrentUserSession.shared.userId {
             do {
-                let allCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
-                collections = allCollections.filter { $0.userId == userId }
+                // Load from local repository
+                let localCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
+                var allCollections = localCollections.filter { $0.userId == userId }
+
+                // Also fetch from CloudKit to get any collections that might not be synced locally yet
+                if CurrentUserSession.shared.isCloudSyncAvailable {
+                    do {
+                        // Fetch all visibility levels for current user's collections
+                        let publicCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                            ownerIds: [userId],
+                            visibility: .publicRecipe
+                        )
+                        let friendsCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                            ownerIds: [userId],
+                            visibility: .friendsOnly
+                        )
+                        let privateCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                            ownerIds: [userId],
+                            visibility: .privateRecipe
+                        )
+
+                        // Combine all CloudKit collections
+                        let cloudCollections = publicCollections + friendsCollections + privateCollections
+
+                        // Add any CloudKit collections that aren't already in local storage
+                        for cloudCollection in cloudCollections {
+                            if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
+                                allCollections.append(cloudCollection)
+                            }
+                        }
+                    } catch {
+                        AppLogger.general.warning("Failed to load collections from CloudKit: \(error.localizedDescription)")
+                    }
+                }
+
+                collections = allCollections.sorted { $0.updatedAt > $1.updatedAt }
             } catch {
                 AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
             }

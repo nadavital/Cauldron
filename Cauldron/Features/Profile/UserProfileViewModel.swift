@@ -19,6 +19,8 @@ class UserProfileViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var userRecipes: [SharedRecipe] = []
     @Published var isLoadingRecipes = false
+    @Published var userCollections: [Collection] = []
+    @Published var isLoadingCollections = false
     @Published var connections: [ManagedConnection] = []
     @Published var isLoadingConnections = false
     @Published var usersMap: [UUID: User] = [:]
@@ -32,6 +34,10 @@ class UserProfileViewModel: ObservableObject {
     private var lastRecipeLoadTime: Date?
     private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
     private var lastConnectionState: ConnectionState?
+
+    // Collection caching
+    private var lastCollectionLoadTime: Date?
+    private var lastCollectionConnectionState: ConnectionState?
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -312,6 +318,69 @@ class UserProfileViewModel: ObservableObject {
             sharedRecipe.recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
             sharedRecipe.recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
         }
+    }
+
+    // MARK: - Collection Fetching
+
+    func loadUserCollections(forceRefresh: Bool = false) async {
+        // Check cache validity
+        if !forceRefresh, let lastLoadTime = lastCollectionLoadTime,
+           Date().timeIntervalSince(lastLoadTime) < cacheValidityDuration,
+           lastCollectionConnectionState == connectionState {
+            AppLogger.general.info("Using cached collections for \(self.user.username)")
+            return
+        }
+
+        // Invalidate cache if connection state changed
+        if lastCollectionConnectionState != connectionState {
+            AppLogger.general.info("Connection state changed, invalidating collection cache")
+            lastCollectionConnectionState = connectionState
+        }
+
+        isLoadingCollections = true
+
+        do {
+            userCollections = try await fetchUserCollections()
+            lastCollectionLoadTime = Date()
+            lastCollectionConnectionState = connectionState
+            AppLogger.general.info("✅ Loaded \(self.userCollections.count) collections for user \(self.user.username)")
+        } catch {
+            AppLogger.general.error("❌ Failed to load user collections: \(error.localizedDescription)")
+            errorMessage = "Failed to load collections: \(error.localizedDescription)"
+            showError = true
+        }
+
+        isLoadingCollections = false
+    }
+
+    private func fetchUserCollections() async throws -> [Collection] {
+        var allCollections: [Collection] = []
+
+        // If viewing own profile, show public + friends-only (what friends see)
+        // If connected to user, also show public + friends-only
+        // Otherwise, only show public
+        let shouldShowFriendsOnly = isCurrentUser || connectionState == .connected
+
+        // Fetch public collections from this user
+        let publicCollections = try await dependencies.cloudKitService.queryCollections(
+            ownerIds: [user.id],
+            visibility: .publicRecipe
+        )
+        AppLogger.general.info("Found \(publicCollections.count) public collections from \(self.user.username)")
+        allCollections.append(contentsOf: publicCollections)
+
+        // If viewing own profile or connected, also fetch friends-only collections
+        if shouldShowFriendsOnly {
+            let friendsCollections = try await dependencies.cloudKitService.queryCollections(
+                ownerIds: [user.id],
+                visibility: .friendsOnly
+            )
+            AppLogger.general.info("Found \(friendsCollections.count) friends-only collections from \(self.user.username)")
+            allCollections.append(contentsOf: friendsCollections)
+        }
+
+        // Sort by updated date (most recent first)
+        return allCollections.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     var displayedConnections: [ManagedConnection] {

@@ -79,7 +79,8 @@ struct CollectionCardView: View {
         Group {
             let size: CGFloat = 80  // 160 / 2 for the 2x2 grid
 
-            if recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+            // Show empty state if collection has no recipes, not based on loaded images
+            if collection.recipeCount == 0 {
                 // Empty state - show placeholder
                 collectionColor
                     .overlay(
@@ -88,6 +89,19 @@ struct CollectionCardView: View {
                                 .font(.system(size: 30))
                                 .foregroundColor(.white.opacity(0.6))
                             Text("No recipes")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    )
+            } else if recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+                // Has recipes but images not loaded - show placeholder with count
+                collectionColor
+                    .overlay(
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 30))
+                                .foregroundColor(.white.opacity(0.6))
+                            Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.8))
                         }

@@ -1221,12 +1221,7 @@ actor CloudKitService {
         // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
 
-        // Use localization with field substitution to show acceptor's display name
-        // The %@ placeholder will be replaced with the value from the toUsername field
-        notification.alertLocalizationKey = "CONNECTION_ACCEPTED_ALERT"
-        notification.alertLocalizationArgs = ["toUsername"]
-
-        // Fallback message if localization fails
+        // Use simple alert message (can't rely on optional fields like toUsername being present)
         notification.alertBody = "Your friend request was accepted!"
 
         notification.soundName = "default"
@@ -1234,7 +1229,8 @@ actor CloudKitService {
         notification.shouldSendContentAvailable = true
 
         // Include connection data in userInfo for navigation
-        notification.desiredKeys = ["connectionId", "toUserId", "toUsername", "toDisplayName"]
+        // Only request fields that are guaranteed to exist (avoid optional fields that may cause errors)
+        notification.desiredKeys = ["id", "fromUserId", "toUserId", "status"]
 
         subscription.notificationInfo = notification
 
@@ -1463,6 +1459,48 @@ actor CloudKitService {
         } catch let error as CKError {
             // Handle schema not yet deployed - record type doesn't exist until first save
             if error.code == .unknownItem || error.errorCode == 11 { // 11 = unknown record type
+                logger.info("Collection record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
+    }
+
+    /// Query collections by owner and visibility (similar to querySharedRecipes)
+    func queryCollections(ownerIds: [UUID], visibility: RecipeVisibility) async throws -> [Collection] {
+        logger.info("🔍 Querying collections from \(ownerIds.count) owners with visibility: \(visibility.rawValue)")
+
+        guard !ownerIds.isEmpty else { return [] }
+
+        let db = try getPublicDatabase()
+
+        // Build predicate for userId and visibility
+        let ownerIdStrings = ownerIds.map { $0.uuidString }
+        let predicate = NSPredicate(
+            format: "userId IN %@ AND visibility == %@",
+            ownerIdStrings,
+            visibility.rawValue
+        )
+
+        let query = CKQuery(recordType: collectionRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        do {
+            let results = try await db.records(matching: query, resultsLimit: 100)
+
+            var collections: [Collection] = []
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let collection = try? collectionFromRecord(record) {
+                    collections.append(collection)
+                }
+            }
+
+            logger.info("✅ Found \(collections.count) collections")
+            return collections
+        } catch let error as CKError {
+            // Handle schema not yet deployed - record type doesn't exist until first save
+            if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("Collection record type not yet in CloudKit schema - returning empty list")
                 return []
             }

@@ -13,6 +13,7 @@ struct UserProfileView: View {
     @StateObject private var viewModel: UserProfileViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
+    @State private var showingSettings = false
     @State private var hasLoadedInitialData = false
 
     init(user: User, dependencies: DependencyContainer) {
@@ -29,9 +30,19 @@ struct UserProfileView: View {
                 // Profile Header
                 profileHeader
 
+                // Friend View Indicator (only for current user)
+                if viewModel.isCurrentUser {
+                    friendViewIndicator
+                }
+
                 // Connection Management Section
                 if !viewModel.isCurrentUser {
                     connectionSection
+                }
+
+                // Collections Section (only show if user has collections)
+                if !viewModel.userCollections.isEmpty || viewModel.isLoadingCollections {
+                    collectionsSection
                 }
 
                 // Recipes Section
@@ -49,6 +60,7 @@ struct UserProfileView: View {
                 Task {
                     await viewModel.loadConnectionStatus()
                     await viewModel.loadUserRecipes()
+                    await viewModel.loadUserCollections()
                     if viewModel.isCurrentUser {
                         await viewModel.loadConnections()
                     }
@@ -60,8 +72,8 @@ struct UserProfileView: View {
         } message: {
             Text(viewModel.errorMessage)
         }
-        .sheet(isPresented: $showingEditProfile) {
-            EditProfileView(dependencies: viewModel.dependencies)
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(dependencies: viewModel.dependencies)
         }
     }
 
@@ -99,12 +111,12 @@ struct UserProfileView: View {
                 }
             }
 
-            // Edit Profile button for current user
+            // Settings button for current user
             if viewModel.isCurrentUser {
                 Button {
-                    showingEditProfile = true
+                    showingSettings = true
                 } label: {
-                    Label("Edit Profile", systemImage: "pencil")
+                    Label("Settings", systemImage: "gearshape")
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
@@ -113,6 +125,20 @@ struct UserProfileView: View {
             }
         }
         .padding(.top)
+    }
+
+    private var friendViewIndicator: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "eye")
+                .font(.caption)
+            Text("This is how your profile appears to friends")
+                .font(.caption)
+        }
+        .foregroundColor(.secondary)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(8)
     }
 
     @ViewBuilder
@@ -290,6 +316,73 @@ struct UserProfileView: View {
             .disabled(viewModel.isProcessing)
         }
         .padding()
+    }
+
+    private var collectionsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Section header
+            HStack {
+                Label("Collections", systemImage: "folder")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                Spacer()
+
+                if !viewModel.isLoadingCollections && !viewModel.userCollections.isEmpty {
+                    Text("\(viewModel.userCollections.count)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal)
+
+            // Content
+            if viewModel.isLoadingCollections {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .padding(.vertical, 40)
+            } else if viewModel.userCollections.isEmpty {
+                emptyCollectionsState
+            } else {
+                collectionsScrollView
+            }
+        }
+    }
+
+    private var emptyCollectionsState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "folder")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary.opacity(0.5))
+
+            Text(viewModel.isCurrentUser ? "No collections to show" : "\(user.displayName) hasn't shared any collections yet")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    private var collectionsScrollView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                ForEach(viewModel.userCollections, id: \.id) { collection in
+                    NavigationLink(destination: CollectionDetailView(
+                        collection: collection,
+                        dependencies: viewModel.dependencies
+                    )) {
+                        CollectionCardView(collection: collection, recipeImages: [])
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+        }
     }
 
     private var recipesSection: some View {

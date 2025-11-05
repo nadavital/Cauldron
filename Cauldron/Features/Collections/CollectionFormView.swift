@@ -330,6 +330,9 @@ struct CollectionFormView: View {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let recipeIds = Array(selectedRecipeIds)
 
+            // Determine cover image type based on what's selected
+            let coverType: CoverImageType = emoji != nil ? .emoji : .recipeGrid
+
             if let existingCollection = collectionToEdit {
                 // Update existing collection
                 let updated = existingCollection.updated(
@@ -337,7 +340,8 @@ struct CollectionFormView: View {
                     recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: emoji,
-                    color: color
+                    color: color,
+                    coverImageType: coverType
                 )
                 try await dependencies.collectionRepository.update(updated)
                 AppLogger.general.info("✅ Updated collection: \(trimmedName)")
@@ -349,7 +353,8 @@ struct CollectionFormView: View {
                     recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: emoji,
-                    color: color
+                    color: color,
+                    coverImageType: coverType
                 )
                 try await dependencies.collectionRepository.create(newCollection)
                 AppLogger.general.info("✅ Created collection: \(trimmedName)")
