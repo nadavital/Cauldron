@@ -79,8 +79,7 @@ actor SharingService {
     /// Fetches public recipes from friends
     ///
     /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
-    /// To save a recipe for later, users must explicitly create a RecipeReference (via "Add to My Recipes")
-    /// or copy it to their personal collection (via "Save a Copy").
+    /// To save a recipe for later, users must explicitly add it to their personal collection via "Add to My Recipes".
     func getSharedRecipes() async throws -> [SharedRecipe] {
         logger.info("📥 Fetching shared recipes from PUBLIC database")
 

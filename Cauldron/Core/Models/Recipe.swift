@@ -175,7 +175,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             notes: notes,
             imageURL: imageURL,
             isFavorite: false, // Reset favorite status
-            visibility: .privateRecipe, // Make it private by default
+            visibility: .publicRecipe, // Keep it public by default to maintain sharing spirit
             ownerId: userId,
             cloudRecordName: nil, // Clear cloud record name for new copy
             createdAt: Date(),

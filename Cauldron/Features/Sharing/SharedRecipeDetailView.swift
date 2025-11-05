@@ -53,7 +53,7 @@ struct SharedRecipeDetailView: View {
         .navigationTitle(sharedRecipe.recipe.title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            // Save a Copy (independent recipe)
+            // Add to My Recipes (independent recipe)
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     Task {
@@ -80,7 +80,7 @@ struct SharedRecipeDetailView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                     } else {
-                        Label("Save a Copy", systemImage: "doc.on.doc")
+                        Label("Add to My Recipes", systemImage: "plus.circle")
                     }
                 }
                 .disabled(isPerformingAction || hasOwnedCopy || isCheckingDuplicates)
@@ -99,7 +99,7 @@ struct SharedRecipeDetailView: View {
         } message: {
             Text("This will remove the recipe from your shared list. You can't undo this action.")
         }
-        .toast(isShowing: $showCopyToast, icon: "doc.on.doc.fill", message: "Recipe copied!")
+        .toast(isShowing: $showCopyToast, icon: "checkmark.circle.fill", message: "Recipe added")
         .task {
             await checkForDuplicates()
         }
@@ -123,7 +123,7 @@ struct SharedRecipeDetailView: View {
                     .foregroundColor(.secondary)
             }
             
-            Text("This is a read-only view. Add to your recipes to save a reference (always synced) or copy to edit independently.")
+            Text("This is a read-only view. Tap 'Add to My Recipes' to save it to your library where you can edit it independently.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, 4)

@@ -536,7 +536,7 @@ struct CollectionRecipeSelectorSheet: View {
                             } header: {
                                 Text("Saved from Others")
                             } footer: {
-                                Text("To add these to your collection, you'll need to save a copy")
+                                Text("To add these to your collection, you'll need to add them to your recipes first")
                                     .font(.caption)
                             }
                         }

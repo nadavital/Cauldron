@@ -54,7 +54,10 @@ actor RecipeRepository {
                 ownerId: recipe.ownerId,
                 cloudRecordName: recipe.id.uuidString, // Use recipe ID as CloudKit record name
                 createdAt: recipe.createdAt,
-                updatedAt: recipe.updatedAt
+                updatedAt: recipe.updatedAt,
+                originalCreatorId: recipe.originalCreatorId,
+                originalCreatorName: recipe.originalCreatorName,
+                savedAt: recipe.savedAt
             )
         }
 
