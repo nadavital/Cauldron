@@ -69,7 +69,7 @@ actor RecipeRepository {
         // Immediately attempt to sync to CloudKit (not detached)
         await syncRecipeToCloudKit(recipeToSave, cloudKitService: cloudKitService)
 
-        // If visibility is friends-only or public, also copy to PUBLIC database for sharing
+        // If visibility is public, also copy to PUBLIC database for sharing
         await syncRecipeToPublicDatabase(recipeToSave, cloudKitService: cloudKitService)
     }
 
@@ -333,7 +333,7 @@ actor RecipeRepository {
 
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
     private func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitService) async {
-        // Only sync if visibility is friends-only or public
+        // Only sync if visibility is public
         guard recipe.visibility != .privateRecipe else {
             // If recipe was made private, delete from PUBLIC database
             await deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)

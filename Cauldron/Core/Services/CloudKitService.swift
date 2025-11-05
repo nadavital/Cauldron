@@ -758,11 +758,11 @@ actor CloudKitService {
     // MARK: - Public Recipe Sharing (NEW Architecture)
 
     /// Copy recipe to PUBLIC database when visibility != .private
-    /// This makes the recipe discoverable by friends or everyone
+    /// This makes the recipe discoverable by everyone
     func copyRecipeToPublic(_ recipe: Recipe) async throws {
         logger.info("📤 Copying recipe to PUBLIC database: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
 
-        // Only copy if visibility is friends-only or public
+        // Only copy if visibility is public
         guard recipe.visibility != .privateRecipe else {
             logger.info("Recipe is private, skipping PUBLIC database copy")
             return
@@ -991,12 +991,18 @@ actor CloudKitService {
         let fromResults = try await db.records(matching: fromQuery)
 
         for (_, result) in fromResults.matchResults {
-            if let record = try? result.get(),
-               let connection = try? connectionFromRecord(record),
-               !connectionIds.contains(connection.id) {
-                connections.append(connection)
-                connectionIds.insert(connection.id)
-                logger.debug("  Found connection (from): \(connection.id) - status: \(connection.status.rawValue)")
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                        logger.debug("  Found connection (from): \(connection.id) - status: \(connection.status.rawValue)")
+                    }
+                } catch {
+                    // Skip legacy connections (rejected/blocked) - they should be deleted
+                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
+                }
             }
         }
 
@@ -1006,25 +1012,29 @@ actor CloudKitService {
         let toResults = try await db.records(matching: toQuery)
 
         for (_, result) in toResults.matchResults {
-            if let record = try? result.get(),
-               let connection = try? connectionFromRecord(record),
-               !connectionIds.contains(connection.id) {
-                connections.append(connection)
-                connectionIds.insert(connection.id)
-                logger.debug("  Found connection (to): \(connection.id) - status: \(connection.status.rawValue)")
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                        logger.debug("  Found connection (to): \(connection.id) - status: \(connection.status.rawValue)")
+                    }
+                } catch {
+                    // Skip legacy connections (rejected/blocked) - they should be deleted
+                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
+                }
             }
         }
 
         logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
-        logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted, \(connections.filter { $0.status == .rejected }.count) rejected")
+        logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted")
 
         // Clean up duplicates - remove duplicate connections between same two users
         let cleanedConnections = try await removeDuplicateConnections(connections)
 
-        // Filter out rejected connections - they should be invisible to users
-        let filteredConnections = cleanedConnections.filter { $0.status != .rejected }
-        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected/duplicates)")
-        return filteredConnections
+        logger.info("Returning \(cleanedConnections.count) connections")
+        return cleanedConnections
     }
 
     /// Remove duplicate connections between the same two users

@@ -15,7 +15,7 @@ import Foundation
 /// Key characteristics:
 /// - Explicit membership: recipes are manually added/removed
 /// - Can contain both owned recipes and referenced recipes
-/// - Support visibility levels (private/friends/public) for sharing
+/// - Support visibility levels (private/public) for sharing
 /// - Stored in CloudKit PUBLIC database to enable sharing
 /// - Custom presentation with emoji/color theme
 ///
@@ -50,7 +50,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         description: String? = nil,
         userId: UUID,
         recipeIds: [UUID] = [],
-        visibility: RecipeVisibility = .privateRecipe,
+        visibility: RecipeVisibility = .publicRecipe,
         emoji: String? = nil,
         color: String? = nil,
         coverImageType: CoverImageType = .recipeGrid,
@@ -155,8 +155,6 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         switch visibility {
         case .publicRecipe:
             return "public"
-        case .friendsOnly:
-            return "public or friends-only"
         case .privateRecipe:
             return "any visibility"
         }

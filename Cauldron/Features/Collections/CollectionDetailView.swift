@@ -415,8 +415,6 @@ struct CollectionDetailView: View {
         switch collection.visibility {
         case .privateRecipe:
             return "lock.fill"
-        case .friendsOnly:
-            return "person.2.fill"
         case .publicRecipe:
             return "globe"
         }
@@ -426,8 +424,6 @@ struct CollectionDetailView: View {
         switch collection.visibility {
         case .privateRecipe:
             return "Private"
-        case .friendsOnly:
-            return "Friends"
         case .publicRecipe:
             return "Public"
         }

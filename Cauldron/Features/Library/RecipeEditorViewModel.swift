@@ -94,7 +94,7 @@ class RecipeEditorViewModel: ObservableObject {
     @Published var isSaving: Bool = false
     @Published var selectedImage: UIImage?
     @Published var imageFilename: String?
-    @Published var visibility: RecipeVisibility = .privateRecipe
+    @Published var visibility: RecipeVisibility = .publicRecipe
     
     let dependencies: DependencyContainer
     let existingRecipe: Recipe?

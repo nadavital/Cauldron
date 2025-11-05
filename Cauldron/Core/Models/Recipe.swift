@@ -47,7 +47,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         notes: String? = nil,
         imageURL: URL? = nil,
         isFavorite: Bool = false,
-        visibility: RecipeVisibility = .privateRecipe,  // Private by default, but still syncs to iCloud
+        visibility: RecipeVisibility = .publicRecipe,  // Public by default to encourage sharing
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
@@ -211,8 +211,6 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         switch visibility {
         case .publicRecipe:
             return true
-        case .friendsOnly:
-            return isFriend
         case .privateRecipe:
             return false
         }
@@ -226,9 +224,6 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         case .publicRecipe:
             // Public collections should only contain public recipes
             return visibility == .publicRecipe
-        case .friendsOnly:
-            // Friends-only collections can contain public or friends-only recipes
-            return visibility == .publicRecipe || visibility == .friendsOnly
         case .privateRecipe:
             // Private collections can contain any visibility
             return true

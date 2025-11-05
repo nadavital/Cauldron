@@ -33,7 +33,7 @@ struct CollectionFormView: View {
         _name = State(initialValue: collectionToEdit?.name ?? "")
         _emoji = State(initialValue: collectionToEdit?.emoji)
         _color = State(initialValue: collectionToEdit?.color)
-        _visibility = State(initialValue: collectionToEdit?.visibility ?? .privateRecipe)
+        _visibility = State(initialValue: collectionToEdit?.visibility ?? .publicRecipe)
         _selectedRecipeIds = State(initialValue: Set(collectionToEdit?.recipeIds ?? []))
     }
 
@@ -209,9 +209,6 @@ struct CollectionFormView: View {
                         Label("Private", systemImage: "lock.fill")
                             .tag(RecipeVisibility.privateRecipe)
 
-                        Label("Friends", systemImage: "person.2.fill")
-                            .tag(RecipeVisibility.friendsOnly)
-
                         Label("Public", systemImage: "globe")
                             .tag(RecipeVisibility.publicRecipe)
                     }
@@ -221,10 +218,6 @@ struct CollectionFormView: View {
                     switch visibility {
                     case .privateRecipe:
                         Text("Only you can see this collection")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    case .friendsOnly:
-                        Text("Your friends can see and save this collection")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     case .publicRecipe:
