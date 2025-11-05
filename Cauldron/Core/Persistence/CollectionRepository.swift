@@ -209,22 +209,27 @@ actor CollectionRepository {
 
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
+        logger.info("🔄 Attempting to sync collection '\(collection.name)' (visibility: \(collection.visibility.rawValue)) to CloudKit")
+
         let isAvailable = await cloudKitService.isCloudKitAvailable()
+        logger.info("CloudKit availability check: \(isAvailable)")
+
         guard isAvailable else {
-            logger.warning("CloudKit not available - collection will sync later: \(collection.name)")
+            logger.warning("⚠️ CloudKit not available - collection will sync later: \(collection.name)")
             pendingSyncCollections.insert(collection.id)
             return
         }
 
         do {
-            logger.info("Syncing collection to CloudKit: \(collection.name)")
+            logger.info("☁️ Syncing collection to CloudKit: \(collection.name)")
             try await cloudKitService.saveCollection(collection)
-            logger.info("✅ Successfully synced collection to CloudKit")
+            logger.info("✅ Successfully synced collection '\(collection.name)' to CloudKit")
 
             // Remove from pending if it was there
             pendingSyncCollections.remove(collection.id)
         } catch {
             logger.error("❌ CloudKit sync failed for collection '\(collection.name)': \(error.localizedDescription)")
+            logger.error("❌ Error details: \(error)")
             pendingSyncCollections.insert(collection.id)
         }
     }

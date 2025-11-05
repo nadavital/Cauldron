@@ -15,11 +15,8 @@ struct SharedRecipeDetailView: View {
     let onRemove: () async -> Void
 
     @State private var isPerformingAction = false
-    @State private var isSavingReference = false
     @State private var showRemoveConfirmation = false
-    @State private var showReferenceToast = false
     @State private var showCopyToast = false
-    @State private var hasExistingReference = false
     @State private var hasOwnedCopy = false
     @State private var isCheckingDuplicates = true
     @Environment(\.dismiss) private var dismiss
@@ -56,25 +53,6 @@ struct SharedRecipeDetailView: View {
         .navigationTitle(sharedRecipe.recipe.title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            // Add to My Recipes (saves reference - always synced)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task {
-                        await saveRecipeReference()
-                    }
-                } label: {
-                    if isSavingReference {
-                        ProgressView()
-                    } else if hasExistingReference {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    } else {
-                        Image(systemName: "bookmark")
-                    }
-                }
-                .disabled(isSavingReference || isPerformingAction || hasExistingReference || isCheckingDuplicates)
-            }
-
             // Save a Copy (independent recipe)
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -102,10 +80,10 @@ struct SharedRecipeDetailView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                     } else {
-                        Image(systemName: "doc.on.doc")
+                        Label("Save a Copy", systemImage: "doc.on.doc")
                     }
                 }
-                .disabled(isPerformingAction || isSavingReference || hasOwnedCopy || isCheckingDuplicates)
+                .disabled(isPerformingAction || hasOwnedCopy || isCheckingDuplicates)
             }
         }
         .confirmationDialog("Remove Shared Recipe", isPresented: $showRemoveConfirmation) {
@@ -121,16 +99,9 @@ struct SharedRecipeDetailView: View {
         } message: {
             Text("This will remove the recipe from your shared list. You can't undo this action.")
         }
-        .toast(isShowing: $showReferenceToast, icon: "bookmark.fill", message: "Added to your recipes!")
         .toast(isShowing: $showCopyToast, icon: "doc.on.doc.fill", message: "Recipe copied!")
         .task {
             await checkForDuplicates()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeReferenceRemoved"))) { _ in
-            // Re-check duplicates when a reference is removed
-            Task {
-                await checkForDuplicates()
-            }
         }
     }
     
@@ -257,58 +228,7 @@ struct SharedRecipeDetailView: View {
         .background(Color.gray.opacity(0.1))
         .cornerRadius(12)
     }
-    
 
-    private func saveRecipeReference() async {
-        isSavingReference = true
-        defer { isSavingReference = false }
-
-        do {
-            // Get current user
-            let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
-            guard let currentUser = currentUser else {
-                AppLogger.general.error("Cannot save recipe reference - no current user")
-                return
-            }
-
-            // Create recipe reference
-            let reference = RecipeReference.reference(userId: currentUser.id, recipe: sharedRecipe.recipe)
-
-            // Save to CloudKit PUBLIC database
-            try await dependencies.cloudKitService.saveRecipeReference(reference)
-
-            AppLogger.general.info("Saved recipe reference: \(sharedRecipe.recipe.title)")
-
-            // Update tracking state immediately
-            await MainActor.run {
-                hasExistingReference = true
-            }
-
-            // Notify other views that a recipe was added
-            await MainActor.run {
-                NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
-            }
-
-            // Refresh the SharingTabViewModel's reference tracking
-            await SharingTabViewModel.shared.loadSharedRecipes()
-
-            // Show toast notification
-            await MainActor.run {
-                withAnimation {
-                    showReferenceToast = true
-                }
-            }
-
-            // Dismiss sheet after toast appears
-            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
-            await MainActor.run {
-                dismiss()
-            }
-        } catch {
-            AppLogger.general.error("Failed to save recipe reference: \(error.localizedDescription)")
-            // TODO: Show error alert
-        }
-    }
 
     private func checkForDuplicates() async {
         guard let userId = CurrentUserSession.shared.userId else {
@@ -317,12 +237,6 @@ struct SharedRecipeDetailView: View {
         }
 
         do {
-            // Check for existing reference
-            hasExistingReference = try await dependencies.recipeReferenceManager.hasReference(
-                for: sharedRecipe.recipe.id,
-                userId: userId
-            )
-
             // Check for owned copy
             hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
                 title: sharedRecipe.recipe.title,
@@ -331,7 +245,7 @@ struct SharedRecipeDetailView: View {
             )
 
             isCheckingDuplicates = false
-            AppLogger.general.info("Duplicate check complete - hasReference: \(hasExistingReference), hasOwnedCopy: \(hasOwnedCopy)")
+            AppLogger.general.info("Duplicate check complete - hasOwnedCopy: \(hasOwnedCopy)")
         } catch {
             AppLogger.general.error("Failed to check for duplicates: \(error.localizedDescription)")
             isCheckingDuplicates = false

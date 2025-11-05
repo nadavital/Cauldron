@@ -10,11 +10,12 @@ import os
 
 /// Preloaded data to pass to view models
 /// CRITICAL: This structure is the key to preventing empty state flash!
-/// By loading ALL recipes BEFORE showing the UI and passing them directly to CookTabViewModel,
+/// By loading ALL data BEFORE showing the UI and passing them directly to view models,
 /// we ensure the view never renders with empty arrays.
 struct PreloadedRecipeData {
     let allRecipes: [Recipe]           // All recipes (owned + referenced) loaded from storage
     let recentlyCookedIds: [UUID]      // IDs of recently cooked recipes for quick filtering
+    let collections: [Collection]      // All collections loaded from storage
 }
 
 struct ContentView: View {
@@ -98,49 +99,22 @@ struct ContentView: View {
             // OPTIMIZATION: Parallelize independent data fetches using async let
             async let ownedRecipes = dependencies.recipeRepository.fetchAll()
             async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
+            async let localCollections = dependencies.collectionRepository.fetchAll()
 
-            // Wait for both to complete in parallel
-            var allRecipes = try await ownedRecipes
+            // Wait for all to complete in parallel
+            let allRecipes = try await ownedRecipes
             let recentlyCookedIds = try await cookingHistory
-            AppLogger.general.info("⚡️ Fast-loaded \(allRecipes.count) owned recipes and \(recentlyCookedIds.count) recent")
+            let collections = try await localCollections
+            AppLogger.general.info("✅ All data preloaded successfully: \(allRecipes.count) recipes, \(recentlyCookedIds.count) recent, \(collections.count) collections")
 
-            // Preload recipe references (for shared recipes saved by user)
-            if let userId = userSession.userId, userSession.isCloudSyncAvailable {
+            // Run one-time migration to fix recipe ownership from old reference system
+            if let userId = userSession.userId {
                 do {
-                    let references = try await dependencies.recipeReferenceManager.fetchReferences(for: userId)
-                    AppLogger.general.info("Preloaded \(references.count) recipe references")
-
-                    // OPTIMIZATION: Fetch all recipe references in parallel using TaskGroup
-                    if !references.isEmpty {
-                        await withTaskGroup(of: Recipe?.self) { group in
-                            for reference in references {
-                                group.addTask {
-                                    do {
-                                        return try await self.dependencies.cloudKitService.fetchPublicRecipe(
-                                            recipeId: reference.originalRecipeId,
-                                            ownerId: reference.originalOwnerId
-                                        )
-                                    } catch {
-                                        AppLogger.general.warning("Failed to preload reference: \(reference.recipeTitle)")
-                                        return nil
-                                    }
-                                }
-                            }
-
-                            // Collect all successfully fetched recipes
-                            for await recipe in group {
-                                if let recipe = recipe, !allRecipes.contains(where: { $0.id == recipe.id }) {
-                                    allRecipes.append(recipe)
-                                }
-                            }
-                        }
-                    }
+                    try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
                 } catch {
-                    AppLogger.general.warning("Failed to preload recipe references: \(error.localizedDescription)")
+                    AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
                 }
             }
-
-            AppLogger.general.info("✅ All data preloaded successfully: \(allRecipes.count) recipes, \(recentlyCookedIds.count) recent")
 
             // OPTIMIZATION: Start background sync AFTER UI is shown
             // This keeps the UI responsive while CloudKit syncs in the background
@@ -161,7 +135,14 @@ struct ContentView: View {
                 await SharingTabViewModel.shared.loadSharedRecipes()
             }
 
-            return PreloadedRecipeData(allRecipes: allRecipes, recentlyCookedIds: recentlyCookedIds)
+            // Preload connections/friends list in background
+            if let userId = userSession.userId {
+                Task.detached(priority: .utility) { @MainActor in
+                    await dependencies.connectionManager.loadConnections(forUserId: userId)
+                }
+            }
+
+            return PreloadedRecipeData(allRecipes: allRecipes, recentlyCookedIds: recentlyCookedIds, collections: collections)
         } catch {
             AppLogger.general.warning("Data preload failed: \(error.localizedDescription)")
             return nil

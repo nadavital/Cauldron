@@ -7,12 +7,182 @@
 
 import SwiftUI
 
+/// Main settings view with account management
+struct SettingsView: View {
+    let dependencies: DependencyContainer
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var userSession = CurrentUserSession.shared
+    @State private var showingEditProfile = false
+    @State private var showingDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var deleteErrorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // Profile Section
+                Section {
+                    if let user = userSession.currentUser {
+                        HStack(spacing: 16) {
+                            ProfileAvatar(user: user, size: 60)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(user.displayName)
+                                    .font(.headline)
+                                Text("@\(user.username)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                showingEditProfile = true
+                            } label: {
+                                Text("Edit")
+                                    .font(.subheadline)
+                                    .foregroundColor(.cauldronOrange)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                } header: {
+                    Text("Profile")
+                }
+
+                // Danger Zone Section
+                Section {
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        if isDeleting {
+                            HStack {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.red)
+                                Text("Deleting Account...")
+                                    .font(.body)
+                            }
+                        } else {
+                            Label("Delete Account", systemImage: "trash")
+                                .font(.body)
+                        }
+                    }
+                    .disabled(isDeleting)
+
+                    if let error = deleteErrorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                } header: {
+                    Text("Danger Zone")
+                } footer: {
+                    Text("Deleting your account will permanently remove all your data from iCloud, including recipes, collections, and connections. This action cannot be undone.")
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", systemImage: "xmark") {
+                        dismiss()
+                    }
+                }
+            }
+            .sheet(isPresented: $showingEditProfile) {
+                EditProfileView(dependencies: dependencies)
+            }
+            .alert("Delete Account?", isPresented: $showingDeleteConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete All Data", role: .destructive) {
+                    Task {
+                        await deleteAccount()
+                    }
+                }
+            } message: {
+                Text("This will permanently delete all your data from iCloud:\n\n• All recipes\n• All collections\n• All connections\n• Your profile\n\nThis action cannot be undone.")
+            }
+        }
+    }
+
+    private func deleteAccount() async {
+        isDeleting = true
+        deleteErrorMessage = nil
+
+        guard let userId = userSession.userId else {
+            deleteErrorMessage = "No user ID found"
+            isDeleting = false
+            return
+        }
+
+        do {
+            // Delete all data from CloudKit and local storage
+            AppLogger.general.info("🗑️ Starting account deletion for user: \(userId)")
+
+            // 1. Delete all recipes from CloudKit public database
+            AppLogger.general.info("Deleting recipes from CloudKit...")
+            let recipes = try await dependencies.recipeRepository.fetchAll()
+            for recipe in recipes {
+                // Only delete from CloudKit if it's synced
+                if recipe.cloudRecordName != nil {
+                    try? await dependencies.cloudKitService.deletePublicRecipe(
+                        recipeId: recipe.id,
+                        ownerId: userId
+                    )
+                }
+                // Delete from local storage
+                try? await dependencies.recipeRepository.delete(id: recipe.id)
+            }
+
+            // 2. Delete all collections from CloudKit and local storage
+            AppLogger.general.info("Deleting collections from CloudKit...")
+            let collections = try await dependencies.collectionRepository.fetchAll()
+            for collection in collections.filter({ $0.userId == userId }) {
+                try? await dependencies.cloudKitService.deleteCollection(collection.id)
+                try? await dependencies.collectionRepository.delete(id: collection.id)
+            }
+
+            // 3. Delete all connections from CloudKit and local storage
+            AppLogger.general.info("Deleting connections from CloudKit...")
+            let connections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
+            for connection in connections {
+                try? await dependencies.cloudKitService.deleteConnection(connection)
+                try? await dependencies.connectionRepository.delete(connection)
+            }
+
+            // 4. Delete all grocery items from local storage
+            AppLogger.general.info("Clearing grocery items...")
+            let groceryItems = try? await dependencies.groceryRepository.fetchAllItemsForDisplay()
+            if let items = groceryItems {
+                for item in items {
+                    try? await dependencies.groceryRepository.deleteItem(id: item.id)
+                }
+            }
+
+            // 5. Clear user session and trigger sign out
+            AppLogger.general.info("Clearing user session...")
+            await userSession.signOut()
+
+            AppLogger.general.info("✅ Account deleted successfully")
+
+            // Dismiss settings - onboarding will show automatically
+            dismiss()
+
+        } catch {
+            AppLogger.general.error("❌ Failed to delete account: \(error.localizedDescription)")
+            deleteErrorMessage = "Failed to delete account: \(error.localizedDescription)"
+            isDeleting = false
+        }
+    }
+}
+
 /// View for editing user profile
 struct EditProfileView: View {
     let dependencies: DependencyContainer
     @Environment(\.dismiss) private var dismiss
     @StateObject private var userSession = CurrentUserSession.shared
-    
+
     @State private var username = ""
     @State private var displayName = ""
     @State private var profileEmoji: String?
@@ -41,7 +211,7 @@ struct EditProfileView: View {
             profileColor: profileColor
         )
     }
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -61,7 +231,7 @@ struct EditProfileView: View {
                     }
                     .padding(.vertical, 8)
                 }
-                
+
                 Section {
                     TextField("Username", text: $username)
                         .textInputAutocapitalization(.never)
@@ -196,7 +366,7 @@ struct EditProfileView: View {
                 } header: {
                     Text("Profile Color")
                 }
-                
+
                 if let error = errorMessage {
                     Section {
                         Text(error)
@@ -237,7 +407,7 @@ struct EditProfileView: View {
             }
         }
     }
-    
+
     private func saveProfile() async {
         isSaving = true
         errorMessage = nil
@@ -278,6 +448,10 @@ struct EditProfileView: View {
     }
 }
 
-#Preview {
+#Preview("Settings") {
+    SettingsView(dependencies: .preview())
+}
+
+#Preview("Edit Profile") {
     EditProfileView(dependencies: .preview())
 }

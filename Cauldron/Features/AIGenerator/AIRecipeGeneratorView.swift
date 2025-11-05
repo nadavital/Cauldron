@@ -25,24 +25,11 @@ struct AIRecipeGeneratorView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(spacing: 24) {
-                        headerSection
-
                         if !isAvailable {
                             unavailableSection
                         } else {
-                            // Show collapsed summary when recipe is generated and input is collapsed
-                            if !isInputExpanded && viewModel.generatedRecipe != nil {
-                                collapsedInputSummary
-                            }
-
-                            // Combined prompt and category section (only when expanded or no recipe yet)
-                            if isInputExpanded {
-                                combinedInputSection
-                            }
-
-                            if viewModel.isGenerating || viewModel.generatedRecipe != nil {
-                                progressSection
-                            }
+                            // Combined section that expands/collapses
+                            expandableInputSection
 
                             if let partial = viewModel.partialRecipe {
                                 recipePreviewSection(partial: partial)
@@ -59,9 +46,9 @@ struct AIRecipeGeneratorView: View {
                 }
                 .background(Color.cauldronBackground.ignoresSafeArea())
 
-                // Floating generate button
-                if isAvailable && !viewModel.isGenerating && viewModel.generatedRecipe == nil {
-                    floatingGenerateButton
+                // Floating action button (generate/generating/regenerate)
+                if isAvailable {
+                    floatingActionButton
                 }
             }
             .navigationTitle("Generate Recipe")
@@ -97,9 +84,9 @@ struct AIRecipeGeneratorView: View {
             .task {
                 isAvailable = await viewModel.checkAvailability()
             }
-            .onChange(of: viewModel.generatedRecipe) { oldValue, newValue in
-                // Auto-collapse input section when recipe generation completes
-                if oldValue == nil && newValue != nil {
+            .onChange(of: viewModel.isGenerating) { oldValue, newValue in
+                // Auto-collapse input section when generation starts
+                if !oldValue && newValue {
                     withAnimation(.spring(response: 0.4)) {
                         isInputExpanded = false
                     }
@@ -110,113 +97,267 @@ struct AIRecipeGeneratorView: View {
 
     // MARK: - Sections
 
-    private var collapsedInputSummary: some View {
-        Button {
-            withAnimation(.spring(response: 0.3)) {
-                isInputExpanded = true
-            }
-        } label: {
-            HStack(spacing: 12) {
-                // Mini Apple Intelligence icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.18, green: 0.28, blue: 0.99),
-                                    Color(red: 0.57, green: 0.14, blue: 1.0)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-
-                    Image(systemName: "apple.intelligence")
-                        .font(.system(size: 16))
-                        .foregroundColor(.white)
+    private var expandableInputSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header - always visible
+            Button {
+                // Only allow expanding/collapsing when not generating
+                if !viewModel.isGenerating {
+                    withAnimation(.spring(response: 0.3)) {
+                        isInputExpanded.toggle()
+                    }
                 }
+            } label: {
+                HStack(spacing: 12) {
+                    // Apple Intelligence icon
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.18, green: 0.28, blue: 0.99),
+                                        Color(red: 0.57, green: 0.14, blue: 1.0)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 36, height: 36)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Recipe for:")
-                        .font(.caption)
+                        Image(systemName: "apple.intelligence")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Show status text based on state
+                        if viewModel.isGenerating {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .tint(.cauldronOrange)
+                                Text(viewModel.generationProgress.description)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                        } else if viewModel.generatedRecipe != nil {
+                            HStack(spacing: 8) {
+                                Image(systemName: viewModel.generationProgress.systemImage)
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                                Text(viewModel.generationProgress.description)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                        } else {
+                            // Before generation starts - show ready state
+                            Text("Generate with AI")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+
+                        // Show recipe summary only when collapsed
+                        if !isInputExpanded && (viewModel.isGenerating || viewModel.generatedRecipe != nil) {
+                            if !viewModel.prompt.isEmpty {
+                                Text(viewModel.prompt)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            } else if viewModel.hasSelectedCategories {
+                                Text(viewModel.selectedCategoriesSummary)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            } else {
+                                Text("Custom recipe")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+
+                    // Show chevron when not generating
+                    if !viewModel.isGenerating {
+                        Image(systemName: isInputExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(16)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isGenerating)
+
+            // Input fields - shown when expanded
+            if isInputExpanded && !viewModel.isGenerating {
+                VStack(alignment: .leading, spacing: 20) {
+                    Divider()
+                        .padding(.horizontal, 16)
+
+                    // Prompt/Notes field
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(viewModel.hasSelectedCategories ? "Additional Notes (Optional)" : "What would you like to cook?")
+                            .font(.headline)
+
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $viewModel.prompt)
+                                .frame(minHeight: 100)
+                                .padding(14)
+                                .background(Color.cauldronBackground)
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(isPromptFocused ? Color.cauldronOrange : Color.secondary.opacity(0.15), lineWidth: 1.5)
+                                )
+                                .focused($isPromptFocused)
+
+                            if viewModel.prompt.isEmpty {
+                                Text(viewModel.hasSelectedCategories ? "e.g., no peanuts, extra spicy, low sodium..." : "Describe your ideal dish...")
+                                    .foregroundColor(.secondary.opacity(0.5))
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 22)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    }
+
+                    // Categories
+                    Text("Or select categories:")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
 
-                    // Show either prompt or selected categories as summary
-                    if !viewModel.prompt.isEmpty {
-                        Text(viewModel.prompt)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
-                    } else if viewModel.hasSelectedCategories {
-                        Text(viewModel.selectedCategoriesSummary)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
-                    } else {
-                        Text("Custom recipe")
+                    // Cuisine
+                    CategorySelectionRow(
+                        title: "Cuisine",
+                        icon: "map",
+                        options: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                        selected: $viewModel.selectedCuisines
+                    )
+
+                    // Dietary
+                    CategorySelectionRow(
+                        title: "Diet",
+                        icon: "leaf",
+                        options: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                        selected: $viewModel.selectedDiets
+                    )
+
+                    // Time
+                    CategorySelectionRow(
+                        title: "Time",
+                        icon: "clock",
+                        options: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                        selected: $viewModel.selectedTimes
+                    )
+
+                    // Meal Type
+                    CategorySelectionRow(
+                        title: "Meal",
+                        icon: "fork.knife",
+                        options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                        selected: $viewModel.selectedTypes
+                    )
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(12)
+    }
+
+    private var unifiedStatusSection: some View {
+        HStack(spacing: 12) {
+            // Apple Intelligence icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.18, green: 0.28, blue: 0.99),
+                                Color(red: 0.57, green: 0.14, blue: 1.0)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: "apple.intelligence")
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                // Show status text based on state
+                if viewModel.isGenerating {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(.cauldronOrange)
+                        Text(viewModel.generationProgress.description)
                             .font(.subheadline)
                             .fontWeight(.medium)
                     }
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.down")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var headerSection: some View {
-        VStack(spacing: 20) {
-            HStack(alignment: .center, spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.18, green: 0.28, blue: 0.99),
-                                    Color(red: 0.57, green: 0.14, blue: 1.0)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 70, height: 70)
-
-                    Image(systemName: "apple.intelligence")
-                        .font(.system(size: 34))
-                        .foregroundColor(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("AI Recipe Generator")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-
-                    Text("Describe what you crave and Cauldron will craft the recipe using Apple Intelligence.")
+                } else if viewModel.generatedRecipe != nil {
+                    HStack(spacing: 8) {
+                        Image(systemName: viewModel.generationProgress.systemImage)
+                            .font(.caption)
+                            .foregroundColor(.green)
+                        Text(viewModel.generationProgress.description)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                } else {
+                    // Before generation starts - show ready state
+                    Text("Generate with AI")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .fontWeight(.medium)
+                }
+
+                // Show recipe summary only when generating or complete
+                if viewModel.isGenerating || viewModel.generatedRecipe != nil {
+                    if !viewModel.prompt.isEmpty {
+                        Text(viewModel.prompt)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else if viewModel.hasSelectedCategories {
+                        Text(viewModel.selectedCategoriesSummary)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Custom recipe")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
-            Divider()
+            Spacer()
 
-            Text("Fine-tune the prompt with ingredients, dietary preferences, or timing to receive a recipe that's ready to cook.")
-                .font(.footnote)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.leading)
+            // Show regenerate button when recipe is complete
+            if viewModel.generatedRecipe != nil && !viewModel.isGenerating {
+                Button {
+                    withAnimation(.spring(response: 0.3)) {
+                        isInputExpanded = true
+                    }
+                    viewModel.regenerate()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                        .foregroundColor(.cauldronOrange)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(20)
-        .cardStyle()
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(12)
     }
 
     private var unavailableSection: some View {
@@ -310,23 +451,48 @@ struct AIRecipeGeneratorView: View {
         .cardStyle()
     }
 
-    private var floatingGenerateButton: some View {
+    private var floatingActionButton: some View {
         Button {
-            viewModel.generateRecipe()
-            isPromptFocused = false
+            if viewModel.isGenerating {
+                // Do nothing when generating
+            } else if viewModel.generatedRecipe != nil {
+                // Regenerate
+                withAnimation(.spring(response: 0.3)) {
+                    isInputExpanded = true
+                }
+                viewModel.regenerate()
+            } else {
+                // Generate
+                viewModel.generateRecipe()
+                isPromptFocused = false
+            }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "wand.and.stars")
-                    .font(.title3)
-                Text("Generate Recipe")
-                    .font(.headline)
+                if viewModel.isGenerating {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                    Text("Generating")
+                        .font(.headline)
+                } else if viewModel.generatedRecipe != nil {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.title3)
+                    Text("Regenerate")
+                        .font(.headline)
+                } else {
+                    Image(systemName: "wand.and.stars")
+                        .font(.title3)
+                    Text("Generate Recipe")
+                        .font(.headline)
+                }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 32)
             .padding(.vertical, 16)
-            .glassEffect(viewModel.canGenerate ? .regular.tint(.orange).interactive() : .regular.tint(.gray), in: Capsule())
+            .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
         }
-        .disabled(!viewModel.canGenerate)
+        .disabled(viewModel.isGenerating || (!viewModel.canGenerate && viewModel.generatedRecipe == nil))
+        .opacity((viewModel.canGenerate || viewModel.generatedRecipe != nil || viewModel.isGenerating) ? 1.0 : 0.5)
         .padding(.bottom, 32)
     }
 
@@ -423,41 +589,6 @@ struct AIRecipeGeneratorView: View {
             .disabled(!viewModel.canGenerate)
         }
         .padding(20)
-        .cardStyle()
-    }
-
-    private var progressSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                if viewModel.isGenerating {
-                    ProgressView()
-                        .tint(.cauldronOrange)
-                } else {
-                    Image(systemName: viewModel.generationProgress.systemImage)
-                        .foregroundColor(viewModel.generationProgress == .complete ? .green : .cauldronOrange)
-                }
-
-                Text(viewModel.generationProgress.description)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-
-                Spacer()
-
-                if viewModel.generatedRecipe != nil {
-                    Button {
-                        withAnimation(.spring(response: 0.3)) {
-                            isInputExpanded = true
-                        }
-                        viewModel.regenerate()
-                    } label: {
-                        Label("Regenerate", systemImage: "arrow.clockwise")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-        .padding(16)
         .cardStyle()
     }
 

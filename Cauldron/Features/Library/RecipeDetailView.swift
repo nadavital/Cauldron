@@ -19,7 +19,6 @@ struct RecipeDetailView: View {
     @State private var scaleFactor: Double = 1.0
     @State private var localIsFavorite: Bool
     @State private var scalingWarnings: [ScalingWarning] = []
-    @State private var showingShareSheet = false
     @State private var showingToast = false
     @State private var recipeWasDeleted = false
     @State private var showDeleteConfirmation = false
@@ -139,12 +138,6 @@ struct RecipeDetailView: View {
                         }
 
                         Button {
-                            showingShareSheet = true
-                        } label: {
-                            Label("Share Recipe", systemImage: "square.and.arrow.up")
-                        }
-
-                        Button {
                             Task {
                                 await addToGroceryList()
                             }
@@ -185,27 +178,12 @@ struct RecipeDetailView: View {
                             Label("Add to Collection", systemImage: "folder.badge.plus")
                         }
 
-                        Button {
-                            Task {
-                                await convertToCopy()
-                            }
-                        } label: {
-                            if isConvertingToCopy {
-                                Label("Converting...", systemImage: "doc.on.doc")
-                            } else if hasOwnedCopy {
-                                Label("Already Have a Copy", systemImage: "checkmark.circle.fill")
-                            } else {
-                                Label("Make a Copy", systemImage: "doc.on.doc")
-                            }
-                        }
-                        .disabled(isConvertingToCopy || hasOwnedCopy)
-
                         Divider()
 
                         Button(role: .destructive) {
                             showDeleteConfirmation = true
                         } label: {
-                            Label("Remove Reference", systemImage: "bookmark.slash")
+                            Label("Delete Recipe", systemImage: "trash")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -215,25 +193,13 @@ struct RecipeDetailView: View {
         }
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
-            if recipe.isOwnedByCurrentUser() {
-                Button("Delete", role: .destructive) {
-                    Task {
-                        await deleteRecipe()
-                    }
-                }
-            } else {
-                Button("Remove Reference", role: .destructive) {
-                    Task {
-                        await deleteReference()
-                    }
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteRecipe()
                 }
             }
         } message: {
-            if recipe.isOwnedByCurrentUser() {
-                Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
-            } else {
-                Text("This will remove the recipe reference from your collection. The original recipe will remain in the owner's collection.")
-            }
+            Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
         }
         .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
             Button("Cancel", role: .cancel) {}
@@ -261,9 +227,6 @@ struct RecipeDetailView: View {
                 dismiss()
             }
         }
-        .sheet(isPresented: $showingShareSheet) {
-            ShareRecipeView(recipe: recipe, dependencies: dependencies)
-        }
         .sheet(isPresented: $showingVisibilityPicker) {
             RecipeVisibilityPickerSheet(
                 currentVisibility: $currentVisibility,
@@ -280,14 +243,6 @@ struct RecipeDetailView: View {
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
-        .task {
-            // Load recipe owner info if this is a reference
-            if recipe.isReference, let ownerId = recipe.ownerId {
-                await loadRecipeOwner(ownerId)
-                // Check if user already has a copy of this recipe
-                await checkForOwnedCopy()
-            }
-        }
     }
     
     private var headerSection: some View {
@@ -311,63 +266,6 @@ struct RecipeDetailView: View {
             }
             .font(.subheadline)
             .foregroundColor(.secondary)
-
-            // Reference indicator banner
-            if recipe.isReference {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bookmark.fill")
-                            .font(.caption)
-                            .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-
-                        Text("Recipe Reference")
-                            .font(.caption)
-                            .fontWeight(.medium)
-
-                        Text("•")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Text("View-only. Tap the menu to make an editable copy.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-                    }
-
-                    // Owner profile link button
-                    if let owner = recipeOwner {
-                        NavigationLink(destination: UserProfileView(user: owner, dependencies: dependencies)) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.caption)
-                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-
-                                Text("View \(owner.displayName)'s profile")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(Color(red: 0.5, green: 0.0, blue: 0.0))
-
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    } else if isLoadingOwner {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading owner info...")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color(red: 0.5, green: 0.0, blue: 0.0).opacity(0.1))
-                .cornerRadius(8)
-            }
 
             if !recipe.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -651,114 +549,6 @@ struct RecipeDetailView: View {
         }
     }
 
-    /// Delete a recipe reference (bookmark to a shared recipe)
-    ///
-    /// This handles two scenarios:
-    /// 1. Recipe was explicitly saved via "Add to My Recipes" - A RecipeReference record exists in CloudKit
-    ///    → Delete the RecipeReference record, show toast, dismiss view
-    ///
-    /// 2. Recipe is being viewed from Sharing tab but was never saved - No RecipeReference exists
-    ///    → This happens when viewing public recipes from cached queries
-    ///    → Gracefully handle by just dismissing the view (nothing to delete)
-    ///
-    /// This method ensures we don't show errors to users when they try to remove recipes
-    /// they're just browsing (as opposed to recipes they've explicitly saved).
-    private func deleteReference() async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            AppLogger.general.error("Cannot delete reference - no current user")
-            return
-        }
-
-        do {
-            try await dependencies.recipeReferenceManager.deleteReference(
-                for: recipe.id,
-                userId: userId
-            )
-            AppLogger.general.info("Deleted recipe reference: \(recipe.title)")
-
-            // Notify other views that a reference was removed
-            NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
-
-            // Show toast
-            withAnimation {
-                showReferenceRemovedToast = true
-            }
-
-            // Dismiss after a delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                dismiss()
-            }
-        } catch RecipeReferenceError.referenceNotFound {
-            // No RecipeReference found. This could mean:
-            // 1. User is browsing a public recipe (never saved) - just dismiss
-            // 2. Recipe is an orphaned local copy (exists in local DB but not as a reference) - delete it
-
-            // Check if this recipe exists in local storage
-            do {
-                let localRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id)
-                if localRecipe != nil {
-                    // This is an orphaned local recipe - delete it from local storage
-                    AppLogger.general.info("Found orphaned local recipe \(recipe.title) - deleting from local storage")
-                    try await dependencies.recipeRepository.delete(id: recipe.id)
-
-                    // Notify other views
-                    NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
-
-                    // Show toast
-                    withAnimation {
-                        showReferenceRemovedToast = true
-                    }
-
-                    // Dismiss after delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        dismiss()
-                    }
-                } else {
-                    // Recipe only exists in PUBLIC database (browsing scenario) - just dismiss
-                    AppLogger.general.info("No reference to delete for recipe \(recipe.title) - dismissing view")
-                    NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
-                    dismiss()
-                }
-            } catch {
-                // Failed to check local storage - just dismiss gracefully
-                AppLogger.general.warning("Could not check local storage for recipe: \(error.localizedDescription)")
-                NotificationCenter.default.post(name: NSNotification.Name("RecipeReferenceRemoved"), object: nil)
-                dismiss()
-            }
-        } catch {
-            AppLogger.general.error("Failed to delete reference: \(error.localizedDescription)")
-            // Show error to user in future enhancement
-        }
-    }
-
-    private func convertToCopy() async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            AppLogger.general.error("Cannot convert to copy - no current user")
-            return
-        }
-
-        isConvertingToCopy = true
-        defer { isConvertingToCopy = false }
-
-        do {
-            let ownedCopy = try await dependencies.recipeReferenceManager.convertReferenceToOwnedCopyAndDeleteReference(
-                recipe: recipe,
-                currentUserId: userId
-            )
-            AppLogger.general.info("Converted reference to owned copy: \(ownedCopy.title)")
-
-            // Show success state
-            showConvertSuccess = true
-
-            // Dismiss and navigate to the new copy
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                dismiss()
-            }
-        } catch {
-            AppLogger.general.error("Failed to convert to copy: \(error.localizedDescription)")
-        }
-    }
-
     private func loadRecipeOwner(_ ownerId: UUID) async {
         isLoadingOwner = true
         defer { isLoadingOwner = false }
@@ -874,7 +664,7 @@ struct RecipeVisibilityPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
@@ -888,8 +678,7 @@ struct RecipeVisibilityPickerSheet: View {
                         if isChanging {
                             ProgressView()
                         } else {
-                            Text("Save")
-                                .fontWeight(.semibold)
+                            Label("Save", systemImage: "checkmark")
                         }
                     }
                     .disabled(isChanging || selectedVisibility == currentVisibility)

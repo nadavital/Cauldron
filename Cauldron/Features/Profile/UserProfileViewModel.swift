@@ -19,6 +19,8 @@ class UserProfileViewModel: ObservableObject {
     @Published var isProcessing = false
     @Published var userRecipes: [SharedRecipe] = []
     @Published var isLoadingRecipes = false
+    @Published var userCollections: [Collection] = []
+    @Published var isLoadingCollections = false
     @Published var connections: [ManagedConnection] = []
     @Published var isLoadingConnections = false
     @Published var usersMap: [UUID: User] = [:]
@@ -27,11 +29,6 @@ class UserProfileViewModel: ObservableObject {
     let user: User
     let dependencies: DependencyContainer
     private var cancellables = Set<AnyCancellable>()
-
-    // Recipe caching
-    private var lastRecipeLoadTime: Date?
-    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
-    private var lastConnectionState: ConnectionState?
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -220,18 +217,14 @@ class UserProfileViewModel: ObservableObject {
     // MARK: - Recipe Fetching
 
     func loadUserRecipes(forceRefresh: Bool = false) async {
-        // Check cache validity
-        if !forceRefresh, let lastLoadTime = lastRecipeLoadTime,
-           Date().timeIntervalSince(lastLoadTime) < cacheValidityDuration,
-           lastConnectionState == connectionState {
-            AppLogger.general.info("Using cached recipes for \(self.user.username)")
+        // Check cache first (unless force refresh)
+        if !forceRefresh,
+           let cachedRecipes = dependencies.profileCacheManager.getCachedRecipes(
+               for: user.id,
+               connectionState: connectionState
+           ) {
+            userRecipes = cachedRecipes
             return
-        }
-
-        // Invalidate cache if connection state changed
-        if lastConnectionState != connectionState {
-            AppLogger.general.info("Connection state changed, invalidating recipe cache")
-            lastConnectionState = connectionState
         }
 
         // Only show loading state when actually fetching
@@ -239,8 +232,14 @@ class UserProfileViewModel: ObservableObject {
 
         do {
             userRecipes = try await fetchUserRecipes()
-            lastRecipeLoadTime = Date()
-            lastConnectionState = connectionState
+
+            // Cache the results
+            dependencies.profileCacheManager.cacheRecipes(
+                userRecipes,
+                for: user.id,
+                connectionState: connectionState
+            )
+
             AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
@@ -314,7 +313,120 @@ class UserProfileViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Collection Fetching
+
+    func loadUserCollections(forceRefresh: Bool = false) async {
+        // Check cache first (unless force refresh)
+        if !forceRefresh,
+           let cachedCollections = dependencies.profileCacheManager.getCachedCollections(
+               for: user.id,
+               connectionState: connectionState
+           ) {
+            userCollections = cachedCollections
+            return
+        }
+
+        isLoadingCollections = true
+
+        do {
+            userCollections = try await fetchUserCollections()
+
+            // Cache the results
+            dependencies.profileCacheManager.cacheCollections(
+                userCollections,
+                for: user.id,
+                connectionState: connectionState
+            )
+
+            AppLogger.general.info("✅ Loaded \(self.userCollections.count) collections for user \(self.user.username)")
+        } catch {
+            AppLogger.general.error("❌ Failed to load user collections: \(error.localizedDescription)")
+            errorMessage = "Failed to load collections: \(error.localizedDescription)"
+            showError = true
+        }
+
+        isLoadingCollections = false
+    }
+
+    private func fetchUserCollections() async throws -> [Collection] {
+        var allCollections: [Collection] = []
+
+        // If viewing own profile, show public + friends-only (what friends see, NOT private)
+        // If connected to user, also show public + friends-only
+        // Otherwise, only show public
+        let shouldShowFriendsOnly = isCurrentUser || connectionState == .connected
+
+        // If viewing own profile, load local collections (excluding private)
+        if isCurrentUser {
+            let localCollections = try await dependencies.collectionRepository.fetchAll()
+            AppLogger.general.info("Found \(localCollections.count) total local collections")
+
+            // Filter to only public and friends-only (profile shows what friends would see)
+            let visibleCollections = localCollections.filter {
+                $0.visibility == .publicRecipe || $0.visibility == .friendsOnly
+            }
+            AppLogger.general.info("Filtered to \(visibleCollections.count) visible collections (public + friends-only)")
+            allCollections.append(contentsOf: visibleCollections)
+        }
+
+        // Fetch collections from CloudKit
+        if CurrentUserSession.shared.isCloudSyncAvailable {
+            do {
+                // Fetch public collections
+                let publicCollections = try await dependencies.cloudKitService.queryCollections(
+                    ownerIds: [user.id],
+                    visibility: .publicRecipe
+                )
+                AppLogger.general.info("Found \(publicCollections.count) public collections from CloudKit for \(self.user.username)")
+
+                // Add CloudKit collections that aren't already in local storage
+                for cloudCollection in publicCollections {
+                    if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
+                        allCollections.append(cloudCollection)
+                    }
+                }
+
+                // If viewing own profile or connected, also fetch friends-only collections
+                if shouldShowFriendsOnly {
+                    let friendsCollections = try await dependencies.cloudKitService.queryCollections(
+                        ownerIds: [user.id],
+                        visibility: .friendsOnly
+                    )
+                    AppLogger.general.info("Found \(friendsCollections.count) friends-only collections from CloudKit for \(self.user.username)")
+
+                    // Add CloudKit collections that aren't already in local storage
+                    for cloudCollection in friendsCollections {
+                        if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
+                            allCollections.append(cloudCollection)
+                        }
+                    }
+                }
+            } catch {
+                AppLogger.general.warning("Failed to load collections from CloudKit: \(error.localizedDescription)")
+                // If we're viewing our own profile and already have local collections, continue
+                if !isCurrentUser {
+                    throw error
+                }
+            }
+        }
+
+        // Sort by updated date (most recent first)
+        return allCollections.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     var displayedConnections: [ManagedConnection] {
         return Array(connections.prefix(6))
+    }
+
+    // MARK: - Refresh
+
+    /// Refreshes all profile data (used for pull-to-refresh)
+    func refreshProfile() async {
+        await loadConnectionStatus()
+        await loadUserRecipes(forceRefresh: true)
+        await loadUserCollections(forceRefresh: true)
+        if isCurrentUser {
+            await loadConnections()
+        }
     }
 }

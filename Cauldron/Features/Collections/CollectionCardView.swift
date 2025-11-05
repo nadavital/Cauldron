@@ -15,16 +15,16 @@ struct CollectionCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Cover image/grid
             ZStack {
-                if collection.coverImageType == .emoji, let emoji = collection.emoji {
-                    // Show emoji
+                if let emoji = collection.emoji {
+                    // Show emoji with color background
                     collectionColor
                         .frame(width: 160, height: 160)
                         .overlay(
                             Text(emoji)
                                 .font(.system(size: 60))
                         )
-                } else if collection.coverImageType == .color {
-                    // Show solid color
+                } else if collection.color != nil {
+                    // Show solid color only (no emoji)
                     collectionColor
                         .frame(width: 160, height: 160)
                         .overlay(
@@ -52,16 +52,10 @@ struct CollectionCardView: View {
 
             // Collection name and count
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if let emoji = collection.emoji, collection.coverImageType != .emoji {
-                        Text(emoji)
-                            .font(.caption)
-                    }
-                    Text(collection.name)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
+                Text(collection.name)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
                 Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
                     .font(.caption)
@@ -79,7 +73,8 @@ struct CollectionCardView: View {
         Group {
             let size: CGFloat = 80  // 160 / 2 for the 2x2 grid
 
-            if recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+            // Show empty state if collection has no recipes, not based on loaded images
+            if collection.recipeCount == 0 {
                 // Empty state - show placeholder
                 collectionColor
                     .overlay(
@@ -88,6 +83,19 @@ struct CollectionCardView: View {
                                 .font(.system(size: 30))
                                 .foregroundColor(.white.opacity(0.6))
                             Text("No recipes")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    )
+            } else if recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+                // Has recipes but images not loaded - show placeholder with count
+                collectionColor
+                    .overlay(
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 30))
+                                .foregroundColor(.white.opacity(0.6))
+                            Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
                                 .font(.caption)
                                 .foregroundColor(.white.opacity(0.8))
                         }
@@ -193,16 +201,10 @@ struct CollectionReferenceCardView: View {
 
             // Collection name and count
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if let emoji = reference.collectionEmoji {
-                        Text(emoji)
-                            .font(.caption)
-                    }
-                    Text(reference.collectionName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
+                Text(reference.collectionName)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
                 Text("\(reference.recipeCount) recipe\(reference.recipeCount == 1 ? "" : "s")")
                     .font(.caption)

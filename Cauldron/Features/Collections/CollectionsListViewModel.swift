@@ -122,35 +122,12 @@ class CollectionsListViewModel: ObservableObject {
 
     /// Get recipes for a collection
     func getRecipes(for collection: Collection) async throws -> [Recipe] {
-        // Fetch all recipes (owned + referenced)
-        var allRecipes = try await dependencies.recipeRepository.fetchAll()
-
-        // Add referenced recipes if available
-        if let userId = CurrentUserSession.shared.userId {
-            let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-
-            for reference in references {
-                // Fetch the actual recipe from public database
-                if let sharedRecipe = try? await fetchSharedRecipe(recipeId: reference.originalRecipeId, ownerId: reference.originalOwnerId) {
-                    allRecipes.append(sharedRecipe)
-                }
-            }
-        }
+        // Fetch all owned recipes
+        let allRecipes = try await dependencies.recipeRepository.fetchAll()
 
         // Filter to only recipes in this collection
         return allRecipes.filter { recipe in
             collection.recipeIds.contains(recipe.id)
         }
-    }
-
-    /// Fetch a shared recipe from public database
-    private func fetchSharedRecipe(recipeId: UUID, ownerId: UUID) async throws -> Recipe? {
-        // Query public database for the shared recipe
-        let sharedRecipes = try await dependencies.cloudKitService.querySharedRecipes(
-            ownerIds: [ownerId],
-            visibility: .publicRecipe
-        )
-
-        return sharedRecipes.first { $0.id == recipeId }
     }
 }

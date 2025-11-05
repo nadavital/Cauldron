@@ -19,7 +19,6 @@ struct CookTabView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSessionConflictAlert = false
     @State private var isAIAvailable = false
-    @State private var collections: [Collection] = []
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
@@ -31,11 +30,6 @@ struct CookTabView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     // My Collections
                     collectionsSection
-
-                    // What Can I Cook?
-                    if !viewModel.cookableRecipes.isEmpty {
-                        whatCanICookSection
-                    }
 
                     // Recently Cooked
                     if !viewModel.recentlyCookedRecipes.isEmpty {
@@ -106,14 +100,10 @@ struct CookTabView: View {
             .task {
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
-
-                // Load collections
-                await loadCollections()
             }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
-                await loadCollections()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
                 // Refresh when a recipe is added from another tab
@@ -121,63 +111,15 @@ struct CookTabView: View {
                     await viewModel.loadData()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { _ in
+                // Refresh when a collection is added from another tab
+                Task {
+                    await viewModel.loadData()
+                }
+            }
         }
     }
 
-    private func loadCollections() async {
-        if let userId = CurrentUserSession.shared.userId {
-            do {
-                let allCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
-                collections = allCollections.filter { $0.userId == userId }
-            } catch {
-                AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
-            }
-        }
-    }
-    
-    private var whatCanICookSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                Text("What Can I Cook?")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                Spacer()
-                
-                NavigationLink(destination: CookableRecipesListView(recipes: viewModel.cookableRecipes, dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
-                }
-            }
-            
-            Text("\(viewModel.cookableRecipes.count) recipes you can make right now")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(viewModel.cookableRecipes.prefix(10)) { recipe in
-                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
-                            RecipeCardView(recipe: recipe)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            recipeContextMenu(for: recipe)
-                        } preview: {
-                            RecipeCardView(recipe: recipe)
-                                .frame(width: 200)
-                                .padding()
-                                .background(Color(.systemBackground))
-                        }
-                    }
-                }
-                .padding(.bottom, 8)
-            }
-        }
-    }
-    
     private var recentlyCookedSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -234,14 +176,14 @@ struct CookTabView: View {
                 }
             }
 
-            if collections.isEmpty {
+            if viewModel.collections.isEmpty {
                 Text("Organize your recipes into collections")
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        ForEach(collections.prefix(10)) { collection in
+                        ForEach(viewModel.collections.prefix(10)) { collection in
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
@@ -503,19 +445,7 @@ struct RecipeCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with badges
             ZStack(alignment: .topTrailing) {
-                ZStack(alignment: .topLeading) {
-                    RecipeImageView(cardImageURL: recipe.imageURL)
-
-                    // Reference indicator (top-left)
-                    if recipe.isReference {
-                        Image(systemName: "bookmark.fill")
-                            .font(.caption)
-                            .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
-                            .padding(6)
-                            .background(Circle().fill(.ultraThinMaterial))
-                            .padding(8)
-                    }
-                }
+                RecipeImageView(cardImageURL: recipe.imageURL)
 
                 // Favorite indicator (top-right)
                 if recipe.isFavorite {

@@ -20,6 +20,8 @@ struct SharedCollectionDetailView: View {
     @State private var showReferenceToast = false
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var hiddenRecipeCount = 0
+    @State private var isFriendWithOwner = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -40,6 +42,11 @@ struct SharedCollectionDetailView: View {
                     emptyStateSection
                 } else {
                     recipesSection
+
+                    // Show info if some recipes are hidden
+                    if hiddenRecipeCount > 0 {
+                        hiddenRecipesInfoSection
+                    }
                 }
             }
             .padding()
@@ -75,6 +82,7 @@ struct SharedCollectionDetailView: View {
             }
         }
         .task {
+            await checkFriendshipStatus()
             await loadRecipes()
             await checkForExistingReference()
         }
@@ -167,11 +175,44 @@ struct SharedCollectionDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var hiddenRecipesInfoSection: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.fill")
+                .foregroundColor(.secondary)
+                .font(.subheadline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(hiddenRecipeCount) private recipe\(hiddenRecipeCount == 1 ? "" : "s") not shown")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                if !isFriendWithOwner {
+                    Text("Connect with the collection owner to see friends-only recipes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(12)
+    }
+
     private var recipesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recipes")
-                .font(.title3)
-                .fontWeight(.bold)
+            HStack {
+                Text("Recipes")
+                    .font(.title3)
+                    .fontWeight(.bold)
+
+                if !recipes.isEmpty {
+                    Text("(\(recipes.count))")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                }
+            }
 
             ForEach(recipes) { recipe in
                 NavigationLink {
@@ -202,18 +243,40 @@ struct SharedCollectionDetailView: View {
 
     // MARK: - Actions
 
+    private func checkFriendshipStatus() async {
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            isFriendWithOwner = false
+            return
+        }
+
+        // Check if we're friends with the collection owner
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
+        let connectionStatus = dependencies.connectionManager.connectionStatus(with: collection.userId)
+        isFriendWithOwner = connectionStatus?.isAccepted ?? false
+
+        AppLogger.general.info("Friendship status with collection owner: \(isFriendWithOwner)")
+    }
+
     private func loadRecipes() async {
         isLoading = true
         defer { isLoading = false }
 
         guard !collection.recipeIds.isEmpty else {
             recipes = []
+            hiddenRecipeCount = 0
+            return
+        }
+
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            recipes = []
+            hiddenRecipeCount = 0
             return
         }
 
         // Fetch recipes that are in this collection
         // We need to fetch them from CloudKit PUBLIC database since they're shared
         var fetchedRecipes: [Recipe] = []
+        var skippedCount = 0
 
         for recipeId in collection.recipeIds {
             do {
@@ -222,15 +285,25 @@ struct SharedCollectionDetailView: View {
                     recipeId: recipeId,
                     ownerId: collection.userId
                 )
-                fetchedRecipes.append(recipe)
+
+                // Check if the viewer can access this recipe
+                if recipe.isAccessible(to: currentUserId, isFriend: isFriendWithOwner) {
+                    fetchedRecipes.append(recipe)
+                } else {
+                    skippedCount += 1
+                    AppLogger.general.info("Skipped private/friends-only recipe: \(recipe.title)")
+                }
             } catch {
+                // Recipe might be private (doesn't exist in PUBLIC database)
+                skippedCount += 1
                 AppLogger.general.warning("Failed to fetch recipe \(recipeId) from shared collection: \(error.localizedDescription)")
-                // Continue loading other recipes even if one fails
             }
         }
 
         recipes = fetchedRecipes
-        AppLogger.general.info("✅ Loaded \(recipes.count) recipes for shared collection: \(collection.name)")
+        hiddenRecipeCount = skippedCount
+
+        AppLogger.general.info("✅ Loaded \(recipes.count) accessible recipes for shared collection: \(collection.name) (\(hiddenRecipeCount) hidden)")
     }
 
     private func saveCollectionReference() async {
@@ -301,26 +374,11 @@ struct SharedCollectionDetailView: View {
         guard let userId = CurrentUserSession.shared.userId else { return }
 
         do {
-            // Create a copy of the recipe owned by the current user
-            let copiedRecipe = Recipe(
-                id: UUID(), // New ID for the copy
-                title: recipe.title,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps,
-                yields: recipe.yields,
-                totalMinutes: recipe.totalMinutes,
-                tags: recipe.tags,
-                nutrition: recipe.nutrition,
-                sourceURL: recipe.sourceURL,
-                sourceTitle: recipe.sourceTitle,
-                notes: recipe.notes,
-                imageURL: recipe.imageURL,
-                isFavorite: false,
-                visibility: .privateRecipe, // Make it private by default
-                ownerId: userId, // Set the current user as owner
-                cloudRecordName: nil, // Clear to ensure new CloudKit record
-                createdAt: Date(),
-                updatedAt: Date()
+            // Create a copy of the recipe owned by the current user using withOwner()
+            let copiedRecipe = recipe.withOwner(
+                userId,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipe.ownerId != nil ? "Collection Owner" : nil  // TODO: Fetch actual creator name
             )
             try await dependencies.recipeRepository.create(copiedRecipe)
 
