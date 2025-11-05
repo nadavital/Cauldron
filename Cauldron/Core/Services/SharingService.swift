@@ -179,7 +179,12 @@ actor SharingService {
             throw NSError(domain: "SharingService", code: 2, userInfo: [NSLocalizedDescriptionKey: "No current user found"])
         }
 
-        let personalCopy = sharedRecipe.createPersonalCopy(ownerId: userId)
+        // Create a copy using withOwner(), preserving attribution to the shared recipe creator
+        let personalCopy = sharedRecipe.recipe.withOwner(
+            userId,
+            originalCreatorId: sharedRecipe.sharedBy.id,
+            originalCreatorName: sharedRecipe.sharedBy.displayName
+        )
         try await recipeRepository.create(personalCopy)
         logger.info("Copied shared recipe '\(personalCopy.title)' to personal collection with ownerId: \(userId)")
         return personalCopy

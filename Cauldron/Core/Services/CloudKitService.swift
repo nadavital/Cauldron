@@ -73,7 +73,6 @@ actor CloudKitService {
     private let recipeRecordType = "Recipe"
     private let connectionRecordType = "Connection"
     private let sharedRecipeRecordType = "SharedRecipe"  // PUBLIC database
-    private let recipeReferenceRecordType = "RecipeReference"  // PUBLIC database
     private let collectionRecordType = "Collection"  // PUBLIC database
     private let collectionReferenceRecordType = "CollectionReference"  // PUBLIC database
 
@@ -1255,109 +1254,6 @@ actor CloudKitService {
         } catch {
             logger.warning("Failed to unsubscribe from acceptances: \(error.localizedDescription)")
         }
-    }
-
-    // MARK: - Recipe References (NEW Architecture)
-
-    /// Save recipe reference to PUBLIC database
-    /// This creates a lightweight pointer to a shared recipe that the user has saved
-    func saveRecipeReference(_ reference: RecipeReference) async throws {
-        logger.info("💾 Saving recipe reference: \(reference.recipeTitle)")
-
-        let db = try getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: reference.id.uuidString)
-        let record = CKRecord(recordType: recipeReferenceRecordType, recordID: recordID)
-
-        // Core fields
-        record["userId"] = reference.userId.uuidString as CKRecordValue
-        record["originalRecipeId"] = reference.originalRecipeId.uuidString as CKRecordValue
-        record["originalOwnerId"] = reference.originalOwnerId.uuidString as CKRecordValue
-        record["savedAt"] = reference.savedAt as CKRecordValue
-        record["isCopy"] = reference.isCopy as CKRecordValue
-
-        // Cached metadata for display without fetching full recipe
-        record["recipeTitle"] = reference.recipeTitle as CKRecordValue
-        if !reference.recipeTags.isEmpty {
-            // Store tags as JSON string for CloudKit PUBLIC database compatibility
-            if let tagsJSON = try? JSONEncoder().encode(reference.recipeTags),
-               let tagsString = String(data: tagsJSON, encoding: .utf8) {
-                record["recipeTags"] = tagsString as CKRecordValue
-            }
-        }
-
-        _ = try await db.save(record)
-        logger.info("✅ Saved recipe reference to PUBLIC database")
-    }
-
-    /// Fetch user's saved recipe references
-    func fetchRecipeReferences(forUserId userId: UUID) async throws -> [RecipeReference] {
-        logger.info("📥 Fetching recipe references for user: \(userId)")
-
-        let db = try getPublicDatabase()
-        let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
-        let query = CKQuery(recordType: recipeReferenceRecordType, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "savedAt", ascending: false)]
-
-        let results = try await db.records(matching: query)
-
-        var references: [RecipeReference] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let reference = try? recipeReferenceFromRecord(record) {
-                references.append(reference)
-            }
-        }
-
-        logger.info("✅ Fetched \(references.count) recipe references")
-        return references
-    }
-
-    /// Delete a recipe reference
-    func deleteRecipeReference(_ referenceId: UUID) async throws {
-        logger.info("🗑️ Deleting recipe reference: \(referenceId)")
-
-        let db = try getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: referenceId.uuidString)
-
-        try await db.deleteRecord(withID: recordID)
-        logger.info("✅ Deleted recipe reference")
-    }
-
-    // MARK: - Private Helpers for RecipeReference
-
-    private func recipeReferenceFromRecord(_ record: CKRecord) throws -> RecipeReference {
-        guard let userIdString = record["userId"] as? String,
-              let userId = UUID(uuidString: userIdString),
-              let originalRecipeIdString = record["originalRecipeId"] as? String,
-              let originalRecipeId = UUID(uuidString: originalRecipeIdString),
-              let originalOwnerIdString = record["originalOwnerId"] as? String,
-              let originalOwnerId = UUID(uuidString: originalOwnerIdString),
-              let savedAt = record["savedAt"] as? Date,
-              let isCopy = record["isCopy"] as? Bool,
-              let recipeTitle = record["recipeTitle"] as? String else {
-            throw CloudKitError.invalidRecord
-        }
-
-        // Parse tags from JSON string
-        let recipeTags: [String]
-        if let tagsString = record["recipeTags"] as? String,
-           let tagsData = tagsString.data(using: .utf8),
-           let tags = try? JSONDecoder().decode([String].self, from: tagsData) {
-            recipeTags = tags
-        } else {
-            recipeTags = []
-        }
-
-        return RecipeReference(
-            id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
-            userId: userId,
-            originalRecipeId: originalRecipeId,
-            originalOwnerId: originalOwnerId,
-            savedAt: savedAt,
-            isCopy: isCopy,
-            recipeTitle: recipeTitle,
-            recipeTags: recipeTags
-        )
     }
 
     // MARK: - Collections

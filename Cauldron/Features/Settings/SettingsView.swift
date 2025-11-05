@@ -151,14 +151,7 @@ struct SettingsView: View {
                 try? await dependencies.connectionRepository.delete(connection)
             }
 
-            // 4. Delete all recipe references from CloudKit
-            AppLogger.general.info("Deleting recipe references from CloudKit...")
-            let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-            for reference in references {
-                try? await dependencies.cloudKitService.deleteRecipeReference(reference.id)
-            }
-
-            // 5. Delete all grocery items from local storage
+            // 4. Delete all grocery items from local storage
             AppLogger.general.info("Clearing grocery items...")
             let groceryItems = try? await dependencies.groceryRepository.fetchAllItemsForDisplay()
             if let items = groceryItems {
@@ -167,7 +160,7 @@ struct SettingsView: View {
                 }
             }
 
-            // 6. Clear user session and trigger sign out
+            // 5. Clear user session and trigger sign out
             AppLogger.general.info("Clearing user session...")
             await userSession.signOut()
 

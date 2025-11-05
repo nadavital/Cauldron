@@ -374,26 +374,11 @@ struct SharedCollectionDetailView: View {
         guard let userId = CurrentUserSession.shared.userId else { return }
 
         do {
-            // Create a copy of the recipe owned by the current user
-            let copiedRecipe = Recipe(
-                id: UUID(), // New ID for the copy
-                title: recipe.title,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps,
-                yields: recipe.yields,
-                totalMinutes: recipe.totalMinutes,
-                tags: recipe.tags,
-                nutrition: recipe.nutrition,
-                sourceURL: recipe.sourceURL,
-                sourceTitle: recipe.sourceTitle,
-                notes: recipe.notes,
-                imageURL: recipe.imageURL,
-                isFavorite: false,
-                visibility: .privateRecipe, // Make it private by default
-                ownerId: userId, // Set the current user as owner
-                cloudRecordName: nil, // Clear to ensure new CloudKit record
-                createdAt: Date(),
-                updatedAt: Date()
+            // Create a copy of the recipe owned by the current user using withOwner()
+            let copiedRecipe = recipe.withOwner(
+                userId,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipe.ownerId != nil ? "Collection Owner" : nil  // TODO: Fetch actual creator name
             )
             try await dependencies.recipeRepository.create(copiedRecipe)
 

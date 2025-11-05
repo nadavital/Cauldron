@@ -466,6 +466,47 @@ actor RecipeRepository {
         logger.info("Checking for similar recipe - title: '\(title)', ingredientCount: \(ingredientCount), hasSimilar: \(hasSimilar)")
         return hasSimilar
     }
+
+    /// One-time migration: Update all recipes to set current user as owner
+    /// This fixes recipes from the old reference system that may have wrong owner IDs
+    func migrateRecipeOwnership(currentUserId: UUID) async throws {
+        logger.info("🔄 Starting recipe ownership migration for user: \(currentUserId)")
+
+        let context = ModelContext(modelContainer)
+        let fetchDescriptor = FetchDescriptor<RecipeModel>()
+        let allModels = try context.fetch(fetchDescriptor)
+
+        var migratedCount = 0
+
+        for model in allModels {
+            // Only update recipes that don't have the current user as owner
+            if model.ownerId != currentUserId {
+                let oldOwnerId = model.ownerId
+
+                // If the recipe has an owner and it's not the current user,
+                // preserve that as the original creator for attribution
+                if let oldOwnerId = oldOwnerId {
+                    if model.originalCreatorId == nil {
+                        model.originalCreatorId = oldOwnerId
+                        logger.info("  Preserved original creator ID: \(oldOwnerId)")
+                    }
+                }
+
+                // Set current user as the owner
+                model.ownerId = currentUserId
+                migratedCount += 1
+
+                logger.info("  ✅ Migrated recipe '\(model.title)' - old owner: \(oldOwnerId?.uuidString ?? "nil") → new owner: \(currentUserId)")
+            }
+        }
+
+        if migratedCount > 0 {
+            try context.save()
+            logger.info("✅ Migration complete: Updated \(migratedCount) recipes to have current user as owner")
+        } else {
+            logger.info("✅ Migration complete: No recipes needed updating")
+        }
+    }
 }
 
 enum RepositoryError: Error, LocalizedError {

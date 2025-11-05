@@ -275,43 +275,8 @@ struct CollectionFormView: View {
     private func loadRecipes() async {
         do {
             // Load owned recipes from local storage
-            var recipes = try await dependencies.recipeRepository.fetchAll()
-
-            // Load recipe references if user is logged in and CloudKit is available
-            if CurrentUserSession.shared.isCloudSyncAvailable,
-               let userId = CurrentUserSession.shared.userId {
-                do {
-                    // Fetch recipe references from CloudKit
-                    let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-                    AppLogger.general.info("Fetched \(references.count) recipe references from CloudKit")
-
-                    // Fetch full recipes for each reference
-                    for reference in references {
-                        do {
-                            let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                                recipeId: reference.originalRecipeId,
-                                ownerId: reference.originalOwnerId
-                            )
-
-                            // Only add if not already in owned recipes (avoid duplicates)
-                            if !recipes.contains(where: { $0.id == recipe.id }) {
-                                recipes.append(recipe)
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to fetch referenced recipe \(reference.recipeTitle): \(error.localizedDescription)")
-                            // Continue with other references even if one fails
-                        }
-                    }
-
-                    AppLogger.general.info("Total recipes including references: \(recipes.count)")
-                } catch {
-                    AppLogger.general.warning("Failed to fetch recipe references (continuing with owned recipes only): \(error.localizedDescription)")
-                    // Don't fail completely - just show owned recipes
-                }
-            }
-
-            allRecipes = recipes
-            AppLogger.general.info("✅ Loaded \(allRecipes.count) recipes (owned + referenced)")
+            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("✅ Loaded \(allRecipes.count) owned recipes")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
         }
@@ -419,20 +384,6 @@ struct RecipeSelectorSheet: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     RecipeImageView(thumbnailImageURL: recipe.imageURL)
-                                        .overlay(
-                                            Group {
-                                                if recipe.isReference {
-                                                    // Reference badge in top-left corner
-                                                    Image(systemName: "bookmark.fill")
-                                                        .font(.caption)
-                                                        .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
-                                                        .padding(6)
-                                                        .background(Circle().fill(.ultraThinMaterial))
-                                                        .padding(6)
-                                                }
-                                            },
-                                            alignment: .topLeading
-                                        )
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(recipe.title)
@@ -491,43 +442,8 @@ struct RecipeSelectorSheet: View {
 
         do {
             // Load owned recipes from local storage
-            var loadedRecipes = try await dependencies.recipeRepository.fetchAll()
-
-            // Load recipe references if user is logged in and CloudKit is available
-            if CurrentUserSession.shared.isCloudSyncAvailable,
-               let userId = CurrentUserSession.shared.userId {
-                do {
-                    // Fetch recipe references from CloudKit
-                    let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-                    AppLogger.general.info("Fetched \(references.count) recipe references from CloudKit")
-
-                    // Fetch full recipes for each reference
-                    for reference in references {
-                        do {
-                            let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                                recipeId: reference.originalRecipeId,
-                                ownerId: reference.originalOwnerId
-                            )
-
-                            // Only add if not already in owned recipes (avoid duplicates)
-                            if !loadedRecipes.contains(where: { $0.id == recipe.id }) {
-                                loadedRecipes.append(recipe)
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to fetch referenced recipe \(reference.recipeTitle): \(error.localizedDescription)")
-                            // Continue with other references even if one fails
-                        }
-                    }
-
-                    AppLogger.general.info("Total recipes including references: \(loadedRecipes.count)")
-                } catch {
-                    AppLogger.general.warning("Failed to fetch recipe references (continuing with owned recipes only): \(error.localizedDescription)")
-                    // Don't fail completely - just show owned recipes
-                }
-            }
-
-            recipes = loadedRecipes
-            AppLogger.general.info("✅ Loaded \(recipes.count) recipes for selector (owned + referenced)")
+            recipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for selector")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")
         }

@@ -338,36 +338,8 @@ struct CollectionDetailView: View {
                 AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
             }
 
-            // Fetch all recipes (owned + referenced)
-            var allRecipes = try await dependencies.recipeRepository.fetchAll()
-
-            // Add referenced recipes if available
-            if CurrentUserSession.shared.isCloudSyncAvailable,
-               let userId = CurrentUserSession.shared.userId {
-                do {
-                    let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-                    AppLogger.general.info("Fetched \(references.count) recipe references for collection display")
-
-                    // Fetch full recipes for each reference
-                    for reference in references {
-                        do {
-                            let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                                recipeId: reference.originalRecipeId,
-                                ownerId: reference.originalOwnerId
-                            )
-
-                            // Only add if not already in owned recipes (avoid duplicates)
-                            if !allRecipes.contains(where: { $0.id == recipe.id }) {
-                                allRecipes.append(recipe)
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to fetch referenced recipe \(reference.recipeTitle): \(error.localizedDescription)")
-                        }
-                    }
-                } catch {
-                    AppLogger.general.warning("Failed to fetch recipe references: \(error.localizedDescription)")
-                }
-            }
+            // Fetch all owned recipes
+            let allRecipes = try await dependencies.recipeRepository.fetchAll()
 
             // Filter to only recipes in this collection
             recipes = allRecipes.filter { recipe in
@@ -678,43 +650,8 @@ struct CollectionRecipeSelectorSheet: View {
 
         do {
             // Load owned recipes from local storage
-            var loadedRecipes = try await dependencies.recipeRepository.fetchAll()
-
-            // Load recipe references if user is logged in and CloudKit is available
-            if CurrentUserSession.shared.isCloudSyncAvailable,
-               let userId = CurrentUserSession.shared.userId {
-                do {
-                    // Fetch recipe references from CloudKit
-                    let references = try await dependencies.cloudKitService.fetchRecipeReferences(forUserId: userId)
-                    AppLogger.general.info("Fetched \(references.count) recipe references from CloudKit")
-
-                    // Fetch full recipes for each reference
-                    for reference in references {
-                        do {
-                            let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                                recipeId: reference.originalRecipeId,
-                                ownerId: reference.originalOwnerId
-                            )
-
-                            // Only add if not already in owned recipes (avoid duplicates)
-                            if !loadedRecipes.contains(where: { $0.id == recipe.id }) {
-                                loadedRecipes.append(recipe)
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to fetch referenced recipe \(reference.recipeTitle): \(error.localizedDescription)")
-                            // Continue with other references even if one fails
-                        }
-                    }
-
-                    AppLogger.general.info("Total recipes including references: \(loadedRecipes.count)")
-                } catch {
-                    AppLogger.general.warning("Failed to fetch recipe references (continuing with owned recipes only): \(error.localizedDescription)")
-                    // Don't fail completely - just show owned recipes
-                }
-            }
-
-            recipes = loadedRecipes
-            AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection selector (owned + referenced)")
+            recipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for collection selector")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")
         }
@@ -782,26 +719,11 @@ struct CollectionRecipeSelectorSheet: View {
         defer { isCopying = false }
 
         do {
-            // Create a copy of the recipe owned by the current user
-            let copiedRecipe = Recipe(
-                id: UUID(), // New ID for the copy
-                title: recipe.title,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps,
-                yields: recipe.yields,
-                totalMinutes: recipe.totalMinutes,
-                tags: recipe.tags,
-                nutrition: recipe.nutrition,
-                sourceURL: recipe.sourceURL,
-                sourceTitle: recipe.sourceTitle,
-                notes: recipe.notes,
-                imageURL: recipe.imageURL,
-                isFavorite: false,
-                visibility: .privateRecipe, // Make it private by default
-                ownerId: userId, // Set the current user as owner
-                cloudRecordName: nil, // Clear to ensure new CloudKit record
-                createdAt: Date(),
-                updatedAt: Date()
+            // Create a copy of the recipe owned by the current user using withOwner()
+            let copiedRecipe = recipe.withOwner(
+                userId,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipe.ownerId != nil ? "Unknown" : nil  // TODO: Fetch actual creator name
             )
 
             // Save the copied recipe

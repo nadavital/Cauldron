@@ -28,12 +28,10 @@ class DependencyContainer: ObservableObject {
     let unitsService: UnitsService
     let cookSessionManager: CookSessionManager
     let groceryService: GroceryService
-    let recommender: Recommender
     let foundationModelsService: FoundationModelsService
     let sharingService: SharingService
     let cloudKitService: CloudKitService
     let recipeSyncService: RecipeSyncService
-    let recipeReferenceManager: RecipeReferenceManager
 
     // UI Services (MainActor)
     let timerManager: TimerManager
@@ -79,8 +77,6 @@ class DependencyContainer: ObservableObject {
             unitsService: unitsService
         )
 
-        self.recommender = Recommender()
-
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
             recipeRepository: recipeRepository,
@@ -91,11 +87,6 @@ class DependencyContainer: ObservableObject {
             cloudKitService: cloudKitService,
             recipeRepository: recipeRepository,
             deletedRecipeRepository: deletedRecipeRepository
-        )
-
-        self.recipeReferenceManager = RecipeReferenceManager(
-            cloudKitService: cloudKitService,
-            recipeRepository: recipeRepository
         )
 
         // Initialize parsers

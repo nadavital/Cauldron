@@ -39,6 +39,11 @@ final class RecipeModel {
     var ownerId: UUID?
     var cloudRecordName: String?
 
+    // Attribution fields for copied recipes
+    var originalCreatorId: UUID?
+    var originalCreatorName: String?
+    var savedAt: Date?
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -57,7 +62,10 @@ final class RecipeModel {
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        originalCreatorId: UUID? = nil,
+        originalCreatorName: String? = nil,
+        savedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -77,6 +85,9 @@ final class RecipeModel {
         self.cloudRecordName = cloudRecordName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalCreatorId = originalCreatorId
+        self.originalCreatorName = originalCreatorName
+        self.savedAt = savedAt
     }
     
     /// Convert from domain Recipe to RecipeModel
@@ -108,7 +119,10 @@ final class RecipeModel {
             ownerId: recipe.ownerId,
             cloudRecordName: recipe.cloudRecordName,
             createdAt: recipe.createdAt,
-            updatedAt: recipe.updatedAt
+            updatedAt: recipe.updatedAt,
+            originalCreatorId: recipe.originalCreatorId,
+            originalCreatorName: recipe.originalCreatorName,
+            savedAt: recipe.savedAt
         )
     }
     
@@ -173,7 +187,10 @@ final class RecipeModel {
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
         )
     }
 }

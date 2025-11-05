@@ -27,6 +27,11 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let cloudRecordName: String?  // CloudKit record name
     let createdAt: Date
     let updatedAt: Date
+
+    // Attribution fields for copied recipes
+    let originalCreatorId: UUID?  // ID of the user who originally created this recipe (if copied)
+    let originalCreatorName: String?  // Display name of the original creator (cached for performance)
+    let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
     
     init(
         id: UUID = UUID(),
@@ -46,7 +51,10 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        originalCreatorId: UUID? = nil,
+        originalCreatorName: String? = nil,
+        savedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -66,6 +74,9 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.cloudRecordName = cloudRecordName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalCreatorId = originalCreatorId
+        self.originalCreatorName = originalCreatorName
+        self.savedAt = savedAt
     }
     
     var displayTime: String? {
@@ -100,7 +111,10 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
             createdAt: createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
         )
     }
     
@@ -129,13 +143,25 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
             createdAt: createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
         )
     }
 
     /// Create a copy with a new owner (for saving shared recipes)
-    func withOwner(_ userId: UUID) -> Recipe {
-        Recipe(
+    /// - Parameters:
+    ///   - userId: The ID of the user who will own the copy
+    ///   - originalCreatorId: Optional ID of the original creator (for attribution)
+    ///   - originalCreatorName: Optional name of the original creator (for attribution)
+    /// - Returns: A new Recipe instance owned by the specified user
+    func withOwner(_ userId: UUID, originalCreatorId: UUID? = nil, originalCreatorName: String? = nil) -> Recipe {
+        // Determine attribution - use provided values or fall back to current owner
+        let creatorId = originalCreatorId ?? ownerId
+        let creatorName = originalCreatorName
+
+        return Recipe(
             id: UUID(), // New ID for the copy
             title: title,
             ingredients: ingredients,
@@ -153,7 +179,10 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             ownerId: userId,
             cloudRecordName: nil, // Clear cloud record name for new copy
             createdAt: Date(),
-            updatedAt: Date()
+            updatedAt: Date(),
+            originalCreatorId: creatorId,
+            originalCreatorName: creatorName,
+            savedAt: Date()
         )
     }
 
@@ -165,12 +194,6 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             return false
         }
         return ownerId == currentUserId
-    }
-
-    /// Check if this is a referenced recipe (not owned by current user)
-    @MainActor
-    var isReference: Bool {
-        !isOwnedByCurrentUser()
     }
 
     /// Check if a viewer can access this recipe based on visibility and relationship
