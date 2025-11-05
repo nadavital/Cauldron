@@ -217,7 +217,11 @@ class RecipeEditorViewModel: ObservableObject {
             }
 
             // Save to local database (CloudKit sync happens automatically in repository)
-            if isEditing {
+            // Check if recipe actually exists in database, not just if existingRecipe is set
+            // This handles the case where an imported recipe is edited before being saved
+            let recipeExists = await dependencies.recipeRepository.recipeExists(id: recipe.id)
+
+            if recipeExists {
                 try await dependencies.recipeRepository.update(recipe)
             } else {
                 try await dependencies.recipeRepository.create(recipe)

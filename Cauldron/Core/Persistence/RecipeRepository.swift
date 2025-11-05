@@ -312,6 +312,22 @@ actor RecipeRepository {
         logger.info("Deleted recipe and created tombstone: \(recipe.title)")
     }
 
+    /// Check if a recipe exists in the database
+    func recipeExists(id: UUID) async -> Bool {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.id == id }
+        )
+
+        do {
+            let results = try context.fetch(descriptor)
+            return !results.isEmpty
+        } catch {
+            logger.error("Failed to check if recipe exists: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     /// Delete a recipe from CloudKit with proper error handling
     private func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitService: CloudKitService) async {
         // Only try to delete if CloudKit is available
