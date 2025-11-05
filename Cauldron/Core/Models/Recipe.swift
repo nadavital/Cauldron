@@ -172,4 +172,43 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     var isReference: Bool {
         !isOwnedByCurrentUser()
     }
+
+    /// Check if a viewer can access this recipe based on visibility and relationship
+    /// - Parameters:
+    ///   - viewerId: ID of the user attempting to view the recipe (nil for current user)
+    ///   - isFriend: Whether the viewer is friends with the recipe owner
+    /// - Returns: True if the recipe is accessible to the viewer
+    func isAccessible(to viewerId: UUID?, isFriend: Bool) -> Bool {
+        // Owner can always see their own recipes
+        if let viewerId = viewerId, viewerId == ownerId {
+            return true
+        }
+
+        // Check based on visibility
+        switch visibility {
+        case .publicRecipe:
+            return true
+        case .friendsOnly:
+            return isFriend
+        case .privateRecipe:
+            return false
+        }
+    }
+
+    /// Check if this recipe meets the minimum visibility requirement for a collection
+    /// - Parameter collectionVisibility: The visibility level of the collection
+    /// - Returns: True if recipe visibility is sufficient for the collection
+    func meetsMinimumVisibility(for collectionVisibility: RecipeVisibility) -> Bool {
+        switch collectionVisibility {
+        case .publicRecipe:
+            // Public collections should only contain public recipes
+            return visibility == .publicRecipe
+        case .friendsOnly:
+            // Friends-only collections can contain public or friends-only recipes
+            return visibility == .publicRecipe || visibility == .friendsOnly
+        case .privateRecipe:
+            // Private collections can contain any visibility
+            return true
+        }
+    }
 }

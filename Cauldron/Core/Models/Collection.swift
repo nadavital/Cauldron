@@ -141,6 +141,27 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         visibility != .privateRecipe
     }
 
+    /// Get non-conforming recipes based on collection visibility
+    /// - Parameter recipes: Array of recipes to check against collection visibility
+    /// - Returns: Array of recipes that don't meet the minimum visibility requirement
+    func nonConformingRecipes(from recipes: [Recipe]) -> [Recipe] {
+        recipes.filter { recipe in
+            !recipe.meetsMinimumVisibility(for: visibility)
+        }
+    }
+
+    /// Get the minimum visibility description for this collection
+    var minimumVisibilityDescription: String {
+        switch visibility {
+        case .publicRecipe:
+            return "public"
+        case .friendsOnly:
+            return "public or friends-only"
+        case .privateRecipe:
+            return "any visibility"
+        }
+    }
+
     // MARK: - Hashable & Equatable
 
     static func == (lhs: Collection, rhs: Collection) -> Bool {
