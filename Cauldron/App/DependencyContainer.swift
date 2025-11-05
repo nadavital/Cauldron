@@ -37,6 +37,7 @@ class DependencyContainer: ObservableObject {
 
     // UI Services (MainActor)
     let timerManager: TimerManager
+    let profileCacheManager: ProfileCacheManager
     lazy var cookModeCoordinator: CookModeCoordinator = CookModeCoordinator(dependencies: self)
     lazy var connectionManager: ConnectionManager = ConnectionManager(dependencies: self)
 
@@ -72,6 +73,7 @@ class DependencyContainer: ObservableObject {
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
         self.timerManager = TimerManager()
+        self.profileCacheManager = ProfileCacheManager()
 
         self.groceryService = GroceryService(
             unitsService: unitsService

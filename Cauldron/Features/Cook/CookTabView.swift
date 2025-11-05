@@ -125,47 +125,48 @@ struct CookTabView: View {
     }
 
     private func loadCollections() async {
-        if let userId = CurrentUserSession.shared.userId {
-            do {
-                // Load from local repository
-                let localCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
-                var allCollections = localCollections.filter { $0.userId == userId }
+        do {
+            // Load from local repository - don't filter by userId to match CollectionsListView behavior
+            let localCollections = try await viewModel.dependencies.collectionRepository.fetchAll()
+            var allCollections = localCollections
+            AppLogger.general.info("🔍 CookTab: Loaded \(allCollections.count) collections from repository")
 
-                // Also fetch from CloudKit to get any collections that might not be synced locally yet
-                if CurrentUserSession.shared.isCloudSyncAvailable {
-                    do {
-                        // Fetch all visibility levels for current user's collections
-                        let publicCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
-                            ownerIds: [userId],
-                            visibility: .publicRecipe
-                        )
-                        let friendsCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
-                            ownerIds: [userId],
-                            visibility: .friendsOnly
-                        )
-                        let privateCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
-                            ownerIds: [userId],
-                            visibility: .privateRecipe
-                        )
+            // Also fetch from CloudKit to get any collections that might not be synced locally yet
+            if let userId = CurrentUserSession.shared.userId, CurrentUserSession.shared.isCloudSyncAvailable {
+                do {
+                    // Fetch all visibility levels for current user's collections
+                    let publicCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                        ownerIds: [userId],
+                        visibility: .publicRecipe
+                    )
+                    let friendsCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                        ownerIds: [userId],
+                        visibility: .friendsOnly
+                    )
+                    let privateCollections = try await viewModel.dependencies.cloudKitService.queryCollections(
+                        ownerIds: [userId],
+                        visibility: .privateRecipe
+                    )
 
-                        // Combine all CloudKit collections
-                        let cloudCollections = publicCollections + friendsCollections + privateCollections
+                    // Combine all CloudKit collections
+                    let cloudCollections = publicCollections + friendsCollections + privateCollections
+                    AppLogger.general.info("🔍 CookTab: Loaded \(cloudCollections.count) collections from CloudKit")
 
-                        // Add any CloudKit collections that aren't already in local storage
-                        for cloudCollection in cloudCollections {
-                            if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
-                                allCollections.append(cloudCollection)
-                            }
+                    // Add any CloudKit collections that aren't already in local storage
+                    for cloudCollection in cloudCollections {
+                        if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
+                            allCollections.append(cloudCollection)
                         }
-                    } catch {
-                        AppLogger.general.warning("Failed to load collections from CloudKit: \(error.localizedDescription)")
                     }
+                } catch {
+                    AppLogger.general.warning("Failed to load collections from CloudKit: \(error.localizedDescription)")
                 }
-
-                collections = allCollections.sorted { $0.updatedAt > $1.updatedAt }
-            } catch {
-                AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
             }
+
+            collections = allCollections.sorted { $0.updatedAt > $1.updatedAt }
+            AppLogger.general.info("🔍 CookTab: Final collections count: \(collections.count)")
+        } catch {
+            AppLogger.general.error("Failed to load collections: \(error.localizedDescription)")
         }
     }
     

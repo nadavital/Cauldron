@@ -1230,7 +1230,7 @@ actor CloudKitService {
 
         // Include connection data in userInfo for navigation
         // Only request fields that are guaranteed to exist (avoid optional fields that may cause errors)
-        notification.desiredKeys = ["id", "fromUserId", "toUserId", "status"]
+        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status"]
 
         subscription.notificationInfo = notification
 

@@ -40,8 +40,8 @@ struct UserProfileView: View {
                     connectionSection
                 }
 
-                // Collections Section (only show if user has collections)
-                if !viewModel.userCollections.isEmpty || viewModel.isLoadingCollections {
+                // Collections Section (only show if user has collections OR still loading the first time)
+                if !viewModel.userCollections.isEmpty || (viewModel.isLoadingCollections && !hasLoadedInitialData) {
                     collectionsSection
                 }
 
@@ -53,6 +53,9 @@ struct UserProfileView: View {
         .navigationTitle(user.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
+        .refreshable {
+            await viewModel.refreshProfile()
+        }
         .onAppear {
             // Only load initial data once - the viewModel's cache will handle subsequent requests
             if !hasLoadedInitialData {

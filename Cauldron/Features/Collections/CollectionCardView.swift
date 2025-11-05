@@ -15,16 +15,16 @@ struct CollectionCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Cover image/grid
             ZStack {
-                if collection.coverImageType == .emoji, let emoji = collection.emoji {
-                    // Show emoji
+                if let emoji = collection.emoji {
+                    // Show emoji with color background
                     collectionColor
                         .frame(width: 160, height: 160)
                         .overlay(
                             Text(emoji)
                                 .font(.system(size: 60))
                         )
-                } else if collection.coverImageType == .color {
-                    // Show solid color
+                } else if collection.color != nil {
+                    // Show solid color only (no emoji)
                     collectionColor
                         .frame(width: 160, height: 160)
                         .overlay(
@@ -52,16 +52,10 @@ struct CollectionCardView: View {
 
             // Collection name and count
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if let emoji = collection.emoji, collection.coverImageType != .emoji {
-                        Text(emoji)
-                            .font(.caption)
-                    }
-                    Text(collection.name)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
+                Text(collection.name)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
                 Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
                     .font(.caption)
@@ -207,16 +201,10 @@ struct CollectionReferenceCardView: View {
 
             // Collection name and count
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if let emoji = reference.collectionEmoji {
-                        Text(emoji)
-                            .font(.caption)
-                    }
-                    Text(reference.collectionName)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                }
+                Text(reference.collectionName)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
 
                 Text("\(reference.recipeCount) recipe\(reference.recipeCount == 1 ? "" : "s")")
                     .font(.caption)
