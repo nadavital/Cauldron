@@ -187,7 +187,7 @@ struct CollectionDetailView: View {
                         NavigationLink {
                             RecipeDetailView(recipe: recipe, dependencies: dependencies)
                         } label: {
-                            RecipeRowView(recipe: recipe)
+                            RecipeRowView(recipe: recipe, dependencies: dependencies)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -513,7 +513,7 @@ struct CollectionRecipeSelectorSheet: View {
                                     Button {
                                         toggleRecipe(recipe.id)
                                     } label: {
-                                        recipeRow(recipe: recipe, isSelectable: true)
+                                        recipeRow(recipe: recipe, isSelectable: true, dependencies: dependencies)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -529,7 +529,7 @@ struct CollectionRecipeSelectorSheet: View {
                                     Button {
                                         showingCopyConfirmation = recipe
                                     } label: {
-                                        recipeRow(recipe: recipe, isSelectable: false)
+                                        recipeRow(recipe: recipe, isSelectable: false, dependencies: dependencies)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -590,9 +590,9 @@ struct CollectionRecipeSelectorSheet: View {
     }
 
     @ViewBuilder
-    private func recipeRow(recipe: Recipe, isSelectable: Bool) -> some View {
+    private func recipeRow(recipe: Recipe, isSelectable: Bool, dependencies: DependencyContainer) -> some View {
         HStack(spacing: 12) {
-            RecipeImageView(thumbnailImageURL: recipe.imageURL)
+            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
                 .overlay(
                     Group {
                         if !isSelectable {
@@ -859,7 +859,7 @@ struct ConformanceFixSheet: View {
                                     Button {
                                         toggleRecipe(recipe.id)
                                     } label: {
-                                        recipeRow(recipe: recipe, selectable: true)
+                                        recipeRow(recipe: recipe, selectable: true, dependencies: dependencies)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -883,7 +883,7 @@ struct ConformanceFixSheet: View {
                                     .padding(.bottom, 8)
 
                                 ForEach(referencedRecipes) { recipe in
-                                    recipeRow(recipe: recipe, selectable: false)
+                                    recipeRow(recipe: recipe, selectable: false, dependencies: dependencies)
                                 }
                             }
                         }
@@ -938,9 +938,9 @@ struct ConformanceFixSheet: View {
     }
 
     @ViewBuilder
-    private func recipeRow(recipe: Recipe, selectable: Bool) -> some View {
+    private func recipeRow(recipe: Recipe, selectable: Bool, dependencies: DependencyContainer) -> some View {
         HStack(spacing: 12) {
-            RecipeImageView(thumbnailImageURL: recipe.imageURL)
+            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
                 .overlay(
                     Group {
                         if !selectable {

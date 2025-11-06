@@ -54,7 +54,7 @@ struct RecipeDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero Image - Stretches to top
                     if let imageURL = recipe.imageURL {
-                        HeroRecipeImageView(imageURL: imageURL)
+                        HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                             .ignoresSafeArea(edges: .top)
                     }
 

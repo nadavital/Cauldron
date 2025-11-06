@@ -8,6 +8,7 @@
 import Foundation
 import CloudKit
 import os
+import UIKit
 
 /// Account status for iCloud/CloudKit
 enum CloudKitAccountStatus: CustomStringConvertible {
@@ -140,7 +141,7 @@ actor CloudKitService {
         }
     }
 
-    private func getPrivateDatabase() throws -> CKDatabase {
+    func getPrivateDatabase() throws -> CKDatabase {
         try checkEnabled()
         guard let privateDatabase = privateDatabase else {
             throw CloudKitError.notEnabled
@@ -148,7 +149,7 @@ actor CloudKitService {
         return privateDatabase
     }
 
-    private func getPublicDatabase() throws -> CKDatabase {
+    func getPublicDatabase() throws -> CKDatabase {
         try checkEnabled()
         guard let publicDatabase = publicDatabase else {
             throw CloudKitError.notEnabled
@@ -576,6 +577,10 @@ actor CloudKitService {
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
 
+        // Note: Image asset is uploaded separately via uploadImageAsset()
+        // We preserve existing imageAsset and imageModifiedAt if they exist
+        // This allows recipe data sync to happen independently from image sync
+
         logger.info("Saving recipe to CloudKit private database...")
         do {
             let savedRecord = try await db.save(record)
@@ -739,6 +744,10 @@ actor CloudKitService {
         let yields = record["yields"] as? String ?? "4 servings"
         let totalMinutes = record["totalMinutes"] as? Int
 
+        // Cloud image metadata (optional)
+        let cloudImageRecordName: String? = (record["imageAsset"] as? CKAsset) != nil ? record.recordID.recordName : nil
+        let imageModifiedAt = record["imageModifiedAt"] as? Date
+
         return Recipe(
             id: recipeId,
             title: title,
@@ -750,6 +759,8 @@ actor CloudKitService {
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: record.recordID.recordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -1495,6 +1506,182 @@ actor CloudKitService {
         logger.info("✅ Deleted collection reference")
     }
 
+    // MARK: - Image Assets
+
+    /// Upload image as CKAsset to CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID this image belongs to
+    ///   - imageData: The image data to upload
+    ///   - database: The database to upload to (private or public)
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadImageAsset(recipeId: UUID, imageData: Data, to database: CKDatabase) async throws -> String {
+        logger.info("📤 Uploading image asset for recipe: \(recipeId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(recipeId.uuidString)
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Find existing recipe record to attach asset to
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            // Fetch existing record
+            let record = try await database.record(for: recordID)
+
+            // Add image asset and modification timestamp
+            record["imageAsset"] = asset
+            record["imageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await database.save(record)
+            logger.info("✅ Uploaded image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("Recipe record not found in CloudKit: \(recipeId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download image asset from CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID to download image for
+    ///   - database: The database to download from (private or public)
+    /// - Returns: The image data, or nil if no image exists
+    func downloadImageAsset(recipeId: UUID, from database: CKDatabase) async throws -> Data? {
+        logger.info("📥 Downloading image asset for recipe: \(recipeId)")
+
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            let record = try await database.record(for: recordID)
+
+            guard let asset = record["imageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No image asset found for recipe: \(recipeId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded image asset (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Recipe record not found: \(recipeId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete image asset from CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID to delete image for
+    ///   - database: The database to delete from (private or public)
+    func deleteImageAsset(recipeId: UUID, from database: CKDatabase) async throws {
+        logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
+
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            let record = try await database.record(for: recordID)
+
+            // Remove image asset fields
+            record["imageAsset"] = nil
+            record["imageModifiedAt"] = nil
+
+            _ = try await database.save(record)
+            logger.info("✅ Deleted image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Recipe record not found: \(recipeId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    /// Optimize image data for CloudKit upload
+    /// - Parameter imageData: Original image data
+    /// - Returns: Optimized image data
+    /// - Throws: CloudKitError if optimization fails or image is too large
+    private func optimizeImageForCloudKit(_ imageData: Data) async throws -> Data {
+        logger.info("Image size: \(imageData.count) bytes, optimizing...")
+
+        #if canImport(UIKit)
+        guard let image = UIImage(data: imageData) else {
+            throw CloudKitError.compressionFailed
+        }
+
+        let maxSizeBytes = 10_000_000 // 10MB max for CloudKit
+        let compressionThreshold = 5_000_000 // 5MB - compress if larger
+
+        // Try 80% quality compression first
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            if data.count <= compressionThreshold {
+                logger.info("Optimized to \(data.count) bytes")
+                return data
+            }
+            if data.count <= maxSizeBytes {
+                logger.info("Optimized to \(data.count) bytes")
+                return data
+            }
+        }
+
+        // Try 60% compression
+        if let compressedData = image.jpegData(compressionQuality: 0.6),
+           compressedData.count <= maxSizeBytes {
+            logger.info("Optimized to \(compressedData.count) bytes")
+            return compressedData
+        }
+
+        // If still too large, resize and compress
+        let maxDimension: CGFloat = 2000
+        let scale = min(maxDimension / image.size.width, maxDimension / image.size.height, 1.0)
+
+        if scale < 1.0 {
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+            let resizedImage = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+
+            if let resizedImage = resizedImage,
+               let compressedData = resizedImage.jpegData(compressionQuality: 0.8),
+               compressedData.count <= maxSizeBytes {
+                logger.info("Optimized to \(compressedData.count) bytes")
+                return compressedData
+            }
+        }
+
+        throw CloudKitError.assetTooLarge
+        #else
+        // macOS or other platforms
+        throw CloudKitError.compressionFailed
+        #endif
+    }
+
     // MARK: - Private Helpers for Collections
 
     private func collectionFromRecord(_ record: CKRecord) throws -> Collection {
@@ -1582,6 +1769,9 @@ enum CloudKitError: LocalizedError {
     case networkError
     case quotaExceeded
     case syncConflict
+    case assetNotFound
+    case assetTooLarge
+    case compressionFailed
 
     var errorDescription: String? {
         switch self {
@@ -1610,6 +1800,12 @@ enum CloudKitError: LocalizedError {
             return "iCloud storage is full. Please free up space in Settings"
         case .syncConflict:
             return "Sync conflict detected. Your changes may need to be merged manually"
+        case .assetNotFound:
+            return "Image not found in iCloud"
+        case .assetTooLarge:
+            return "Image is too large to upload (max 10MB)"
+        case .compressionFailed:
+            return "Failed to compress image for upload"
         }
     }
 

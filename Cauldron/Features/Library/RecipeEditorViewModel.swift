@@ -135,7 +135,7 @@ class RecipeEditorViewModel: ObservableObject {
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
             Task {
-                let result = await RecipeImageService.shared.loadImage(from: imageURL)
+                let result = await dependencies.recipeImageService.loadImage(from: imageURL)
                 if case .success(let image) = result {
                     await MainActor.run {
                         selectedImage = image
@@ -211,8 +211,8 @@ class RecipeEditorViewModel: ObservableObject {
 
             // Handle image if selected
             if let image = selectedImage {
-                let filename = try await ImageManager.shared.saveImage(image, recipeId: recipe.id)
-                let imageURL = await ImageManager.shared.imageURL(for: filename)
+                let filename = try await dependencies.imageManager.saveImage(image, recipeId: recipe.id)
+                let imageURL = await dependencies.imageManager.imageURL(for: filename)
                 recipe = recipe.withImageURL(imageURL)
             }
 

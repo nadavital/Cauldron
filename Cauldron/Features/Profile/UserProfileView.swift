@@ -467,7 +467,7 @@ struct UserProfileView: View {
                         await viewModel.loadUserRecipes(forceRefresh: true)
                     }
                 )) {
-                    RecipeCard(sharedRecipe: sharedRecipe)
+                    RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
                 }
                 .buttonStyle(.plain)
             }
@@ -480,12 +480,13 @@ struct UserProfileView: View {
 
 struct RecipeCard: View {
     let sharedRecipe: SharedRecipe
+    let dependencies: DependencyContainer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image
             if let imageURL = sharedRecipe.recipe.imageURL {
-                RecipeImageView(cardImageURL: imageURL)
+                RecipeImageView(cardImageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                     .frame(height: 160)
                     .clipped()
             } else {

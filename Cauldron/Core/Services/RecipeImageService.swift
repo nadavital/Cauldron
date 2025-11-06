@@ -7,19 +7,24 @@
 
 import SwiftUI
 import UIKit
+import CloudKit
 
 /// Centralized service for loading and caching recipe images
 @MainActor
 class RecipeImageService {
-    static let shared = RecipeImageService()
-
     // Memory cache for loaded images
     private let cache = NSCache<NSString, UIImage>()
 
     // Maximum cache size (50 images)
     private let maxCacheCount = 50
 
-    private init() {
+    // CloudKit service for fallback loading
+    private let cloudKitService: CloudKitService
+    private let imageManager: ImageManager
+
+    init(cloudKitService: CloudKitService, imageManager: ImageManager) {
+        self.cloudKitService = cloudKitService
+        self.imageManager = imageManager
         cache.countLimit = maxCacheCount
     }
 
@@ -109,6 +114,55 @@ class RecipeImageService {
             .appendingPathComponent(filename)
 
         return await loadImage(from: imageURL)
+    }
+
+    /// Load an image for a recipe with CloudKit fallback
+    /// - Parameters:
+    ///   - recipeId: The recipe ID
+    ///   - url: The local URL (optional, for cache key)
+    /// - Returns: Result containing UIImage or error
+    func loadImage(forRecipeId recipeId: UUID, localURL url: URL?) async -> Result<UIImage, ImageLoadError> {
+        // Try loading from local URL first
+        if let url = url {
+            let result = await loadImage(from: url)
+            if case .success = result {
+                return result
+            }
+        }
+
+        // If local load failed, try CloudKit fallback
+        do {
+            let privateDB = try await cloudKitService.getPrivateDatabase()
+
+            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, database: privateDB) {
+                // Image downloaded successfully, load it
+                let fileManager = FileManager.default
+                guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                    return .failure(.invalidURL)
+                }
+
+                let imageURL = documentsURL
+                    .appendingPathComponent("RecipeImages")
+                    .appendingPathComponent(filename)
+
+                return await loadImage(from: imageURL)
+            }
+        } catch {
+            // CloudKit fallback failed, return original error
+        }
+
+        return .failure(.loadFailed(NSError(domain: "RecipeImageService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Image not found locally or in CloudKit"])))
+    }
+
+    /// Prefetch images for multiple recipes (for collection grids)
+    /// - Parameter recipeIds: Array of recipe IDs to prefetch
+    func prefetchImages(forRecipeIds recipeIds: [UUID]) {
+        Task {
+            for recipeId in recipeIds.prefix(4) {  // Only prefetch first 4 for grid
+                let filename = "\(recipeId.uuidString).jpg"
+                _ = await loadImage(filename: filename)
+            }
+        }
     }
 
     /// Clear all cached images from memory

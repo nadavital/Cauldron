@@ -111,7 +111,7 @@ struct AllRecipesListView: View {
             
             ForEach(filteredAndSortedRecipes) { recipe in
                 NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                    RecipeRowView(recipe: recipe)
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {

@@ -154,7 +154,7 @@ struct SharingTabView: View {
                                     await viewModel.removeSharedRecipe(sharedRecipe)
                                 }
                             )) {
-                                SharedRecipeRowView(sharedRecipe: sharedRecipe)
+                                SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                                     .padding(.horizontal, 16)
                             }
                             .buttonStyle(.plain)
@@ -253,7 +253,7 @@ struct SharingTabView: View {
                         await viewModel.removeSharedRecipe(sharedRecipe)
                     }
                 )) {
-                    SharedRecipeRowView(sharedRecipe: sharedRecipe)
+                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                 }
             }
         }
@@ -263,11 +263,12 @@ struct SharingTabView: View {
 /// Row view for a shared recipe with enhanced visuals
 struct SharedRecipeRowView: View {
     let sharedRecipe: SharedRecipe
+    let dependencies: DependencyContainer
 
     var body: some View {
         HStack(spacing: 14) {
             // Recipe Image
-            RecipeImageView(thumbnailImageURL: sharedRecipe.recipe.imageURL)
+            RecipeImageView(thumbnailImageURL: sharedRecipe.recipe.imageURL, recipeImageService: dependencies.recipeImageService)
 
             VStack(alignment: .leading, spacing: 8) {
                 // Title

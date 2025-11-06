@@ -145,7 +145,7 @@ struct ReferencedCollectionDetailView: View {
                                 NavigationLink {
                                     RecipeDetailView(recipe: recipe, dependencies: dependencies)
                                 } label: {
-                                    RecipeRowView(recipe: recipe)
+                                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                                 }
                             }
                         }

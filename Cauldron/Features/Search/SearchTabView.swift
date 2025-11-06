@@ -123,7 +123,7 @@ struct SearchTabView: View {
 
                 ForEach(viewModel.recipeSearchResults) { recipe in
                     NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
-                        RecipeRowView(recipe: recipe)
+                        RecipeRowView(recipe: recipe, dependencies: viewModel.dependencies)
                     }
                     .buttonStyle(.plain)
                 }

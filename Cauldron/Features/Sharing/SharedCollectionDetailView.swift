@@ -234,7 +234,7 @@ struct SharedCollectionDetailView: View {
                         RecipeDetailView(recipe: recipe, dependencies: dependencies)
                     }
                 } label: {
-                    RecipeRowView(recipe: recipe)
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
                 .buttonStyle(.plain)
             }

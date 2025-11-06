@@ -7,6 +7,7 @@
 
 import Foundation
 import os
+import CloudKit
 
 /// Sync status for recipe syncing
 enum RecipeSyncStatus {
@@ -28,16 +29,23 @@ actor RecipeSyncService {
     private let cloudKitService: CloudKitService
     private let recipeRepository: RecipeRepository
     private let deletedRecipeRepository: DeletedRecipeRepository
+    private let imageManager: ImageManager
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeSyncService")
 
     private var lastSyncDate: Date?
     private let lastSyncKey = "lastRecipeSyncDate"
     private var autoSyncTask: Task<Void, Never>?
 
-    init(cloudKitService: CloudKitService, recipeRepository: RecipeRepository, deletedRecipeRepository: DeletedRecipeRepository) {
+    init(
+        cloudKitService: CloudKitService,
+        recipeRepository: RecipeRepository,
+        deletedRecipeRepository: DeletedRecipeRepository,
+        imageManager: ImageManager
+    ) {
         self.cloudKitService = cloudKitService
         self.recipeRepository = recipeRepository
         self.deletedRecipeRepository = deletedRecipeRepository
+        self.imageManager = imageManager
 
         // Load last sync date
         if let timestamp = UserDefaults.standard.object(forKey: lastSyncKey) as? Date {
@@ -227,10 +235,16 @@ actor RecipeSyncService {
                         visibility: cloudRecipe.visibility,
                         ownerId: cloudRecipe.ownerId,
                         cloudRecordName: cloudRecipe.cloudRecordName,
+                        cloudImageRecordName: cloudRecipe.cloudImageRecordName,
+                        imageModifiedAt: cloudRecipe.imageModifiedAt,
                         createdAt: cloudRecipe.createdAt,
                         updatedAt: cloudRecipe.updatedAt
                     )
                     try await recipeRepository.update(mergedRecipe)
+
+                    // Download image if cloud has it and local doesn't
+                    await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+
                     updated += 1
                 } else if localRecipe.updatedAt > cloudRecipe.updatedAt {
                     // Local version is newer - push to cloud (preserve CloudKit metadata)
@@ -253,6 +267,8 @@ actor RecipeSyncService {
                             visibility: localRecipe.visibility,
                             ownerId: ownerId,
                             cloudRecordName: cloudRecipe.cloudRecordName ?? localRecipe.cloudRecordName,  // Preserve CloudKit record name
+                            cloudImageRecordName: localRecipe.cloudImageRecordName,
+                            imageModifiedAt: localRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
                             updatedAt: localRecipe.updatedAt
                         )
@@ -265,7 +281,8 @@ actor RecipeSyncService {
                     pushedToCloud += 1
                 } else {
                     // Same timestamp - ensure CloudKit metadata is preserved locally
-                    if localRecipe.cloudRecordName != cloudRecipe.cloudRecordName {
+                    if localRecipe.cloudRecordName != cloudRecipe.cloudRecordName ||
+                       localRecipe.cloudImageRecordName != cloudRecipe.cloudImageRecordName {
                         let updated = Recipe(
                             id: localRecipe.id,
                             title: localRecipe.title,
@@ -283,17 +300,27 @@ actor RecipeSyncService {
                             visibility: localRecipe.visibility,
                             ownerId: localRecipe.ownerId,
                             cloudRecordName: cloudRecipe.cloudRecordName,  // Update CloudKit metadata
+                            cloudImageRecordName: cloudRecipe.cloudImageRecordName,
+                            imageModifiedAt: cloudRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
                             updatedAt: localRecipe.updatedAt
                         )
                         try await recipeRepository.update(updated)
                     }
+
+                    // Download image if missing locally but exists in cloud
+                    await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+
                     skipped += 1
                 }
             } else {
                 // Recipe exists in cloud but not locally - create local
                 logger.info("⬇️ Creating local recipe from cloud: \(cloudRecipe.title)")
                 try await recipeRepository.create(cloudRecipe)
+
+                // Download image if exists in cloud
+                await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+
                 created += 1
             }
         }
@@ -335,5 +362,50 @@ actor RecipeSyncService {
     func stopPeriodicSync() {
         autoSyncTask?.cancel()
         autoSyncTask = nil
+    }
+
+    // MARK: - Image Sync Helpers
+
+    /// Download recipe image from CloudKit if needed
+    /// - Parameters:
+    ///   - recipe: The recipe to check and download image for
+    ///   - userId: The current user's ID (to determine which database to use)
+    private func downloadImageIfNeeded(recipe: Recipe, userId: UUID) async {
+        // Check if recipe has a cloud image
+        guard recipe.cloudImageRecordName != nil else {
+            return
+        }
+
+        // Check if image already exists locally
+        let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
+        if hasLocalImage {
+            // Check if cloud image is newer
+            let localModified = await imageManager.getImageModificationDate(recipeId: recipe.id)
+            if let cloudModified = recipe.imageModifiedAt,
+               let localModified = localModified,
+               localModified >= cloudModified {
+                // Local image is same or newer, no need to download
+                return
+            }
+        }
+
+        // Determine which database to use based on recipe ownership
+        let isOwnRecipe = recipe.ownerId == userId
+
+        // Download image from CloudKit
+        do {
+            let database = isOwnRecipe ?
+                try await cloudKitService.getPrivateDatabase() :
+                try await cloudKitService.getPublicDatabase()
+
+            let dbName = isOwnRecipe ? "PRIVATE" : "PUBLIC"
+            logger.info("📥 Downloading image for recipe: \(recipe.title) from \(dbName) DB")
+
+            if let _ = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, database: database) {
+                logger.info("✅ Image downloaded successfully for: \(recipe.title)")
+            }
+        } catch {
+            logger.warning("Failed to download image for recipe '\(recipe.title)': \(error.localizedDescription)")
+        }
     }
 }

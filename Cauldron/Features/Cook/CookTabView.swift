@@ -141,13 +141,13 @@ struct CookTabView: View {
                 HStack(spacing: 16) {
                     ForEach(viewModel.recentlyCookedRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
-                            RecipeCardView(recipe: recipe)
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
-                            RecipeCardView(recipe: recipe)
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                                 .frame(width: 200)
                                 .padding()
                                 .background(Color(.systemBackground))
@@ -222,13 +222,13 @@ struct CookTabView: View {
                     HStack(spacing: 16) {
                         ForEach(viewModel.allRecipes.prefix(10)) { recipe in
                             NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
-                                RecipeCardView(recipe: recipe)
+                                RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
                                 recipeContextMenu(for: recipe)
                             } preview: {
-                                RecipeCardView(recipe: recipe)
+                                RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                                     .frame(width: 200)
                                     .padding()
                                     .background(Color(.systemBackground))
@@ -440,12 +440,13 @@ struct CategoryCardView: View {
 
 struct RecipeCardView: View {
     let recipe: Recipe
+    let dependencies: DependencyContainer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with badges
             ZStack(alignment: .topTrailing) {
-                RecipeImageView(cardImageURL: recipe.imageURL)
+                RecipeImageView(cardImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
 
                 // Favorite indicator (top-right)
                 if recipe.isFavorite {

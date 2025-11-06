@@ -160,7 +160,7 @@ struct CollectionFormView: View {
                         ForEach(selectedRecipes) { recipe in
                             HStack {
                                 if let imageURL = recipe.imageURL {
-                                    RecipeImageView(thumbnailImageURL: imageURL)
+                                    RecipeImageView(thumbnailImageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                                 } else {
                                     RoundedRectangle(cornerRadius: 8)
                                         .fill(Color.gray.opacity(0.2))
@@ -376,7 +376,7 @@ struct RecipeSelectorSheet: View {
                                 toggleRecipe(recipe.id)
                             } label: {
                                 HStack(spacing: 12) {
-                                    RecipeImageView(thumbnailImageURL: recipe.imageURL)
+                                    RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(recipe.title)
