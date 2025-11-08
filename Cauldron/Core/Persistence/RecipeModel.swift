@@ -42,6 +42,7 @@ final class RecipeModel {
     var imageModifiedAt: Date?  // Timestamp when image was last modified
 
     // Attribution fields for copied recipes
+    var originalRecipeId: UUID?
     var originalCreatorId: UUID?
     var originalCreatorName: String?
     var savedAt: Date?
@@ -67,6 +68,7 @@ final class RecipeModel {
         imageModifiedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
+        originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil
@@ -91,6 +93,7 @@ final class RecipeModel {
         self.imageModifiedAt = imageModifiedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalRecipeId = originalRecipeId
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
@@ -128,6 +131,7 @@ final class RecipeModel {
             imageModifiedAt: recipe.imageModifiedAt,
             createdAt: recipe.createdAt,
             updatedAt: recipe.updatedAt,
+            originalRecipeId: recipe.originalRecipeId,
             originalCreatorId: recipe.originalCreatorId,
             originalCreatorName: recipe.originalCreatorName,
             savedAt: recipe.savedAt
@@ -198,6 +202,7 @@ final class RecipeModel {
             imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt

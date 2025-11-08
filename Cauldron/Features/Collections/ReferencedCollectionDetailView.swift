@@ -19,7 +19,14 @@ struct ReferencedCollectionDetailView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var showRemoveConfirmation = false
+    @State private var hiddenRecipeCount = 0
+    @State private var isFriendWithOwner = false
+    @State private var ownerDisplayName: String?
     @Environment(\.dismiss) private var dismiss
+
+    private var loader: SharedCollectionLoader {
+        SharedCollectionLoader(dependencies: dependencies)
+    }
 
     var filteredRecipes: [Recipe] {
         if searchText.isEmpty {
@@ -70,13 +77,24 @@ struct ReferencedCollectionDetailView: View {
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
 
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "person.2.fill")
-                                            .font(.caption)
-                                        Text("Shared Collection")
-                                            .font(.caption)
+                                    // Owner attribution
+                                    if let ownerName = ownerDisplayName {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "person.fill")
+                                                .font(.caption)
+                                            Text("by \(ownerName)")
+                                                .font(.caption)
+                                        }
+                                        .foregroundColor(.blue)
+                                    } else {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "person.2.fill")
+                                                .font(.caption)
+                                            Text("Shared Collection")
+                                                .font(.caption)
+                                        }
+                                        .foregroundColor(.blue)
                                     }
-                                    .foregroundColor(.blue)
                                 }
 
                                 Spacer()
@@ -147,6 +165,11 @@ struct ReferencedCollectionDetailView: View {
                                 } label: {
                                     RecipeRowView(recipe: recipe, dependencies: dependencies)
                                 }
+                            }
+
+                            // Show hidden recipe info if applicable
+                            if hiddenRecipeCount > 0 {
+                                hiddenRecipesInfo
                             }
                         }
                     }
@@ -225,6 +248,9 @@ struct ReferencedCollectionDetailView: View {
         defer { isLoading = false }
 
         do {
+            // Fetch owner info first
+            await loadOwnerInfo()
+
             // Fetch the original collection from CloudKit
             let fetchedCollection = try await dependencies.cloudKitService.fetchPublicRecipe(
                 recipeId: reference.originalCollectionId,
@@ -256,32 +282,34 @@ struct ReferencedCollectionDetailView: View {
         }
     }
 
-    private func loadRecipes(for collection: Collection) async {
-        guard !collection.recipeIds.isEmpty else {
-            recipes = []
-            return
-        }
-
+    private func loadOwnerInfo() async {
         do {
-            var fetchedRecipes: [Recipe] = []
-
-            for recipeId in collection.recipeIds {
-                do {
-                    let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                        recipeId: recipeId,
-                        ownerId: collection.userId
-                    )
-                    fetchedRecipes.append(recipe)
-                } catch {
-                    AppLogger.general.warning("Failed to fetch recipe \(recipeId): \(error.localizedDescription)")
-                }
-            }
-
-            recipes = fetchedRecipes
-            AppLogger.general.info("✅ Loaded \(recipes.count) recipes for referenced collection")
+            let user = try await dependencies.cloudKitService.fetchUser(byUserId: reference.originalOwnerId)
+            ownerDisplayName = user?.displayName
         } catch {
-            AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
+            AppLogger.general.warning("Could not fetch owner info: \(error.localizedDescription)")
+            // Silently fail - we'll just show generic "Shared Collection"
         }
+    }
+
+    private func loadRecipes(for collection: Collection) async {
+        // Check friendship status first
+        isFriendWithOwner = await loader.checkFriendshipStatus(
+            viewerId: CurrentUserSession.shared.userId,
+            ownerId: collection.userId
+        )
+
+        // Load recipes with accessibility filtering
+        let result = await loader.loadRecipes(
+            from: collection,
+            viewerId: CurrentUserSession.shared.userId,
+            isFriend: isFriendWithOwner
+        )
+
+        recipes = result.visibleRecipes
+        hiddenRecipeCount = result.hiddenRecipeCount
+
+        AppLogger.general.info("✅ Loaded \(recipes.count) visible recipes, \(hiddenRecipeCount) hidden")
     }
 
     private func removeReference() async {
@@ -301,6 +329,30 @@ struct ReferencedCollectionDetailView: View {
     }
 
     // MARK: - Helpers
+
+    private var hiddenRecipesInfo: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.fill")
+                .foregroundColor(.secondary)
+                .font(.subheadline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(hiddenRecipeCount) private recipe\(hiddenRecipeCount == 1 ? "" : "s") not shown")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Text("These recipes are no longer publicly shared")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.1))
+        .cornerRadius(12)
+        .padding(.top, 8)
+    }
 
     private func collectionColor(for collection: Collection) -> Color {
         if let colorHex = collection.color {

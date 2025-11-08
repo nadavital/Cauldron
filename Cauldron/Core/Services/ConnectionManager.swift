@@ -541,13 +541,16 @@ class ConnectionManager: ObservableObject {
 
     // MARK: - Badge Management
 
-    /// Update app icon badge count based on pending connection requests
-    func updateBadgeCount() {
-        let pendingRequestsCount = connections.values.filter { managedConn in
+    /// Get the count of pending friend requests for the current user
+    var pendingRequestsCount: Int {
+        connections.values.filter { managedConn in
             managedConn.connection.toUserId == currentUserId &&
             managedConn.connection.status == .pending
         }.count
+    }
 
+    /// Update app icon badge count based on pending connection requests
+    func updateBadgeCount() {
         logger.info("📛 Updating badge count to: \(pendingRequestsCount)")
 
         Task {

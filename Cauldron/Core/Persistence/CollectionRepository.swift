@@ -25,6 +25,35 @@ actor CollectionRepository {
 
         // Start retry mechanism for failed syncs
         startSyncRetryTask()
+
+        // Listen for recipe visibility changes
+        setupRecipeVisibilityObserver()
+    }
+
+    /// Setup observer for recipe visibility changes
+    private func setupRecipeVisibilityObserver() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("RecipeVisibilityChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let recipeId = notification.userInfo?["recipeId"] as? UUID,
+                  let oldVisibilityRaw = notification.userInfo?["oldVisibility"] as? String,
+                  let newVisibilityRaw = notification.userInfo?["newVisibility"] as? String,
+                  let oldVisibility = RecipeVisibility(rawValue: oldVisibilityRaw),
+                  let newVisibility = RecipeVisibility(rawValue: newVisibilityRaw) else {
+                return
+            }
+
+            Task {
+                await self.handleRecipeVisibilityChange(
+                    recipeId: recipeId,
+                    oldVisibility: oldVisibility,
+                    newVisibility: newVisibility
+                )
+            }
+        }
     }
 
     // MARK: - Create
@@ -93,6 +122,10 @@ actor CollectionRepository {
             throw CollectionRepositoryError.collectionNotFound
         }
 
+        // Capture old state for change detection
+        let oldVisibility = RecipeVisibility(rawValue: existingModel.visibility) ?? .publicRecipe
+        let oldRecipeIds = (try? JSONDecoder().decode([UUID].self, from: existingModel.recipeIdsBlob)) ?? []
+
         // Update the model
         let updatedModel = try CollectionModel.from(collection)
 
@@ -120,6 +153,29 @@ actor CollectionRepository {
 
         // Sync to CloudKit
         await syncCollectionToCloudKit(collection)
+
+        // Post notifications for changes
+        if oldVisibility != collection.visibility {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CollectionUpdated"),
+                object: nil,
+                userInfo: [
+                    "collectionId": collection.id,
+                    "changeType": "visibility"
+                ]
+            )
+        }
+
+        if oldRecipeIds != collection.recipeIds {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CollectionRecipesChanged"),
+                object: nil,
+                userInfo: [
+                    "collectionId": collection.id,
+                    "recipeIds": collection.recipeIds
+                ]
+            )
+        }
     }
 
     /// Add a recipe to a collection
@@ -280,6 +336,44 @@ actor CollectionRepository {
             } catch {
                 logger.error("❌ Retry failed for collection: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // MARK: - Recipe Visibility Change Handling
+
+    /// Handle recipe visibility changes and update affected collections
+    /// This ensures collections stay in sync when recipes change visibility
+    func handleRecipeVisibilityChange(recipeId: UUID, oldVisibility: RecipeVisibility, newVisibility: RecipeVisibility) async {
+        logger.info("🔄 Handling visibility change for recipe \(recipeId): \(oldVisibility.rawValue) → \(newVisibility.rawValue)")
+
+        do {
+            // Find all collections containing this recipe
+            let affectedCollections = try await fetchCollections(containingRecipe: recipeId)
+
+            guard !affectedCollections.isEmpty else {
+                logger.info("No collections affected by recipe visibility change")
+                return
+            }
+
+            logger.info("Found \(affectedCollections.count) collections containing this recipe")
+
+            // Update each affected collection's timestamp to trigger CloudKit sync
+            // This ensures that anyone with a reference to this collection will see the update
+            for collection in affectedCollections {
+                // Create updated collection with new timestamp
+                let updated = collection.updated(
+                    name: collection.name,
+                    description: collection.description,
+                    recipeIds: collection.recipeIds,
+                    emoji: collection.emoji,
+                    color: collection.color
+                )
+
+                try await update(updated)
+                logger.info("✅ Updated collection '\(collection.name)' due to recipe visibility change")
+            }
+        } catch {
+            logger.error("❌ Failed to handle recipe visibility change: \(error.localizedDescription)")
         }
     }
 

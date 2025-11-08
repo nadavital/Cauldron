@@ -32,6 +32,22 @@ struct RecipeDetailView: View {
     @State private var currentVisibility: RecipeVisibility
     @State private var isChangingVisibility = false
     @State private var showingCollectionPicker = false
+    @State private var isSavingRecipe = false
+    @State private var showSaveSuccessToast = false
+    @State private var isCheckingDuplicates = false
+    @State private var originalCreator: User?
+    @State private var isLoadingCreator = false
+
+    // Recipe update sync state
+    @State private var originalRecipe: Recipe?
+    @State private var isCheckingForUpdates = false
+    @State private var hasUpdates = false
+    @State private var isUpdatingRecipe = false
+    @State private var showUpdateSuccessToast = false
+
+    // Error handling
+    @State private var showErrorAlert = false
+    @State private var errorMessage: String?
 
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -111,6 +127,12 @@ struct RecipeDetailView: View {
         }
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            // Only check for updates if this is a copied recipe
+            if recipe.originalRecipeId != nil {
+                await checkForRecipeUpdates()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -162,28 +184,31 @@ struct RecipeDetailView: View {
                         Image(systemName: "ellipsis.circle")
                     }
                 } else {
-                    // Referenced recipe menu (read-only)
+                    // Referenced recipe menu (read-only - someone else's recipe)
                     Menu {
+                        Button {
+                            Task {
+                                await saveRecipeToLibrary()
+                            }
+                        } label: {
+                            if isSavingRecipe {
+                                Label("Saving...", systemImage: "arrow.down.circle")
+                            } else if hasOwnedCopy {
+                                Label("Already in Library", systemImage: "checkmark.circle.fill")
+                            } else {
+                                Label("Save to My Recipes", systemImage: "plus.circle")
+                            }
+                        }
+                        .disabled(isSavingRecipe || hasOwnedCopy || isCheckingDuplicates)
+
+                        Divider()
+
                         Button {
                             Task {
                                 await addToGroceryList()
                             }
                         } label: {
                             Label("Add to Grocery List", systemImage: "cart.badge.plus")
-                        }
-
-                        Button {
-                            showingCollectionPicker = true
-                        } label: {
-                            Label("Add to Collection", systemImage: "folder.badge.plus")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDeleteConfirmation = true
-                        } label: {
-                            Label("Delete Recipe", systemImage: "trash")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -211,6 +236,13 @@ struct RecipeDetailView: View {
         } message: {
             if let currentRecipe = dependencies.cookModeCoordinator.currentRecipe {
                 Text("End '\(currentRecipe.title)' to start cooking '\(recipe.title)'?")
+            }
+        }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let errorMessage = errorMessage {
+                Text(errorMessage)
             }
         }
         .sheet(isPresented: $showingEditSheet) {
@@ -243,6 +275,29 @@ struct RecipeDetailView: View {
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
+        .toast(isShowing: $showSaveSuccessToast, icon: "checkmark.circle.fill", message: "Saved to your recipes")
+        .toast(isShowing: $showUpdateSuccessToast, icon: "arrow.triangle.2.circlepath", message: "Recipe updated successfully")
+        .task {
+            // Check for duplicates when viewing someone else's recipe
+            if !recipe.isOwnedByCurrentUser() {
+                await checkForOwnedCopy()
+
+                // Load owner info for proper attribution when saving
+                if let ownerId = recipe.ownerId {
+                    await loadRecipeOwner(ownerId)
+                }
+            }
+
+            // Load original creator for saved recipes to enable profile link
+            if let creatorId = recipe.originalCreatorId {
+                await loadOriginalCreator(creatorId)
+            }
+
+            // Check for updates if this is a copied recipe
+            if recipe.originalRecipeId != nil {
+                await checkForRecipeUpdates()
+            }
+        }
     }
     
     private var headerSection: some View {
@@ -285,7 +340,65 @@ struct RecipeDetailView: View {
                 }
                 .frame(height: 30)
             }
-            
+
+            // Attribution for saved recipes
+            if let creatorName = recipe.originalCreatorName {
+                Group {
+                    if let creator = originalCreator {
+                        NavigationLink {
+                            UserProfileView(user: creator, dependencies: dependencies)
+                        } label: {
+                            attributionContent(creatorName: creatorName, showChevron: true)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        attributionContent(creatorName: creatorName, showChevron: false)
+                    }
+                }
+            }
+
+            // Updates Available Banner
+            if hasUpdates {
+                Button {
+                    Task {
+                        await updateRecipeCopy()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.title3)
+                            .foregroundColor(.blue)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Update Available")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.primary)
+
+                            Text("The original recipe has been updated")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        if isUpdatingRecipe {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.blue.opacity(0.08))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(isUpdatingRecipe)
+            }
+
             // Scale picker
             VStack(alignment: .leading, spacing: 8) {
                 Text("Recipe Scale")
@@ -328,7 +441,43 @@ struct RecipeDetailView: View {
         .padding()
         .cardStyle()
     }
-    
+
+    @ViewBuilder
+    private func attributionContent(creatorName: String, showChevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.circle.fill")
+                .font(.title3)
+                .foregroundColor(.cauldronOrange)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Recipe by \(creatorName)")
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+
+                if let savedDate = recipe.savedAt {
+                    Text("Saved \(savedDate.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Show loading or chevron
+            if isLoadingCreator {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.cauldronOrange.opacity(0.08))
+        .cornerRadius(10)
+    }
+
     private var ingredientsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Ingredients")
@@ -562,10 +711,63 @@ struct RecipeDetailView: View {
         }
     }
 
+    private func loadOriginalCreator(_ creatorId: UUID) async {
+        isLoadingCreator = true
+        defer { isLoadingCreator = false }
+
+        do {
+            originalCreator = try await dependencies.cloudKitService.fetchUser(byUserId: creatorId)
+            AppLogger.general.info("Loaded original creator: \(originalCreator?.displayName ?? "unknown")")
+        } catch {
+            AppLogger.general.warning("Failed to load original creator: \(error.localizedDescription)")
+            // Don't show error to user - attribution will still show name without profile link
+        }
+    }
+
+    private func saveRecipeToLibrary() async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("Cannot save recipe - no current user")
+            return
+        }
+
+        isSavingRecipe = true
+        defer { isSavingRecipe = false }
+
+        do {
+            // Create a copy of the recipe owned by the current user
+            let copiedRecipe = recipe.withOwner(
+                userId,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipeOwner?.displayName
+            )
+
+            try await dependencies.recipeRepository.create(copiedRecipe)
+            AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
+
+            // Update state
+            hasOwnedCopy = true
+
+            // Notify other views
+            NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
+
+            // Show success toast
+            withAnimation {
+                showSaveSuccessToast = true
+            }
+        } catch {
+            AppLogger.general.error("❌ Failed to save recipe: \(error.localizedDescription)")
+            errorMessage = "Failed to save recipe: \(error.localizedDescription)"
+            showErrorAlert = true
+        }
+    }
+
     private func checkForOwnedCopy() async {
         guard let userId = CurrentUserSession.shared.userId else {
             return
         }
+
+        isCheckingDuplicates = true
+        defer { isCheckingDuplicates = false }
 
         do {
             hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
@@ -599,7 +801,107 @@ struct RecipeDetailView: View {
             showingVisibilityPicker = false
         } catch {
             AppLogger.general.error("Failed to change visibility: \(error.localizedDescription)")
-            // TODO: Show error to user
+            errorMessage = "Failed to change visibility: \(error.localizedDescription)"
+            showErrorAlert = true
+        }
+    }
+
+    // MARK: - Recipe Update Sync
+
+    /// Check if the original recipe has been updated since this copy was saved
+    private func checkForRecipeUpdates() async {
+        // Only check for updates if this is a copied recipe
+        guard let originalRecipeId = recipe.originalRecipeId,
+              let originalOwnerId = recipe.originalCreatorId else {
+            return
+        }
+
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        do {
+            // Fetch the original recipe from CloudKit public database
+            let original = try await dependencies.cloudKitService.fetchPublicRecipe(
+                recipeId: originalRecipeId,
+                ownerId: originalOwnerId
+            )
+
+            originalRecipe = original
+
+            // Check if the original has been updated after this copy was saved
+            if let savedAt = recipe.savedAt,
+               original.updatedAt > savedAt {
+                hasUpdates = true
+                AppLogger.general.info("🔄 Updates available for recipe '\(recipe.title)': original updated at \(original.updatedAt), saved at \(savedAt)")
+            } else {
+                hasUpdates = false
+                AppLogger.general.info("✅ Recipe '\(recipe.title)' is up to date")
+            }
+        } catch {
+            AppLogger.general.error("❌ Failed to check for recipe updates: \(error.localizedDescription)")
+            // Silently fail - user can manually refresh later
+            hasUpdates = false
+        }
+    }
+
+    /// Update the local copy with changes from the original recipe
+    private func updateRecipeCopy() async {
+        guard let original = originalRecipe else {
+            AppLogger.general.error("Cannot update recipe - original not loaded")
+            return
+        }
+
+        isUpdatingRecipe = true
+        defer { isUpdatingRecipe = false }
+
+        do {
+            // Create an updated copy preserving the local recipe's ID and attribution
+            let updatedRecipe = Recipe(
+                id: recipe.id, // Keep the same ID
+                title: original.title,
+                ingredients: original.ingredients,
+                steps: original.steps,
+                yields: original.yields,
+                totalMinutes: original.totalMinutes,
+                tags: original.tags,
+                nutrition: original.nutrition,
+                sourceURL: original.sourceURL,
+                sourceTitle: original.sourceTitle,
+                notes: original.notes,
+                imageURL: original.imageURL,
+                isFavorite: recipe.isFavorite, // Preserve local favorite status
+                visibility: recipe.visibility, // Preserve local visibility
+                ownerId: recipe.ownerId, // Keep current owner
+                cloudRecordName: recipe.cloudRecordName,
+                cloudImageRecordName: recipe.cloudImageRecordName,
+                imageModifiedAt: recipe.imageModifiedAt,
+                createdAt: recipe.createdAt, // Preserve original creation date
+                updatedAt: Date(), // Update timestamp
+                originalRecipeId: recipe.originalRecipeId, // Preserve link to original
+                originalCreatorId: recipe.originalCreatorId,
+                originalCreatorName: recipe.originalCreatorName,
+                savedAt: Date() // Update the "saved at" timestamp
+            )
+
+            // Save the updated recipe
+            try await dependencies.recipeRepository.update(updatedRecipe)
+
+            AppLogger.general.info("✅ Successfully updated recipe '\(recipe.title)' from original")
+
+            // Clear the update flag
+            hasUpdates = false
+
+            // Show success toast
+            withAnimation {
+                showUpdateSuccessToast = true
+            }
+
+            // Notify other views that the recipe was updated
+            NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: nil)
+        } catch {
+            AppLogger.general.error("❌ Failed to update recipe: \(error.localizedDescription)")
+            errorMessage = "Failed to update recipe: \(error.localizedDescription)"
+            showErrorAlert = true
         }
     }
 }

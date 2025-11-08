@@ -584,6 +584,9 @@ actor RecipeRepository {
             throw RepositoryError.notFound
         }
 
+        // Store old visibility for notification
+        let oldVisibility = recipe.visibility
+
         // Create updated recipe with new visibility
         let updatedRecipe = Recipe(
             id: recipe.id,
@@ -610,6 +613,19 @@ actor RecipeRepository {
         try await update(updatedRecipe)
 
         logger.info("Updated recipe visibility: \(recipe.title) -> \(visibility.displayName)")
+
+        // Post notification if visibility actually changed
+        if oldVisibility != visibility {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("RecipeVisibilityChanged"),
+                object: nil,
+                userInfo: [
+                    "recipeId": id,
+                    "oldVisibility": oldVisibility.rawValue,
+                    "newVisibility": visibility.rawValue
+                ]
+            )
+        }
     }
 
     /// Check if a similar recipe already exists

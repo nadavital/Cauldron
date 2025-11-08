@@ -31,6 +31,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let updatedAt: Date
 
     // Attribution fields for copied recipes
+    let originalRecipeId: UUID?  // ID of the original recipe (if this is a copy) - enables update sync
     let originalCreatorId: UUID?  // ID of the user who originally created this recipe (if copied)
     let originalCreatorName: String?  // Display name of the original creator (cached for performance)
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
@@ -56,6 +57,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         imageModifiedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
+        originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil
@@ -80,6 +82,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.imageModifiedAt = imageModifiedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalRecipeId = originalRecipeId
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
@@ -120,6 +123,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt
@@ -154,6 +158,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt
@@ -192,6 +197,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             imageModifiedAt: nil, // Will be set when image is downloaded and saved
             createdAt: Date(),
             updatedAt: Date(),
+            originalRecipeId: self.id, // Track the original recipe for update sync
             originalCreatorId: creatorId,
             originalCreatorName: creatorName,
             savedAt: Date()
@@ -211,15 +217,15 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     /// Check if a viewer can access this recipe based on visibility and relationship
     /// - Parameters:
     ///   - viewerId: ID of the user attempting to view the recipe (nil for current user)
-    ///   - isFriend: Whether the viewer is friends with the recipe owner
     /// - Returns: True if the recipe is accessible to the viewer
-    func isAccessible(to viewerId: UUID?, isFriend: Bool) -> Bool {
+    func isAccessible(to viewerId: UUID?, isFriend: Bool = false) -> Bool {
         // Owner can always see their own recipes
         if let viewerId = viewerId, viewerId == ownerId {
             return true
         }
 
         // Check based on visibility
+        // Note: isFriend parameter is deprecated but kept for backward compatibility
         switch visibility {
         case .publicRecipe:
             return true
@@ -269,6 +275,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             imageModifiedAt: modifiedAt,
             createdAt: createdAt,
             updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt

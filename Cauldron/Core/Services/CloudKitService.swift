@@ -577,6 +577,20 @@ actor CloudKitService {
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
 
+        // Attribution fields for recipe sync
+        if let originalRecipeId = recipe.originalRecipeId {
+            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
+        }
+        if let originalCreatorId = recipe.originalCreatorId {
+            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
+        }
+        if let originalCreatorName = recipe.originalCreatorName {
+            record["originalCreatorName"] = originalCreatorName as CKRecordValue
+        }
+        if let savedAt = recipe.savedAt {
+            record["savedAt"] = savedAt as CKRecordValue
+        }
+
         // Note: Image asset is uploaded separately via uploadImageAsset()
         // We preserve existing imageAsset and imageModifiedAt if they exist
         // This allows recipe data sync to happen independently from image sync
@@ -748,6 +762,22 @@ actor CloudKitService {
         let cloudImageRecordName: String? = (record["imageAsset"] as? CKAsset) != nil ? record.recordID.recordName : nil
         let imageModifiedAt = record["imageModifiedAt"] as? Date
 
+        // Attribution fields (optional)
+        let originalRecipeId: UUID? = {
+            if let idString = record["originalRecipeId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalCreatorId: UUID? = {
+            if let idString = record["originalCreatorId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalCreatorName = record["originalCreatorName"] as? String
+        let savedAt = record["savedAt"] as? Date
+
         return Recipe(
             id: recipeId,
             title: title,
@@ -762,7 +792,11 @@ actor CloudKitService {
             cloudImageRecordName: cloudImageRecordName,
             imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
         )
     }
 
@@ -825,6 +859,20 @@ actor CloudKitService {
         }
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
+
+        // Attribution fields for recipe sync (optional - only present on copied recipes)
+        if let originalRecipeId = recipe.originalRecipeId {
+            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
+        }
+        if let originalCreatorId = recipe.originalCreatorId {
+            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
+        }
+        if let originalCreatorName = recipe.originalCreatorName {
+            record["originalCreatorName"] = originalCreatorName as CKRecordValue
+        }
+        if let savedAt = recipe.savedAt {
+            record["savedAt"] = savedAt as CKRecordValue
+        }
 
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")
@@ -1459,6 +1507,10 @@ actor CloudKitService {
         }
         record["recipeCount"] = reference.recipeCount as CKRecordValue
 
+        // Staleness tracking
+        record["lastValidatedAt"] = reference.lastValidatedAt as CKRecordValue
+        record["cachedVisibility"] = reference.cachedVisibility as CKRecordValue
+
         _ = try await db.save(record)
         logger.info("✅ Saved collection reference to PUBLIC database")
     }
@@ -1743,6 +1795,9 @@ actor CloudKitService {
         }
 
         let collectionEmoji = record["collectionEmoji"] as? String
+        // Optional fields with defaults for backward compatibility
+        let lastValidatedAt = record["lastValidatedAt"] as? Date ?? savedAt
+        let cachedVisibility = record["cachedVisibility"] as? String ?? "public"
 
         return CollectionReference(
             id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
@@ -1753,6 +1808,8 @@ actor CloudKitService {
             collectionName: collectionName,
             collectionEmoji: collectionEmoji,
             recipeCount: recipeCount,
+            lastValidatedAt: lastValidatedAt,
+            cachedVisibility: cachedVisibility,
             cloudRecordName: record.recordID.recordName
         )
     }

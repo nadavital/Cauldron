@@ -24,6 +24,8 @@ struct CollectionDetailView: View {
     @State private var isUpdatingVisibility = false
     @State private var showingDeleteConfirmation = false
     @State private var showingConformanceSheet = false
+    @State private var showingVisibilityWarning = false
+    @State private var pendingVisibility: RecipeVisibility?
     @Environment(\.dismiss) private var dismiss
 
     var nonConformingRecipes: [Recipe] {
@@ -92,8 +94,14 @@ struct CollectionDetailView: View {
                         Menu {
                             ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
                                 Button {
-                                    Task {
-                                        await updateVisibility(to: visibility)
+                                    // Check if making private and show warning
+                                    if visibility == .privateRecipe && selectedVisibility == .publicRecipe {
+                                        pendingVisibility = visibility
+                                        showingVisibilityWarning = true
+                                    } else {
+                                        Task {
+                                            await updateVisibility(to: visibility)
+                                        }
                                     }
                                 } label: {
                                     Label(visibility.displayName, systemImage: visibility.icon)
@@ -250,6 +258,21 @@ struct CollectionDetailView: View {
             if let errorMessage = errorMessage {
                 Text(errorMessage)
             }
+        }
+        .alert("Make Collection Private?", isPresented: $showingVisibilityWarning) {
+            Button("Cancel", role: .cancel) {
+                pendingVisibility = nil
+            }
+            Button("Make Private", role: .destructive) {
+                if let newVisibility = pendingVisibility {
+                    Task {
+                        await updateVisibility(to: newVisibility)
+                    }
+                }
+                pendingVisibility = nil
+            }
+        } message: {
+            Text("Making this collection private will hide it from anyone who has saved it. They will no longer be able to view the recipes in this collection.")
         }
         .confirmationDialog(
             "Delete Collection?",
