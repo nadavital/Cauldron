@@ -80,12 +80,14 @@ actor CloudKitService {
     init() {
         // Try to initialize CloudKit, but don't crash if it fails
         do {
-            let testContainer = CKContainer.default()
+            // Use explicit container identifier to support multiple bundle IDs (dev/production)
+            // This ensures both Nadav.Cauldron and Nadav.Cauldron.dev use the same CloudKit container
+            let testContainer = CKContainer(identifier: "iCloud.Nadav.Cauldron")
             self.container = testContainer
             self.privateDatabase = testContainer.privateCloudDatabase
             self.publicDatabase = testContainer.publicCloudDatabase
             self.isEnabled = true
-            logger.info("CloudKit initialized successfully")
+            logger.info("CloudKit initialized successfully with container: iCloud.Nadav.Cauldron")
         } catch {
             logger.warning("CloudKit not available: \(error.localizedDescription)")
             logger.warning("Enable CloudKit capability in Xcode to use cloud features")

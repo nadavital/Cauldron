@@ -60,7 +60,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
                 Task {
                     do {
-                        let container = CKContainer.default()
+                        let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
                         let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in
                             container.fetchShareMetadata(with: url) { metadata, error in
                                 if let error = error {
@@ -341,7 +341,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
 
                 Task {
                     do {
-                        let container = CKContainer.default()
+                        let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
                         let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in
                             container.fetchShareMetadata(with: url) { metadata, error in
                                 if let error = error {
