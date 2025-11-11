@@ -16,8 +16,6 @@ struct AllRecipesListView: View {
     @State private var searchText = ""
     @State private var selectedTag: String?
     @State private var sortOption: SortOption = .recent
-    @State private var recipeToDelete: Recipe?
-    @State private var showDeleteConfirmation = false
     @State private var localRecipes: [Recipe]
     @State private var showingImporter = false
     @State private var showingEditor = false
@@ -115,8 +113,9 @@ struct AllRecipesListView: View {
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
-                        recipeToDelete = recipe
-                        showDeleteConfirmation = true
+                        Task {
+                            await deleteRecipe(recipe)
+                        }
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -164,13 +163,10 @@ struct AllRecipesListView: View {
         .onChange(of: recipes) { newRecipes in
             localRecipes = newRecipes
         }
-        .alert("Delete Recipe?", isPresented: $showDeleteConfirmation, presenting: recipeToDelete) { recipe in
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                deleteRecipe(recipe)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
+            if let deletedRecipeId = notification.object as? UUID {
+                localRecipes.removeAll { $0.id == deletedRecipeId }
             }
-        } message: { recipe in
-            Text("Are you sure you want to delete \"\(recipe.title)\"? This cannot be undone.")
         }
         .sheet(isPresented: $showingImporter, onDismiss: {
             // Refresh recipes when importer is dismissed
@@ -257,14 +253,12 @@ struct AllRecipesListView: View {
         }
     }
     
-    private func deleteRecipe(_ recipe: Recipe) {
-        Task {
-            do {
-                try await dependencies.recipeRepository.delete(id: recipe.id)
-                localRecipes.removeAll { $0.id == recipe.id }
-            } catch {
-                AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
-            }
+    private func deleteRecipe(_ recipe: Recipe) async {
+        do {
+            try await dependencies.recipeRepository.delete(id: recipe.id)
+            // UI update handled by RecipeDeleted notification listener
+        } catch {
+            AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
         }
     }
 }

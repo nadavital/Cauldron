@@ -118,6 +118,12 @@ struct CookTabView: View {
                     await viewModel.loadData()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+                // Refresh when a recipe is deleted from another tab
+                Task {
+                    await viewModel.loadData()
+                }
+            }
         }
     }
 

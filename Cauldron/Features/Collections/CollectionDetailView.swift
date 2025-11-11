@@ -139,6 +139,11 @@ struct CollectionDetailView: View {
         .refreshable {
             await loadRecipes()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            Task {
+                await loadRecipes()
+            }
+        }
     }
 
     // MARK: - Sheet Content

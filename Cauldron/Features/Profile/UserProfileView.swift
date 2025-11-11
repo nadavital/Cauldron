@@ -56,6 +56,14 @@ struct UserProfileView: View {
         .refreshable {
             await viewModel.refreshProfile()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            // Only refresh if viewing own profile
+            if viewModel.isCurrentUser {
+                Task {
+                    await viewModel.loadUserRecipes()
+                }
+            }
+        }
         .onAppear {
             // Only load initial data once - the viewModel's cache will handle subsequent requests
             if !hasLoadedInitialData {
@@ -530,7 +538,7 @@ struct RecipeCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(2)
                 .foregroundColor(.primary)
-                .frame(height: 36, alignment: .top)
+                .frame(height: 40, alignment: .top)
 
             // Meta info
             HStack(spacing: 8) {

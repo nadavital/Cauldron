@@ -175,6 +175,12 @@ struct CollectionsListView: View {
             recipeImageCache.removeAll()  // Clear cache on refresh
             await viewModel.loadCollections()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            recipeImageCache.removeAll()  // Clear image cache
+            Task {
+                await viewModel.loadCollections()
+            }
+        }
     }
 }
 
