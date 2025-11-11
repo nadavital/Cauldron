@@ -11,20 +11,33 @@ struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
 
+    @State private var customCoverImage: UIImage?
+    @State private var isLoadingImage = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Cover image/grid
             ZStack {
-                if let emoji = collection.emoji {
-                    // Show emoji with color background
-                    collectionColor
+                switch collection.coverImageType {
+                case .customImage:
+                    customImageView
                         .frame(width: 160, height: 160)
-                        .overlay(
-                            Text(emoji)
-                                .font(.system(size: 60))
-                        )
-                } else if collection.color != nil {
-                    // Show solid color only (no emoji)
+                case .emoji:
+                    // Show emoji with color background
+                    if let emoji = collection.emoji {
+                        collectionColor
+                            .frame(width: 160, height: 160)
+                            .overlay(
+                                Text(emoji)
+                                    .font(.system(size: 60))
+                            )
+                    } else {
+                        // Fallback to grid if emoji not set
+                        recipeGridView
+                            .frame(width: 160, height: 160)
+                    }
+                case .color:
+                    // Show solid color with folder icon and name
                     collectionColor
                         .frame(width: 160, height: 160)
                         .overlay(
@@ -41,7 +54,7 @@ struct CollectionCardView: View {
                                     .padding(.horizontal, 8)
                             }
                         )
-                } else {
+                case .recipeGrid:
                     // Default: Show 2x2 grid of recipe images
                     recipeGridView
                         .frame(width: 160, height: 160)
@@ -49,6 +62,11 @@ struct CollectionCardView: View {
             }
             .cornerRadius(12)
             .clipped()
+            .task {
+                if collection.coverImageType == .customImage {
+                    await loadCustomImage()
+                }
+            }
 
             // Collection name and count
             VStack(alignment: .leading, spacing: 4) {
@@ -150,6 +168,43 @@ struct CollectionCardView: View {
                     .font(.system(size: size * 0.3))
                     .foregroundColor(.white.opacity(0.5))
             )
+    }
+
+    // MARK: - Custom Image View
+
+    private var customImageView: some View {
+        Group {
+            if let customCoverImage = customCoverImage {
+                Image(uiImage: customCoverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if isLoadingImage {
+                collectionColor
+                    .overlay(
+                        ProgressView()
+                            .tint(.white)
+                    )
+            } else {
+                // Fallback to recipe grid if custom image fails to load
+                recipeGridView
+            }
+        }
+    }
+
+    @MainActor
+    private func loadCustomImage() async {
+        guard let coverImageURL = collection.coverImageURL else {
+            return
+        }
+
+        isLoadingImage = true
+        defer { isLoadingImage = false }
+
+        // Load image from local file URL
+        if let imageData = try? Data(contentsOf: coverImageURL),
+           let image = UIImage(data: imageData) {
+            customCoverImage = image
+        }
     }
 
     // MARK: - Color

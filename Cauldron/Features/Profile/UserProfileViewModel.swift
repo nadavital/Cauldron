@@ -251,39 +251,38 @@ class UserProfileViewModel: ObservableObject {
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
-        var allRecipes: [SharedRecipe] = []
-
         // Get current user to check connection status
         guard let currentUserId = CurrentUserSession.shared.userId else {
             return []
         }
 
-        // Determine if we're connected to this user
-        let isConnected = connectionState == .connected
+        let recipes: [Recipe]
 
-        // Fetch public recipes from this user
-        let publicRecipes = try await dependencies.cloudKitService.querySharedRecipes(
-            ownerIds: [user.id],
-            visibility: .publicRecipe
-        )
-        AppLogger.general.info("Found \(publicRecipes.count) public recipes from \(self.user.username)")
+        // If viewing your own profile, fetch from local storage (same as Cook tab)
+        if isCurrentUser {
+            recipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
+        } else {
+            // If viewing someone else's profile, fetch their public recipes from CloudKit
+            recipes = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: [user.id],
+                visibility: .publicRecipe
+            )
+            AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
+        }
 
         // Convert to SharedRecipe
-        for recipe in publicRecipes {
-            let sharedRecipe = SharedRecipe(
-                id: UUID(),
+        let sharedRecipes = recipes.map { recipe in
+            SharedRecipe(
+                id: recipe.id,
                 recipe: recipe,
                 sharedBy: user,
                 sharedAt: recipe.updatedAt
             )
-            allRecipes.append(sharedRecipe)
         }
 
-        // Note: With simplified visibility model, only public recipes are fetched
-        // Friends can see all public recipes (no separate friends-only category)
-
         // Sort by updated date (most recent first)
-        return allRecipes.sorted { $0.sharedAt > $1.sharedAt }
+        return sharedRecipes.sorted { $0.sharedAt > $1.sharedAt }
     }
 
     var filteredRecipes: [SharedRecipe] {

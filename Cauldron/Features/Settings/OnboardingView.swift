@@ -11,18 +11,23 @@ import SwiftUI
 struct OnboardingView: View {
     let dependencies: DependencyContainer
     let onComplete: () -> Void
-    
+
     @State private var username = ""
     @State private var displayName = ""
     @State private var profileEmoji: String?
     @State private var profileColor: String? = Color.profileOrange.toHex()
+    @State private var profileImage: UIImage?
     @State private var isCreating = false
     @State private var errorMessage: String?
-    @State private var showingEmojiPicker = false
+    @State private var showingAvatarCustomization = false
+    @State private var showingImagePicker = false
 
-    // Preset food emojis for quick selection and random selection
-    private let foodEmojis = ["🍕", "🍔", "🍜", "🍰", "🥗", "🍱", "🌮", "🍣", "🥘", "🍛", "🧁", "🥐",
-                             "🍪", "🍩", "🥧", "🍦", "🍓", "🍌", "🍉", "🍇", "🍊", "🥑", "🥕", "🌽"]
+    // Avatar type selection
+    enum AvatarType: String, CaseIterable {
+        case emoji = "Emoji Avatar"
+        case photo = "Upload Photo"
+    }
+    @State private var selectedAvatarType: AvatarType = .emoji
 
     var isValid: Bool {
         username.count >= 3 && username.count <= 20 &&
@@ -34,7 +39,7 @@ struct OnboardingView: View {
         User(
             username: username.isEmpty ? "username" : username,
             displayName: displayName.isEmpty ? "Your Name" : displayName,
-            profileEmoji: profileEmoji,
+            profileEmoji: selectedAvatarType == .emoji ? profileEmoji : nil,
             profileColor: profileColor
         )
     }
@@ -94,84 +99,80 @@ struct OnboardingView: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        // Emoji picker
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Profile Emoji (Optional)")
+                        // Avatar type selection
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Profile Avatar")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
 
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
-                                ForEach(foodEmojis, id: \.self) { emoji in
-                                    Button {
-                                        profileEmoji = emoji
-                                    } label: {
-                                        Text(emoji)
-                                            .font(.title2)
-                                            .frame(width: 44, height: 44)
-                                            .background(profileEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.cauldronSecondaryBackground)
-                                            .cornerRadius(8)
-                                    }
-                                    .buttonStyle(.plain)
+                            // Avatar type picker
+                            Picker("Avatar Type", selection: $selectedAvatarType) {
+                                ForEach(AvatarType.allCases, id: \.self) { type in
+                                    Text(type.rawValue).tag(type)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: selectedAvatarType) { oldValue, newValue in
+                                // Clear the other option when switching
+                                if newValue == .photo {
+                                    profileEmoji = nil
+                                } else {
+                                    profileImage = nil
                                 }
                             }
 
-                            HStack(spacing: 8) {
+                            // Avatar customization button
+                            if selectedAvatarType == .emoji {
                                 Button {
-                                    showingEmojiPicker = true
+                                    showingAvatarCustomization = true
                                 } label: {
-                                    Label("Choose Emoji", systemImage: "face.smiling")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button {
-                                    profileEmoji = foodEmojis.randomElement()
-                                } label: {
-                                    Label("Random", systemImage: "shuffle")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(.cauldronOrange)
-                            }
-                        }
-
-                        // Color picker
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Profile Color (Optional)")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 12) {
-                                ForEach(Color.allProfileColors, id: \.self) { color in
-                                    Button {
-                                        profileColor = color.toHex()
-                                    } label: {
-                                        Circle()
-                                            .fill(color.opacity(0.3))
-                                            .frame(width: 44, height: 44)
-                                            .overlay(
-                                                Circle()
-                                                    .strokeBorder(Color.primary, lineWidth: profileColor == color.toHex() ? 3 : 0)
-                                            )
-                                            .overlay(
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(color)
-                                                    .font(.headline)
-                                                    .opacity(profileColor == color.toHex() ? 1 : 0)
-                                            )
+                                    HStack {
+                                        if let emoji = profileEmoji {
+                                            Text(emoji)
+                                                .font(.title2)
+                                        } else {
+                                            Image(systemName: "face.smiling")
+                                        }
+                                        Text(profileEmoji != nil ? "Change Avatar" : "Customize Avatar")
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-
-                            Button {
-                                profileColor = Color.allProfileColors.randomElement()?.toHex()
-                            } label: {
-                                Label("Random Color", systemImage: "shuffle")
+                                    .padding()
                                     .frame(maxWidth: .infinity)
+                                    .background(Color.cauldronSecondaryBackground)
+                                    .cornerRadius(12)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                // Photo upload button
+                                Button {
+                                    showingImagePicker = true
+                                } label: {
+                                    HStack {
+                                        if let image = profileImage {
+                                            Image(uiImage: image)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 40, height: 40)
+                                                .clipShape(Circle())
+                                        } else {
+                                            Image(systemName: "photo")
+                                        }
+                                        Text(profileImage != nil ? "Change Photo" : "Upload Photo")
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color.cauldronSecondaryBackground)
+                                    .cornerRadius(12)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(.cauldronOrange)
                         }
 
                         if let error = errorMessage {
@@ -215,8 +216,14 @@ struct OnboardingView: View {
                 }
             }
             .navigationBarHidden(true)
-            .sheet(isPresented: $showingEmojiPicker) {
-                EmojiPickerView(selectedEmoji: $profileEmoji)
+            .sheet(isPresented: $showingAvatarCustomization) {
+                AvatarCustomizationSheet(
+                    selectedEmoji: $profileEmoji,
+                    selectedColor: $profileColor
+                )
+            }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(image: $profileImage)
             }
         }
     }
@@ -230,8 +237,9 @@ struct OnboardingView: View {
             try await CurrentUserSession.shared.createUser(
                 username: username,
                 displayName: displayName,
-                profileEmoji: profileEmoji,
+                profileEmoji: selectedAvatarType == .emoji ? profileEmoji : nil,
                 profileColor: profileColor,
+                profileImage: selectedAvatarType == .photo ? profileImage : nil,
                 dependencies: dependencies
             )
             onComplete()

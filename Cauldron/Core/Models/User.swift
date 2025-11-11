@@ -15,8 +15,11 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     let email: String?
     let cloudRecordName: String?  // CloudKit record name
     let createdAt: Date
-    let profileEmoji: String?  // Emoji for profile avatar
+    let profileEmoji: String?  // Emoji for profile avatar (mutually exclusive with profileImageURL)
     let profileColor: String?  // Hex color string for profile avatar
+    let profileImageURL: URL?  // Local file URL for profile image
+    let cloudProfileImageRecordName: String?  // CloudKit record name for profile image asset
+    let profileImageModifiedAt: Date?  // Last modified date for sync tracking
 
     init(
         id: UUID = UUID(),
@@ -26,7 +29,10 @@ struct User: Codable, Sendable, Hashable, Identifiable {
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
         profileEmoji: String? = nil,
-        profileColor: String? = nil
+        profileColor: String? = nil,
+        profileImageURL: URL? = nil,
+        cloudProfileImageRecordName: String? = nil,
+        profileImageModifiedAt: Date? = nil
     ) {
         self.id = id
         self.username = username
@@ -36,5 +42,42 @@ struct User: Codable, Sendable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.profileEmoji = profileEmoji
         self.profileColor = profileColor
+        self.profileImageURL = profileImageURL
+        self.cloudProfileImageRecordName = cloudProfileImageRecordName
+        self.profileImageModifiedAt = profileImageModifiedAt
+    }
+
+    /// Get user's initials from display name
+    var initials: String {
+        let words = displayName.split(separator: " ")
+        if words.count >= 2 {
+            return String(words[0].prefix(1) + words[1].prefix(1)).uppercased()
+        } else if !displayName.isEmpty {
+            return String(displayName.prefix(2)).uppercased()
+        }
+        return "?"
+    }
+
+    /// Create a copy with updated profile fields
+    func updatedProfile(
+        profileEmoji: String? = nil,
+        profileColor: String? = nil,
+        profileImageURL: URL? = nil,
+        cloudProfileImageRecordName: String? = nil,
+        profileImageModifiedAt: Date? = nil
+    ) -> User {
+        User(
+            id: id,
+            username: username,
+            displayName: displayName,
+            email: email,
+            cloudRecordName: cloudRecordName,
+            createdAt: createdAt,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor,
+            profileImageURL: profileImageURL,
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt
+        )
     }
 }

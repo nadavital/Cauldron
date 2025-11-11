@@ -385,6 +385,12 @@ actor CloudKitService {
         if let color = user.profileColor {
             record["profileColor"] = color as CKRecordValue
         }
+        if let cloudImageRecordName = user.cloudProfileImageRecordName {
+            record["cloudProfileImageRecordName"] = cloudImageRecordName as CKRecordValue
+        }
+        if let imageModifiedAt = user.profileImageModifiedAt {
+            record["profileImageModifiedAt"] = imageModifiedAt as CKRecordValue
+        }
         record["createdAt"] = user.createdAt as CKRecordValue
 
         // Save to PUBLIC database so other users can discover this user
@@ -503,6 +509,8 @@ actor CloudKitService {
         let createdAt = record["createdAt"] as? Date ?? Date()
         let profileEmoji = record["profileEmoji"] as? String
         let profileColor = record["profileColor"] as? String
+        let cloudProfileImageRecordName = record["cloudProfileImageRecordName"] as? String
+        let profileImageModifiedAt = record["profileImageModifiedAt"] as? Date
 
         return User(
             id: userId,
@@ -512,7 +520,10 @@ actor CloudKitService {
             cloudRecordName: record.recordID.recordName,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
-            profileColor: profileColor
+            profileColor: profileColor,
+            profileImageURL: nil,  // Will be set after downloading image
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt
         )
     }
     
@@ -1675,6 +1686,253 @@ actor CloudKitService {
             throw error
         }
     }
+
+    // MARK: - User Profile Image Methods
+
+    /// Upload user profile image to CloudKit
+    /// - Parameters:
+    ///   - userId: The user ID this image belongs to
+    ///   - imageData: The image data to upload
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadUserProfileImage(userId: UUID, imageData: Data) async throws -> String {
+        logger.info("📤 Uploading profile image for user: \(userId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("profile_\(userId.uuidString)")
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Get user's CloudKit record
+        let db = try getPublicDatabase()
+
+        // Find user record - try with custom record name format
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            // Fetch existing user record
+            let record = try await db.record(for: recordID)
+
+            // Add profile image asset and modification timestamp
+            record["profileImageAsset"] = asset
+            record["profileImageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Uploaded profile image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("User record not found in CloudKit: \(userId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload profile image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download user profile image from CloudKit
+    /// - Parameter userId: The user ID to download image for
+    /// - Returns: The image data, or nil if no image exists
+    func downloadUserProfileImage(userId: UUID) async throws -> Data? {
+        logger.info("📥 Downloading profile image for user: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Try to find user record
+        // First, try to fetch the user to get their cloud record name
+        guard let user = try await fetchUser(byUserId: userId),
+              let cloudRecordName = user.cloudRecordName else {
+            logger.warning("Cannot download profile image - user not found or no cloud record")
+            return nil
+        }
+
+        let recordID = CKRecord.ID(recordName: cloudRecordName)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            guard let asset = record["profileImageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No profile image asset found for user: \(userId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded profile image (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete user profile image from CloudKit
+    /// - Parameter userId: The user ID to delete image for
+    func deleteUserProfileImage(userId: UUID) async throws {
+        logger.info("🗑️ Deleting profile image for user: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Get user's CloudKit record
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            // Remove profile image asset fields
+            record["profileImageAsset"] = nil
+            record["profileImageModifiedAt"] = nil
+
+            _ = try await db.save(record)
+            logger.info("✅ Deleted profile image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Collection Cover Image Methods
+
+    /// Upload collection cover image to CloudKit
+    /// - Parameters:
+    ///   - collectionId: The collection ID this image belongs to
+    ///   - imageData: The image data to upload
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadCollectionCoverImage(collectionId: UUID, imageData: Data) async throws -> String {
+        logger.info("📤 Uploading collection cover image for collection: \(collectionId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("collection_\(collectionId.uuidString)")
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Get collection's CloudKit record
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            // Fetch existing collection record
+            let record = try await db.record(for: recordID)
+
+            // Add cover image asset and modification timestamp
+            record["coverImageAsset"] = asset
+            record["coverImageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Uploaded collection cover image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("Collection record not found in CloudKit: \(collectionId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload collection cover image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download collection cover image from CloudKit
+    /// - Parameter collectionId: The collection ID to download image for
+    /// - Returns: The image data, or nil if no image exists
+    func downloadCollectionCoverImage(collectionId: UUID) async throws -> Data? {
+        logger.info("📥 Downloading collection cover image for collection: \(collectionId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            guard let asset = record["coverImageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No collection cover image asset found for collection: \(collectionId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded collection cover image (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Collection record not found: \(collectionId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete collection cover image from CloudKit
+    /// - Parameter collectionId: The collection ID to delete image for
+    func deleteCollectionCoverImage(collectionId: UUID) async throws {
+        logger.info("🗑️ Deleting collection cover image for collection: \(collectionId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            // Remove cover image asset fields
+            record["coverImageAsset"] = nil
+            record["coverImageModifiedAt"] = nil
+
+            _ = try await db.save(record)
+            logger.info("✅ Deleted collection cover image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Collection record not found: \(collectionId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Image Optimization
 
     /// Optimize image data for CloudKit upload
     /// - Parameter imageData: Original image data

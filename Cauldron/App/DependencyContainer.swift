@@ -35,6 +35,8 @@ class DependencyContainer: ObservableObject {
     let imageMigrationService: CloudImageMigration
     let imageSyncManager: ImageSyncManager
     let imageManager: ImageManager
+    let profileImageManager: ProfileImageManager
+    let collectionImageManager: CollectionImageManager
     let recipeImageService: RecipeImageService
 
     // UI Services (MainActor)
@@ -57,6 +59,8 @@ class DependencyContainer: ObservableObject {
         // Initialize services that repositories depend on
         self.cloudKitService = CloudKitService()
         self.imageManager = ImageManager(cloudKitService: cloudKitService)
+        self.profileImageManager = ProfileImageManager(cloudKitService: cloudKitService)
+        self.collectionImageManager = CollectionImageManager(cloudKitService: cloudKitService)
         self.imageSyncManager = ImageSyncManager()
 
         // Initialize repositories (now with CloudKit service)

@@ -25,6 +25,9 @@ final class CollectionModel {
     var emoji: String?
     var color: String?
     var coverImageType: String = "recipeGrid"  // CoverImageType rawValue
+    var coverImagePath: String?  // Store URL path as string for SwiftData
+    var cloudCoverImageRecordName: String?
+    var coverImageModifiedAt: Date?
 
     // Sharing
     var visibility: String = "private"  // RecipeVisibility rawValue
@@ -41,6 +44,9 @@ final class CollectionModel {
         emoji: String? = nil,
         color: String? = nil,
         coverImageType: String = "recipeGrid",
+        coverImagePath: String? = nil,
+        cloudCoverImageRecordName: String? = nil,
+        coverImageModifiedAt: Date? = nil,
         visibility: String = "private",
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
@@ -54,6 +60,9 @@ final class CollectionModel {
         self.emoji = emoji
         self.color = color
         self.coverImageType = coverImageType
+        self.coverImagePath = coverImagePath
+        self.cloudCoverImageRecordName = cloudCoverImageRecordName
+        self.coverImageModifiedAt = coverImageModifiedAt
         self.visibility = visibility
         self.cloudRecordName = cloudRecordName
         self.createdAt = createdAt
@@ -74,6 +83,9 @@ final class CollectionModel {
             emoji: collection.emoji,
             color: collection.color,
             coverImageType: collection.coverImageType.rawValue,
+            coverImagePath: collection.coverImageURL?.absoluteString,
+            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
+            coverImageModifiedAt: collection.coverImageModifiedAt,
             visibility: collection.visibility.rawValue,
             cloudRecordName: collection.cloudRecordName,
             createdAt: collection.createdAt,
@@ -96,6 +108,9 @@ final class CollectionModel {
             emoji: emoji,
             color: color,
             coverImageType: CoverImageType(rawValue: coverImageType) ?? .recipeGrid,
+            coverImageURL: coverImagePath.flatMap { URL(string: $0) },
+            cloudCoverImageRecordName: cloudCoverImageRecordName,
+            coverImageModifiedAt: coverImageModifiedAt,
             cloudRecordName: cloudRecordName,
             createdAt: createdAt,
             updatedAt: updatedAt

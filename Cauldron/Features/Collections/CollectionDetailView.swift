@@ -16,17 +16,25 @@ struct CollectionDetailView: View {
     @State private var recipes: [Recipe] = []
     @State private var isLoading = false
     @State private var searchText = ""
-    @State private var showingEditSheet = false
+    @State private var activeSheet: ActiveSheet?
     @State private var errorMessage: String?
     @State private var showError = false
-    @State private var showingRecipeSelector = false
-    @State private var selectedVisibility: RecipeVisibility
-    @State private var isUpdatingVisibility = false
-    @State private var showingDeleteConfirmation = false
-    @State private var showingConformanceSheet = false
-    @State private var showingVisibilityWarning = false
-    @State private var pendingVisibility: RecipeVisibility?
+    @State private var customCoverImage: UIImage?
     @Environment(\.dismiss) private var dismiss
+
+    enum ActiveSheet: Identifiable {
+        case edit
+        case addRecipes
+        case conformance
+
+        var id: Int {
+            switch self {
+            case .edit: return 1
+            case .addRecipes: return 2
+            case .conformance: return 3
+            }
+        }
+    }
 
     var nonConformingRecipes: [Recipe] {
         collection.nonConformingRecipes(from: recipes)
@@ -36,7 +44,6 @@ struct CollectionDetailView: View {
         self.initialCollection = collection
         self.dependencies = dependencies
         self._collection = State(initialValue: collection)
-        self._selectedVisibility = State(initialValue: collection.visibility)
     }
 
     var filteredRecipes: [Recipe] {
@@ -51,112 +58,7 @@ struct CollectionDetailView: View {
 
     var body: some View {
         List {
-            // Header with collection info
-            Section {
-                VStack(spacing: 16) {
-                    // Icon
-                    if let emoji = collection.emoji {
-                        ZStack {
-                            Circle()
-                                .fill(collectionColor.opacity(0.15))
-                                .frame(width: 80, height: 80)
-
-                            Text(emoji)
-                                .font(.system(size: 50))
-                        }
-                    } else {
-                        ZStack {
-                            Circle()
-                                .fill(collectionColor.opacity(0.15))
-                                .frame(width: 80, height: 80)
-
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(collectionColor)
-                        }
-                    }
-
-                    // Name and count
-                    VStack(spacing: 4) {
-                        Text(collection.name)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
-
-                        Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-
-                    // Action buttons - Horizontal layout
-                    HStack(spacing: 12) {
-                        // Visibility picker
-                        Menu {
-                            ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                                Button {
-                                    // Check if making private and show warning
-                                    if visibility == .privateRecipe && selectedVisibility == .publicRecipe {
-                                        pendingVisibility = visibility
-                                        showingVisibilityWarning = true
-                                    } else {
-                                        Task {
-                                            await updateVisibility(to: visibility)
-                                        }
-                                    }
-                                } label: {
-                                    Label(visibility.displayName, systemImage: visibility.icon)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: selectedVisibility.icon)
-                                    .font(.subheadline)
-                                Text(selectedVisibility.displayName)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption)
-                            }
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color.secondary.opacity(0.1))
-                            .cornerRadius(10)
-                        }
-                        .disabled(isUpdatingVisibility)
-
-                        // Add Recipes button
-                        Button {
-                            showingRecipeSelector = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.subheadline)
-                                Text("Add Recipes")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.cauldronOrange)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(Color.cauldronOrange.opacity(0.1))
-                            .cornerRadius(10)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-
-                    // Non-conforming recipes warning (only for shared collections)
-                    if collection.isShared && !nonConformingRecipes.isEmpty {
-                        nonConformingRecipesWarning
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+            headerSection
 
             // Recipes
             if isLoading {
@@ -214,32 +116,40 @@ struct CollectionDetailView: View {
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search recipes")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button {
-                        showingEditSheet = true
-                    } label: {
-                        Label("Edit Collection", systemImage: "pencil")
-                    }
-
-                    Divider()
-
-                    Button(role: .destructive) {
-                        showingDeleteConfirmation = true
-                    } label: {
-                        Label("Delete Collection", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(for: sheet)
+        }
+        .alert("Error", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let errorMessage = errorMessage {
+                Text(errorMessage)
             }
         }
-        .sheet(isPresented: $showingEditSheet) {
+        .task {
+            await loadRecipes()
+        }
+        .task {
+            // Load custom cover image if present
+            if collection.coverImageType == .customImage {
+                customCoverImage = await dependencies.collectionImageManager.loadImage(collectionId: collection.id)
+            }
+        }
+        .refreshable {
+            await loadRecipes()
+        }
+    }
+
+    // MARK: - Sheet Content
+
+    @ViewBuilder
+    private func sheetContent(for sheet: ActiveSheet) -> some View {
+        let _ = print("📋 Sheet presenting with activeSheet: \(sheet)")
+        switch sheet {
+        case .edit:
             CollectionFormView(collectionToEdit: collection)
                 .environment(\.dependencies, dependencies)
-        }
-        .sheet(isPresented: $showingRecipeSelector) {
+        case .addRecipes:
             CollectionRecipeSelectorSheet(
                 collection: collection,
                 dependencies: dependencies,
@@ -251,50 +161,7 @@ struct CollectionDetailView: View {
                 }
             )
             .presentationDetents([.medium, .large])
-        }
-        .alert("Error", isPresented: $showError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            if let errorMessage = errorMessage {
-                Text(errorMessage)
-            }
-        }
-        .alert("Make Collection Private?", isPresented: $showingVisibilityWarning) {
-            Button("Cancel", role: .cancel) {
-                pendingVisibility = nil
-            }
-            Button("Make Private", role: .destructive) {
-                if let newVisibility = pendingVisibility {
-                    Task {
-                        await updateVisibility(to: newVisibility)
-                    }
-                }
-                pendingVisibility = nil
-            }
-        } message: {
-            Text("Making this collection private will hide it from anyone who has saved it. They will no longer be able to view the recipes in this collection.")
-        }
-        .confirmationDialog(
-            "Delete Collection?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                Task {
-                    await deleteCollection()
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently delete \"\(collection.name)\" and remove all recipes from it. The recipes themselves will not be deleted.")
-        }
-        .task {
-            await loadRecipes()
-        }
-        .refreshable {
-            await loadRecipes()
-        }
-        .sheet(isPresented: $showingConformanceSheet) {
+        case .conformance:
             ConformanceFixSheet(
                 collection: collection,
                 nonConformingRecipes: nonConformingRecipes,
@@ -313,7 +180,7 @@ struct CollectionDetailView: View {
 
     private var nonConformingRecipesWarning: some View {
         Button {
-            showingConformanceSheet = true
+            activeSheet = .conformance
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -389,43 +256,148 @@ struct CollectionDetailView: View {
         }
     }
 
-    private func updateVisibility(to newVisibility: RecipeVisibility) async {
-        guard newVisibility != selectedVisibility else { return }
+    // MARK: - View Components
 
-        isUpdatingVisibility = true
-        defer { isUpdatingVisibility = false }
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: 16) {
+                // Cover Image
+                coverImageView
+                    .frame(width: 120, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
 
-        do {
-            let updated = collection.updated(visibility: newVisibility)
-            try await dependencies.collectionRepository.update(updated)
+                // Name and count
+                VStack(spacing: 4) {
+                    Text(collection.name)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
 
-            // Update local state
-            collection = updated
-            selectedVisibility = newVisibility
+                    Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
 
-            AppLogger.general.info("✅ Updated collection visibility to \(newVisibility.displayName)")
-        } catch {
-            AppLogger.general.error("❌ Failed to update visibility: \(error.localizedDescription)")
-            errorMessage = "Failed to update visibility: \(error.localizedDescription)"
-            showError = true
+                // Action buttons
+                HStack(spacing: 12) {
+                    editCollectionButton
+                        .id("edit-button")
+                    addRecipesButton
+                        .id("add-button")
+                }
+                .padding(.horizontal, 16)
+
+                // Warning banner
+                if collection.isShared && !nonConformingRecipes.isEmpty {
+                    nonConformingRecipesWarning
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
         }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets())
     }
 
-    private func deleteCollection() async {
-        do {
-            try await dependencies.collectionRepository.delete(id: collection.id)
-            AppLogger.general.info("✅ Deleted collection: \(collection.name)")
-
-            // Dismiss the view after successful deletion
-            dismiss()
-        } catch {
-            AppLogger.general.error("❌ Failed to delete collection: \(error.localizedDescription)")
-            errorMessage = "Failed to delete collection: \(error.localizedDescription)"
-            showError = true
+    private var editCollectionButton: some View {
+        Button(action: {
+            print("🔵 Edit Collection button tapped, setting activeSheet to .edit")
+            activeSheet = .edit
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "pencil")
+                    .font(.subheadline)
+                Text("Edit Collection")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.1))
+            .cornerRadius(10)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+    }
+
+    private var addRecipesButton: some View {
+        Button(action: {
+            print("🟢 Add Recipes button tapped, setting activeSheet to .addRecipes")
+            activeSheet = .addRecipes
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.subheadline)
+                Text("Add Recipes")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(.cauldronOrange)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Color.cauldronOrange.opacity(0.1))
+            .cornerRadius(10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private var coverImageView: some View {
+        switch collection.coverImageType {
+        case .customImage:
+            if let customCoverImage = customCoverImage {
+                Image(uiImage: customCoverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                // Loading or fallback
+                collectionColor
+                    .overlay(
+                        ProgressView()
+                            .tint(.white)
+                    )
+            }
+        case .emoji:
+            if let emoji = collection.emoji {
+                ZStack {
+                    Circle()
+                        .fill(collectionColor.opacity(0.15))
+                    Text(emoji)
+                        .font(.system(size: 50))
+                }
+            } else {
+                Circle()
+                    .fill(collectionColor.opacity(0.15))
+                    .overlay(
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(collectionColor)
+                    )
+            }
+        case .color:
+            ZStack {
+                Circle()
+                    .fill(collectionColor.opacity(0.15))
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(collectionColor)
+            }
+        case .recipeGrid:
+            Circle()
+                .fill(collectionColor.opacity(0.15))
+                .overlay(
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(collectionColor)
+                )
+        }
+    }
 
     private var collectionColor: Color {
         if let colorHex = collection.color {
