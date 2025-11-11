@@ -80,4 +80,27 @@ struct User: Codable, Sendable, Hashable, Identifiable {
             profileImageModifiedAt: profileImageModifiedAt
         )
     }
+
+    /// Check if the profile image needs to be uploaded to CloudKit
+    /// - Parameter localImageModified: The modification date of the local image file
+    /// - Returns: True if local image is newer than cloud or no cloud image exists
+    func needsProfileImageUpload(localImageModified: Date?) -> Bool {
+        // If no local image, no upload needed
+        guard let localModified = localImageModified else {
+            return false
+        }
+
+        // If no cloud image record, upload needed
+        guard cloudProfileImageRecordName != nil else {
+            return true
+        }
+
+        // If no cloud modification date, upload needed
+        guard let cloudModified = profileImageModifiedAt else {
+            return true
+        }
+
+        // Upload if local is newer than cloud
+        return localModified > cloudModified
+    }
 }

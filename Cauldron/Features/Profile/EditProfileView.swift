@@ -287,31 +287,44 @@ struct ProfileEditView: View {
                 // Save image locally
                 let profileImageURL = try await dependencies.profileImageManager.saveImage(image, userId: currentUser.id)
 
-                // Upload to CloudKit
-                do {
-                    let cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: currentUser.id)
+                // Check if upload is needed
+                let localModified = await dependencies.profileImageManager.getImageModificationDate(userId: currentUser.id)
+                let needsUpload = currentUser.needsProfileImageUpload(localImageModified: localModified)
 
-                    // Update user with image references
-                    let updatedUser = currentUser.updatedProfile(
-                        profileEmoji: nil,
-                        profileColor: nil,
-                        profileImageURL: profileImageURL,
-                        cloudProfileImageRecordName: cloudProfileImageRecordName,
-                        profileImageModifiedAt: Date()
-                    )
+                // Upload to CloudKit if needed
+                var cloudProfileImageRecordName = currentUser.cloudProfileImageRecordName
+                var profileImageModifiedAt = currentUser.profileImageModifiedAt
 
-                    // Save to CloudKit
-                    try await dependencies.cloudKitService.saveUser(updatedUser)
-
-                    // Update session
-                    CurrentUserSession.shared.currentUser = updatedUser
-                    saveUserToDefaults(updatedUser)
-
-                    AppLogger.general.info("✅ Updated profile with photo")
-                } catch {
-                    AppLogger.general.warning("⚠️ Failed to upload profile image: \(error.localizedDescription)")
-                    throw error
+                if needsUpload {
+                    do {
+                        cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: currentUser.id)
+                        profileImageModifiedAt = Date()
+                        AppLogger.general.info("✅ Uploaded profile image to CloudKit")
+                    } catch {
+                        AppLogger.general.warning("⚠️ Failed to upload profile image: \(error.localizedDescription)")
+                        throw error
+                    }
+                } else {
+                    AppLogger.general.info("⏭️ Skipping profile image upload - already in sync")
                 }
+
+                // Update user with image references
+                let updatedUser = currentUser.updatedProfile(
+                    profileEmoji: nil,
+                    profileColor: nil,
+                    profileImageURL: profileImageURL,
+                    cloudProfileImageRecordName: cloudProfileImageRecordName,
+                    profileImageModifiedAt: profileImageModifiedAt
+                )
+
+                // Save to CloudKit
+                try await dependencies.cloudKitService.saveUser(updatedUser)
+
+                // Update session
+                CurrentUserSession.shared.currentUser = updatedUser
+                saveUserToDefaults(updatedUser)
+
+                AppLogger.general.info("✅ Updated profile with photo")
             } else if selectedAvatarType == .emoji {
                 // Clear existing profile image
                 await dependencies.profileImageManager.deleteImage(userId: currentUser.id)
