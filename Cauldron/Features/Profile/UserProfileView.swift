@@ -530,6 +530,7 @@ struct RecipeCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(2)
                 .foregroundColor(.primary)
+                .frame(height: 36, alignment: .top)
 
             // Meta info
             HStack(spacing: 8) {
@@ -562,22 +563,25 @@ struct RecipeCard: View {
     }
 
     private var placeholderImage: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.cauldronOrange.opacity(0.08),
+                        Color.cauldronOrange.opacity(0.02)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-            Image(systemName: "fork.knife")
-                .font(.system(size: 36))
-                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+                Image(systemName: "fork.knife")
+                    .font(.system(size: 36))
+                    .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+            }
+            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .aspectRatio(1.5, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -592,18 +596,22 @@ struct ProfileRecipeImage: View {
     @State private var imageOpacity: Double = 0
 
     var body: some View {
-        Group {
-            if let image = loadedImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(imageOpacity)
-            } else {
-                placeholderView
+        GeometryReader { geometry in
+            Group {
+                if let image = loadedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(imageOpacity)
+                } else {
+                    placeholderView
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .aspectRatio(1.5, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         .task {
             await loadImage()
         }
