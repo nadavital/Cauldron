@@ -32,10 +32,20 @@ class DependencyContainer: ObservableObject {
     let sharingService: SharingService
     let cloudKitService: CloudKitService
     let recipeSyncService: RecipeSyncService
+    let imageMigrationService: CloudImageMigration
+    let imageSyncManager: ImageSyncManager
+    let imageManager: ImageManager
+    let profileImageManager: ProfileImageManager
+    let collectionImageManager: CollectionImageManager
+    let recipeImageService: RecipeImageService
 
     // UI Services (MainActor)
     let timerManager: TimerManager
     let profileCacheManager: ProfileCacheManager
+    lazy var imageSyncViewModel: ImageSyncViewModel = ImageSyncViewModel(
+        imageSyncManager: imageSyncManager,
+        imageMigrationService: imageMigrationService
+    )
     lazy var cookModeCoordinator: CookModeCoordinator = CookModeCoordinator(dependencies: self)
     lazy var connectionManager: ConnectionManager = ConnectionManager(dependencies: self)
 
@@ -48,6 +58,10 @@ class DependencyContainer: ObservableObject {
 
         // Initialize services that repositories depend on
         self.cloudKitService = CloudKitService()
+        self.imageManager = ImageManager(cloudKitService: cloudKitService)
+        self.profileImageManager = ProfileImageManager(cloudKitService: cloudKitService)
+        self.collectionImageManager = CollectionImageManager(cloudKitService: cloudKitService)
+        self.imageSyncManager = ImageSyncManager()
 
         // Initialize repositories (now with CloudKit service)
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
@@ -59,7 +73,9 @@ class DependencyContainer: ObservableObject {
             modelContainer: modelContainer,
             cloudKitService: cloudKitService,
             deletedRecipeRepository: deletedRecipeRepository,
-            collectionRepository: collectionRepository
+            collectionRepository: collectionRepository,
+            imageManager: imageManager,
+            imageSyncManager: imageSyncManager
         )
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
@@ -86,17 +102,45 @@ class DependencyContainer: ObservableObject {
         self.recipeSyncService = RecipeSyncService(
             cloudKitService: cloudKitService,
             recipeRepository: recipeRepository,
-            deletedRecipeRepository: deletedRecipeRepository
+            deletedRecipeRepository: deletedRecipeRepository,
+            imageManager: imageManager
         )
+
+        self.imageMigrationService = CloudImageMigration(
+            recipeRepository: recipeRepository,
+            imageManager: imageManager,
+            cloudKitService: cloudKitService,
+            imageSyncManager: imageSyncManager
+        )
+
+        // Note: imageSyncViewModel is lazy and will be initialized on first access
 
         // Initialize parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
 
+        // RecipeImageService is MainActor-isolated
+        // Create it with a temporary reference to avoid capture issues
+        let tempCloudKitService = cloudKitService
+        let tempImageManager = imageManager
+        self.recipeImageService = MainActor.assumeIsolated {
+            RecipeImageService(
+                cloudKitService: tempCloudKitService,
+                imageManager: tempImageManager
+            )
+        }
+
         // Note: cookModeCoordinator and connectionManager are lazy and will be initialized on first access
 
         // Start periodic sync after initialization
         self.recipeSyncService.startPeriodicSync()
+
+        // Start background image migration after a delay (runs only once)
+        Task {
+            // Wait 10 seconds after app launch to avoid impacting startup
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            await imageMigrationService.startMigration()
+        }
     }
     
     /// Create container with in-memory storage (for previews/testing)
@@ -143,6 +187,8 @@ class DependencyContainer: ObservableObject {
         }
 
         // SwiftData will handle automatic lightweight migrations for compatible schema changes
+        // New optional fields (cloudImageRecordName, imageModifiedAt) will be automatically
+        // migrated with nil values for existing records
         let config = ModelConfiguration(schema: schema, allowsSave: true)
         let container = try ModelContainer(for: schema, configurations: [config])
 

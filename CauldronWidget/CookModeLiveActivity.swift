@@ -68,7 +68,7 @@ struct CookModeLiveActivity: Widget {
                         Text(context.state.stepInstruction)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(3)
                             .multilineTextAlignment(.center)
 
                         // Timer info below instruction

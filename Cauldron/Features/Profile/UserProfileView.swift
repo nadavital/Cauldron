@@ -13,7 +13,6 @@ struct UserProfileView: View {
     @StateObject private var viewModel: UserProfileViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
-    @State private var showingSettings = false
     @State private var hasLoadedInitialData = false
 
     init(user: User, dependencies: DependencyContainer) {
@@ -75,8 +74,8 @@ struct UserProfileView: View {
         } message: {
             Text(viewModel.errorMessage)
         }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(dependencies: viewModel.dependencies)
+        .sheet(isPresented: $showingEditProfile) {
+            ProfileEditView(dependencies: viewModel.dependencies)
         }
     }
 
@@ -114,12 +113,12 @@ struct UserProfileView: View {
                 }
             }
 
-            // Settings button for current user
+            // Edit Profile button for current user
             if viewModel.isCurrentUser {
                 Button {
-                    showingSettings = true
+                    showingEditProfile = true
                 } label: {
-                    Label("Settings", systemImage: "gearshape")
+                    Label("Edit Profile", systemImage: "pencil")
                         .font(.subheadline)
                         .fontWeight(.medium)
                 }
@@ -455,21 +454,33 @@ struct UserProfileView: View {
             GridItem(.flexible(), spacing: 16)
         ], spacing: 16) {
             ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
-                NavigationLink(destination: SharedRecipeDetailView(
-                    sharedRecipe: sharedRecipe,
-                    dependencies: viewModel.dependencies,
-                    onCopy: {
-                        // Reload recipes after copying - force refresh since data changed
-                        await viewModel.loadUserRecipes(forceRefresh: true)
-                    },
-                    onRemove: {
-                        // Reload recipes after removing - force refresh since data changed
-                        await viewModel.loadUserRecipes(forceRefresh: true)
+                if sharedRecipe.recipe.isOwnedByCurrentUser() {
+                    // Own recipe - use RecipeDetailView for full editing capabilities
+                    NavigationLink(destination: RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
+                        dependencies: viewModel.dependencies
+                    )) {
+                        RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
                     }
-                )) {
-                    RecipeCard(sharedRecipe: sharedRecipe)
+                    .buttonStyle(.plain)
+                } else {
+                    // Someone else's recipe - use SharedRecipeDetailView (read-only)
+                    NavigationLink(destination: SharedRecipeDetailView(
+                        sharedRecipe: sharedRecipe,
+                        dependencies: viewModel.dependencies,
+                        onCopy: {
+                            // Reload recipes after copying - force refresh since data changed
+                            await viewModel.loadUserRecipes(forceRefresh: true)
+                        },
+                        onRemove: {
+                            // Reload recipes after removing - force refresh since data changed
+                            await viewModel.loadUserRecipes(forceRefresh: true)
+                        }
+                    )) {
+                        RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal)
@@ -480,16 +491,26 @@ struct UserProfileView: View {
 
 struct RecipeCard: View {
     let sharedRecipe: SharedRecipe
+    let dependencies: DependencyContainer
+
+    @MainActor
+    private var isOwnRecipe: Bool {
+        sharedRecipe.recipe.isOwnedByCurrentUser()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image
             if let imageURL = sharedRecipe.recipe.imageURL {
-                RecipeImageView(cardImageURL: imageURL)
-                    .frame(height: 160)
-                    .clipped()
+                ProfileRecipeImage(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
+                    .onAppear {
+                        AppLogger.general.debug("📸 RecipeCard loading image for '\(sharedRecipe.recipe.title)': \(imageURL.absoluteString)")
+                    }
             } else {
                 placeholderImage
+                    .onAppear {
+                        AppLogger.general.warning("⚠️ RecipeCard: No imageURL for recipe '\(sharedRecipe.recipe.title)'")
+                    }
             }
 
             // Title
@@ -509,13 +530,20 @@ struct RecipeCard: View {
 
                 Spacer()
 
-                // Visibility indicator
-                Image(systemName: sharedRecipe.recipe.visibility.icon)
-                    .font(.caption2)
-                    .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
+                // Show ownership or visibility indicator
+                if isOwnRecipe {
+                    // Own recipe - show visibility status
+                    Image(systemName: sharedRecipe.recipe.visibility.icon)
+                        .font(.caption2)
+                        .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
+                } else {
+                    // Others' recipe - show shared indicator
+                    Image(systemName: "person.circle")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 250, alignment: .top)
         .padding(12)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(12)
@@ -537,8 +565,68 @@ struct RecipeCard: View {
                 .font(.system(size: 36))
                 .foregroundStyle(Color.cauldronOrange.opacity(0.3))
         }
-        .frame(height: 160)
-        .clipped()
+        .aspectRatio(1.5, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Profile Recipe Image
+
+/// Adaptive recipe image for profile grid that fills available width
+struct ProfileRecipeImage: View {
+    let imageURL: URL
+    let recipeImageService: RecipeImageService
+
+    @State private var loadedImage: UIImage?
+    @State private var imageOpacity: Double = 0
+
+    var body: some View {
+        Group {
+            if let image = loadedImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .opacity(imageOpacity)
+            } else {
+                placeholderView
+            }
+        }
+        .aspectRatio(1.5, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task {
+            await loadImage()
+        }
+    }
+
+    private var placeholderView: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.cauldronOrange.opacity(0.08),
+                    Color.cauldronOrange.opacity(0.02)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Image(systemName: "fork.knife")
+                .font(.system(size: 36))
+                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+        }
+    }
+
+    private func loadImage() async {
+        let result = await recipeImageService.loadImage(from: imageURL)
+
+        switch result {
+        case .success(let image):
+            loadedImage = image
+            withAnimation(.easeOut(duration: 0.3)) {
+                imageOpacity = 1.0
+            }
+        case .failure:
+            break
+        }
     }
 }
 

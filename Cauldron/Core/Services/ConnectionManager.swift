@@ -233,13 +233,8 @@ class ConnectionManager: ObservableObject {
         if let existingConnection = connectionStatus(with: userId) {
             logger.info("Found existing connection with status: \(existingConnection.connection.status.rawValue)")
 
-            // If rejected, delete it first to allow re-requesting
-            if existingConnection.connection.status == .rejected {
-                logger.info("🗑️ Deleting rejected connection to allow re-request")
-                connections.removeValue(forKey: existingConnection.id)
-                try? await dependencies.connectionRepository.delete(existingConnection.connection)
-                try? await dependencies.cloudKitService.deleteConnection(existingConnection.connection)
-            } else if existingConnection.connection.status == .pending || existingConnection.connection.status == .accepted {
+            // Connection already exists (pending or accepted)
+            if existingConnection.connection.status == .pending || existingConnection.connection.status == .accepted {
                 logger.warning("Connection already exists with status: \(existingConnection.connection.status.rawValue)")
                 throw ConnectionError.invalidState
             }
@@ -546,13 +541,16 @@ class ConnectionManager: ObservableObject {
 
     // MARK: - Badge Management
 
-    /// Update app icon badge count based on pending connection requests
-    func updateBadgeCount() {
-        let pendingRequestsCount = connections.values.filter { managedConn in
+    /// Get the count of pending friend requests for the current user
+    var pendingRequestsCount: Int {
+        connections.values.filter { managedConn in
             managedConn.connection.toUserId == currentUserId &&
             managedConn.connection.status == .pending
         }.count
+    }
 
+    /// Update app icon badge count based on pending connection requests
+    func updateBadgeCount() {
         logger.info("📛 Updating badge count to: \(pendingRequestsCount)")
 
         Task {

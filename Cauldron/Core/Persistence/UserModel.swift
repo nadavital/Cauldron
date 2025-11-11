@@ -19,8 +19,11 @@ final class UserModel {
     var createdAt: Date = Date()
     var profileEmoji: String? = nil
     var profileColor: String? = nil
+    var profileImagePath: String? = nil  // Store URL path as string for SwiftData
+    var cloudProfileImageRecordName: String? = nil
+    var profileImageModifiedAt: Date? = nil
 
-    init(id: UUID, username: String, displayName: String, email: String? = nil, cloudRecordName: String? = nil, createdAt: Date, profileEmoji: String? = nil, profileColor: String? = nil) {
+    init(id: UUID, username: String, displayName: String, email: String? = nil, cloudRecordName: String? = nil, createdAt: Date, profileEmoji: String? = nil, profileColor: String? = nil, profileImagePath: String? = nil, cloudProfileImageRecordName: String? = nil, profileImageModifiedAt: Date? = nil) {
         self.id = id
         self.username = username
         self.displayName = displayName
@@ -29,6 +32,9 @@ final class UserModel {
         self.createdAt = createdAt
         self.profileEmoji = profileEmoji
         self.profileColor = profileColor
+        self.profileImagePath = profileImagePath
+        self.cloudProfileImageRecordName = cloudProfileImageRecordName
+        self.profileImageModifiedAt = profileImageModifiedAt
     }
 
     /// Convert to domain model
@@ -41,7 +47,10 @@ final class UserModel {
             cloudRecordName: cloudRecordName,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
-            profileColor: profileColor
+            profileColor: profileColor,
+            profileImageURL: profileImagePath.flatMap { URL(string: $0) },
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt
         )
     }
 
@@ -55,7 +64,10 @@ final class UserModel {
             cloudRecordName: user.cloudRecordName,
             createdAt: user.createdAt,
             profileEmoji: user.profileEmoji,
-            profileColor: user.profileColor
+            profileColor: user.profileColor,
+            profileImagePath: user.profileImageURL?.absoluteString,
+            cloudProfileImageRecordName: user.cloudProfileImageRecordName,
+            profileImageModifiedAt: user.profileImageModifiedAt
         )
     }
 }

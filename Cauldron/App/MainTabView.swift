@@ -22,6 +22,13 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
+    @ObservedObject private var connectionManager: ConnectionManager
+
+    init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
+        self.dependencies = dependencies
+        self.preloadedData = preloadedData
+        self.connectionManager = dependencies.connectionManager
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -36,6 +43,7 @@ struct MainTabView: View {
             Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
                 SharingTabView(dependencies: dependencies)
             }
+            .badge(connectionManager.pendingRequestsCount)
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
                 SearchTabView(dependencies: dependencies)

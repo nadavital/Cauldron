@@ -36,6 +36,10 @@ struct CollectionReference: Codable, Sendable, Hashable, Identifiable {
     let collectionEmoji: String?
     let recipeCount: Int
 
+    // Staleness tracking
+    let lastValidatedAt: Date  // Last time we checked if the original collection still exists
+    let cachedVisibility: String  // Cached visibility from when we saved it
+
     // CloudKit sync
     let cloudRecordName: String?
 
@@ -48,6 +52,8 @@ struct CollectionReference: Codable, Sendable, Hashable, Identifiable {
         collectionName: String,
         collectionEmoji: String? = nil,
         recipeCount: Int = 0,
+        lastValidatedAt: Date = Date(),
+        cachedVisibility: String = "public",
         cloudRecordName: String? = nil
     ) {
         self.id = id
@@ -58,6 +64,8 @@ struct CollectionReference: Codable, Sendable, Hashable, Identifiable {
         self.collectionName = collectionName
         self.collectionEmoji = collectionEmoji
         self.recipeCount = recipeCount
+        self.lastValidatedAt = lastValidatedAt
+        self.cachedVisibility = cachedVisibility
         self.cloudRecordName = cloudRecordName
     }
 
@@ -72,7 +80,49 @@ struct CollectionReference: Codable, Sendable, Hashable, Identifiable {
             originalOwnerId: collection.userId,
             collectionName: collection.name,
             collectionEmoji: collection.emoji,
-            recipeCount: collection.recipeCount
+            recipeCount: collection.recipeCount,
+            lastValidatedAt: Date(),
+            cachedVisibility: collection.visibility.rawValue
+        )
+    }
+
+    /// Check if this reference needs validation (older than 24 hours)
+    var needsValidation: Bool {
+        let dayInSeconds: TimeInterval = 24 * 60 * 60
+        return Date().timeIntervalSince(lastValidatedAt) > dayInSeconds
+    }
+
+    /// Update validation timestamp
+    func withUpdatedValidation() -> CollectionReference {
+        CollectionReference(
+            id: id,
+            userId: userId,
+            originalCollectionId: originalCollectionId,
+            originalOwnerId: originalOwnerId,
+            savedAt: savedAt,
+            collectionName: collectionName,
+            collectionEmoji: collectionEmoji,
+            recipeCount: recipeCount,
+            lastValidatedAt: Date(),
+            cachedVisibility: cachedVisibility,
+            cloudRecordName: cloudRecordName
+        )
+    }
+
+    /// Update cached metadata from current collection
+    func withUpdatedMetadata(from collection: Collection) -> CollectionReference {
+        CollectionReference(
+            id: id,
+            userId: userId,
+            originalCollectionId: originalCollectionId,
+            originalOwnerId: originalOwnerId,
+            savedAt: savedAt,
+            collectionName: collection.name,
+            collectionEmoji: collection.emoji,
+            recipeCount: collection.recipeCount,
+            lastValidatedAt: Date(),
+            cachedVisibility: collection.visibility.rawValue,
+            cloudRecordName: cloudRecordName
         )
     }
 }

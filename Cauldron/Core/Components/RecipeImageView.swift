@@ -12,6 +12,7 @@ struct RecipeImageView: View {
     let imageURL: URL?
     let size: ImageSize
     let showPlaceholderText: Bool
+    let recipeImageService: RecipeImageService
 
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
@@ -20,11 +21,13 @@ struct RecipeImageView: View {
     init(
         imageURL: URL?,
         size: ImageSize = .card,
-        showPlaceholderText: Bool = false
+        showPlaceholderText: Bool = false,
+        recipeImageService: RecipeImageService
     ) {
         self.imageURL = imageURL
         self.size = size
         self.showPlaceholderText = showPlaceholderText
+        self.recipeImageService = recipeImageService
     }
 
     var body: some View {
@@ -80,7 +83,7 @@ struct RecipeImageView: View {
     private func loadImage() async {
         isLoading = true
 
-        let result = await RecipeImageService.shared.loadImage(from: imageURL)
+        let result = await recipeImageService.loadImage(from: imageURL)
 
         switch result {
         case .success(let image):
@@ -171,23 +174,23 @@ extension RecipeImageView {
 
 extension RecipeImageView {
     /// Create a hero-sized image view
-    init(heroImageURL: URL?) {
-        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false)
+    init(heroImageURL: URL?, recipeImageService: RecipeImageService) {
+        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false, recipeImageService: recipeImageService)
     }
 
     /// Create a card-sized image view
-    init(cardImageURL: URL?) {
-        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false)
+    init(cardImageURL: URL?, recipeImageService: RecipeImageService) {
+        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService)
     }
 
     /// Create a thumbnail-sized image view
-    init(thumbnailImageURL: URL?) {
-        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false)
+    init(thumbnailImageURL: URL?, recipeImageService: RecipeImageService) {
+        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService)
     }
 
     /// Create a preview-sized image view
-    init(previewImageURL: URL?, showPlaceholderText: Bool = true) {
-        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText)
+    init(previewImageURL: URL?, showPlaceholderText: Bool = true, recipeImageService: RecipeImageService) {
+        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText, recipeImageService: recipeImageService)
     }
 }
 
@@ -196,6 +199,7 @@ extension RecipeImageView {
 /// Hero image view with card style and padding
 struct HeroRecipeImageView: View {
     let imageURL: URL?
+    let recipeImageService: RecipeImageService
 
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
@@ -256,7 +260,7 @@ struct HeroRecipeImageView: View {
     }
 
     private func loadImage() async {
-        let result = await RecipeImageService.shared.loadImage(from: imageURL)
+        let result = await recipeImageService.loadImage(from: imageURL)
 
         switch result {
         case .success(let image):
@@ -275,9 +279,10 @@ struct HeroRecipeImageView: View {
 // MARK: - Preview
 
 #Preview("Card") {
-    VStack(spacing: 20) {
-        RecipeImageView(cardImageURL: nil)
-        RecipeImageView(thumbnailImageURL: nil)
+    let dependencies = try! DependencyContainer.preview()
+    return VStack(spacing: 20) {
+        RecipeImageView(cardImageURL: nil, recipeImageService: dependencies.recipeImageService)
+        RecipeImageView(thumbnailImageURL: nil, recipeImageService: dependencies.recipeImageService)
     }
     .padding()
 }

@@ -11,8 +11,38 @@ import Foundation
 enum ConnectionStatus: String, Codable, Sendable {
     case pending = "pending"
     case accepted = "accepted"
-    case rejected = "rejected"  // Hidden from both users, allows re-requesting
-    case blocked = "blocked"
+
+    // MARK: - Migration Support
+
+    /// Custom decoder to handle legacy "rejected" and "blocked" statuses
+    /// These connections should have been deleted, but we handle them gracefully
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        switch rawValue {
+        case "pending":
+            self = .pending
+        case "accepted":
+            self = .accepted
+        case "rejected", "blocked":
+            // Migration: These should be deleted, but if we encounter them,
+            // treat as pending so they can be properly handled by the user
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Legacy connection status '\(rawValue)' should be deleted"
+                )
+            )
+        default:
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Unknown connection status: \(rawValue)"
+                )
+            )
+        }
+    }
 }
 
 /// Represents a connection/friendship between two users

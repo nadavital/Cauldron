@@ -25,10 +25,13 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let visibility: RecipeVisibility
     let ownerId: UUID?  // User who owns this recipe (for cloud sync)
     let cloudRecordName: String?  // CloudKit record name
+    let cloudImageRecordName: String?  // CloudKit asset record name for image
+    let imageModifiedAt: Date?  // Timestamp when image was last modified
     let createdAt: Date
     let updatedAt: Date
 
     // Attribution fields for copied recipes
+    let originalRecipeId: UUID?  // ID of the original recipe (if this is a copy) - enables update sync
     let originalCreatorId: UUID?  // ID of the user who originally created this recipe (if copied)
     let originalCreatorName: String?  // Display name of the original creator (cached for performance)
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
@@ -47,11 +50,14 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         notes: String? = nil,
         imageURL: URL? = nil,
         isFavorite: Bool = false,
-        visibility: RecipeVisibility = .privateRecipe,  // Private by default, but still syncs to iCloud
+        visibility: RecipeVisibility = .publicRecipe,  // Public by default to encourage sharing
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
+        cloudImageRecordName: String? = nil,
+        imageModifiedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
+        originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil
@@ -72,8 +78,11 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.visibility = visibility
         self.ownerId = ownerId
         self.cloudRecordName = cloudRecordName
+        self.cloudImageRecordName = cloudImageRecordName
+        self.imageModifiedAt = imageModifiedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalRecipeId = originalRecipeId
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
@@ -110,8 +119,11 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt
@@ -142,8 +154,11 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt
@@ -175,11 +190,14 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             notes: notes,
             imageURL: imageURL,
             isFavorite: false, // Reset favorite status
-            visibility: .privateRecipe, // Make it private by default
+            visibility: .publicRecipe, // Keep it public by default to maintain sharing spirit
             ownerId: userId,
             cloudRecordName: nil, // Clear cloud record name for new copy
+            cloudImageRecordName: nil, // Clear cloud image record name for new copy
+            imageModifiedAt: nil, // Will be set when image is downloaded and saved
             createdAt: Date(),
             updatedAt: Date(),
+            originalRecipeId: self.id, // Track the original recipe for update sync
             originalCreatorId: creatorId,
             originalCreatorName: creatorName,
             savedAt: Date()
@@ -199,20 +217,18 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     /// Check if a viewer can access this recipe based on visibility and relationship
     /// - Parameters:
     ///   - viewerId: ID of the user attempting to view the recipe (nil for current user)
-    ///   - isFriend: Whether the viewer is friends with the recipe owner
     /// - Returns: True if the recipe is accessible to the viewer
-    func isAccessible(to viewerId: UUID?, isFriend: Bool) -> Bool {
+    func isAccessible(to viewerId: UUID?, isFriend: Bool = false) -> Bool {
         // Owner can always see their own recipes
         if let viewerId = viewerId, viewerId == ownerId {
             return true
         }
 
         // Check based on visibility
+        // Note: isFriend parameter is deprecated but kept for backward compatibility
         switch visibility {
         case .publicRecipe:
             return true
-        case .friendsOnly:
-            return isFriend
         case .privateRecipe:
             return false
         }
@@ -226,12 +242,66 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         case .publicRecipe:
             // Public collections should only contain public recipes
             return visibility == .publicRecipe
-        case .friendsOnly:
-            // Friends-only collections can contain public or friends-only recipes
-            return visibility == .publicRecipe || visibility == .friendsOnly
         case .privateRecipe:
             // Private collections can contain any visibility
             return true
         }
+    }
+
+    /// Create a copy with updated cloud image metadata
+    /// - Parameters:
+    ///   - recordName: CloudKit asset record name
+    ///   - modifiedAt: Timestamp when image was last modified
+    /// - Returns: A new Recipe instance with updated cloud image metadata
+    func withCloudImageMetadata(recordName: String?, modifiedAt: Date?) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: recordName,
+            imageModifiedAt: modifiedAt,
+            createdAt: createdAt,
+            updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
+        )
+    }
+
+    /// Check if the recipe image needs to be uploaded to CloudKit
+    /// - Parameter localImageModified: The modification date of the local image file
+    /// - Returns: True if local image is newer than cloud or no cloud image exists
+    func needsImageUpload(localImageModified: Date?) -> Bool {
+        // If no local image, no upload needed
+        guard let localModified = localImageModified else {
+            return false
+        }
+
+        // If no cloud image record, upload needed
+        guard cloudImageRecordName != nil else {
+            return true
+        }
+
+        // If no cloud modification date, upload needed
+        guard let cloudModified = imageModifiedAt else {
+            return true
+        }
+
+        // Upload if local is newer than cloud
+        return localModified > cloudModified
     }
 }

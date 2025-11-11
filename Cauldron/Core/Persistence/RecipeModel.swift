@@ -38,8 +38,11 @@ final class RecipeModel {
     var visibility: String = "private"  // RecipeVisibility rawValue
     var ownerId: UUID?
     var cloudRecordName: String?
+    var cloudImageRecordName: String?  // CloudKit asset record name for image
+    var imageModifiedAt: Date?  // Timestamp when image was last modified
 
     // Attribution fields for copied recipes
+    var originalRecipeId: UUID?
     var originalCreatorId: UUID?
     var originalCreatorName: String?
     var savedAt: Date?
@@ -61,8 +64,11 @@ final class RecipeModel {
         visibility: String = "private",
         ownerId: UUID? = nil,
         cloudRecordName: String? = nil,
+        cloudImageRecordName: String? = nil,
+        imageModifiedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
+        originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil
@@ -83,8 +89,11 @@ final class RecipeModel {
         self.visibility = visibility
         self.ownerId = ownerId
         self.cloudRecordName = cloudRecordName
+        self.cloudImageRecordName = cloudImageRecordName
+        self.imageModifiedAt = imageModifiedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.originalRecipeId = originalRecipeId
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
@@ -118,8 +127,11 @@ final class RecipeModel {
             visibility: recipe.visibility.rawValue,
             ownerId: recipe.ownerId,
             cloudRecordName: recipe.cloudRecordName,
+            cloudImageRecordName: recipe.cloudImageRecordName,
+            imageModifiedAt: recipe.imageModifiedAt,
             createdAt: recipe.createdAt,
             updatedAt: recipe.updatedAt,
+            originalRecipeId: recipe.originalRecipeId,
             originalCreatorId: recipe.originalCreatorId,
             originalCreatorName: recipe.originalCreatorName,
             savedAt: recipe.savedAt
@@ -186,8 +198,11 @@ final class RecipeModel {
             visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
             ownerId: ownerId,
             cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt

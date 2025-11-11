@@ -8,6 +8,7 @@
 import Foundation
 import CloudKit
 import os
+import UIKit
 
 /// Account status for iCloud/CloudKit
 enum CloudKitAccountStatus: CustomStringConvertible {
@@ -79,12 +80,14 @@ actor CloudKitService {
     init() {
         // Try to initialize CloudKit, but don't crash if it fails
         do {
-            let testContainer = CKContainer.default()
+            // Use explicit container identifier to support multiple bundle IDs (dev/production)
+            // This ensures both Nadav.Cauldron and Nadav.Cauldron.dev use the same CloudKit container
+            let testContainer = CKContainer(identifier: "iCloud.Nadav.Cauldron")
             self.container = testContainer
             self.privateDatabase = testContainer.privateCloudDatabase
             self.publicDatabase = testContainer.publicCloudDatabase
             self.isEnabled = true
-            logger.info("CloudKit initialized successfully")
+            logger.info("CloudKit initialized successfully with container: iCloud.Nadav.Cauldron")
         } catch {
             logger.warning("CloudKit not available: \(error.localizedDescription)")
             logger.warning("Enable CloudKit capability in Xcode to use cloud features")
@@ -140,7 +143,7 @@ actor CloudKitService {
         }
     }
 
-    private func getPrivateDatabase() throws -> CKDatabase {
+    func getPrivateDatabase() throws -> CKDatabase {
         try checkEnabled()
         guard let privateDatabase = privateDatabase else {
             throw CloudKitError.notEnabled
@@ -148,7 +151,7 @@ actor CloudKitService {
         return privateDatabase
     }
 
-    private func getPublicDatabase() throws -> CKDatabase {
+    func getPublicDatabase() throws -> CKDatabase {
         try checkEnabled()
         guard let publicDatabase = publicDatabase else {
             throw CloudKitError.notEnabled
@@ -382,6 +385,12 @@ actor CloudKitService {
         if let color = user.profileColor {
             record["profileColor"] = color as CKRecordValue
         }
+        if let cloudImageRecordName = user.cloudProfileImageRecordName {
+            record["cloudProfileImageRecordName"] = cloudImageRecordName as CKRecordValue
+        }
+        if let imageModifiedAt = user.profileImageModifiedAt {
+            record["profileImageModifiedAt"] = imageModifiedAt as CKRecordValue
+        }
         record["createdAt"] = user.createdAt as CKRecordValue
 
         // Save to PUBLIC database so other users can discover this user
@@ -500,6 +509,8 @@ actor CloudKitService {
         let createdAt = record["createdAt"] as? Date ?? Date()
         let profileEmoji = record["profileEmoji"] as? String
         let profileColor = record["profileColor"] as? String
+        let cloudProfileImageRecordName = record["cloudProfileImageRecordName"] as? String
+        let profileImageModifiedAt = record["profileImageModifiedAt"] as? Date
 
         return User(
             id: userId,
@@ -509,7 +520,10 @@ actor CloudKitService {
             cloudRecordName: record.recordID.recordName,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
-            profileColor: profileColor
+            profileColor: profileColor,
+            profileImageURL: nil,  // Will be set after downloading image
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt
         )
     }
     
@@ -575,6 +589,24 @@ actor CloudKitService {
         }
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
+
+        // Attribution fields for recipe sync
+        if let originalRecipeId = recipe.originalRecipeId {
+            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
+        }
+        if let originalCreatorId = recipe.originalCreatorId {
+            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
+        }
+        if let originalCreatorName = recipe.originalCreatorName {
+            record["originalCreatorName"] = originalCreatorName as CKRecordValue
+        }
+        if let savedAt = recipe.savedAt {
+            record["savedAt"] = savedAt as CKRecordValue
+        }
+
+        // Note: Image asset is uploaded separately via uploadImageAsset()
+        // We preserve existing imageAsset and imageModifiedAt if they exist
+        // This allows recipe data sync to happen independently from image sync
 
         logger.info("Saving recipe to CloudKit private database...")
         do {
@@ -739,6 +771,26 @@ actor CloudKitService {
         let yields = record["yields"] as? String ?? "4 servings"
         let totalMinutes = record["totalMinutes"] as? Int
 
+        // Cloud image metadata (optional)
+        let cloudImageRecordName: String? = (record["imageAsset"] as? CKAsset) != nil ? record.recordID.recordName : nil
+        let imageModifiedAt = record["imageModifiedAt"] as? Date
+
+        // Attribution fields (optional)
+        let originalRecipeId: UUID? = {
+            if let idString = record["originalRecipeId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalCreatorId: UUID? = {
+            if let idString = record["originalCreatorId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalCreatorName = record["originalCreatorName"] as? String
+        let savedAt = record["savedAt"] as? Date
+
         return Recipe(
             id: recipeId,
             title: title,
@@ -750,19 +802,25 @@ actor CloudKitService {
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: record.recordID.recordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt
         )
     }
 
     // MARK: - Public Recipe Sharing (NEW Architecture)
 
     /// Copy recipe to PUBLIC database when visibility != .private
-    /// This makes the recipe discoverable by friends or everyone
+    /// This makes the recipe discoverable by everyone
     func copyRecipeToPublic(_ recipe: Recipe) async throws {
         logger.info("📤 Copying recipe to PUBLIC database: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
 
-        // Only copy if visibility is friends-only or public
+        // Only copy if visibility is public
         guard recipe.visibility != .privateRecipe else {
             logger.info("Recipe is private, skipping PUBLIC database copy")
             return
@@ -814,6 +872,20 @@ actor CloudKitService {
         }
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
+
+        // Attribution fields for recipe sync (optional - only present on copied recipes)
+        if let originalRecipeId = recipe.originalRecipeId {
+            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
+        }
+        if let originalCreatorId = recipe.originalCreatorId {
+            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
+        }
+        if let originalCreatorName = recipe.originalCreatorName {
+            record["originalCreatorName"] = originalCreatorName as CKRecordValue
+        }
+        if let savedAt = recipe.savedAt {
+            record["savedAt"] = savedAt as CKRecordValue
+        }
 
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")
@@ -991,12 +1063,18 @@ actor CloudKitService {
         let fromResults = try await db.records(matching: fromQuery)
 
         for (_, result) in fromResults.matchResults {
-            if let record = try? result.get(),
-               let connection = try? connectionFromRecord(record),
-               !connectionIds.contains(connection.id) {
-                connections.append(connection)
-                connectionIds.insert(connection.id)
-                logger.debug("  Found connection (from): \(connection.id) - status: \(connection.status.rawValue)")
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                        logger.debug("  Found connection (from): \(connection.id) - status: \(connection.status.rawValue)")
+                    }
+                } catch {
+                    // Skip legacy connections (rejected/blocked) - they should be deleted
+                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
+                }
             }
         }
 
@@ -1006,25 +1084,29 @@ actor CloudKitService {
         let toResults = try await db.records(matching: toQuery)
 
         for (_, result) in toResults.matchResults {
-            if let record = try? result.get(),
-               let connection = try? connectionFromRecord(record),
-               !connectionIds.contains(connection.id) {
-                connections.append(connection)
-                connectionIds.insert(connection.id)
-                logger.debug("  Found connection (to): \(connection.id) - status: \(connection.status.rawValue)")
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                        logger.debug("  Found connection (to): \(connection.id) - status: \(connection.status.rawValue)")
+                    }
+                } catch {
+                    // Skip legacy connections (rejected/blocked) - they should be deleted
+                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
+                }
             }
         }
 
         logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
-        logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted, \(connections.filter { $0.status == .rejected }.count) rejected")
+        logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted")
 
         // Clean up duplicates - remove duplicate connections between same two users
         let cleanedConnections = try await removeDuplicateConnections(connections)
 
-        // Filter out rejected connections - they should be invisible to users
-        let filteredConnections = cleanedConnections.filter { $0.status != .rejected }
-        logger.info("Returning \(filteredConnections.count) connections (excluded \(connections.count - filteredConnections.count) rejected/duplicates)")
-        return filteredConnections
+        logger.info("Returning \(cleanedConnections.count) connections")
+        return cleanedConnections
     }
 
     /// Remove duplicate connections between the same two users
@@ -1438,6 +1520,10 @@ actor CloudKitService {
         }
         record["recipeCount"] = reference.recipeCount as CKRecordValue
 
+        // Staleness tracking
+        record["lastValidatedAt"] = reference.lastValidatedAt as CKRecordValue
+        record["cachedVisibility"] = reference.cachedVisibility as CKRecordValue
+
         _ = try await db.save(record)
         logger.info("✅ Saved collection reference to PUBLIC database")
     }
@@ -1483,6 +1569,429 @@ actor CloudKitService {
 
         try await db.deleteRecord(withID: recordID)
         logger.info("✅ Deleted collection reference")
+    }
+
+    // MARK: - Image Assets
+
+    /// Upload image as CKAsset to CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID this image belongs to
+    ///   - imageData: The image data to upload
+    ///   - database: The database to upload to (private or public)
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadImageAsset(recipeId: UUID, imageData: Data, to database: CKDatabase) async throws -> String {
+        logger.info("📤 Uploading image asset for recipe: \(recipeId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(recipeId.uuidString)
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Find existing recipe record to attach asset to
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            // Fetch existing record
+            let record = try await database.record(for: recordID)
+
+            // Add image asset and modification timestamp
+            record["imageAsset"] = asset
+            record["imageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await database.save(record)
+            logger.info("✅ Uploaded image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("Recipe record not found in CloudKit: \(recipeId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download image asset from CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID to download image for
+    ///   - database: The database to download from (private or public)
+    /// - Returns: The image data, or nil if no image exists
+    func downloadImageAsset(recipeId: UUID, from database: CKDatabase) async throws -> Data? {
+        logger.info("📥 Downloading image asset for recipe: \(recipeId)")
+
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            let record = try await database.record(for: recordID)
+
+            guard let asset = record["imageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No image asset found for recipe: \(recipeId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded image asset (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Recipe record not found: \(recipeId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete image asset from CloudKit
+    /// - Parameters:
+    ///   - recipeId: The recipe ID to delete image for
+    ///   - database: The database to delete from (private or public)
+    func deleteImageAsset(recipeId: UUID, from database: CKDatabase) async throws {
+        logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
+
+        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+
+        do {
+            let record = try await database.record(for: recordID)
+
+            // Remove image asset fields
+            record["imageAsset"] = nil
+            record["imageModifiedAt"] = nil
+
+            _ = try await database.save(record)
+            logger.info("✅ Deleted image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Recipe record not found: \(recipeId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    // MARK: - User Profile Image Methods
+
+    /// Upload user profile image to CloudKit
+    /// - Parameters:
+    ///   - userId: The user ID this image belongs to
+    ///   - imageData: The image data to upload
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadUserProfileImage(userId: UUID, imageData: Data) async throws -> String {
+        logger.info("📤 Uploading profile image for user: \(userId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("profile_\(userId.uuidString)")
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Get user's CloudKit record
+        let db = try getPublicDatabase()
+
+        // Find user record - try with custom record name format
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            // Fetch existing user record
+            let record = try await db.record(for: recordID)
+
+            // Add profile image asset and modification timestamp
+            record["profileImageAsset"] = asset
+            record["profileImageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Uploaded profile image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("User record not found in CloudKit: \(userId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload profile image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download user profile image from CloudKit
+    /// - Parameter userId: The user ID to download image for
+    /// - Returns: The image data, or nil if no image exists
+    func downloadUserProfileImage(userId: UUID) async throws -> Data? {
+        logger.info("📥 Downloading profile image for user: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Try to find user record
+        // First, try to fetch the user to get their cloud record name
+        guard let user = try await fetchUser(byUserId: userId),
+              let cloudRecordName = user.cloudRecordName else {
+            logger.warning("Cannot download profile image - user not found or no cloud record")
+            return nil
+        }
+
+        let recordID = CKRecord.ID(recordName: cloudRecordName)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            guard let asset = record["profileImageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No profile image asset found for user: \(userId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded profile image (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete user profile image from CloudKit
+    /// - Parameter userId: The user ID to delete image for
+    func deleteUserProfileImage(userId: UUID) async throws {
+        logger.info("🗑️ Deleting profile image for user: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Get user's CloudKit record
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            // Remove profile image asset fields
+            record["profileImageAsset"] = nil
+            record["profileImageModifiedAt"] = nil
+
+            _ = try await db.save(record)
+            logger.info("✅ Deleted profile image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Collection Cover Image Methods
+
+    /// Upload collection cover image to CloudKit
+    /// - Parameters:
+    ///   - collectionId: The collection ID this image belongs to
+    ///   - imageData: The image data to upload
+    /// - Returns: The CloudKit record name for the uploaded asset
+    func uploadCollectionCoverImage(collectionId: UUID, imageData: Data) async throws -> String {
+        logger.info("📤 Uploading collection cover image for collection: \(collectionId)")
+
+        // Optimize image before upload
+        let optimizedData = try await optimizeImageForCloudKit(imageData)
+
+        // Create temporary file for CKAsset
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("collection_\(collectionId.uuidString)")
+            .appendingPathExtension("jpg")
+
+        try optimizedData.write(to: tempURL)
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        // Create CKAsset
+        let asset = CKAsset(fileURL: tempURL)
+
+        // Get collection's CloudKit record
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            // Fetch existing collection record
+            let record = try await db.record(for: recordID)
+
+            // Add cover image asset and modification timestamp
+            record["coverImageAsset"] = asset
+            record["coverImageModifiedAt"] = Date() as CKRecordValue
+
+            // Save updated record
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Uploaded collection cover image asset")
+            return savedRecord.recordID.recordName
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.error("Collection record not found in CloudKit: \(collectionId)")
+                throw CloudKitError.invalidRecord
+            } else if error.code == .quotaExceeded {
+                logger.error("iCloud storage quota exceeded - cannot upload collection cover image")
+                throw CloudKitError.quotaExceeded
+            }
+            throw error
+        }
+    }
+
+    /// Download collection cover image from CloudKit
+    /// - Parameter collectionId: The collection ID to download image for
+    /// - Returns: The image data, or nil if no image exists
+    func downloadCollectionCoverImage(collectionId: UUID) async throws -> Data? {
+        logger.info("📥 Downloading collection cover image for collection: \(collectionId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            guard let asset = record["coverImageAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL else {
+                logger.info("No collection cover image asset found for collection: \(collectionId)")
+                return nil
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            logger.info("✅ Downloaded collection cover image (\(data.count) bytes)")
+            return data
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Collection record not found: \(collectionId)")
+                return nil
+            }
+            throw error
+        }
+    }
+
+    /// Delete collection cover image from CloudKit
+    /// - Parameter collectionId: The collection ID to delete image for
+    func deleteCollectionCoverImage(collectionId: UUID) async throws {
+        logger.info("🗑️ Deleting collection cover image for collection: \(collectionId)")
+
+        let db = try getPublicDatabase()
+        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
+
+        do {
+            let record = try await db.record(for: recordID)
+
+            // Remove cover image asset fields
+            record["coverImageAsset"] = nil
+            record["coverImageModifiedAt"] = nil
+
+            _ = try await db.save(record)
+            logger.info("✅ Deleted collection cover image asset")
+
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("Collection record not found: \(collectionId)")
+                return
+            }
+            throw error
+        }
+    }
+
+    // MARK: - Image Optimization
+
+    /// Optimize image data for CloudKit upload
+    /// - Parameter imageData: Original image data
+    /// - Returns: Optimized image data
+    /// - Throws: CloudKitError if optimization fails or image is too large
+    private func optimizeImageForCloudKit(_ imageData: Data) async throws -> Data {
+        logger.info("Image size: \(imageData.count) bytes, optimizing...")
+
+        #if canImport(UIKit)
+        guard let image = UIImage(data: imageData) else {
+            throw CloudKitError.compressionFailed
+        }
+
+        let maxSizeBytes = 10_000_000 // 10MB max for CloudKit
+        let compressionThreshold = 5_000_000 // 5MB - compress if larger
+
+        // Try 80% quality compression first
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            if data.count <= compressionThreshold {
+                logger.info("Optimized to \(data.count) bytes")
+                return data
+            }
+            if data.count <= maxSizeBytes {
+                logger.info("Optimized to \(data.count) bytes")
+                return data
+            }
+        }
+
+        // Try 60% compression
+        if let compressedData = image.jpegData(compressionQuality: 0.6),
+           compressedData.count <= maxSizeBytes {
+            logger.info("Optimized to \(compressedData.count) bytes")
+            return compressedData
+        }
+
+        // If still too large, resize and compress
+        let maxDimension: CGFloat = 2000
+        let scale = min(maxDimension / image.size.width, maxDimension / image.size.height, 1.0)
+
+        if scale < 1.0 {
+            let newSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+            let resizedImage = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+
+            if let resizedImage = resizedImage,
+               let compressedData = resizedImage.jpegData(compressionQuality: 0.8),
+               compressedData.count <= maxSizeBytes {
+                logger.info("Optimized to \(compressedData.count) bytes")
+                return compressedData
+            }
+        }
+
+        throw CloudKitError.assetTooLarge
+        #else
+        // macOS or other platforms
+        throw CloudKitError.compressionFailed
+        #endif
     }
 
     // MARK: - Private Helpers for Collections
@@ -1546,6 +2055,9 @@ actor CloudKitService {
         }
 
         let collectionEmoji = record["collectionEmoji"] as? String
+        // Optional fields with defaults for backward compatibility
+        let lastValidatedAt = record["lastValidatedAt"] as? Date ?? savedAt
+        let cachedVisibility = record["cachedVisibility"] as? String ?? "public"
 
         return CollectionReference(
             id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
@@ -1556,6 +2068,8 @@ actor CloudKitService {
             collectionName: collectionName,
             collectionEmoji: collectionEmoji,
             recipeCount: recipeCount,
+            lastValidatedAt: lastValidatedAt,
+            cachedVisibility: cachedVisibility,
             cloudRecordName: record.recordID.recordName
         )
     }
@@ -1572,6 +2086,9 @@ enum CloudKitError: LocalizedError {
     case networkError
     case quotaExceeded
     case syncConflict
+    case assetNotFound
+    case assetTooLarge
+    case compressionFailed
 
     var errorDescription: String? {
         switch self {
@@ -1600,6 +2117,12 @@ enum CloudKitError: LocalizedError {
             return "iCloud storage is full. Please free up space in Settings"
         case .syncConflict:
             return "Sync conflict detected. Your changes may need to be merged manually"
+        case .assetNotFound:
+            return "Image not found in iCloud"
+        case .assetTooLarge:
+            return "Image is too large to upload (max 10MB)"
+        case .compressionFailed:
+            return "Failed to compress image for upload"
         }
     }
 

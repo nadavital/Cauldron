@@ -35,7 +35,7 @@ struct RecipeImportPreviewView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero Image - Card style
                     if let imageURL = editedRecipe.imageURL {
-                        HeroRecipeImageView(imageURL: imageURL)
+                        HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                     }
 
                     VStack(alignment: .leading, spacing: 20) {

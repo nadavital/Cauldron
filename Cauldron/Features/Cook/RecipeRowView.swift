@@ -10,11 +10,12 @@ import SwiftUI
 /// Reusable recipe row view for list displays
 struct RecipeRowView: View {
     let recipe: Recipe
-    
+    let dependencies: DependencyContainer
+
     var body: some View {
         HStack(spacing: 12) {
             // Thumbnail image
-            RecipeImageView(thumbnailImageURL: recipe.imageURL)
+            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -74,7 +75,8 @@ struct RecipeRowView: View {
 }
 
 #Preview {
-    NavigationStack {
+    let dependencies = try! DependencyContainer.preview()
+    return NavigationStack {
         List {
             RecipeRowView(
                 recipe: Recipe(
@@ -90,7 +92,8 @@ struct RecipeRowView: View {
                     yields: "4 servings",
                     totalMinutes: 45,
                     tags: [Tag(name: "Dessert"), Tag(name: "Quick")]
-                )
+                ),
+                dependencies: dependencies
             )
         }
     }

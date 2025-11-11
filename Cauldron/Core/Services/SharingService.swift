@@ -76,11 +76,10 @@ actor SharingService {
     }
     
     /// Get all recipes shared with the current user (from PUBLIC database)
-    /// Fetches friends' recipes (visibility = friendsOnly) and public recipes (visibility = public)
+    /// Fetches public recipes from friends
     ///
     /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
-    /// To save a recipe for later, users must explicitly create a RecipeReference (via "Add to My Recipes")
-    /// or copy it to their personal collection (via "Save a Copy").
+    /// To save a recipe for later, users must explicitly add it to their personal collection via "Add to My Recipes".
     func getSharedRecipes() async throws -> [SharedRecipe] {
         logger.info("📥 Fetching shared recipes from PUBLIC database")
 
@@ -111,31 +110,7 @@ actor SharingService {
 
         var allSharedRecipes: [SharedRecipe] = []
 
-        // Fetch friends-only recipes from friends
-        if !friendIds.isEmpty {
-            let friendsRecipes = try await cloudKitService.querySharedRecipes(
-                ownerIds: friendIds,
-                visibility: .friendsOnly
-            )
-            logger.info("Found \(friendsRecipes.count) friends-only recipes")
-
-            // Convert to SharedRecipe objects
-            for recipe in friendsRecipes {
-                // Fetch owner user info by userId
-                if let ownerId = recipe.ownerId,
-                   let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
-                    let sharedRecipe = SharedRecipe(
-                        id: UUID(),
-                        recipe: recipe,
-                        sharedBy: owner,
-                        sharedAt: recipe.createdAt
-                    )
-                    allSharedRecipes.append(sharedRecipe)
-                }
-            }
-        }
-
-        // Also fetch public recipes from friends (so friends see each other's public recipes too)
+        // Fetch public recipes from friends
         if !friendIds.isEmpty {
             let friendsPublicRecipes = try await cloudKitService.querySharedRecipes(
                 ownerIds: friendIds,

@@ -15,7 +15,7 @@ import Foundation
 /// Key characteristics:
 /// - Explicit membership: recipes are manually added/removed
 /// - Can contain both owned recipes and referenced recipes
-/// - Support visibility levels (private/friends/public) for sharing
+/// - Support visibility levels (private/public) for sharing
 /// - Stored in CloudKit PUBLIC database to enable sharing
 /// - Custom presentation with emoji/color theme
 ///
@@ -36,6 +36,9 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     let emoji: String?  // Optional emoji icon (e.g., "🎄", "⚡")
     let color: String?  // Optional hex color (e.g., "#FF5733")
     let coverImageType: CoverImageType  // How to display the collection card
+    let coverImageURL: URL?  // Local file URL for custom cover image
+    let cloudCoverImageRecordName: String?  // CloudKit record name for cover image asset
+    let coverImageModifiedAt: Date?  // Last modified date for sync tracking
 
     // CloudKit sync
     let cloudRecordName: String?
@@ -50,10 +53,13 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         description: String? = nil,
         userId: UUID,
         recipeIds: [UUID] = [],
-        visibility: RecipeVisibility = .privateRecipe,
+        visibility: RecipeVisibility = .publicRecipe,
         emoji: String? = nil,
         color: String? = nil,
         coverImageType: CoverImageType = .recipeGrid,
+        coverImageURL: URL? = nil,
+        cloudCoverImageRecordName: String? = nil,
+        coverImageModifiedAt: Date? = nil,
         cloudRecordName: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -67,6 +73,9 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         self.emoji = emoji
         self.color = color
         self.coverImageType = coverImageType
+        self.coverImageURL = coverImageURL
+        self.cloudCoverImageRecordName = cloudCoverImageRecordName
+        self.coverImageModifiedAt = coverImageModifiedAt
         self.cloudRecordName = cloudRecordName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -89,7 +98,10 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         visibility: RecipeVisibility? = nil,
         emoji: String? = nil,
         color: String? = nil,
-        coverImageType: CoverImageType? = nil
+        coverImageType: CoverImageType? = nil,
+        coverImageURL: URL? = nil,
+        cloudCoverImageRecordName: String? = nil,
+        coverImageModifiedAt: Date? = nil
     ) -> Collection {
         Collection(
             id: self.id,
@@ -101,6 +113,9 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
             emoji: emoji ?? self.emoji,
             color: color ?? self.color,
             coverImageType: coverImageType ?? self.coverImageType,
+            coverImageURL: coverImageURL ?? self.coverImageURL,
+            cloudCoverImageRecordName: cloudCoverImageRecordName ?? self.cloudCoverImageRecordName,
+            coverImageModifiedAt: coverImageModifiedAt ?? self.coverImageModifiedAt,
             cloudRecordName: self.cloudRecordName,
             createdAt: self.createdAt,
             updatedAt: Date()
@@ -155,8 +170,6 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         switch visibility {
         case .publicRecipe:
             return "public"
-        case .friendsOnly:
-            return "public or friends-only"
         case .privateRecipe:
             return "any visibility"
         }
@@ -175,7 +188,8 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
 
 /// How the collection cover should be displayed
 enum CoverImageType: String, Codable, Sendable, CaseIterable {
-    case recipeGrid  // Show 2x2 grid of recipe images
-    case emoji       // Show custom emoji
-    case color       // Show solid color background with name
+    case recipeGrid   // Show 2x2 grid of recipe images
+    case emoji        // Show custom emoji
+    case color        // Show solid color background with name
+    case customImage  // Show user-uploaded custom cover image
 }

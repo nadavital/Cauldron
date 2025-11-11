@@ -32,7 +32,7 @@ struct CategoryRecipesListView: View {
         List {
             ForEach(localRecipes) { recipe in
                 NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                    RecipeRowView(recipe: recipe)
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {

@@ -187,11 +187,20 @@ class CurrentUserSession: ObservableObject {
         displayName: String,
         profileEmoji: String? = nil,
         profileColor: String? = nil,
+        profileImage: UIImage? = nil,
         dependencies: DependencyContainer
     ) async throws {
         logger.info("Creating new user: \(username)")
 
         let userId = UUID()
+
+        // Handle profile image if provided (mutually exclusive with emoji)
+        var profileImageURL: URL?
+        if let profileImage = profileImage {
+            // Save profile image locally
+            profileImageURL = try await dependencies.profileImageManager.saveImage(profileImage, userId: userId)
+            logger.info("Saved profile image locally")
+        }
 
         // Try to create in CloudKit first
         var cloudUser: User?
@@ -199,10 +208,21 @@ class CurrentUserSession: ObservableObject {
             cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
                 username: username,
                 displayName: displayName,
-                profileEmoji: profileEmoji,
+                profileEmoji: profileImage == nil ? profileEmoji : nil,  // Clear emoji if using photo
                 profileColor: profileColor
             )
             logger.info("User created in CloudKit")
+
+            // Upload profile image to CloudKit if provided
+            if let profileImage = profileImage, let cloudUser = cloudUser {
+                do {
+                    let recordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: cloudUser.id)
+                    logger.info("Uploaded profile image to CloudKit: \(recordName)")
+                } catch {
+                    logger.warning("Failed to upload profile image to CloudKit: \(error.localizedDescription)")
+                    // Continue - local image is still available
+                }
+            }
         } catch {
             logger.warning("CloudKit user creation failed (ok if not enabled): \(error.localizedDescription)")
             // Continue with local user
@@ -213,8 +233,9 @@ class CurrentUserSession: ObservableObject {
             id: userId,
             username: username,
             displayName: displayName,
-            profileEmoji: profileEmoji,
-            profileColor: profileColor
+            profileEmoji: profileImage == nil ? profileEmoji : nil,  // Clear emoji if using photo
+            profileColor: profileColor,
+            profileImageURL: profileImageURL
         )
 
         // Save to UserDefaults

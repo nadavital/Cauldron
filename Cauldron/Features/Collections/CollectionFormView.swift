@@ -21,9 +21,13 @@ struct CollectionFormView: View {
     @State private var color: String?
     @State private var visibility: RecipeVisibility
     @State private var selectedRecipeIds: Set<UUID>
+    @State private var coverImageType: CoverImageType
+    @State private var coverImage: UIImage?
     @State private var showingEmojiPicker = false
+    @State private var showingImagePicker = false
     @State private var isSaving = false
     @State private var showingRecipeSelector = false
+    @State private var showingDeleteConfirmation = false
     @State private var allRecipes: [Recipe] = []
 
     init(collectionToEdit: Collection? = nil) {
@@ -33,8 +37,9 @@ struct CollectionFormView: View {
         _name = State(initialValue: collectionToEdit?.name ?? "")
         _emoji = State(initialValue: collectionToEdit?.emoji)
         _color = State(initialValue: collectionToEdit?.color)
-        _visibility = State(initialValue: collectionToEdit?.visibility ?? .privateRecipe)
+        _visibility = State(initialValue: collectionToEdit?.visibility ?? .publicRecipe)
         _selectedRecipeIds = State(initialValue: Set(collectionToEdit?.recipeIds ?? []))
+        _coverImageType = State(initialValue: collectionToEdit?.coverImageType ?? .recipeGrid)
     }
 
     var isEditing: Bool {
@@ -96,26 +101,6 @@ struct CollectionFormView: View {
                     TextField("Collection Name", text: $name)
                         .font(.body)
 
-                    // Emoji picker
-                    HStack {
-                        Text("Icon")
-                            .foregroundColor(.primary)
-
-                        Spacer()
-
-                        Button {
-                            showingEmojiPicker = true
-                        } label: {
-                            if let emoji = emoji {
-                                Text(emoji)
-                                    .font(.title2)
-                            } else {
-                                Text("Add Emoji")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-
                     // Color picker
                     HStack {
                         Text("Color")
@@ -140,6 +125,87 @@ struct CollectionFormView: View {
                     Text("Details")
                 }
 
+                // Cover Image Section
+                Section {
+                    Picker("Cover Type", selection: $coverImageType) {
+                        Text("Recipe Grid").tag(CoverImageType.recipeGrid)
+                        Text("Emoji").tag(CoverImageType.emoji)
+                        Text("Color").tag(CoverImageType.color)
+                        Text("Custom Image").tag(CoverImageType.customImage)
+                    }
+                    .onChange(of: coverImageType) { oldValue, newValue in
+                        // Clear incompatible state when switching types
+                        if newValue != .emoji {
+                            emoji = nil
+                        }
+                        if newValue != .customImage {
+                            coverImage = nil
+                        }
+                    }
+
+                    // Show emoji picker for emoji type
+                    if coverImageType == .emoji {
+                        HStack {
+                            Text("Icon")
+                                .foregroundColor(.primary)
+
+                            Spacer()
+
+                            Button {
+                                showingEmojiPicker = true
+                            } label: {
+                                if let emoji = emoji {
+                                    Text(emoji)
+                                        .font(.title2)
+                                } else {
+                                    Text("Choose Emoji")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    // Show image picker for custom image type
+                    if coverImageType == .customImage {
+                        Button {
+                            showingImagePicker = true
+                        } label: {
+                            HStack {
+                                if let coverImage = coverImage {
+                                    Image(uiImage: coverImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "photo")
+                                        .foregroundColor(.secondary)
+                                }
+                                Text(coverImage != nil ? "Change Cover Image" : "Add Cover Image")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("Cover Image")
+                } footer: {
+                    switch coverImageType {
+                    case .recipeGrid:
+                        Text("Show a 2×2 grid of recipe images from this collection")
+                    case .emoji:
+                        Text("Show an emoji icon with the color background")
+                    case .color:
+                        Text("Show the collection name on a solid color background")
+                    case .customImage:
+                        Text("Upload a custom cover image for this collection")
+                    }
+                }
+
                 // Recipes Section
                 Section {
                     Button {
@@ -160,7 +226,7 @@ struct CollectionFormView: View {
                         ForEach(selectedRecipes) { recipe in
                             HStack {
                                 if let imageURL = recipe.imageURL {
-                                    RecipeImageView(thumbnailImageURL: imageURL)
+                                    RecipeImageView(thumbnailImageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                                 } else {
                                     RoundedRectangle(cornerRadius: 8)
                                         .fill(Color.gray.opacity(0.2))
@@ -209,9 +275,6 @@ struct CollectionFormView: View {
                         Label("Private", systemImage: "lock.fill")
                             .tag(RecipeVisibility.privateRecipe)
 
-                        Label("Friends", systemImage: "person.2.fill")
-                            .tag(RecipeVisibility.friendsOnly)
-
                         Label("Public", systemImage: "globe")
                             .tag(RecipeVisibility.publicRecipe)
                     }
@@ -223,10 +286,6 @@ struct CollectionFormView: View {
                         Text("Only you can see this collection")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                    case .friendsOnly:
-                        Text("Your friends can see and save this collection")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     case .publicRecipe:
                         Text("Everyone can see and save this collection")
                             .font(.caption)
@@ -234,6 +293,24 @@ struct CollectionFormView: View {
                     }
                 } header: {
                     Text("Sharing")
+                }
+
+                // Delete Collection Section (only when editing)
+                if isEditing {
+                    Section {
+                        Button(role: .destructive) {
+                            showingDeleteConfirmation = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Delete Collection")
+                            }
+                        }
+                    } header: {
+                        Text("Delete Collection")
+                    } footer: {
+                        Text("This will permanently delete this collection and remove all recipes from it. The recipes themselves will not be deleted.")
+                    }
                 }
             }
             .navigationTitle(isEditing ? "Edit Collection" : "New Collection")
@@ -257,6 +334,9 @@ struct CollectionFormView: View {
             .sheet(isPresented: $showingEmojiPicker) {
                 EmojiPickerView(selectedEmoji: $emoji)
             }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(image: $coverImage)
+            }
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorSheet(
                     selectedRecipeIds: $selectedRecipeIds,
@@ -266,6 +346,28 @@ struct CollectionFormView: View {
             }
             .task {
                 await loadRecipes()
+            }
+            .task {
+                // Load existing cover image if editing
+                if let collection = collectionToEdit,
+                   collection.coverImageType == .customImage,
+                   coverImage == nil {
+                    coverImage = await dependencies.collectionImageManager.loadImage(collectionId: collection.id)
+                }
+            }
+            .confirmationDialog(
+                "Delete Collection?",
+                isPresented: $showingDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        await deleteCollection()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete \"\(collectionToEdit?.name ?? "this collection")\" and remove all recipes from it. The recipes themselves will not be deleted.")
             }
         }
     }
@@ -295,8 +397,33 @@ struct CollectionFormView: View {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let recipeIds = Array(selectedRecipeIds)
 
-            // Determine cover image type based on what's selected
-            let coverType: CoverImageType = emoji != nil ? .emoji : .recipeGrid
+            // Handle custom cover image upload
+            var coverImageURL: URL? = collectionToEdit?.coverImageURL
+            var cloudCoverImageRecordName: String? = collectionToEdit?.cloudCoverImageRecordName
+            var coverImageModifiedAt: Date? = collectionToEdit?.coverImageModifiedAt
+
+            if coverImageType == .customImage, let coverImage = coverImage {
+                // Save image locally first (using temporary ID if new collection)
+                let collectionId = collectionToEdit?.id ?? UUID()
+                coverImageURL = try await dependencies.collectionImageManager.saveImage(coverImage, collectionId: collectionId)
+                coverImageModifiedAt = Date()
+
+                // Upload to CloudKit
+                do {
+                    cloudCoverImageRecordName = try await dependencies.collectionImageManager.uploadImageToCloud(collectionId: collectionId)
+                    AppLogger.general.info("✅ Uploaded collection cover image to CloudKit")
+                } catch {
+                    AppLogger.general.warning("⚠️ Failed to upload cover image to CloudKit, will retry later: \(error.localizedDescription)")
+                }
+            } else if coverImageType != .customImage {
+                // Clear cover image if switching away from custom image
+                if let existingId = collectionToEdit?.id {
+                    await dependencies.collectionImageManager.deleteImage(collectionId: existingId)
+                }
+                coverImageURL = nil
+                cloudCoverImageRecordName = nil
+                coverImageModifiedAt = nil
+            }
 
             if let existingCollection = collectionToEdit {
                 // Update existing collection
@@ -306,7 +433,10 @@ struct CollectionFormView: View {
                     visibility: visibility,
                     emoji: emoji,
                     color: color,
-                    coverImageType: coverType
+                    coverImageType: coverImageType,
+                    coverImageURL: coverImageURL,
+                    cloudCoverImageRecordName: cloudCoverImageRecordName,
+                    coverImageModifiedAt: coverImageModifiedAt
                 )
                 try await dependencies.collectionRepository.update(updated)
                 AppLogger.general.info("✅ Updated collection: \(trimmedName)")
@@ -319,7 +449,10 @@ struct CollectionFormView: View {
                     visibility: visibility,
                     emoji: emoji,
                     color: color,
-                    coverImageType: coverType
+                    coverImageType: coverImageType,
+                    coverImageURL: coverImageURL,
+                    cloudCoverImageRecordName: cloudCoverImageRecordName,
+                    coverImageModifiedAt: coverImageModifiedAt
                 )
                 try await dependencies.collectionRepository.create(newCollection)
                 AppLogger.general.info("✅ Created collection: \(trimmedName)")
@@ -328,6 +461,25 @@ struct CollectionFormView: View {
             dismiss()
         } catch {
             AppLogger.general.error("❌ Failed to save collection: \(error.localizedDescription)")
+        }
+    }
+
+    private func deleteCollection() async {
+        guard let collection = collectionToEdit else { return }
+
+        do {
+            // Delete from repository
+            try await dependencies.collectionRepository.delete(id: collection.id)
+
+            // Delete local cover image if it exists
+            if collection.coverImageType == .customImage {
+                await dependencies.collectionImageManager.deleteImage(collectionId: collection.id)
+            }
+
+            AppLogger.general.info("✅ Deleted collection: \(collection.name)")
+            dismiss()
+        } catch {
+            AppLogger.general.error("❌ Failed to delete collection: \(error.localizedDescription)")
         }
     }
 
@@ -383,7 +535,7 @@ struct RecipeSelectorSheet: View {
                                 toggleRecipe(recipe.id)
                             } label: {
                                 HStack(spacing: 12) {
-                                    RecipeImageView(thumbnailImageURL: recipe.imageURL)
+                                    RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
 
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(recipe.title)

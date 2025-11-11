@@ -94,7 +94,7 @@ class RecipeEditorViewModel: ObservableObject {
     @Published var isSaving: Bool = false
     @Published var selectedImage: UIImage?
     @Published var imageFilename: String?
-    @Published var visibility: RecipeVisibility = .privateRecipe
+    @Published var visibility: RecipeVisibility = .publicRecipe
     
     let dependencies: DependencyContainer
     let existingRecipe: Recipe?
@@ -135,7 +135,7 @@ class RecipeEditorViewModel: ObservableObject {
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
             Task {
-                let result = await RecipeImageService.shared.loadImage(from: imageURL)
+                let result = await dependencies.recipeImageService.loadImage(from: imageURL)
                 if case .success(let image) = result {
                     await MainActor.run {
                         selectedImage = image
@@ -211,13 +211,17 @@ class RecipeEditorViewModel: ObservableObject {
 
             // Handle image if selected
             if let image = selectedImage {
-                let filename = try await ImageManager.shared.saveImage(image, recipeId: recipe.id)
-                let imageURL = await ImageManager.shared.imageURL(for: filename)
+                let filename = try await dependencies.imageManager.saveImage(image, recipeId: recipe.id)
+                let imageURL = await dependencies.imageManager.imageURL(for: filename)
                 recipe = recipe.withImageURL(imageURL)
             }
 
             // Save to local database (CloudKit sync happens automatically in repository)
-            if isEditing {
+            // Check if recipe actually exists in database, not just if existingRecipe is set
+            // This handles the case where an imported recipe is edited before being saved
+            let recipeExists = await dependencies.recipeRepository.recipeExists(id: recipe.id)
+
+            if recipeExists {
                 try await dependencies.recipeRepository.update(recipe)
             } else {
                 try await dependencies.recipeRepository.create(recipe)

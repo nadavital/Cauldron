@@ -19,11 +19,13 @@ typealias RecipeSnapshot = GeneratedRecipe.PartiallyGenerated
 /// Uses Foundation Models framework for structured content generation
 actor FoundationModelsService {
 
-    private let session: LanguageModelSession
-
     init() {
-        // Initialize with minimal instructions - let @Generable schema guide the structure
-        self.session = LanguageModelSession(
+        // No persistent session - we create fresh sessions per request to avoid context accumulation
+    }
+
+    /// Create a fresh session with recipe-specific instructions
+    private func createSession() -> LanguageModelSession {
+        LanguageModelSession(
             instructions: {
                 """
                 Generate practical recipes with clear measurements and detailed steps.
@@ -53,6 +55,9 @@ actor FoundationModelsService {
         AsyncThrowingStream { continuation in
             Task {
                 do {
+                    // Create a fresh session for each generation to avoid context window issues
+                    let session = await self.createSession()
+
                     let stream = session.streamResponse(
                         generating: GeneratedRecipe.self,
                         includeSchemaInPrompt: false,
@@ -84,6 +89,9 @@ actor FoundationModelsService {
         }
 
         do {
+            // Create a fresh session for parsing to avoid context accumulation
+            let session = createSession()
+
             let result = try await session.respond(
                 to: """
                 Parse the following recipe text into a structured format:
@@ -108,6 +116,9 @@ actor FoundationModelsService {
         guard await isAvailable else {
             return nil
         }
+
+        // Create a fresh session for clarifying to avoid context accumulation
+        let session = createSession()
 
         let result = try await session.respond(
             to: """

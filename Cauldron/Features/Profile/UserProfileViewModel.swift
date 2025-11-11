@@ -251,55 +251,38 @@ class UserProfileViewModel: ObservableObject {
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
-        var allRecipes: [SharedRecipe] = []
-
         // Get current user to check connection status
         guard let currentUserId = CurrentUserSession.shared.userId else {
             return []
         }
 
-        // Determine if we're connected to this user
-        let isConnected = connectionState == .connected
+        let recipes: [Recipe]
 
-        // Fetch public recipes from this user
-        let publicRecipes = try await dependencies.cloudKitService.querySharedRecipes(
-            ownerIds: [user.id],
-            visibility: .publicRecipe
-        )
-        AppLogger.general.info("Found \(publicRecipes.count) public recipes from \(self.user.username)")
+        // If viewing your own profile, fetch from local storage (same as Cook tab)
+        if isCurrentUser {
+            recipes = try await dependencies.recipeRepository.fetchAll()
+            AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
+        } else {
+            // If viewing someone else's profile, fetch their public recipes from CloudKit
+            recipes = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: [user.id],
+                visibility: .publicRecipe
+            )
+            AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
+        }
 
         // Convert to SharedRecipe
-        for recipe in publicRecipes {
-            let sharedRecipe = SharedRecipe(
-                id: UUID(),
+        let sharedRecipes = recipes.map { recipe in
+            SharedRecipe(
+                id: recipe.id,
                 recipe: recipe,
                 sharedBy: user,
                 sharedAt: recipe.updatedAt
             )
-            allRecipes.append(sharedRecipe)
-        }
-
-        // If connected, also fetch friends-only recipes
-        if isConnected {
-            let friendsRecipes = try await dependencies.cloudKitService.querySharedRecipes(
-                ownerIds: [user.id],
-                visibility: .friendsOnly
-            )
-            AppLogger.general.info("Found \(friendsRecipes.count) friends-only recipes from \(self.user.username)")
-
-            for recipe in friendsRecipes {
-                let sharedRecipe = SharedRecipe(
-                    id: UUID(),
-                    recipe: recipe,
-                    sharedBy: user,
-                    sharedAt: recipe.updatedAt
-                )
-                allRecipes.append(sharedRecipe)
-            }
         }
 
         // Sort by updated date (most recent first)
-        return allRecipes.sorted { $0.sharedAt > $1.sharedAt }
+        return sharedRecipes.sorted { $0.sharedAt > $1.sharedAt }
     }
 
     var filteredRecipes: [SharedRecipe] {
@@ -351,21 +334,18 @@ class UserProfileViewModel: ObservableObject {
     private func fetchUserCollections() async throws -> [Collection] {
         var allCollections: [Collection] = []
 
-        // If viewing own profile, show public + friends-only (what friends see, NOT private)
-        // If connected to user, also show public + friends-only
-        // Otherwise, only show public
-        let shouldShowFriendsOnly = isCurrentUser || connectionState == .connected
+        // Only show public collections on profiles (simplified from private/friends/public to private/public)
 
         // If viewing own profile, load local collections (excluding private)
         if isCurrentUser {
             let localCollections = try await dependencies.collectionRepository.fetchAll()
             AppLogger.general.info("Found \(localCollections.count) total local collections")
 
-            // Filter to only public and friends-only (profile shows what friends would see)
+            // Filter to only public (profile shows what others would see)
             let visibleCollections = localCollections.filter {
-                $0.visibility == .publicRecipe || $0.visibility == .friendsOnly
+                $0.visibility == .publicRecipe
             }
-            AppLogger.general.info("Filtered to \(visibleCollections.count) visible collections (public + friends-only)")
+            AppLogger.general.info("Filtered to \(visibleCollections.count) public collections")
             allCollections.append(contentsOf: visibleCollections)
         }
 
@@ -383,22 +363,6 @@ class UserProfileViewModel: ObservableObject {
                 for cloudCollection in publicCollections {
                     if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
                         allCollections.append(cloudCollection)
-                    }
-                }
-
-                // If viewing own profile or connected, also fetch friends-only collections
-                if shouldShowFriendsOnly {
-                    let friendsCollections = try await dependencies.cloudKitService.queryCollections(
-                        ownerIds: [user.id],
-                        visibility: .friendsOnly
-                    )
-                    AppLogger.general.info("Found \(friendsCollections.count) friends-only collections from CloudKit for \(self.user.username)")
-
-                    // Add CloudKit collections that aren't already in local storage
-                    for cloudCollection in friendsCollections {
-                        if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
-                            allCollections.append(cloudCollection)
-                        }
                     }
                 }
             } catch {

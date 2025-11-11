@@ -22,6 +22,10 @@ final class CollectionReferenceModel {
     var collectionEmoji: String?
     var recipeCount: Int = 0
 
+    // Staleness tracking
+    var lastValidatedAt: Date = Date()
+    var cachedVisibility: String = "public"
+
     // CloudKit sync
     var cloudRecordName: String?
 
@@ -34,6 +38,8 @@ final class CollectionReferenceModel {
         collectionName: String,
         collectionEmoji: String? = nil,
         recipeCount: Int = 0,
+        lastValidatedAt: Date = Date(),
+        cachedVisibility: String = "public",
         cloudRecordName: String? = nil
     ) {
         self.id = id
@@ -44,6 +50,8 @@ final class CollectionReferenceModel {
         self.collectionName = collectionName
         self.collectionEmoji = collectionEmoji
         self.recipeCount = recipeCount
+        self.lastValidatedAt = lastValidatedAt
+        self.cachedVisibility = cachedVisibility
         self.cloudRecordName = cloudRecordName
     }
 
@@ -58,6 +66,8 @@ final class CollectionReferenceModel {
             collectionName: reference.collectionName,
             collectionEmoji: reference.collectionEmoji,
             recipeCount: reference.recipeCount,
+            lastValidatedAt: reference.lastValidatedAt,
+            cachedVisibility: reference.cachedVisibility,
             cloudRecordName: reference.cloudRecordName
         )
     }
@@ -73,6 +83,8 @@ final class CollectionReferenceModel {
             collectionName: collectionName,
             collectionEmoji: collectionEmoji,
             recipeCount: recipeCount,
+            lastValidatedAt: lastValidatedAt,
+            cachedVisibility: cachedVisibility,
             cloudRecordName: cloudRecordName
         )
     }

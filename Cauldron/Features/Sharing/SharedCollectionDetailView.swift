@@ -24,6 +24,10 @@ struct SharedCollectionDetailView: View {
     @State private var isFriendWithOwner = false
     @Environment(\.dismiss) private var dismiss
 
+    private var loader: SharedCollectionLoader {
+        SharedCollectionLoader(dependencies: dependencies)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -186,11 +190,9 @@ struct SharedCollectionDetailView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                if !isFriendWithOwner {
-                    Text("Connect with the collection owner to see friends-only recipes")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Text("These recipes are private and cannot be viewed")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
@@ -234,7 +236,7 @@ struct SharedCollectionDetailView: View {
                         RecipeDetailView(recipe: recipe, dependencies: dependencies)
                     }
                 } label: {
-                    RecipeRowView(recipe: recipe)
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
                 .buttonStyle(.plain)
             }
@@ -261,49 +263,20 @@ struct SharedCollectionDetailView: View {
         isLoading = true
         defer { isLoading = false }
 
-        guard !collection.recipeIds.isEmpty else {
-            recipes = []
-            hiddenRecipeCount = 0
-            return
-        }
+        // Check friendship status first
+        await checkFriendshipStatus()
 
-        guard let currentUserId = CurrentUserSession.shared.userId else {
-            recipes = []
-            hiddenRecipeCount = 0
-            return
-        }
+        // Load recipes using shared loader
+        let result = await loader.loadRecipes(
+            from: collection,
+            viewerId: CurrentUserSession.shared.userId,
+            isFriend: isFriendWithOwner
+        )
 
-        // Fetch recipes that are in this collection
-        // We need to fetch them from CloudKit PUBLIC database since they're shared
-        var fetchedRecipes: [Recipe] = []
-        var skippedCount = 0
+        recipes = result.visibleRecipes
+        hiddenRecipeCount = result.hiddenRecipeCount
 
-        for recipeId in collection.recipeIds {
-            do {
-                // Try to fetch as a public recipe
-                let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                    recipeId: recipeId,
-                    ownerId: collection.userId
-                )
-
-                // Check if the viewer can access this recipe
-                if recipe.isAccessible(to: currentUserId, isFriend: isFriendWithOwner) {
-                    fetchedRecipes.append(recipe)
-                } else {
-                    skippedCount += 1
-                    AppLogger.general.info("Skipped private/friends-only recipe: \(recipe.title)")
-                }
-            } catch {
-                // Recipe might be private (doesn't exist in PUBLIC database)
-                skippedCount += 1
-                AppLogger.general.warning("Failed to fetch recipe \(recipeId) from shared collection: \(error.localizedDescription)")
-            }
-        }
-
-        recipes = fetchedRecipes
-        hiddenRecipeCount = skippedCount
-
-        AppLogger.general.info("✅ Loaded \(recipes.count) accessible recipes for shared collection: \(collection.name) (\(hiddenRecipeCount) hidden)")
+        AppLogger.general.info("✅ Loaded \(recipes.count) visible recipes, \(hiddenRecipeCount) hidden")
     }
 
     private func saveCollectionReference() async {
