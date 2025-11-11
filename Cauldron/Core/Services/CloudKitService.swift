@@ -1346,7 +1346,17 @@ actor CloudKitService {
 
         let db = try getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collection.id.uuidString)
-        let record = CKRecord(recordType: collectionRecordType, recordID: recordID)
+
+        // Try to fetch existing record first, create new if doesn't exist
+        let record: CKRecord
+        do {
+            record = try await db.record(for: recordID)
+            logger.info("Updating existing collection record")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Record doesn't exist, create new one
+            record = CKRecord(recordType: collectionRecordType, recordID: recordID)
+            logger.info("Creating new collection record")
+        }
 
         // Core fields
         record["collectionId"] = collection.id.uuidString as CKRecordValue

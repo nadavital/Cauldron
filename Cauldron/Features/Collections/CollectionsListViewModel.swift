@@ -188,4 +188,16 @@ class CollectionsListViewModel: ObservableObject {
             collection.recipeIds.contains(recipe.id)
         }
     }
+
+    /// Get first 4 recipe image URLs for a collection (for grid display)
+    func getRecipeImages(for collection: Collection) async -> [URL?] {
+        do {
+            let recipes = try await getRecipes(for: collection)
+            // Take first 4 recipes and get their image URLs
+            return Array(recipes.prefix(4).map { $0.imageURL })
+        } catch {
+            AppLogger.general.error("Failed to fetch recipe images for collection: \(error.localizedDescription)")
+            return []
+        }
+    }
 }

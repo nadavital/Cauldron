@@ -14,6 +14,7 @@ struct UserProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
+    @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -378,9 +379,19 @@ struct UserProfileView: View {
                         collection: collection,
                         dependencies: viewModel.dependencies
                     )) {
-                        CollectionCardView(collection: collection, recipeImages: [])
+                        CollectionCardView(
+                            collection: collection,
+                            recipeImages: collectionImageCache[collection.id] ?? []
+                        )
                     }
                     .buttonStyle(.plain)
+                    .task(id: collection.id) {
+                        // Load recipe images if not cached
+                        if collectionImageCache[collection.id] == nil {
+                            let images = await viewModel.getRecipeImages(for: collection)
+                            collectionImageCache[collection.id] = images
+                        }
+                    }
                 }
             }
             .padding(.horizontal)

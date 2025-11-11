@@ -262,7 +262,16 @@ struct RecipeImportPreviewView: View {
                 }
             }
             .sheet(isPresented: $showingEditSheet) {
-                RecipeEditorView(dependencies: dependencies, recipe: editedRecipe)
+                RecipeEditorView(
+                    dependencies: dependencies,
+                    recipe: editedRecipe,
+                    onSaveAndDismiss: {
+                        // When editor saves during import, dismiss the entire import flow
+                        onSave()
+                        dismiss()
+                    },
+                    isImporting: true
+                )
             }
             .alert("Recipe Saved!", isPresented: $showSuccess) {
                 Button("OK") {

@@ -393,4 +393,21 @@ class UserProfileViewModel: ObservableObject {
             await loadConnections()
         }
     }
+
+    /// Get first 4 recipe image URLs for a collection (for grid display)
+    func getRecipeImages(for collection: Collection) async -> [URL?] {
+        do {
+            // Load recipes for this collection
+            let allRecipes = try await dependencies.recipeRepository.fetchAll()
+            let collectionRecipes = allRecipes.filter { recipe in
+                collection.recipeIds.contains(recipe.id)
+            }
+
+            // Take first 4 recipes and get their image URLs
+            return Array(collectionRecipes.prefix(4).map { $0.imageURL })
+        } catch {
+            AppLogger.general.error("Failed to fetch recipe images for collection: \(error.localizedDescription)")
+            return []
+        }
+    }
 }

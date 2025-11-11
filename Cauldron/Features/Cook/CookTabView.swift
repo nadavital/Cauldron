@@ -19,6 +19,7 @@ struct CookTabView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSessionConflictAlert = false
     @State private var isAIAvailable = false
+    @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
@@ -187,10 +188,17 @@ struct CookTabView: View {
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: []
+                                    recipeImages: collectionImageCache[collection.id] ?? []
                                 )
                             }
                             .buttonStyle(.plain)
+                            .task(id: collection.id) {
+                                // Load recipe images if not cached
+                                if collectionImageCache[collection.id] == nil {
+                                    let images = await viewModel.getRecipeImages(for: collection)
+                                    collectionImageCache[collection.id] = images
+                                }
+                            }
                         }
                     }
                     .padding(.bottom, 8)

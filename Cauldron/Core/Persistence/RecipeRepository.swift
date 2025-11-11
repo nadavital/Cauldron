@@ -517,13 +517,40 @@ actor RecipeRepository {
             try await cloudKitService.copyRecipeToPublic(recipe)
             logger.info("✅ Successfully synced recipe to PUBLIC database")
 
-            // Upload image to PUBLIC database if exists
+            // Upload image to PUBLIC database only if it needs to be uploaded
+            // Check if image exists and if it's been modified since last upload
             if recipe.imageURL != nil {
-                await uploadRecipeImage(recipe, to: .public)
+                let shouldUpload = await shouldUploadImageToPublic(recipe)
+                if shouldUpload {
+                    await uploadRecipeImage(recipe, to: .public)
+                } else {
+                    logger.debug("⏭️ Skipping image upload - already synced to PUBLIC database")
+                }
             }
         } catch {
             logger.error("❌ PUBLIC database sync failed for recipe '\(recipe.title)': \(error.localizedDescription)")
         }
+    }
+
+    /// Check if image should be uploaded to PUBLIC database
+    /// Returns true if image needs to be uploaded (doesn't exist or has been modified)
+    private func shouldUploadImageToPublic(_ recipe: Recipe) async -> Bool {
+        // If no cloudImageRecordName, image hasn't been uploaded yet
+        guard recipe.cloudImageRecordName != nil else {
+            logger.debug("Image needs upload - no cloudImageRecordName")
+            return true
+        }
+
+        // If image has been modified since last upload, re-upload
+        if let imageModifiedAt = recipe.imageModifiedAt,
+           let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id),
+           localImageModifiedAt > imageModifiedAt {
+            logger.debug("Image needs upload - modified locally")
+            return true
+        }
+
+        // Image already uploaded and hasn't been modified
+        return false
     }
 
     /// Delete recipe from PUBLIC database
