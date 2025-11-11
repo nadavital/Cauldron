@@ -108,7 +108,10 @@ actor CollectionRepository {
     // MARK: - Update
 
     /// Update an existing collection
-    func update(_ collection: Collection) async throws {
+    /// - Parameters:
+    ///   - collection: The collection to update
+    ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
+    func update(_ collection: Collection, shouldUpdateTimestamp: Bool = true) async throws {
         let context = ModelContext(modelContainer)
 
         // Find existing model
@@ -139,7 +142,8 @@ actor CollectionRepository {
         existingModel.emoji = updatedModel.emoji
         existingModel.color = updatedModel.color
         existingModel.coverImageType = updatedModel.coverImageType
-        existingModel.updatedAt = Date()
+        // Only update timestamp for user actions, not sync operations
+        existingModel.updatedAt = shouldUpdateTimestamp ? Date() : collection.updatedAt
 
         try context.save()
         logger.info("✅ Updated collection in local database: \(collection.name)")
@@ -396,9 +400,9 @@ actor CollectionRepository {
                 let localCollection = try await fetch(id: cloudCollection.id)
 
                 if let local = localCollection {
-                    // Update if cloud version is newer
+                    // Update if cloud version is newer (don't update timestamp - sync operation)
                     if cloudCollection.updatedAt > local.updatedAt {
-                        try await update(cloudCollection)
+                        try await update(cloudCollection, shouldUpdateTimestamp: false)
                         logger.info("🔄 Updated collection from cloud: \(cloudCollection.name)")
                     }
                 } else {

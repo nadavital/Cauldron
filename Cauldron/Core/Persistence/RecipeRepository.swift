@@ -250,7 +250,11 @@ actor RecipeRepository {
     }
     
     /// Update a recipe
-    func update(_ recipe: Recipe) async throws {
+    /// - Parameters:
+    ///   - recipe: The recipe to update
+    ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
+    ///   - skipImageSync: Whether to skip image synchronization. Set to true for metadata-only sync operations to avoid unnecessary image processing.
+    func update(_ recipe: Recipe, shouldUpdateTimestamp: Bool = true, skipImageSync: Bool = false) async throws {
         // Capture old state before updating to detect image changes
         let oldRecipe = try await fetch(id: recipe.id)
         guard let oldRecipe = oldRecipe else {
@@ -258,23 +262,37 @@ actor RecipeRepository {
         }
 
         // 1. Update recipe in local database
-        try await updateRecipeInDatabase(recipe)
+        try await updateRecipeInDatabase(recipe, shouldUpdateTimestamp: shouldUpdateTimestamp)
 
-        // 2. Sync image changes (returns updated recipe with cloud metadata)
-        let recipeWithImageMetadata = try await syncImageChanges(
-            oldRecipe: oldRecipe,
-            newRecipe: recipe
-        )
+        // 2. Sync recipe metadata to CloudKit FIRST (recipe record must exist before image can be attached)
+        await syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
 
-        // 3. Sync recipe metadata to CloudKit
-        await syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitService: cloudKitService)
+        // 3. Sync to public database if needed
+        await syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
 
-        // 4. Sync to public database if needed
-        await syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitService: cloudKitService)
+        // 4. Sync image changes only if not skipped (returns updated recipe with cloud metadata)
+        if !skipImageSync {
+            let recipeWithImageMetadata = try await syncImageChanges(
+                oldRecipe: oldRecipe,
+                newRecipe: recipe
+            )
+
+            // If image metadata was updated, sync the updated recipe to CloudKit again
+            if recipeWithImageMetadata.cloudImageRecordName != recipe.cloudImageRecordName {
+                await syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitService: cloudKitService)
+
+                if recipeWithImageMetadata.visibility == .publicRecipe {
+                    await syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitService: cloudKitService)
+                }
+            }
+        }
     }
 
     /// Update recipe in local database only (no CloudKit sync)
-    private func updateRecipeInDatabase(_ recipe: Recipe) async throws {
+    /// - Parameters:
+    ///   - recipe: The recipe to update
+    ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. If false, preserves the recipe's existing timestamp.
+    private func updateRecipeInDatabase(_ recipe: Recipe, shouldUpdateTimestamp: Bool = true) async throws {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.id == recipe.id }
@@ -304,7 +322,8 @@ actor RecipeRepository {
         model.cloudImageRecordName = recipe.cloudImageRecordName
         model.imageModifiedAt = recipe.imageModifiedAt
         model.ownerId = recipe.ownerId  // Preserve owner ID
-        model.updatedAt = Date()
+        // Only update timestamp for user actions, not sync operations
+        model.updatedAt = shouldUpdateTimestamp ? Date() : recipe.updatedAt
 
         // Log image filename being saved
         if let imageFilename = recipe.imageURL?.lastPathComponent {
@@ -325,6 +344,12 @@ actor RecipeRepository {
         let hadImage = oldRecipe.imageURL != nil
         let hasImage = newRecipe.imageURL != nil
         let imageWasRemoved = hadImage && !hasImage
+
+        // Early return: If image URL is unchanged, skip all image processing
+        if oldRecipe.imageURL == newRecipe.imageURL && hasImage {
+            AppLogger.general.debug("⏭️ Skipping image sync - image URL unchanged")
+            return newRecipe
+        }
 
         // Case 1: Image was removed
         if imageWasRemoved {
@@ -535,22 +560,40 @@ actor RecipeRepository {
     /// Check if image should be uploaded to PUBLIC database
     /// Returns true if image needs to be uploaded (doesn't exist or has been modified)
     private func shouldUploadImageToPublic(_ recipe: Recipe) async -> Bool {
-        // If no cloudImageRecordName, image hasn't been uploaded yet
-        guard recipe.cloudImageRecordName != nil else {
-            logger.debug("Image needs upload - no cloudImageRecordName")
+        // Check if recipe exists in PUBLIC database and already has an image
+        guard let ownerId = recipe.ownerId else {
+            logger.debug("Image needs upload - no ownerId")
             return true
         }
 
-        // If image has been modified since last upload, re-upload
-        if let imageModifiedAt = recipe.imageModifiedAt,
-           let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id),
-           localImageModifiedAt > imageModifiedAt {
-            logger.debug("Image needs upload - modified locally")
+        do {
+            // Fetch the recipe from PUBLIC database to check if image already exists
+            let publicRecipe = try await cloudKitService.fetchPublicRecipe(recipeId: recipe.id, ownerId: ownerId)
+
+            // If PUBLIC recipe has an image record name, image already exists
+            if publicRecipe.cloudImageRecordName != nil {
+                // Check if local image has been modified since last upload
+                if let imageModifiedAt = publicRecipe.imageModifiedAt,
+                   let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id),
+                   localImageModifiedAt > imageModifiedAt {
+                    logger.debug("Image needs upload - modified locally")
+                    return true
+                }
+
+                // Image already exists and hasn't been modified
+                logger.debug("⏭️ Skipping image upload - already synced to PUBLIC database")
+                return false
+            } else {
+                // PUBLIC recipe exists but has no image
+                logger.debug("Image needs upload - PUBLIC recipe has no image")
+                return true
+            }
+        } catch {
+            // If we can't fetch the PUBLIC recipe, assume we need to upload
+            // (recipe might not exist yet, or there's a network error)
+            logger.debug("Image needs upload - couldn't verify PUBLIC recipe status: \(error.localizedDescription)")
             return true
         }
-
-        // Image already uploaded and hasn't been modified
-        return false
     }
 
     /// Delete recipe from PUBLIC database
