@@ -1828,6 +1828,36 @@ actor CloudKitService {
         }
     }
 
+    /// Delete user profile from CloudKit (for account deletion)
+    /// - Parameter userId: The user ID to delete
+    func deleteUserProfile(userId: UUID) async throws {
+        logger.info("🗑️ Deleting user profile from CloudKit: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Get user's CloudKit record
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            // Delete user profile image first if exists
+            try await deleteUserProfileImage(userId: userId)
+
+            // Delete the user record itself
+            _ = try await db.deleteRecord(withID: recordID)
+            logger.info("✅ Deleted user profile from CloudKit")
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                // Not an error - already deleted
+                return
+            }
+            logger.error("Failed to delete user profile: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     // MARK: - Collection Cover Image Methods
 
     /// Upload collection cover image to CloudKit

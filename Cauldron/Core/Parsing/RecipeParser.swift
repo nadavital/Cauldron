@@ -19,7 +19,12 @@ enum ParsingError: Error, LocalizedError {
     case noStepsFound
     case networkError(Error)
     case decodingError(Error)
-    
+    case platformNotSupported(String)
+    case invalidURL
+    case invalidHTML
+    case noRecipeFound
+    case imageNotFound
+
     var errorDescription: String? {
         switch self {
         case .invalidSource:
@@ -32,6 +37,16 @@ enum ParsingError: Error, LocalizedError {
             return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
             return "Failed to decode recipe: \(error.localizedDescription)"
+        case .platformNotSupported(let platform):
+            return "\(platform) recipe import is not yet supported. Try copying the recipe text manually."
+        case .invalidURL:
+            return "Invalid URL. Please check the URL and try again."
+        case .invalidHTML:
+            return "Could not read content from URL"
+        case .noRecipeFound:
+            return "No recipe found in the video description. Make sure the video contains a recipe in its description."
+        case .imageNotFound:
+            return "Could not find recipe image"
         }
     }
 }

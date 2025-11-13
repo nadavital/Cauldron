@@ -77,9 +77,25 @@ class ImporterViewModel: ObservableObject {
     }
     
     private func importFromURL() async throws -> Recipe {
-        // Use HTML parser directly (more reliable than AI for structured recipe sites)
-        // The HTML parser will use schema.org JSON-LD when available, then fall back to heuristics
-        var recipe = try await dependencies.htmlParser.parse(from: urlString)
+        // Detect platform and route to appropriate parser
+        let platform = PlatformDetector.detect(from: urlString)
+
+        var recipe: Recipe
+
+        switch platform {
+        case .youtube:
+            // Use YouTube-specific parser for video descriptions
+            recipe = try await dependencies.youtubeParser.parse(from: urlString)
+
+        case .recipeWebsite, .unknown:
+            // Use HTML parser for structured recipe sites
+            // The HTML parser will use schema.org JSON-LD when available, then fall back to heuristics
+            recipe = try await dependencies.htmlParser.parse(from: urlString)
+
+        case .tiktok, .instagram:
+            // Not yet implemented - provide helpful error
+            throw ParsingError.platformNotSupported(platform == .tiktok ? "TikTok" : "Instagram")
+        }
 
         // Download and save image if recipe has an imageURL
         if let imageURL = recipe.imageURL {

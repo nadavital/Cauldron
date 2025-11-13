@@ -52,6 +52,7 @@ class DependencyContainer: ObservableObject {
     // Parsers
     let htmlParser: HTMLRecipeParser
     let textParser: TextRecipeParser
+    let youtubeParser: YouTubeRecipeParser
 
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -118,6 +119,7 @@ class DependencyContainer: ObservableObject {
         // Initialize parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
+        self.youtubeParser = YouTubeRecipeParser(foundationModelsService: foundationModelsService)
 
         // RecipeImageService is MainActor-isolated
         // Create it with a temporary reference to avoid capture issues
@@ -228,4 +230,5 @@ extension View {
         environment(\.dependencies, container)
     }
 }
+
 

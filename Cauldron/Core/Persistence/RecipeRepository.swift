@@ -1006,6 +1006,32 @@ actor RecipeRepository {
         try await create(recipeToSave)
         return recipeToSave
     }
+
+    // MARK: - Account Deletion
+
+    /// Delete all recipes owned by a user (for account deletion)
+    /// - Parameter userId: The ID of the user whose recipes to delete
+    func deleteAllUserRecipes(userId: UUID) async throws {
+        logger.info("🗑️ Deleting all recipes for user: \(userId)")
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.ownerId == userId
+            }
+        )
+
+        let models = try context.fetch(descriptor)
+        logger.info("Found \(models.count) recipes to delete")
+
+        // Delete each recipe (includes CloudKit cleanup and image deletion)
+        for model in models {
+            let recipe = try model.toDomain()
+            try await delete(id: recipe.id)
+        }
+
+        logger.info("✅ Deleted all user recipes")
+    }
 }
 
 enum RepositoryError: Error, LocalizedError {

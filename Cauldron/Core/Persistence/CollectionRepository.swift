@@ -416,6 +416,31 @@ actor CollectionRepository {
             throw error
         }
     }
+
+    // MARK: - Account Deletion
+
+    /// Delete all collections owned by a user (for account deletion)
+    /// - Parameter userId: The ID of the user whose collections to delete
+    func deleteAllUserCollections(userId: UUID) async throws {
+        logger.info("🗑️ Deleting all collections for user: \(userId)")
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { model in
+                model.userId == userId
+            }
+        )
+
+        let models = try context.fetch(descriptor)
+        logger.info("Found \(models.count) collections to delete")
+
+        // Delete each collection (includes CloudKit cleanup)
+        for model in models {
+            try await delete(id: model.id)
+        }
+
+        logger.info("✅ Deleted all user collections")
+    }
 }
 
 // MARK: - Errors
