@@ -11,6 +11,7 @@ struct CollectionsListView: View {
     @Environment(\.dependencies) private var dependencies
     @StateObject private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
+    @State private var recipeImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: CollectionsListViewModel(dependencies: dependencies))
@@ -22,10 +23,13 @@ struct CollectionsListView: View {
                     // My Collections Section
                     if !viewModel.filteredOwnedCollections.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("My Collections")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
+                            // Only show "My Collections" header if there are also saved collections
+                            if !viewModel.filteredReferencedCollections.isEmpty {
+                                Text("My Collections")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .padding(.horizontal)
+                            }
 
                             LazyVGrid(columns: [
                                 GridItem(.flexible(), spacing: 16),
@@ -35,10 +39,17 @@ struct CollectionsListView: View {
                                     NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                                         CollectionCardView(
                                             collection: collection,
-                                            recipeImages: []  // TODO: Fetch first 4 recipe images
+                                            recipeImages: recipeImageCache[collection.id] ?? []
                                         )
                                     }
                                     .buttonStyle(PlainButtonStyle())
+                                    .task(id: collection.id) {
+                                        // Load recipe images if not cached
+                                        if recipeImageCache[collection.id] == nil {
+                                            let images = await viewModel.getRecipeImages(for: collection)
+                                            recipeImageCache[collection.id] = images
+                                        }
+                                    }
                                     .contextMenu {
                                         Button {
                                             // TODO: Edit collection
@@ -161,7 +172,14 @@ struct CollectionsListView: View {
             await viewModel.loadCollections()
         }
         .refreshable {
+            recipeImageCache.removeAll()  // Clear cache on refresh
             await viewModel.loadCollections()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            recipeImageCache.removeAll()  // Clear image cache
+            Task {
+                await viewModel.loadCollections()
+            }
         }
     }
 }

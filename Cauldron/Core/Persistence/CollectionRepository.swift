@@ -108,7 +108,10 @@ actor CollectionRepository {
     // MARK: - Update
 
     /// Update an existing collection
-    func update(_ collection: Collection) async throws {
+    /// - Parameters:
+    ///   - collection: The collection to update
+    ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
+    func update(_ collection: Collection, shouldUpdateTimestamp: Bool = true) async throws {
         let context = ModelContext(modelContainer)
 
         // Find existing model
@@ -139,7 +142,8 @@ actor CollectionRepository {
         existingModel.emoji = updatedModel.emoji
         existingModel.color = updatedModel.color
         existingModel.coverImageType = updatedModel.coverImageType
-        existingModel.updatedAt = Date()
+        // Only update timestamp for user actions, not sync operations
+        existingModel.updatedAt = shouldUpdateTimestamp ? Date() : collection.updatedAt
 
         try context.save()
         logger.info("✅ Updated collection in local database: \(collection.name)")
@@ -396,9 +400,9 @@ actor CollectionRepository {
                 let localCollection = try await fetch(id: cloudCollection.id)
 
                 if let local = localCollection {
-                    // Update if cloud version is newer
+                    // Update if cloud version is newer (don't update timestamp - sync operation)
                     if cloudCollection.updatedAt > local.updatedAt {
-                        try await update(cloudCollection)
+                        try await update(cloudCollection, shouldUpdateTimestamp: false)
                         logger.info("🔄 Updated collection from cloud: \(cloudCollection.name)")
                     }
                 } else {
@@ -411,6 +415,31 @@ actor CollectionRepository {
             logger.error("❌ Failed to sync collections from CloudKit: \(error.localizedDescription)")
             throw error
         }
+    }
+
+    // MARK: - Account Deletion
+
+    /// Delete all collections owned by a user (for account deletion)
+    /// - Parameter userId: The ID of the user whose collections to delete
+    func deleteAllUserCollections(userId: UUID) async throws {
+        logger.info("🗑️ Deleting all collections for user: \(userId)")
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { model in
+                model.userId == userId
+            }
+        )
+
+        let models = try context.fetch(descriptor)
+        logger.info("Found \(models.count) collections to delete")
+
+        // Delete each collection (includes CloudKit cleanup)
+        for model in models {
+            try await delete(id: model.id)
+        }
+
+        logger.info("✅ Deleted all user collections")
     }
 }
 

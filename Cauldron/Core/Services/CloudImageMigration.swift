@@ -143,14 +143,14 @@ actor CloudImageMigration {
                         to: privateDB
                     )
 
-                    // Update recipe with cloud metadata
+                    // Update recipe with cloud metadata (migration - don't update timestamp, skip image sync since we just uploaded)
                     let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
                     let updatedRecipe = recipe.withCloudImageMetadata(
                         recordName: recordName,
                         modifiedAt: modificationDate
                     )
 
-                    try await recipeRepository.update(updatedRecipe)
+                    try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
                     // If recipe is public, also upload to Public database
                     if recipe.visibility == .publicRecipe {

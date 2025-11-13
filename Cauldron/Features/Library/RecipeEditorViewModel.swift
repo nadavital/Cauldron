@@ -98,8 +98,9 @@ class RecipeEditorViewModel: ObservableObject {
     
     let dependencies: DependencyContainer
     let existingRecipe: Recipe?
-    
-    var isEditing: Bool { existingRecipe != nil }
+    let isImporting: Bool  // True when editing during import flow
+
+    var isEditing: Bool { existingRecipe != nil && !isImporting }
     
     var tags: [String] {
         tagsInput
@@ -114,10 +115,11 @@ class RecipeEditorViewModel: ObservableObject {
         steps.contains(where: { !$0.text.isEmpty })
     }
     
-    init(dependencies: DependencyContainer, existingRecipe: Recipe? = nil) {
+    init(dependencies: DependencyContainer, existingRecipe: Recipe? = nil, isImporting: Bool = false) {
         self.dependencies = dependencies
         self.existingRecipe = existingRecipe
-        
+        self.isImporting = isImporting
+
         if let recipe = existingRecipe {
             loadFromRecipe(recipe)
         }

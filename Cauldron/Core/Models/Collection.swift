@@ -175,6 +175,29 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
+    /// Check if the collection cover image needs to be uploaded to CloudKit
+    /// - Parameter localImageModified: The modification date of the local image file
+    /// - Returns: True if local image is newer than cloud or no cloud image exists
+    func needsCoverImageUpload(localImageModified: Date?) -> Bool {
+        // If no local image, no upload needed
+        guard let localModified = localImageModified else {
+            return false
+        }
+
+        // If no cloud image record, upload needed
+        guard cloudCoverImageRecordName != nil else {
+            return true
+        }
+
+        // If no cloud modification date, upload needed
+        guard let cloudModified = coverImageModifiedAt else {
+            return true
+        }
+
+        // Upload if local is newer than cloud
+        return localModified > cloudModified
+    }
+
     // MARK: - Hashable & Equatable
 
     static func == (lhs: Collection, rhs: Collection) -> Bool {

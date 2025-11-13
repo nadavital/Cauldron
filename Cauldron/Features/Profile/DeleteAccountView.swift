@@ -104,17 +104,44 @@ struct DeleteAccountView: View {
         isDeleting = true
         defer { isDeleting = false }
 
-        do {
-            // TODO: Implement account deletion
-            // This should:
-            // 1. Delete all user recipes from CloudKit
-            // 2. Delete all user collections from CloudKit
-            // 3. Delete user profile from CloudKit
-            // 4. Clear local data
-            // 5. Sign out
+        guard let userId = CurrentUserSession.shared.userId else {
+            errorMessage = "Unable to identify user account"
+            showError = true
+            return
+        }
 
-            AppLogger.general.warning("⚠️ Account deletion not yet implemented")
-            errorMessage = "Account deletion is not yet available"
+        do {
+            AppLogger.general.info("🗑️ Starting account deletion for user: \(userId)")
+
+            // Step 1: Delete all user recipes from CloudKit and local storage
+            AppLogger.general.info("Deleting all user recipes...")
+            try await dependencies.recipeRepository.deleteAllUserRecipes(userId: userId)
+            AppLogger.general.info("✅ All recipes deleted")
+
+            // Step 2: Delete all user collections from CloudKit and local storage
+            AppLogger.general.info("Deleting all user collections...")
+            try await dependencies.collectionRepository.deleteAllUserCollections(userId: userId)
+            AppLogger.general.info("✅ All collections deleted")
+
+            // Step 3: Delete user profile from CloudKit
+            AppLogger.general.info("Deleting user profile from CloudKit...")
+            try await dependencies.cloudKitService.deleteUserProfile(userId: userId)
+            AppLogger.general.info("✅ User profile deleted from CloudKit")
+
+            // Step 4: Clear local user data and sign out
+            AppLogger.general.info("Clearing local data and signing out...")
+            await MainActor.run {
+                CurrentUserSession.shared.signOut()
+            }
+
+            AppLogger.general.info("✅ Account deletion complete")
+
+            // Dismiss view - user will be returned to onboarding
+            dismiss()
+
+        } catch {
+            AppLogger.general.error("❌ Account deletion failed: \(error.localizedDescription)")
+            errorMessage = "Failed to delete account: \(error.localizedDescription)"
             showError = true
         }
     }

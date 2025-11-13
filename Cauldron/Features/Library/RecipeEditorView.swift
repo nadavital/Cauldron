@@ -18,10 +18,12 @@ struct RecipeEditorView: View {
     @State private var showDeleteConfirmation = false
 
     let onDelete: (() -> Void)?
+    let onSaveAndDismiss: (() -> Void)?
 
-    init(dependencies: DependencyContainer, recipe: Recipe? = nil, onDelete: (() -> Void)? = nil) {
-        _viewModel = StateObject(wrappedValue: RecipeEditorViewModel(dependencies: dependencies, existingRecipe: recipe))
+    init(dependencies: DependencyContainer, recipe: Recipe? = nil, onDelete: (() -> Void)? = nil, onSaveAndDismiss: (() -> Void)? = nil, isImporting: Bool = false) {
+        _viewModel = StateObject(wrappedValue: RecipeEditorViewModel(dependencies: dependencies, existingRecipe: recipe, isImporting: isImporting))
         self.onDelete = onDelete
+        self.onSaveAndDismiss = onSaveAndDismiss
     }
     
     var body: some View {
@@ -223,6 +225,8 @@ struct RecipeEditorView: View {
                         Task {
                             if await viewModel.save() {
                                 dismiss()
+                                // Call callback if provided (used during import flow)
+                                onSaveAndDismiss?()
                             } else {
                                 viewModel.isSaving = false
                             }

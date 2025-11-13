@@ -240,7 +240,7 @@ actor RecipeSyncService {
                         createdAt: cloudRecipe.createdAt,
                         updatedAt: cloudRecipe.updatedAt
                     )
-                    try await recipeRepository.update(mergedRecipe)
+                    try await recipeRepository.update(mergedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
                     // Download image if cloud has it and local doesn't
                     await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
@@ -274,8 +274,8 @@ actor RecipeSyncService {
                         )
                         try await cloudKitService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
 
-                        // Update local to preserve cloud record name
-                        try await recipeRepository.update(cloudSyncRecipe)
+                        // Update local to preserve cloud record name (don't update timestamp - this is just metadata sync)
+                        try await recipeRepository.update(cloudSyncRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
                     }
                     updated += 1
                     pushedToCloud += 1
@@ -305,7 +305,8 @@ actor RecipeSyncService {
                             createdAt: localRecipe.createdAt,
                             updatedAt: localRecipe.updatedAt
                         )
-                        try await recipeRepository.update(updated)
+                        // Don't update timestamp - just syncing CloudKit metadata (skip image sync for metadata-only updates)
+                        try await recipeRepository.update(updated, shouldUpdateTimestamp: false, skipImageSync: true)
                     }
 
                     // Download image if missing locally but exists in cloud

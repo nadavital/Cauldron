@@ -14,6 +14,7 @@ struct UserProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
+    @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -54,6 +55,14 @@ struct UserProfileView: View {
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
         .refreshable {
             await viewModel.refreshProfile()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            // Only refresh if viewing own profile
+            if viewModel.isCurrentUser {
+                Task {
+                    await viewModel.loadUserRecipes()
+                }
+            }
         }
         .onAppear {
             // Only load initial data once - the viewModel's cache will handle subsequent requests
@@ -378,9 +387,19 @@ struct UserProfileView: View {
                         collection: collection,
                         dependencies: viewModel.dependencies
                     )) {
-                        CollectionCardView(collection: collection, recipeImages: [])
+                        CollectionCardView(
+                            collection: collection,
+                            recipeImages: collectionImageCache[collection.id] ?? []
+                        )
                     }
                     .buttonStyle(.plain)
+                    .task(id: collection.id) {
+                        // Load recipe images if not cached
+                        if collectionImageCache[collection.id] == nil {
+                            let images = await viewModel.getRecipeImages(for: collection)
+                            collectionImageCache[collection.id] = images
+                        }
+                    }
                 }
             }
             .padding(.horizontal)
@@ -519,6 +538,7 @@ struct RecipeCard: View {
                 .fontWeight(.semibold)
                 .lineLimit(2)
                 .foregroundColor(.primary)
+                .frame(height: 40, alignment: .top)
 
             // Meta info
             HStack(spacing: 8) {
@@ -551,22 +571,25 @@ struct RecipeCard: View {
     }
 
     private var placeholderImage: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color.cauldronOrange.opacity(0.08),
+                        Color.cauldronOrange.opacity(0.02)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-            Image(systemName: "fork.knife")
-                .font(.system(size: 36))
-                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+                Image(systemName: "fork.knife")
+                    .font(.system(size: 36))
+                    .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+            }
+            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .aspectRatio(1.5, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -581,18 +604,22 @@ struct ProfileRecipeImage: View {
     @State private var imageOpacity: Double = 0
 
     var body: some View {
-        Group {
-            if let image = loadedImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(imageOpacity)
-            } else {
-                placeholderView
+        GeometryReader { geometry in
+            Group {
+                if let image = loadedImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(imageOpacity)
+                } else {
+                    placeholderView
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .aspectRatio(1.5, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         .task {
             await loadImage()
         }

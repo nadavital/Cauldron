@@ -1346,7 +1346,17 @@ actor CloudKitService {
 
         let db = try getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collection.id.uuidString)
-        let record = CKRecord(recordType: collectionRecordType, recordID: recordID)
+
+        // Try to fetch existing record first, create new if doesn't exist
+        let record: CKRecord
+        do {
+            record = try await db.record(for: recordID)
+            logger.info("Updating existing collection record")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Record doesn't exist, create new one
+            record = CKRecord(recordType: collectionRecordType, recordID: recordID)
+            logger.info("Creating new collection record")
+        }
 
         // Core fields
         record["collectionId"] = collection.id.uuidString as CKRecordValue
@@ -1814,6 +1824,36 @@ actor CloudKitService {
                 logger.info("User record not found: \(userId)")
                 return
             }
+            throw error
+        }
+    }
+
+    /// Delete user profile from CloudKit (for account deletion)
+    /// - Parameter userId: The user ID to delete
+    func deleteUserProfile(userId: UUID) async throws {
+        logger.info("🗑️ Deleting user profile from CloudKit: \(userId)")
+
+        let db = try getPublicDatabase()
+
+        // Get user's CloudKit record
+        let systemUserRecordID = try await getCurrentUserRecordID()
+        let recordName = "user_\(systemUserRecordID.recordName)"
+        let recordID = CKRecord.ID(recordName: recordName)
+
+        do {
+            // Delete user profile image first if exists
+            try await deleteUserProfileImage(userId: userId)
+
+            // Delete the user record itself
+            _ = try await db.deleteRecord(withID: recordID)
+            logger.info("✅ Deleted user profile from CloudKit")
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("User record not found: \(userId)")
+                // Not an error - already deleted
+                return
+            }
+            logger.error("Failed to delete user profile: \(error.localizedDescription)")
             throw error
         }
     }

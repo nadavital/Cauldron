@@ -20,6 +20,7 @@ struct CollectionDetailView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var customCoverImage: UIImage?
+    @State private var recipeImages: [URL?] = []  // For recipe grid display
     @Environment(\.dismiss) private var dismiss
 
     enum ActiveSheet: Identifiable {
@@ -138,6 +139,11 @@ struct CollectionDetailView: View {
         .refreshable {
             await loadRecipes()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
+            Task {
+                await loadRecipes()
+            }
+        }
     }
 
     // MARK: - Sheet Content
@@ -234,6 +240,11 @@ struct CollectionDetailView: View {
             // Filter to only recipes in this collection
             recipes = allRecipes.filter { recipe in
                 collection.recipeIds.contains(recipe.id)
+            }
+
+            // Load recipe images for grid display
+            if collection.coverImageType == .recipeGrid {
+                recipeImages = Array(recipes.prefix(4).map { $0.imageURL })
             }
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
@@ -389,14 +400,81 @@ struct CollectionDetailView: View {
                     .foregroundColor(collectionColor)
             }
         case .recipeGrid:
-            Circle()
-                .fill(collectionColor.opacity(0.15))
-                .overlay(
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(collectionColor)
-                )
+            recipeGridView
         }
+    }
+
+    private var recipeGridView: some View {
+        Group {
+            let size: CGFloat = 60  // 120 / 2 for the 2x2 grid
+
+            if collection.recipeCount == 0 || recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+                // Show placeholder
+                Circle()
+                    .fill(collectionColor.opacity(0.15))
+                    .overlay(
+                        VStack(spacing: 4) {
+                            Image(systemName: "photo.stack")
+                                .font(.system(size: 30))
+                                .foregroundColor(collectionColor.opacity(0.6))
+                            if collection.recipeCount > 0 {
+                                Text("\(collection.recipeCount)")
+                                    .font(.caption2)
+                                    .foregroundColor(collectionColor.opacity(0.8))
+                            }
+                        }
+                    )
+            } else {
+                // Show 2x2 grid of recipe images
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        recipeImageTile(at: 0, size: size)
+                        recipeImageTile(at: 1, size: size)
+                    }
+                    HStack(spacing: 0) {
+                        recipeImageTile(at: 2, size: size)
+                        recipeImageTile(at: 3, size: size)
+                    }
+                }
+                .clipShape(Circle())
+            }
+        }
+    }
+
+    private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
+        Group {
+            if index < recipeImages.count, let imageURL = recipeImages[index] {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .empty:
+                        placeholderTile(size: size)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: size, height: size)
+                            .clipped()
+                    case .failure:
+                        placeholderTile(size: size)
+                    @unknown default:
+                        placeholderTile(size: size)
+                    }
+                }
+            } else {
+                placeholderTile(size: size)
+            }
+        }
+    }
+
+    private func placeholderTile(size: CGFloat) -> some View {
+        Rectangle()
+            .fill(collectionColor.opacity(0.3))
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: "fork.knife")
+                    .font(.system(size: size * 0.3))
+                    .foregroundColor(.white.opacity(0.5))
+            )
     }
 
     private var collectionColor: Color {

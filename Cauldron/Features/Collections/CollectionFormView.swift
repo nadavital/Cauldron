@@ -406,14 +406,28 @@ struct CollectionFormView: View {
                 // Save image locally first (using temporary ID if new collection)
                 let collectionId = collectionToEdit?.id ?? UUID()
                 coverImageURL = try await dependencies.collectionImageManager.saveImage(coverImage, collectionId: collectionId)
-                coverImageModifiedAt = Date()
 
-                // Upload to CloudKit
-                do {
-                    cloudCoverImageRecordName = try await dependencies.collectionImageManager.uploadImageToCloud(collectionId: collectionId)
-                    AppLogger.general.info("✅ Uploaded collection cover image to CloudKit")
-                } catch {
-                    AppLogger.general.warning("⚠️ Failed to upload cover image to CloudKit, will retry later: \(error.localizedDescription)")
+                // Check if upload is needed
+                let localModified = await dependencies.collectionImageManager.getImageModificationDate(collectionId: collectionId)
+                let needsUpload: Bool
+                if let existingCollection = collectionToEdit {
+                    needsUpload = existingCollection.needsCoverImageUpload(localImageModified: localModified)
+                } else {
+                    // New collection always needs upload
+                    needsUpload = true
+                }
+
+                // Upload to CloudKit if needed
+                if needsUpload {
+                    do {
+                        cloudCoverImageRecordName = try await dependencies.collectionImageManager.uploadImageToCloud(collectionId: collectionId)
+                        coverImageModifiedAt = Date()
+                        AppLogger.general.info("✅ Uploaded collection cover image to CloudKit")
+                    } catch {
+                        AppLogger.general.warning("⚠️ Failed to upload cover image to CloudKit, will retry later: \(error.localizedDescription)")
+                    }
+                } else {
+                    AppLogger.general.info("⏭️ Skipping collection cover image upload - already in sync")
                 }
             } else if coverImageType != .customImage {
                 // Clear cover image if switching away from custom image

@@ -117,4 +117,15 @@ class CookTabViewModel: ObservableObject {
             AppLogger.general.error("Failed to load cook tab data: \(error.localizedDescription)")
         }
     }
+
+    /// Get first 4 recipe image URLs for a collection (for grid display)
+    func getRecipeImages(for collection: Collection) async -> [URL?] {
+        // Filter to only recipes in this collection
+        let collectionRecipes = allRecipes.filter { recipe in
+            collection.recipeIds.contains(recipe.id)
+        }
+
+        // Take first 4 recipes and get their image URLs
+        return Array(collectionRecipes.prefix(4).map { $0.imageURL })
+    }
 }
