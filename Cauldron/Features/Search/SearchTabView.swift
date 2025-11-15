@@ -66,6 +66,16 @@ struct SearchTabView: View {
                     await viewModel.loadData()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
+                Task {
+                    await viewModel.loadData()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
+                Task {
+                    await viewModel.loadData()
+                }
+            }
         }
         .searchable(text: $searchText, prompt: searchMode == .recipes ? "Search recipes" : "Search people")
         .onChange(of: searchText) { _, newValue in
