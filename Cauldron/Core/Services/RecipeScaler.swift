@@ -90,25 +90,26 @@ struct RecipeScaler {
     
     private static func scaleYields(_ yields: String, by factor: Double) -> String {
         // Try to parse and update numeric values in yields string
-        let patterns = [
-            // Match "4 servings", "6 people", "8 portions"
-            ("(\\d+)\\s+(servings?|people|persons?|portions?)", "$number $unit"),
-            // Match "serves 4", "feeds 6"
-            ("(serves?|feeds?)\\s+(\\d+)", "$verb $number"),
-            // Match "makes 12", "yields 24"
-            ("(makes?|yields?)\\s+(\\d+)", "$verb $number")
+        // Each pattern tuple: (regex pattern, capture group index for the number)
+        let patterns: [(String, Int)] = [
+            // Match "4 servings", "6 people", "8 portions" - number is in group 1
+            ("(\\d+)\\s+(servings?|people|persons?|portions?)", 1),
+            // Match "serves 4", "feeds 6" - number is in group 2
+            ("(serves?|feeds?)\\s+(\\d+)", 2),
+            // Match "makes 12", "yields 24" - number is in group 2
+            ("(makes?|yields?)\\s+(\\d+)", 2)
         ]
-        
+
         var result = yields
-        
-        for (pattern, _) in patterns {
+
+        for (pattern, numberGroupIndex) in patterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
                 let range = NSRange(yields.startIndex..., in: yields)
-                
+
                 if let match = regex.firstMatch(in: yields, range: range) {
-                    // Extract the number
-                    if match.numberOfRanges >= 2 {
-                        let numberRange = match.range(at: match.numberOfRanges == 2 ? 1 : 2)
+                    // Extract the number from the specified capture group
+                    if match.numberOfRanges > numberGroupIndex {
+                        let numberRange = match.range(at: numberGroupIndex)
                         if let swiftRange = Range(numberRange, in: yields) {
                             let numberStr = String(yields[swiftRange])
                             if let originalNumber = Int(numberStr) {
