@@ -19,6 +19,7 @@ actor RecipeRepository {
     private let collectionRepository: CollectionRepository?
     private let imageManager: ImageManager
     private let imageSyncManager: ImageSyncManager
+    private let operationQueueService: OperationQueueService
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeRepository")
 
     // Track recipes pending sync
@@ -35,7 +36,8 @@ actor RecipeRepository {
         deletedRecipeRepository: DeletedRecipeRepository,
         collectionRepository: CollectionRepository? = nil,
         imageManager: ImageManager,
-        imageSyncManager: ImageSyncManager
+        imageSyncManager: ImageSyncManager,
+        operationQueueService: OperationQueueService
     ) {
         self.modelContainer = modelContainer
         self.cloudKitService = cloudKitService
@@ -43,13 +45,14 @@ actor RecipeRepository {
         self.collectionRepository = collectionRepository
         self.imageManager = imageManager
         self.imageSyncManager = imageSyncManager
+        self.operationQueueService = operationQueueService
 
         // Start retry mechanism for failed syncs
         startSyncRetryTask()
         startImageSyncRetryTask()
     }
 
-    /// Create a new recipe
+    /// Create a new recipe (optimistic - returns immediately)
     func create(_ recipe: Recipe) async throws {
         // Assign cloud record name immediately if not present
         var recipeToSave = recipe
@@ -81,6 +84,7 @@ actor RecipeRepository {
             )
         }
 
+        // 1. Save locally (immediate)
         let context = ModelContext(modelContainer)
         let model = try RecipeModel.from(recipeToSave)
         context.insert(model)
@@ -89,16 +93,37 @@ actor RecipeRepository {
         // If this recipe was previously deleted, remove the tombstone
         try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
 
-        // Immediately attempt to sync to CloudKit (not detached)
-        await syncRecipeToCloudKit(recipeToSave, cloudKitService: cloudKitService)
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .create,
+            entityType: .recipe,
+            entityId: recipeToSave.id
+        )
 
-        // Upload image to CloudKit if exists
-        if recipeToSave.imageURL != nil {
-            await uploadRecipeImage(recipeToSave, to: .private)
+        // 3. Trigger sync in background (non-blocking)
+        Task.detached { [weak self, recipeToSave, cloudKitService] in
+            guard let self = self else { return }
+
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: recipeToSave.id)
+
+            // Attempt sync
+            await self.syncRecipeToCloudKit(recipeToSave, cloudKitService: cloudKitService)
+
+            // Upload image to CloudKit if exists
+            if recipeToSave.imageURL != nil {
+                await self.uploadRecipeImage(recipeToSave, to: .private)
+            }
+
+            // If visibility is public, also copy to PUBLIC database for sharing
+            await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitService: cloudKitService)
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: recipeToSave.id,
+                entityType: .recipe
+            )
         }
-
-        // If visibility is public, also copy to PUBLIC database for sharing
-        await syncRecipeToPublicDatabase(recipeToSave, cloudKitService: cloudKitService)
     }
 
     /// Sync a recipe to CloudKit with proper error tracking
@@ -249,7 +274,7 @@ actor RecipeRepository {
         }
     }
     
-    /// Update a recipe
+    /// Update a recipe (optimistic - returns immediately)
     /// - Parameters:
     ///   - recipe: The recipe to update
     ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
@@ -261,30 +286,52 @@ actor RecipeRepository {
             throw RepositoryError.notFound
         }
 
-        // 1. Update recipe in local database
+        // 1. Update recipe in local database (immediate)
         try await updateRecipeInDatabase(recipe, shouldUpdateTimestamp: shouldUpdateTimestamp)
 
-        // 2. Sync recipe metadata to CloudKit FIRST (recipe record must exist before image can be attached)
-        await syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .update,
+            entityType: .recipe,
+            entityId: recipe.id
+        )
 
-        // 3. Sync to public database if needed
-        await syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+        // 3. Trigger sync in background (non-blocking)
+        Task.detached { [weak self, recipe, oldRecipe, skipImageSync, cloudKitService] in
+            guard let self = self else { return }
 
-        // 4. Sync image changes only if not skipped (returns updated recipe with cloud metadata)
-        if !skipImageSync {
-            let recipeWithImageMetadata = try await syncImageChanges(
-                oldRecipe: oldRecipe,
-                newRecipe: recipe
-            )
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: recipe.id)
 
-            // If image metadata was updated, sync the updated recipe to CloudKit again
-            if recipeWithImageMetadata.cloudImageRecordName != recipe.cloudImageRecordName {
-                await syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitService: cloudKitService)
+            // Sync recipe metadata to CloudKit FIRST (recipe record must exist before image can be attached)
+            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
 
-                if recipeWithImageMetadata.visibility == .publicRecipe {
-                    await syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitService: cloudKitService)
+            // Sync to public database if needed
+            await self.syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+
+            // Sync image changes only if not skipped (returns updated recipe with cloud metadata)
+            if !skipImageSync {
+                let recipeWithImageMetadata = try? await self.syncImageChanges(
+                    oldRecipe: oldRecipe,
+                    newRecipe: recipe
+                )
+
+                // If image metadata was updated, sync the updated recipe to CloudKit again
+                if let recipeWithImageMetadata = recipeWithImageMetadata,
+                   recipeWithImageMetadata.cloudImageRecordName != recipe.cloudImageRecordName {
+                    await self.syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitService: cloudKitService)
+
+                    if recipeWithImageMetadata.visibility == .publicRecipe {
+                        await self.syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitService: cloudKitService)
+                    }
                 }
             }
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: recipe.id,
+                entityType: .recipe
+            )
         }
     }
 
@@ -421,7 +468,7 @@ actor RecipeRepository {
         return recipe
     }
     
-    /// Delete a recipe
+    /// Delete a recipe (optimistic - returns immediately)
     func delete(id: UUID) async throws {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<RecipeModel>(
@@ -435,7 +482,7 @@ actor RecipeRepository {
         // Get the recipe before deletion for CloudKit sync and tombstone
         let recipe = try model.toDomain()
 
-        // Delete from local database
+        // 1. Delete from local database (immediate)
         context.delete(model)
         try context.save()
 
@@ -453,33 +500,54 @@ actor RecipeRepository {
         // Remove from pending sync if it was there
         pendingSyncRecipes.remove(id)
 
-        // Delete image from CloudKit and local storage if exists
+        // Delete local image file immediately
         if recipe.imageURL != nil {
-            // Delete from Private database
-            await deleteRecipeImageFromPrivate(recipe)
-
-            // Delete from Public database if recipe was public
-            if recipe.visibility == .publicRecipe {
-                await deleteRecipeImageFromPublic(recipe)
-            }
-
-            // Delete local image file
             await imageManager.deleteImage(recipeId: recipe.id)
-
-            // Remove from pending image uploads if it was there
             await imageSyncManager.removePendingUpload(recipe.id)
         }
-
-        // Immediately delete from CloudKit
-        await deleteRecipeFromCloudKit(recipe, cloudKitService: cloudKitService)
-
-        // Also delete from PUBLIC database if it was shared
-        await deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
 
         // Post notification that recipe was deleted
         NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
 
-        logger.info("Deleted recipe and created tombstone: \(recipe.title)")
+        logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
+
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .delete,
+            entityType: .recipe,
+            entityId: recipe.id
+        )
+
+        // 3. Trigger CloudKit deletion in background (non-blocking)
+        Task.detached { [weak self, recipe, cloudKitService] in
+            guard let self = self else { return }
+
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: recipe.id)
+
+            // Delete image from CloudKit if exists
+            if recipe.imageURL != nil {
+                // Delete from Private database
+                await self.deleteRecipeImageFromPrivate(recipe)
+
+                // Delete from Public database if recipe was public
+                if recipe.visibility == .publicRecipe {
+                    await self.deleteRecipeImageFromPublic(recipe)
+                }
+            }
+
+            // Delete recipe metadata from CloudKit
+            await self.deleteRecipeFromCloudKit(recipe, cloudKitService: cloudKitService)
+
+            // Also delete from PUBLIC database if it was shared
+            await self.deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: recipe.id,
+                entityType: .recipe
+            )
+        }
     }
 
     /// Check if a recipe exists in the database
@@ -642,9 +710,35 @@ actor RecipeRepository {
             throw RepositoryError.notFound
         }
 
+        // 1. Toggle locally (immediate)
         model.isFavorite.toggle()
         model.updatedAt = Date()
         try context.save()
+
+        // 2. Get updated recipe for background sync
+        let recipe = try model.toDomain()
+
+        // 3. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .update,
+            entityType: .recipe,
+            entityId: id
+        )
+
+        // 4. Trigger sync in background (non-blocking)
+        Task.detached { [weak self, recipe, cloudKitService] in
+            guard let self = self else { return }
+
+            // Sync to CloudKit
+            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: id,
+                entityType: .recipe
+            )
+        }
     }
 
     /// Update visibility for a recipe

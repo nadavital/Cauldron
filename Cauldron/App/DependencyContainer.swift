@@ -38,6 +38,7 @@ class DependencyContainer: ObservableObject {
     let profileImageManager: ProfileImageManager
     let collectionImageManager: CollectionImageManager
     let recipeImageService: RecipeImageService
+    let operationQueueService: OperationQueueService
 
     // UI Services (MainActor)
     let timerManager: TimerManager
@@ -45,6 +46,9 @@ class DependencyContainer: ObservableObject {
     lazy var imageSyncViewModel: ImageSyncViewModel = ImageSyncViewModel(
         imageSyncManager: imageSyncManager,
         imageMigrationService: imageMigrationService
+    )
+    lazy var operationQueueViewModel: OperationQueueViewModel = OperationQueueViewModel(
+        service: operationQueueService
     )
     lazy var cookModeCoordinator: CookModeCoordinator = CookModeCoordinator(dependencies: self)
     lazy var connectionManager: ConnectionManager = ConnectionManager(dependencies: self)
@@ -65,12 +69,14 @@ class DependencyContainer: ObservableObject {
         self.profileImageManager = ProfileImageManager(cloudKitService: cloudKitService)
         self.collectionImageManager = CollectionImageManager(cloudKitService: cloudKitService)
         self.imageSyncManager = ImageSyncManager()
+        self.operationQueueService = OperationQueueService()
 
         // Initialize repositories (now with CloudKit service)
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
         self.collectionRepository = CollectionRepository(
             modelContainer: modelContainer,
-            cloudKitService: cloudKitService
+            cloudKitService: cloudKitService,
+            operationQueueService: operationQueueService
         )
         self.recipeRepository = RecipeRepository(
             modelContainer: modelContainer,
@@ -78,7 +84,8 @@ class DependencyContainer: ObservableObject {
             deletedRecipeRepository: deletedRecipeRepository,
             collectionRepository: collectionRepository,
             imageManager: imageManager,
-            imageSyncManager: imageSyncManager
+            imageSyncManager: imageSyncManager,
+            operationQueueService: operationQueueService
         )
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)

@@ -225,8 +225,12 @@ class RecipeEditorViewModel: ObservableObject {
 
             if recipeExists {
                 try await dependencies.recipeRepository.update(recipe)
+                // Notify other views that the recipe was updated
+                NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: nil)
             } else {
                 try await dependencies.recipeRepository.create(recipe)
+                // Notify other views that a recipe was added
+                NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
             }
 
             AppLogger.general.info("Recipe saved: \(recipe.title)")

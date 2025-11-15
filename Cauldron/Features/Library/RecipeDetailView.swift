@@ -10,10 +10,11 @@ import os
 
 /// Detailed view of a recipe
 struct RecipeDetailView: View {
-    let recipe: Recipe
+    let initialRecipe: Recipe
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
+    @State private var recipe: Recipe
     @State private var showingEditSheet = false
     @State private var showSessionConflictAlert = false
     @State private var scaleFactor: Double = 1.0
@@ -50,8 +51,9 @@ struct RecipeDetailView: View {
     @State private var errorMessage: String?
 
     init(recipe: Recipe, dependencies: DependencyContainer) {
-        self.recipe = recipe
+        self.initialRecipe = recipe
         self.dependencies = dependencies
+        self._recipe = State(initialValue: recipe)
         self._localIsFavorite = State(initialValue: recipe.isFavorite)
         self._currentVisibility = State(initialValue: recipe.visibility)
     }
@@ -253,6 +255,14 @@ struct RecipeDetailView: View {
                     recipeWasDeleted = true
                 }
             )
+        }
+        .onChange(of: showingEditSheet) { _, isPresented in
+            // Refresh recipe data when edit sheet is dismissed
+            if !isPresented {
+                Task {
+                    await refreshRecipe()
+                }
+            }
         }
         .onChange(of: recipeWasDeleted) { _, wasDeleted in
             if wasDeleted {
@@ -685,6 +695,20 @@ struct RecipeDetailView: View {
             } catch {
                 AppLogger.general.error("Failed to toggle favorite: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func refreshRecipe() async {
+        do {
+            // Fetch the latest version of the recipe from the database
+            if let updatedRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
+                recipe = updatedRecipe
+                localIsFavorite = updatedRecipe.isFavorite
+                currentVisibility = updatedRecipe.visibility
+                AppLogger.general.info("✅ Refreshed recipe: \(updatedRecipe.title)")
+            }
+        } catch {
+            AppLogger.general.error("Failed to refresh recipe: \(error.localizedDescription)")
         }
     }
 

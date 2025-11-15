@@ -13,15 +13,21 @@ import os
 actor CollectionRepository {
     private let modelContainer: ModelContainer
     private let cloudKitService: CloudKitService
+    private let operationQueueService: OperationQueueService
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
     // Track collections pending sync
     private var pendingSyncCollections = Set<UUID>()
     private var syncRetryTask: Task<Void, Never>?
 
-    init(modelContainer: ModelContainer, cloudKitService: CloudKitService) {
+    init(
+        modelContainer: ModelContainer,
+        cloudKitService: CloudKitService,
+        operationQueueService: OperationQueueService
+    ) {
         self.modelContainer = modelContainer
         self.cloudKitService = cloudKitService
+        self.operationQueueService = operationQueueService
 
         // Start retry mechanism for failed syncs
         startSyncRetryTask()
@@ -58,17 +64,39 @@ actor CollectionRepository {
 
     // MARK: - Create
 
-    /// Create a new collection
+    /// Create a new collection (optimistic - returns immediately)
     func create(_ collection: Collection) async throws {
+        // 1. Save locally (immediate)
         let context = ModelContext(modelContainer)
         let model = try CollectionModel.from(collection)
         context.insert(model)
         try context.save()
 
-        logger.info("✅ Created collection: \(collection.name)")
+        logger.info("✅ Created collection locally: \(collection.name)")
 
-        // Sync to CloudKit PUBLIC database (for sharing)
-        await syncCollectionToCloudKit(collection)
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .create,
+            entityType: .collection,
+            entityId: collection.id
+        )
+
+        // 3. Trigger sync in background (non-blocking)
+        Task.detached { [weak self, collection] in
+            guard let self = self else { return }
+
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: collection.id)
+
+            // Sync to CloudKit PUBLIC database (for sharing)
+            await self.syncCollectionToCloudKit(collection)
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: collection.id,
+                entityType: .collection
+            )
+        }
     }
 
     // MARK: - Read
@@ -107,7 +135,7 @@ actor CollectionRepository {
 
     // MARK: - Update
 
-    /// Update an existing collection
+    /// Update an existing collection (optimistic - returns immediately)
     /// - Parameters:
     ///   - collection: The collection to update
     ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
@@ -129,7 +157,7 @@ actor CollectionRepository {
         let oldVisibility = RecipeVisibility(rawValue: existingModel.visibility) ?? .publicRecipe
         let oldRecipeIds = (try? JSONDecoder().decode([UUID].self, from: existingModel.recipeIdsBlob)) ?? []
 
-        // Update the model
+        // 1. Update locally (immediate)
         let updatedModel = try CollectionModel.from(collection)
 
         logger.info("🔄 Updating collection '\(collection.name)' with \(collection.recipeCount) recipes")
@@ -155,10 +183,7 @@ actor CollectionRepository {
             logger.info("✅ Verification: collection now has \(verifiedCollection.recipeCount) recipes")
         }
 
-        // Sync to CloudKit
-        await syncCollectionToCloudKit(collection)
-
-        // Post notifications for changes
+        // Post notifications for changes (immediate)
         if oldVisibility != collection.visibility {
             NotificationCenter.default.post(
                 name: NSNotification.Name("CollectionUpdated"),
@@ -178,6 +203,30 @@ actor CollectionRepository {
                     "collectionId": collection.id,
                     "recipeIds": collection.recipeIds
                 ]
+            )
+        }
+
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collection.id
+        )
+
+        // 3. Trigger sync in background (non-blocking)
+        Task.detached { [weak self, collection] in
+            guard let self = self else { return }
+
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: collection.id)
+
+            // Sync to CloudKit
+            await self.syncCollectionToCloudKit(collection)
+
+            // Mark operation as completed
+            await self.operationQueueService.markCompleted(
+                entityId: collection.id,
+                entityType: .collection
             )
         }
     }
@@ -223,7 +272,7 @@ actor CollectionRepository {
 
     // MARK: - Delete
 
-    /// Delete a collection
+    /// Delete a collection (optimistic - returns immediately)
     func delete(id: UUID) async throws {
         let context = ModelContext(modelContainer)
 
@@ -236,17 +285,45 @@ actor CollectionRepository {
             throw CollectionRepositoryError.collectionNotFound
         }
 
+        // 1. Delete locally (immediate)
         context.delete(model)
         try context.save()
 
         logger.info("🗑️ Deleted collection locally")
 
-        // Delete from CloudKit
-        do {
-            try await cloudKitService.deleteCollection(id)
-            logger.info("✅ Deleted collection from CloudKit")
-        } catch {
-            logger.error("❌ Failed to delete collection from CloudKit: \(error.localizedDescription)")
+        // 2. Queue operation for background sync
+        await operationQueueService.addOperation(
+            type: .delete,
+            entityType: .collection,
+            entityId: id
+        )
+
+        // 3. Trigger CloudKit deletion in background (non-blocking)
+        Task.detached { [weak self, id, cloudKitService] in
+            guard let self = self else { return }
+
+            // Mark operation as in progress
+            await self.operationQueueService.markInProgress(operationId: id)
+
+            // Delete from CloudKit
+            do {
+                try await cloudKitService.deleteCollection(id)
+                self.logger.info("✅ Deleted collection from CloudKit")
+
+                // Mark operation as completed
+                await self.operationQueueService.markCompleted(
+                    entityId: id,
+                    entityType: .collection
+                )
+            } catch {
+                self.logger.error("❌ Failed to delete collection from CloudKit: \(error.localizedDescription)")
+
+                // Mark operation as failed
+                await self.operationQueueService.markFailed(
+                    operationId: id,
+                    error: error.localizedDescription
+                )
+            }
         }
     }
 

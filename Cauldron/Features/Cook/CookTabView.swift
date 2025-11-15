@@ -124,6 +124,12 @@ struct CookTabView: View {
                     await viewModel.loadData()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
+                // Refresh when a recipe is updated (e.g., edited from detail view)
+                Task {
+                    await viewModel.loadData()
+                }
+            }
         }
     }
 

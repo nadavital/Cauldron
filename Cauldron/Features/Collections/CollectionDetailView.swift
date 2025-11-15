@@ -120,6 +120,14 @@ struct CollectionDetailView: View {
         .sheet(item: $activeSheet) { sheet in
             sheetContent(for: sheet)
         }
+        .onChange(of: activeSheet) { oldValue, newValue in
+            // Refresh collection when any sheet is dismissed
+            if oldValue != nil && newValue == nil {
+                Task {
+                    await loadRecipes()
+                }
+            }
+        }
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) {}
         } message: {
