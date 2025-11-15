@@ -51,12 +51,6 @@ struct CollectionsListView: View {
                                         }
                                     }
                                     .contextMenu {
-                                        Button {
-                                            // TODO: Edit collection
-                                        } label: {
-                                            Label("Edit", systemImage: "pencil")
-                                        }
-
                                         Button(role: .destructive) {
                                             Task {
                                                 await viewModel.deleteCollection(collection)
@@ -92,7 +86,7 @@ struct CollectionsListView: View {
                                     } label: {
                                         CollectionReferenceCardView(
                                             reference: reference,
-                                            recipeImages: []  // TODO: Fetch first 4 recipe images
+                                            recipeImages: []
                                         )
                                     }
                                     .buttonStyle(PlainButtonStyle())

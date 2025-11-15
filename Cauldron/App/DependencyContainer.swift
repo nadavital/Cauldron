@@ -53,6 +53,8 @@ class DependencyContainer: ObservableObject {
     let htmlParser: HTMLRecipeParser
     let textParser: TextRecipeParser
     let youtubeParser: YouTubeRecipeParser
+    let instagramParser: InstagramRecipeParser
+    let tiktokParser: TikTokRecipeParser
 
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -120,6 +122,8 @@ class DependencyContainer: ObservableObject {
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
         self.youtubeParser = YouTubeRecipeParser(foundationModelsService: foundationModelsService)
+        self.instagramParser = InstagramRecipeParser(foundationModelsService: foundationModelsService)
+        self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)
 
         // RecipeImageService is MainActor-isolated
         // Create it with a temporary reference to avoid capture issues
