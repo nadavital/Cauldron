@@ -20,6 +20,13 @@
 			remoteGlobalIDString = AE678D9E2EB9545B00786709;
 			remoteInfo = CauldronWidgetExtension;
 		};
+		AEC35F2D2EC663B9008AA712 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 505171AA2DCB0D4B0077095A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 50F5BA812E937E2C00E4A5C4;
+			remoteInfo = Cauldron;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -41,6 +48,7 @@
 		AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CauldronWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AE678DA12EB9545B00786709 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		AE678DA32EB9545B00786709 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		AEC35F292EC663B9008AA712 /* CauldronTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CauldronTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -86,6 +94,11 @@
 			path = CauldronWidget;
 			sourceTree = "<group>";
 		};
+		AEC35F2A2EC663B9008AA712 /* CauldronTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CauldronTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -105,6 +118,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AEC35F262EC663B9008AA712 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -113,6 +133,7 @@
 			children = (
 				50F5BA832E937E2C00E4A5C4 /* Cauldron */,
 				AE678DA52EB9545B00786709 /* CauldronWidget */,
+				AEC35F2A2EC663B9008AA712 /* CauldronTests */,
 				AE678DA02EB9545B00786709 /* Frameworks */,
 				505171B32DCB0D4B0077095A /* Products */,
 			);
@@ -123,6 +144,7 @@
 			children = (
 				50F5BA822E937E2C00E4A5C4 /* Cauldron.app */,
 				AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */,
+				AEC35F292EC663B9008AA712 /* CauldronTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -185,6 +207,29 @@
 			productReference = AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		AEC35F282EC663B9008AA712 /* CauldronTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AEC35F312EC663B9008AA712 /* Build configuration list for PBXNativeTarget "CauldronTests" */;
+			buildPhases = (
+				AEC35F252EC663B9008AA712 /* Sources */,
+				AEC35F262EC663B9008AA712 /* Frameworks */,
+				AEC35F272EC663B9008AA712 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AEC35F2E2EC663B9008AA712 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AEC35F2A2EC663B9008AA712 /* CauldronTests */,
+			);
+			name = CauldronTests;
+			packageProductDependencies = (
+			);
+			productName = CauldronTests;
+			productReference = AEC35F292EC663B9008AA712 /* CauldronTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -200,6 +245,10 @@
 					};
 					AE678D9E2EB9545B00786709 = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					AEC35F282EC663B9008AA712 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 50F5BA812E937E2C00E4A5C4;
 					};
 				};
 			};
@@ -221,6 +270,7 @@
 			targets = (
 				50F5BA812E937E2C00E4A5C4 /* Cauldron */,
 				AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */,
+				AEC35F282EC663B9008AA712 /* CauldronTests */,
 			);
 		};
 /* End PBXProject section */
@@ -234,6 +284,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AE678D9D2EB9545B00786709 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AEC35F272EC663B9008AA712 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -257,6 +314,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AEC35F252EC663B9008AA712 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -264,6 +328,11 @@
 			isa = PBXTargetDependency;
 			target = AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */;
 			targetProxy = AE678DB32EB9545C00786709 /* PBXContainerItemProxy */;
+		};
+		AEC35F2E2EC663B9008AA712 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 50F5BA812E937E2C00E4A5C4 /* Cauldron */;
+			targetProxy = AEC35F2D2EC663B9008AA712 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -530,6 +599,48 @@
 			};
 			name = Release;
 		};
+		AEC35F2F2EC663B9008AA712 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C4MRP56MF5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
+			};
+			name = Debug;
+		};
+		AEC35F302EC663B9008AA712 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C4MRP56MF5;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Nadav.CauldronTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Cauldron";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -556,6 +667,15 @@
 			buildConfigurations = (
 				AE678DB72EB9545C00786709 /* Debug */,
 				AE678DB82EB9545C00786709 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AEC35F312EC663B9008AA712 /* Build configuration list for PBXNativeTarget "CauldronTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AEC35F2F2EC663B9008AA712 /* Debug */,
+				AEC35F302EC663B9008AA712 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

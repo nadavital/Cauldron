@@ -175,7 +175,7 @@ actor YouTubeRecipeParser: RecipeParser {
             }
 
             // Check for numbered steps (e.g., "1.", "2)", "3 -")
-            if looksLikeNumberedStep(line) {
+            if TextSectionParser.looksLikeNumberedStep(line) {
                 let timers = TimerExtractor.extractTimers(from: line)
                 let step = CookStep(
                     id: UUID(),
@@ -192,8 +192,8 @@ actor YouTubeRecipeParser: RecipeParser {
 
             // Parse based on current section
             if inIngredientsSection {
-                // Parse as ingredient using the same logic as HTMLRecipeParser
-                let ingredient = parseIngredientText(line)
+                // Parse as ingredient using shared utility
+                let ingredient = IngredientParser.parseIngredientText(line)
                 if !ingredient.name.isEmpty {
                     ingredients.append(ingredient)
                 }
@@ -211,14 +211,14 @@ actor YouTubeRecipeParser: RecipeParser {
                 }
             } else {
                 // Auto-detect: lines that look like ingredients (start with number or common amounts)
-                if looksLikeIngredient(line) {
-                    let ingredient = parseIngredientText(line)
+                if TextSectionParser.looksLikeIngredient(line) {
+                    let ingredient = IngredientParser.parseIngredientText(line)
                     if !ingredient.name.isEmpty {
                         ingredients.append(ingredient)
                     }
                 }
                 // Lines that are substantial and don't look like ingredients might be steps
-                else if line.count > 10 && !looksLikeIngredient(line) {
+                else if line.count > 10 && !TextSectionParser.looksLikeIngredient(line) {
                     let timers = TimerExtractor.extractTimers(from: line)
                     let step = CookStep(
                         id: UUID(),
@@ -234,162 +234,13 @@ actor YouTubeRecipeParser: RecipeParser {
         return (ingredients, steps)
     }
 
-    /// Check if a line looks like a numbered step
-    private func looksLikeNumberedStep(_ line: String) -> Bool {
-        // Match patterns like: "1.", "2)", "3 -", "4:", "Step 5.", etc.
-        let patterns = [
-            #"^\d+\.\s+"#,           // "1. Mix ingredients"
-            #"^\d+\)\s+"#,           // "1) Mix ingredients"
-            #"^\d+\s+-\s+"#,         // "1 - Mix ingredients"
-            #"^\d+:\s+"#,            // "1: Mix ingredients"
-            #"^Step\s+\d+[.):]\s+"#  // "Step 1. Mix ingredients"
-        ]
-
-        for pattern in patterns {
-            if line.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
-                // Make sure it has some content after the number
-                return line.count > 5
-            }
-        }
-
-        return false
-    }
-
-    /// Check if a line looks like an ingredient
-    private func looksLikeIngredient(_ line: String) -> Bool {
-        let pattern = #"^[\d\s½¼¾⅓⅔⅛⅜⅝⅞/-]+"#
-        return line.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    /// Parse ingredient text - same logic as HTMLRecipeParser
-    private func parseIngredientText(_ text: String) -> Ingredient {
-        let cleaned = text.trimmingCharacters(in: .whitespaces)
-
-        // Try to parse quantity and unit from the beginning
-        if let (quantity, remainingText) = extractQuantityAndUnit(from: cleaned) {
-            let ingredientName = remainingText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return Ingredient(
-                id: UUID(),
-                name: ingredientName.isEmpty ? cleaned : ingredientName,
-                quantity: quantity
-            )
-        }
-
-        // If parsing fails, return the whole text as ingredient name
-        return Ingredient(id: UUID(), name: cleaned, quantity: nil)
-    }
-
-    /// Extract quantity and unit - same logic as HTMLRecipeParser
-    private func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
-        let pattern = #"^([\d\s½¼¾⅓⅔⅛⅜⅝⅞/-]+)\s*([a-zA-Z]+)?\s+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
-        }
-
-        let nsString = text as NSString
-        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: nsString.length)),
-              match.numberOfRanges >= 2 else {
-            return nil
-        }
-
-        let quantityRange = match.range(at: 1)
-        let quantityText = nsString.substring(with: quantityRange).trimmingCharacters(in: .whitespaces)
-
-        guard let value = parseQuantityValue(quantityText) else {
-            return nil
-        }
-
-        var unit: UnitKind? = nil
-        var remainingStartIndex = quantityRange.upperBound
-
-        if match.numberOfRanges >= 3 && match.range(at: 2).location != NSNotFound {
-            let unitRange = match.range(at: 2)
-            let unitText = nsString.substring(with: unitRange)
-            unit = parseUnit(unitText)
-            remainingStartIndex = unitRange.upperBound
-        }
-
-        let remainingText = nsString.substring(from: remainingStartIndex)
-        let quantity = Quantity(value: value, unit: unit ?? .whole)
-
-        return (quantity, remainingText)
-    }
-
-    /// Parse quantity value - handles fractions, ranges, etc.
-    private func parseQuantityValue(_ text: String) -> Double? {
-        var cleaned = text.trimmingCharacters(in: .whitespaces)
-
-        // Convert unicode fractions
-        cleaned = cleaned.replacingOccurrences(of: "½", with: "0.5")
-        cleaned = cleaned.replacingOccurrences(of: "¼", with: "0.25")
-        cleaned = cleaned.replacingOccurrences(of: "¾", with: "0.75")
-        cleaned = cleaned.replacingOccurrences(of: "⅓", with: "0.333")
-        cleaned = cleaned.replacingOccurrences(of: "⅔", with: "0.667")
-        cleaned = cleaned.replacingOccurrences(of: "⅛", with: "0.125")
-        cleaned = cleaned.replacingOccurrences(of: "⅜", with: "0.375")
-        cleaned = cleaned.replacingOccurrences(of: "⅝", with: "0.625")
-        cleaned = cleaned.replacingOccurrences(of: "⅞", with: "0.875")
-
-        // Handle ranges like "1-2"
-        if cleaned.contains("-") {
-            let parts = cleaned.components(separatedBy: "-")
-            if parts.count == 2,
-               let first = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-               let second = Double(parts[1].trimmingCharacters(in: .whitespaces)) {
-                return (first + second) / 2
-            }
-        }
-
-        // Handle fractions like "1/2"
-        if cleaned.contains("/") {
-            let parts = cleaned.components(separatedBy: "/")
-            if parts.count == 2,
-               let numerator = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-               let denominator = Double(parts[1].trimmingCharacters(in: .whitespaces)),
-               denominator != 0 {
-                return numerator / denominator
-            }
-        }
-
-        // Handle mixed numbers like "1 1/2"
-        let components = cleaned.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        if components.count == 2 {
-            if let whole = Double(components[0]),
-               let fraction = parseQuantityValue(components[1]) {
-                return whole + fraction
-            }
-        }
-
-        return Double(cleaned)
-    }
-
-    /// Parse unit abbreviations
-    private func parseUnit(_ text: String) -> UnitKind? {
-        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Try exact matches
-        for unit in UnitKind.allCases {
-            if normalized == unit.rawValue ||
-               normalized == unit.displayName ||
-               normalized == unit.pluralName {
-                return unit
-            }
-        }
-
-        // Common abbreviations
-        switch normalized {
-        case "t", "tsp", "tsps", "teaspoons", "teaspoon": return .teaspoon
-        case "T", "tbsp", "tbsps", "tablespoons", "tablespoon": return .tablespoon
-        case "c", "cups", "cup": return .cup
-        case "oz", "ounces", "ounce": return .ounce
-        case "lb", "lbs", "pounds", "pound": return .pound
-        case "g", "grams", "gram": return .gram
-        case "kg", "kgs", "kilograms", "kilogram": return .kilogram
-        case "ml", "mls", "milliliters", "milliliter": return .milliliter
-        case "l", "liters", "liter": return .liter
-        default: return nil
-        }
-    }
+    // Note: Parsing methods have been extracted to shared utilities:
+    // - TextSectionParser.looksLikeNumberedStep()
+    // - TextSectionParser.looksLikeIngredient()
+    // - IngredientParser.parseIngredientText()
+    // - IngredientParser.extractQuantityAndUnit()
+    // - QuantityValueParser.parse()
+    // - UnitParser.parse()
 
     // MARK: - Helper Methods
 
@@ -757,7 +608,7 @@ actor YouTubeRecipeParser: RecipeParser {
         }
 
         let captured = String(text[range])
-        return decodeHTMLEntities(captured)
+        return HTMLEntityDecoder.decode(captured, stripTags: false)
     }
 
     /// Checks if description text looks like it contains a recipe
@@ -780,22 +631,5 @@ actor YouTubeRecipeParser: RecipeParser {
         return keywordCount >= 2
     }
 
-    /// Decodes HTML entities like &amp; &quot; etc.
-    private func decodeHTMLEntities(_ text: String) -> String {
-        var result = text
-        let entities = [
-            "&amp;": "&",
-            "&lt;": "<",
-            "&gt;": ">",
-            "&quot;": "\"",
-            "&#39;": "'",
-            "&apos;": "'"
-        ]
-
-        for (entity, character) in entities {
-            result = result.replacingOccurrences(of: entity, with: character)
-        }
-
-        return result
-    }
+    // Note: HTML entity decoding now handled by HTMLEntityDecoder utility
 }

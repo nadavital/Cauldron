@@ -517,6 +517,7 @@ struct CollectionRecipeSelectorSheet: View {
     @State private var searchText = ""
     @State private var showingCopyConfirmation: Recipe?
     @State private var isCopying = false
+    @State private var recipeOwnerCache: [UUID: User] = [:]  // Cache recipe owners by userId
 
     init(collection: Collection, dependencies: DependencyContainer, onDismiss: @escaping () -> Void) {
         self.collection = collection
@@ -788,11 +789,29 @@ struct CollectionRecipeSelectorSheet: View {
         defer { isCopying = false }
 
         do {
+            // Fetch the recipe owner if not already cached
+            var recipeOwner: User?
+            if let ownerId = recipe.ownerId {
+                if let cachedOwner = recipeOwnerCache[ownerId] {
+                    recipeOwner = cachedOwner
+                } else {
+                    do {
+                        recipeOwner = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId)
+                        if let owner = recipeOwner {
+                            recipeOwnerCache[ownerId] = owner
+                        }
+                    } catch {
+                        AppLogger.general.warning("Failed to fetch recipe owner: \(error.localizedDescription)")
+                        // Continue without owner name - will be nil
+                    }
+                }
+            }
+
             // Create a copy of the recipe owned by the current user using withOwner()
             let copiedRecipe = recipe.withOwner(
                 userId,
                 originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipe.ownerId != nil ? "Unknown" : nil  // TODO: Fetch actual creator name
+                originalCreatorName: recipeOwner?.displayName
             )
 
             // Save the copied recipe

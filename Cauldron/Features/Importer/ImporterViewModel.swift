@@ -87,14 +87,18 @@ class ImporterViewModel: ObservableObject {
             // Use YouTube-specific parser for video descriptions
             recipe = try await dependencies.youtubeParser.parse(from: urlString)
 
+        case .instagram:
+            // Use Instagram-specific parser for post captions
+            recipe = try await dependencies.instagramParser.parse(from: urlString)
+
+        case .tiktok:
+            // Use TikTok-specific parser for video descriptions
+            recipe = try await dependencies.tiktokParser.parse(from: urlString)
+
         case .recipeWebsite, .unknown:
             // Use HTML parser for structured recipe sites
             // The HTML parser will use schema.org JSON-LD when available, then fall back to heuristics
             recipe = try await dependencies.htmlParser.parse(from: urlString)
-
-        case .tiktok, .instagram:
-            // Not yet implemented - provide helpful error
-            throw ParsingError.platformNotSupported(platform == .tiktok ? "TikTok" : "Instagram")
         }
 
         // Download and save image if recipe has an imageURL

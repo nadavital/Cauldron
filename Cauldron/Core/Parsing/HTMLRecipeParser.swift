@@ -208,139 +208,15 @@ actor HTMLRecipeParser: RecipeParser {
     }
     
     private func parseIngredientText(_ text: String) -> Ingredient {
-        // Clean the text first
-        let cleaned = text.trimmingCharacters(in: .whitespaces)
-        
-        // Try to parse quantity and unit from the beginning of the string
-        if let (quantity, remainingText) = extractQuantityAndUnit(from: cleaned) {
-            let ingredientName = remainingText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return Ingredient(name: ingredientName.isEmpty ? cleaned : ingredientName, quantity: quantity)
-        }
-        
-        // If parsing fails, return the whole text as ingredient name
-        return Ingredient(name: cleaned, quantity: nil)
+        // Use shared ingredient parser utility
+        return IngredientParser.parseIngredientText(text)
     }
     
-    private func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
-        // Pattern to match quantity at the start: number (possibly with fraction or unicode fraction) followed by optional unit
-        // Examples: "2 cups", "1/2 cup", "1 ½ cups", "2½ tablespoons", "200g", "1-2 teaspoons"
-        
-        let pattern = #"^([\d\s½¼¾⅓⅔⅛⅜⅝⅞/-]+)\s*([a-zA-Z]+)?\s+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
-        }
-        
-        let nsString = text as NSString
-        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: nsString.length)),
-              match.numberOfRanges >= 2 else {
-            return nil
-        }
-        
-        let quantityRange = match.range(at: 1)
-        let quantityText = nsString.substring(with: quantityRange).trimmingCharacters(in: .whitespaces)
-        
-        // Parse the value
-        guard let value = parseQuantityValue(quantityText) else {
-            return nil
-        }
-        
-        // Parse the unit if present
-        var unit: UnitKind? = nil
-        var remainingStartIndex = quantityRange.upperBound
-        
-        if match.numberOfRanges >= 3 && match.range(at: 2).location != NSNotFound {
-            let unitRange = match.range(at: 2)
-            let unitText = nsString.substring(with: unitRange)
-            unit = parseUnit(unitText)
-            remainingStartIndex = unitRange.upperBound
-        }
-        
-        let remainingText = nsString.substring(from: remainingStartIndex)
-        // Default to `.whole` when no explicit unit is parsed (e.g., "2 eggs")
-        let quantity = Quantity(value: value, unit: unit ?? .whole)
-        
-        return (quantity, remainingText)
-    }
-    
-    private func parseQuantityValue(_ text: String) -> Double? {
-        var cleaned = text.trimmingCharacters(in: .whitespaces)
-        
-        // Convert unicode fractions to decimal
-        cleaned = cleaned.replacingOccurrences(of: "½", with: "0.5")
-        cleaned = cleaned.replacingOccurrences(of: "¼", with: "0.25")
-        cleaned = cleaned.replacingOccurrences(of: "¾", with: "0.75")
-        cleaned = cleaned.replacingOccurrences(of: "⅓", with: "0.333")
-        cleaned = cleaned.replacingOccurrences(of: "⅔", with: "0.667")
-        cleaned = cleaned.replacingOccurrences(of: "⅛", with: "0.125")
-        cleaned = cleaned.replacingOccurrences(of: "⅜", with: "0.375")
-        cleaned = cleaned.replacingOccurrences(of: "⅝", with: "0.625")
-        cleaned = cleaned.replacingOccurrences(of: "⅞", with: "0.875")
-        
-        // Handle ranges like "1-2" - take the average
-        if cleaned.contains("-") {
-            let parts = cleaned.components(separatedBy: "-")
-            if parts.count == 2,
-               let first = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-               let second = Double(parts[1].trimmingCharacters(in: .whitespaces)) {
-                return (first + second) / 2
-            }
-        }
-        
-        // Handle fractions like "1/2"
-        if cleaned.contains("/") {
-            let parts = cleaned.components(separatedBy: "/")
-            if parts.count == 2,
-               let numerator = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-               let denominator = Double(parts[1].trimmingCharacters(in: .whitespaces)),
-               denominator != 0 {
-                return numerator / denominator
-            }
-        }
-        
-        // Handle mixed numbers like "1 1/2" or "1.5"
-        let components = cleaned.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        if components.count == 2 {
-            if let whole = Double(components[0]),
-               let fraction = parseQuantityValue(components[1]) {
-                return whole + fraction
-            }
-        }
-        
-        // Try direct conversion
-        return Double(cleaned)
-    }
-    
-    private func parseUnit(_ text: String) -> UnitKind? {
-        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Try exact matches first
-        for unit in UnitKind.allCases {
-            if normalized == unit.rawValue ||
-               normalized == unit.displayName ||
-               normalized == unit.pluralName {
-                return unit
-            }
-        }
-        
-        // Try common abbreviations and variations
-        switch normalized {
-        case "t", "tsp", "tsps", "teaspoons", "teaspoon": return .teaspoon
-        case "T", "tbsp", "tbsps", "tablespoons", "tablespoon": return .tablespoon
-        case "c", "cups", "cup": return .cup
-        case "oz", "ounces", "ounce": return .ounce
-        case "lb", "lbs", "pounds", "pound": return .pound
-        case "g", "grams", "gram": return .gram
-        case "kg", "kgs", "kilograms", "kilogram": return .kilogram
-        case "ml", "mls", "milliliters", "milliliter": return .milliliter
-        case "l", "liters", "liter": return .liter
-        case "pt", "pts", "pints", "pint": return .pint
-        case "qt", "qts", "quarts", "quart": return .quart
-        case "gal", "gals", "gallons", "gallon": return .gallon
-        case "fl oz", "floz", "fluid ounce", "fluid ounces": return .fluidOunce
-        default: return nil
-        }
-    }
-    
+    // Note: Parsing methods have been extracted to shared utilities:
+    // - IngredientParser.extractQuantityAndUnit()
+    // - QuantityValueParser.parse()
+    // - UnitParser.parse()
+
     // MARK: - Heuristic Parsing
     
     private func parseHeuristic(_ html: String, sourceURL: URL) throws -> Recipe {
@@ -485,82 +361,8 @@ actor HTMLRecipeParser: RecipeParser {
     // MARK: - Helpers
     
     private func stripHTML(_ text: String) -> String {
-        var result = text
-        
-        // Remove HTML tags
-        result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        
-        // Decode numeric HTML entities (&#xHEX; and &#DECIMAL;)
-        // Hex entities like &#x25a;
-        result = decodeNumericEntities(result, pattern: "&#x([0-9A-Fa-f]+);") { hex in
-            if let value = Int(hex, radix: 16), let scalar = UnicodeScalar(value) {
-                return String(Character(scalar))
-            }
-            return nil
-        }
-        
-        // Decimal entities like &#32;
-        result = decodeNumericEntities(result, pattern: "&#(\\d+);") { decimal in
-            if let value = Int(decimal), let scalar = UnicodeScalar(value) {
-                return String(Character(scalar))
-            }
-            return nil
-        }
-        
-        // Decode named HTML entities
-        result = result.replacingOccurrences(of: "&nbsp;", with: " ")
-        result = result.replacingOccurrences(of: "&amp;", with: "&")
-        result = result.replacingOccurrences(of: "&lt;", with: "<")
-        result = result.replacingOccurrences(of: "&gt;", with: ">")
-        result = result.replacingOccurrences(of: "&quot;", with: "\"")
-        result = result.replacingOccurrences(of: "&#39;", with: "'")
-        result = result.replacingOccurrences(of: "&rsquo;", with: "'")
-        result = result.replacingOccurrences(of: "&ldquo;", with: "\"")
-        result = result.replacingOccurrences(of: "&rdquo;", with: "\"")
-        result = result.replacingOccurrences(of: "&mdash;", with: "—")
-        result = result.replacingOccurrences(of: "&ndash;", with: "–")
-        result = result.replacingOccurrences(of: "&frac14;", with: "¼")
-        result = result.replacingOccurrences(of: "&frac12;", with: "½")
-        result = result.replacingOccurrences(of: "&frac34;", with: "¾")
-        
-        // Remove checkbox and other unwanted unicode characters
-        // U+2610 ☐ (ballot box), U+2611 ☑ (ballot box with check), U+2612 ☒ (ballot box with X)
-        // U+25A1 □ (white square), U+25A0 ■ (black square), U+25AB ▫ (white small square)
-        result = result.replacingOccurrences(of: "[☐☑☒□■▫▪]", with: "", options: .regularExpression)
-        
-        // Remove leading bullet points and list markers
-        result = result.replacingOccurrences(of: "^[•●○◦▪▫-]\\s*", with: "", options: .regularExpression)
-        
-        // Clean whitespace
-        result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        return result
-    }
-    
-    private func decodeNumericEntities(_ text: String, pattern: String, decoder: (String) -> String?) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return text
-        }
-        
-        var result = text
-        let nsString = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length)).reversed()
-        
-        for match in matches {
-            if match.numberOfRanges >= 2 {
-                let fullRange = match.range(at: 0)
-                let valueRange = match.range(at: 1)
-                let value = nsString.substring(with: valueRange)
-                
-                if let decoded = decoder(value) {
-                    let fullMatch = nsString.substring(with: fullRange)
-                    result = result.replacingOccurrences(of: fullMatch, with: decoded)
-                }
-            }
-        }
-        
-        return result
+        // Use shared HTML entity decoder utility (which handles tags, entities, and unicode cleanup)
+        return HTMLEntityDecoder.decode(text, stripTags: true)
     }
     
     private func extractDomain(from url: URL) -> String {
