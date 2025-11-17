@@ -14,6 +14,7 @@ import os
 class CookTabViewModel: ObservableObject {
     @Published var allRecipes: [Recipe] = []
     @Published var recentlyCookedRecipes: [Recipe] = []
+    @Published var favoriteRecipes: [Recipe] = []
     @Published var collections: [Collection] = []
     @Published var isLoading = false
 
@@ -35,7 +36,7 @@ class CookTabViewModel: ObservableObject {
             self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
             self.hasLoadedInitially = true
 
-            // Calculate derived data asynchronously (recently cooked)
+            // Calculate derived data asynchronously (recently cooked and favorites)
             // This isn't critical for preventing empty state since it's an optional section
             Task { @MainActor in
                 // Load recently cooked (simple filter, very fast)
@@ -43,7 +44,10 @@ class CookTabViewModel: ObservableObject {
                     preloadedData.recentlyCookedIds.contains($0.id)
                 }
 
-                AppLogger.general.info("Cook tab initialized with preloaded data: \(preloadedData.allRecipes.count) recipes, \(preloadedData.collections.count) collections")
+                // Load favorites (simple filter, very fast)
+                self.favoriteRecipes = preloadedData.allRecipes.filter { $0.isFavorite }
+
+                AppLogger.general.info("Cook tab initialized with preloaded data: \(preloadedData.allRecipes.count) recipes, \(self.favoriteRecipes.count) favorites, \(preloadedData.collections.count) collections")
             }
         } else {
             // Fallback: Load data if not preloaded (e.g., in previews or when returning from onboarding)
@@ -67,6 +71,9 @@ class CookTabViewModel: ObservableObject {
             // Load recently cooked
             let recentIds = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
             recentlyCookedRecipes = allRecipes.filter { recentIds.contains($0.id) }
+
+            // Load favorites
+            favoriteRecipes = allRecipes.filter { $0.isFavorite }
 
             hasLoadedInitially = true
         } catch {

@@ -192,6 +192,7 @@ struct RecipeEditorView: View {
                             HStack {
                                 Spacer()
                                 Label("Delete Recipe", systemImage: "trash")
+                                    .foregroundStyle(.red)
                                 Spacer()
                             }
                         }

@@ -51,7 +51,11 @@ struct SharingTabView: View {
                 await viewModel.loadSharedRecipes()
             }
             .refreshable {
+                // Refresh shared recipes and collections
                 await viewModel.loadSharedRecipes()
+
+                // Also refresh friends list by posting notification
+                NotificationCenter.default.post(name: NSNotification.Name("RefreshConnectionsList"), object: nil)
             }
             .alert("Success", isPresented: $viewModel.showSuccessAlert) {
                 Button("OK") { }
@@ -440,6 +444,11 @@ struct ConnectionsInlineView: View {
         }
         .task {
             await viewModel.loadConnections()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshConnectionsList"))) { _ in
+            Task {
+                await viewModel.loadConnections(forceRefresh: true)
+            }
         }
     }
 }

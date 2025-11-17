@@ -120,12 +120,7 @@ class ImporterViewModel: ObservableObject {
     }
     
     private func importFromText() async throws -> Recipe {
-        // Try Foundation Models first
-        if let recipe = try await dependencies.foundationModelsService.parseRecipeText(textInput) {
-            return recipe
-        }
-        
-        // Fallback to text parser
+        // Use text parser directly
         return try await dependencies.textParser.parse(from: textInput)
     }
 }

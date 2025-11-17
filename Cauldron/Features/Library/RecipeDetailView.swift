@@ -181,6 +181,7 @@ struct RecipeDetailView: View {
                             showDeleteConfirmation = true
                         } label: {
                             Label("Delete Recipe", systemImage: "trash")
+                                .foregroundStyle(.red)
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -198,7 +199,7 @@ struct RecipeDetailView: View {
                             } else if hasOwnedCopy {
                                 Label("Already in Library", systemImage: "checkmark.circle.fill")
                             } else {
-                                Label("Save to My Recipes", systemImage: "plus.circle")
+                                Label("Save to My Recipes", systemImage: "bookmark")
                             }
                         }
                         .disabled(isSavingRecipe || hasOwnedCopy || isCheckingDuplicates)

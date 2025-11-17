@@ -225,6 +225,11 @@ struct HeroRecipeImageView: View {
         .task {
             await loadImage()
         }
+        .onChange(of: imageURL) { _, _ in
+            Task {
+                await loadImage()
+            }
+        }
     }
 
     private var placeholderView: some View {

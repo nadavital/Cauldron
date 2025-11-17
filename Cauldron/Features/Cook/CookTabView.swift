@@ -37,6 +37,11 @@ struct CookTabView: View {
                         recentlyCookedSection
                     }
 
+                    // Favorites
+                    if !viewModel.favoriteRecipes.isEmpty {
+                        favoritesSection
+                    }
+
                     // All Recipes
                     allRecipesSection
                 }
@@ -161,7 +166,44 @@ struct CookTabView: View {
                             recipeContextMenu(for: recipe)
                         } preview: {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
-                                .frame(width: 200)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "star.fill")
+                    .foregroundColor(.yellow)
+                Text("Favorites")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: FavoritesListView(recipes: viewModel.favoriteRecipes, dependencies: viewModel.dependencies)) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.favoriteRecipes.prefix(10)) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                                 .padding()
                                 .background(Color(.systemBackground))
                         }
@@ -222,10 +264,15 @@ struct CookTabView: View {
     private var allRecipesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("All Recipes")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
+                Label {
+                    Text("All Recipes")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                } icon: {
+                    Image(systemName: "fork.knife")
+                        .foregroundColor(.cauldronOrange)
+                }
+
                 Spacer()
                 
                 NavigationLink(destination: AllRecipesListView(recipes: viewModel.allRecipes, dependencies: viewModel.dependencies)) {
@@ -345,6 +392,7 @@ struct CookTabView: View {
             showDeleteConfirmation = true
         } label: {
             Label("Delete Recipe", systemImage: "trash")
+                .foregroundStyle(.red)
         }
     }
     
@@ -520,7 +568,7 @@ struct RecipeCardView: View {
         }
         .frame(width: 240)
     }
-    
+
 }
 
 #Preview {
