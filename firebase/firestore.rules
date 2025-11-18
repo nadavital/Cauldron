@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Shared Recipes
+    match /shared_recipes/{shareId} {
+      allow read: if true; // Publicly readable
+      allow create: if true; // Anyone can share (for now, ideally authenticated)
+      allow update: if false; // Immutable once shared
+      allow delete: if false;
+    }
+
+    // Shared Profiles
+    match /shared_profiles/{shareId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Shared Collections
+    match /shared_collections/{shareId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

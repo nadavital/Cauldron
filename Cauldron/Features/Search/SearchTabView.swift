@@ -19,12 +19,15 @@ struct SearchTabView: View {
         case people = "People"
     }
     
-    init(dependencies: DependencyContainer) {
+    @Binding var navigationPath: NavigationPath
+    
+    init(dependencies: DependencyContainer, navigationPath: Binding<NavigationPath>) {
         _viewModel = StateObject(wrappedValue: SearchTabViewModel(dependencies: dependencies))
+        _navigationPath = navigationPath
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 // Search mode picker
                 Picker("Search Mode", selection: $searchMode) {
@@ -75,6 +78,15 @@ struct SearchTabView: View {
                 Task {
                     await viewModel.loadData()
                 }
+            }
+            .navigationDestination(for: Recipe.self) { recipe in
+                RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+            }
+            .navigationDestination(for: User.self) { user in
+                UserProfileView(user: user, dependencies: viewModel.dependencies)
+            }
+            .navigationDestination(for: Collection.self) { collection in
+                CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)
             }
         }
         .searchable(text: $searchText, prompt: searchMode == .recipes ? "Search recipes" : "Search people")
@@ -502,5 +514,5 @@ struct UserRowView: View {
 }
 
 #Preview {
-    SearchTabView(dependencies: .preview())
+    SearchTabView(dependencies: .preview(), navigationPath: .constant(NavigationPath()))
 }

@@ -8,23 +8,23 @@
 import SwiftUI
 import os
 
-/// Navigation destinations for SharingTab
-enum SharingTabDestination: Hashable {
+/// Navigation destinations for FriendsTab
+enum FriendsTabDestination: Hashable {
     case connections
 }
 
-/// Sections in the Sharing tab
-enum SharingSection: String, CaseIterable {
+/// Sections in the Friends tab
+enum FriendsTabSection: String, CaseIterable {
     case recipes = "Recipes"
     case connections = "Connections"
 }
 
-/// Main sharing tab view showing shared recipes
-struct SharingTabView: View {
-    @ObservedObject private var viewModel = SharingTabViewModel.shared
+/// Friends tab - showing shared recipes and connections
+struct FriendsTabView: View {
+    @ObservedObject private var viewModel = FriendsTabViewModel.shared
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
-    @State private var selectedSection: SharingSection = .recipes
+    @State private var selectedSection: FriendsTabSection = .recipes
 
     let dependencies: DependencyContainer
 
@@ -67,7 +67,7 @@ struct SharingTabView: View {
             } message: {
                 Text(viewModel.alertMessage)
             }
-            .navigationDestination(for: SharingTabDestination.self) { destination in
+            .navigationDestination(for: FriendsTabDestination.self) { destination in
                 switch destination {
                 case .connections:
                     ConnectionsView(dependencies: dependencies)
@@ -148,15 +148,11 @@ struct SharingTabView: View {
                         .padding(.vertical, 50)
                     } else {
                         ForEach(viewModel.sharedRecipes) { sharedRecipe in
-                            NavigationLink(destination: SharedRecipeDetailView(
-                                sharedRecipe: sharedRecipe,
+                            NavigationLink(destination: RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
                                 dependencies: dependencies,
-                                onCopy: {
-                                    await viewModel.copyToPersonalCollection(sharedRecipe)
-                                },
-                                onRemove: {
-                                    await viewModel.removeSharedRecipe(sharedRecipe)
-                                }
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
                             )) {
                                 SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                                     .padding(.horizontal, 16)
@@ -247,15 +243,11 @@ struct SharingTabView: View {
     private var recipesList: some View {
         List {
             ForEach(viewModel.sharedRecipes) { sharedRecipe in
-                NavigationLink(destination: SharedRecipeDetailView(
-                    sharedRecipe: sharedRecipe,
+                NavigationLink(destination: RecipeDetailView(
+                    recipe: sharedRecipe.recipe,
                     dependencies: dependencies,
-                    onCopy: {
-                        await viewModel.copyToPersonalCollection(sharedRecipe)
-                    },
-                    onRemove: {
-                        await viewModel.removeSharedRecipe(sharedRecipe)
-                    }
+                    sharedBy: sharedRecipe.sharedBy,
+                    sharedAt: sharedRecipe.sharedAt
                 )) {
                     SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                 }
@@ -404,11 +396,15 @@ struct ConnectionsInlineView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
-                    NavigationLink(destination: SearchTabView(dependencies: dependencies)) {
-                        Text("Find people to add")
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                    }
+                    // Removed redundant link to SearchTabView
+                    Text("Find people to add")
+                        .font(.caption)
+                        .foregroundColor(.cauldronOrange)
+                        .onTapGesture {
+                            // Ideally switch tab, but for now just show text
+                            // Or use a notification to switch tab
+                            NotificationCenter.default.post(name: NSNotification.Name("SwitchToSearchTab"), object: nil)
+                        }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
@@ -501,5 +497,5 @@ struct SharedCollectionCard: View {
 }
 
 #Preview {
-    SharingTabView(dependencies: .preview())
+    FriendsTabView(dependencies: .preview())
 }

@@ -15,6 +15,11 @@ struct UserProfileView: View {
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
     @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
+    
+    // External sharing
+    @State private var showShareSheet = false
+    @State private var shareLink: ShareableLink?
+    @State private var isGeneratingShareLink = false
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -85,6 +90,30 @@ struct UserProfileView: View {
         }
         .sheet(isPresented: $showingEditProfile) {
             ProfileEditView(dependencies: viewModel.dependencies)
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let link = shareLink {
+                ShareSheet(items: [link])
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // Only allow sharing if it's the current user's profile
+                if viewModel.isCurrentUser {
+                    Button {
+                        Task {
+                            await generateShareLink()
+                        }
+                    } label: {
+                        if isGeneratingShareLink {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isGeneratingShareLink)
+                }
+            }
         }
     }
 
@@ -483,18 +512,12 @@ struct UserProfileView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    // Someone else's recipe - use SharedRecipeDetailView (read-only)
-                    NavigationLink(destination: SharedRecipeDetailView(
-                        sharedRecipe: sharedRecipe,
+                    // Someone else's recipe - use RecipeDetailView (read-only)
+                    NavigationLink(destination: RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
                         dependencies: viewModel.dependencies,
-                        onCopy: {
-                            // Reload recipes after copying - force refresh since data changed
-                            await viewModel.loadUserRecipes(forceRefresh: true)
-                        },
-                        onRemove: {
-                            // Reload recipes after removing - force refresh since data changed
-                            await viewModel.loadUserRecipes(forceRefresh: true)
-                        }
+                        sharedBy: sharedRecipe.sharedBy,
+                        sharedAt: sharedRecipe.sharedAt
                     )) {
                         RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
                     }
@@ -503,6 +526,27 @@ struct UserProfileView: View {
             }
         }
         .padding(.horizontal)
+    }
+
+    private func generateShareLink() async {
+        isGeneratingShareLink = true
+        defer { isGeneratingShareLink = false }
+
+        do {
+            // Count public recipes
+            let publicRecipeCount = viewModel.userRecipes.filter { $0.recipe.visibility == .publicRecipe }.count
+            
+            let link = try await viewModel.dependencies.externalShareService.shareProfile(
+                user,
+                recipeCount: publicRecipeCount
+            )
+            shareLink = link
+            showShareSheet = true
+        } catch {
+            AppLogger.general.error("Failed to generate profile share link: \(error.localizedDescription)")
+            viewModel.errorMessage = "Failed to generate share link: \(error.localizedDescription)"
+            viewModel.showError = true
+        }
     }
 }
 

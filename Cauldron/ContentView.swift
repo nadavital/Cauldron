@@ -18,11 +18,23 @@ struct PreloadedRecipeData {
     let collections: [Collection]      // All collections loaded from storage
 }
 
+struct ImportContext: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ContentView: View {
     @Environment(\.dependencies) private var dependencies
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var isDataReady = false
     @State private var preloadedData: PreloadedRecipeData?
+    @State private var sharedContentWrapper: SharedContentWrapper?
+    @State private var isLoadingShare = false
+
+    struct SharedContentWrapper: Identifiable {
+        let id = UUID()
+        let content: ImportedContent
+    }
 
     var body: some View {
         ZStack {
@@ -65,8 +77,38 @@ struct ContentView: View {
                 Color(uiColor: .systemBackground)
                     .ignoresSafeArea()
             }
+            
+            // Share Loading Overlay
+            if isLoadingShare {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.white)
+                        Text("Loading shared content...")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    }
+                    .padding(30)
+                    .background(Material.ultraThinMaterial)
+                    .cornerRadius(16)
+                }
+            }
         }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
+        .animation(.easeInOut(duration: 0.2), value: isLoadingShare)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenExternalShare"))) { notification in
+            print("🔔 ContentView: Received OpenExternalShare notification")
+            if let url = notification.object as? URL {
+                print("🔔 ContentView: Loading share from URL: \(url)")
+                Task {
+                    await loadSharedContent(url: url)
+                }
+            }
+        }
         .task {
             // CRITICAL LOADING SEQUENCE:
             // Step 1: Initialize user session (determines which view to show)
@@ -86,6 +128,46 @@ struct ContentView: View {
             // Only NOW will the view hierarchy render, and CookTabViewModel will
             // receive preloadedData in its initializer, preventing empty arrays
             isDataReady = true
+        }
+    }
+
+    private func loadSharedContent(url: URL) async {
+        isLoadingShare = true
+        defer { isLoadingShare = false }
+        
+        do {
+            let content = try await dependencies.externalShareService.importFromShareURL(url)
+            
+            // If it's a recipe, we need to fetch the full details from CloudKit
+            // because the share data only contains a summary
+            if case .recipe(let partialRecipe, let owner) = content {
+                print("🌐 ContentView: Fetching full recipe details for \(partialRecipe.title)")
+                if let fullRecipe = try await dependencies.cloudKitService.fetchPublicRecipe(id: partialRecipe.id) {
+                    print("✅ ContentView: Successfully fetched full recipe")
+                    await MainActor.run {
+                        // Post notification to navigate to the recipe in the Search tab
+                        // Use the full recipe but keep the owner info from the share if available
+                        let wrapper = SharedContentWrapper(content: .recipe(fullRecipe, originalCreator: owner))
+                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                    }
+                } else {
+                    print("❌ ContentView: Recipe not found in public database")
+                    // Fallback to partial recipe if fetch fails
+                    await MainActor.run {
+                        let wrapper = SharedContentWrapper(content: content)
+                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                    }
+                }
+            } else {
+                // For profiles and collections, the share data is usually sufficient or handled differently
+                await MainActor.run {
+                    let wrapper = SharedContentWrapper(content: content)
+                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                }
+            }
+        } catch {
+            print("❌ ContentView: Failed to load shared content: \(error)")
+            // Ideally show an alert here
         }
     }
 
@@ -111,6 +193,12 @@ struct ContentView: View {
             if let userId = userSession.userId {
                 do {
                     try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+                    
+                    // Run migration to ensure public recipes are in the public database
+                    // This runs in the background
+                    Task.detached(priority: .utility) {
+                        await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
+                    }
                 } catch {
                     AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
                 }
@@ -131,8 +219,8 @@ struct ContentView: View {
 
             // Preload shared recipes feed in background
             Task.detached(priority: .utility) { @MainActor in
-                SharingTabViewModel.shared.configure(dependencies: dependencies)
-                await SharingTabViewModel.shared.loadSharedRecipes()
+                FriendsTabViewModel.shared.configure(dependencies: dependencies)
+                await FriendsTabViewModel.shared.loadSharedRecipes()
             }
 
             // Preload connections/friends list in background

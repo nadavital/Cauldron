@@ -335,6 +335,23 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
            let url = userActivity.webpageURL {
             AppLogger.general.info("🟣 SceneDelegate: Got web URL: \(url.absoluteString)")
 
+            // Check if it's an external share URL (from Firebase)
+            // Matches: https://YOUR-PROJECT.web.app/recipe/abc123
+            // Or: https://cauldron.app/recipe/abc123
+            if isExternalShareURL(url) {
+                AppLogger.general.info("🟣 SceneDelegate: Detected external share URL, processing...")
+
+                Task {
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("OpenExternalShare"),
+                            object: url
+                        )
+                    }
+                }
+                return
+            }
+
             // Check if it's an iCloud share URL
             if url.host == "www.icloud.com" || url.host == "icloud.com" {
                 AppLogger.general.info("🟣 SceneDelegate: Detected iCloud share URL, processing...")
@@ -369,8 +386,41 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
         }
     }
 
+    /// Check if URL is an external share link (from Firebase)
+    private func isExternalShareURL(_ url: URL) -> Bool {
+        // Check for Firebase hosting domain pattern
+        // Matches: *.web.app, *.firebaseapp.com, or custom domain like cauldron.app
+        guard let host = url.host else { return false }
+        
+        // Check for Firebase domains
+        if host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app" {
+            // Continue to check path
+        } else {
+            return false
+        }
+
+        // Check if path matches share URL pattern: /recipe/*, /profile/*, /collection/*
+        let pathComponents = url.pathComponents
+        guard pathComponents.count >= 3 else { return false }
+
+        let shareTypes = ["recipe", "profile", "collection"]
+        return shareTypes.contains(pathComponents[1])
+    }
+
     private func handleURL(_ url: URL) {
         AppLogger.general.info("🟣 SceneDelegate: handleURL: \(url.absoluteString)")
+
+        // Check if it's an external share deep link (cauldron://import/...)
+        if url.scheme == "cauldron" && url.host == "import" {
+            AppLogger.general.info("🟣 SceneDelegate: Detected external share deep link")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("OpenExternalShare"),
+                object: url
+            )
+            return
+        }
+
+        // Legacy URL handling for testing
         NotificationCenter.default.post(
             name: NSNotification.Name("TestOpenURL"),
             object: url
