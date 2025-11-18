@@ -114,7 +114,7 @@ class ConnectionManager: ObservableObject {
 
     // Cache management
     private var lastSyncTime: Date?
-    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+    private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
 
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()

@@ -35,7 +35,8 @@ final class CollectionRepositoryTests: XCTestCase {
         // Initialize repository
         repository = CollectionRepository(
             modelContainer: modelContainer,
-            cloudKitService: cloudKitService
+            cloudKitService: cloudKitService,
+            operationQueueService: OperationQueueService()
         )
 
         // Create test user ID

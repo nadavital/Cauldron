@@ -19,35 +19,63 @@ struct SharedRecipeDetailView: View {
     @State private var showCopyToast = false
     @State private var hasOwnedCopy = false
     @State private var isCheckingDuplicates = true
+    @State private var showSessionConflictAlert = false
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Hero Image - Card style
-                if let imageURL = sharedRecipe.recipe.imageURL {
-                    HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
-                }
-
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header with shared info
-                    sharedInfoSection
-
-                    // Recipe details
-                    recipeInfoSection
-
-                    // Ingredients
-                    ingredientsSection
-
-                    // Steps
-                    stepsSection
-
-                    // Notes if available
-                    if let notes = sharedRecipe.recipe.notes, !notes.isEmpty {
-                        notesSection(notes)
+        ZStack(alignment: .bottomTrailing) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Hero Image - Card style
+                    if let imageURL = sharedRecipe.recipe.imageURL {
+                        HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                     }
+
+                    VStack(alignment: .leading, spacing: 24) {
+                        // Header with shared info
+                        sharedInfoSection
+
+                        // Recipe details
+                        recipeInfoSection
+
+                        // Ingredients
+                        ingredientsSection
+
+                        // Steps
+                        stepsSection
+
+                        // Notes if available
+                        if let notes = sharedRecipe.recipe.notes, !notes.isEmpty {
+                            notesSection(notes)
+                        }
+                    }
+                    .padding()
+                    .padding(.bottom, 100) // Add padding for the button
                 }
-                .padding()
+            }
+
+            // Liquid Glass Cook Button
+            HStack {
+                Spacer()
+
+                Button {
+                    handleCookButtonTap()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "flame.fill")
+                            .font(.body)
+
+                        Text("Cook")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 16)
             }
         }
         .navigationTitle(sharedRecipe.recipe.title)
@@ -80,7 +108,7 @@ struct SharedRecipeDetailView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                     } else {
-                        Label("Add to My Recipes", systemImage: "plus.circle")
+                        Label("Add to My Recipes", systemImage: "bookmark")
                     }
                 }
                 .disabled(isPerformingAction || hasOwnedCopy || isCheckingDuplicates)
@@ -98,6 +126,18 @@ struct SharedRecipeDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will remove the recipe from your shared list. You can't undo this action.")
+        }
+        .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("End & Start New") {
+                Task {
+                    await dependencies.cookModeCoordinator.startPendingRecipe()
+                }
+            }
+        } message: {
+            if let currentRecipe = dependencies.cookModeCoordinator.currentRecipe {
+                Text("End '\(currentRecipe.title)' to start cooking '\(sharedRecipe.recipe.title)'?")
+            }
         }
         .toast(isShowing: $showCopyToast, icon: "checkmark.circle.fill", message: "Recipe added")
         .task {
@@ -249,6 +289,22 @@ struct SharedRecipeDetailView: View {
         } catch {
             AppLogger.general.error("Failed to check for duplicates: \(error.localizedDescription)")
             isCheckingDuplicates = false
+        }
+    }
+
+    private func handleCookButtonTap() {
+        // Check if different recipe is already cooking
+        if dependencies.cookModeCoordinator.isActive,
+           let currentRecipe = dependencies.cookModeCoordinator.currentRecipe,
+           currentRecipe.id != sharedRecipe.recipe.id {
+            // Show conflict alert
+            dependencies.cookModeCoordinator.pendingRecipe = sharedRecipe.recipe
+            showSessionConflictAlert = true
+        } else {
+            // Start cooking
+            Task {
+                await dependencies.cookModeCoordinator.startCooking(sharedRecipe.recipe)
+            }
         }
     }
 }

@@ -136,9 +136,27 @@ struct ContentView: View {
             }
 
             // Preload connections/friends list in background
+            // This prevents the "slow population" effect when navigating to friends tab
             if let userId = userSession.userId {
                 Task.detached(priority: .utility) { @MainActor in
+                    // Load connections first
                     await dependencies.connectionManager.loadConnections(forUserId: userId)
+
+                    // Then preload user details for all connections
+                    // This eliminates the flicker when opening the friends list
+                    let connections = dependencies.connectionManager.connections.values.map { $0.connection }
+                    var userIds = Set<UUID>()
+                    for connection in connections {
+                        userIds.insert(connection.fromUserId)
+                        userIds.insert(connection.toUserId)
+                    }
+
+                    // Fetch and cache all user details
+                    for userId in userIds {
+                        if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
+                            try? await dependencies.sharingRepository.save(cloudUser)
+                        }
+                    }
                 }
             }
 
