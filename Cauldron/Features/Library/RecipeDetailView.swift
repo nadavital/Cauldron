@@ -361,16 +361,26 @@ struct RecipeDetailView: View {
 
             // Shared By Banner
             if let user = sharedBy {
-                HStack {
-                    ProfileAvatar(user: user, size: 32)
-                    
-                    Text("Shared by \(user.displayName)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
+                NavigationLink {
+                    UserProfileView(user: user, dependencies: dependencies)
+                } label: {
+                    HStack {
+                        ProfileAvatar(user: user, size: 32)
+                        
+                        Text("Shared by \(user.displayName)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(Color(uiColor: .tertiaryLabel))
+                        
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 8)
+                .buttonStyle(.plain)
             }
 
             // Attribution for saved recipes

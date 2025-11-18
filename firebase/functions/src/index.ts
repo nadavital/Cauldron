@@ -249,7 +249,13 @@ export const api = onRequest({ cors: true, invoker: 'public' }, async (req, res)
 
 // --- Preview Pages ---
 
-return `
+// --- Preview Pages ---
+
+function generatePreviewHtml(title: string, description: string, imageURL: string | null, appURL: string, downloadURL: string): string {
+    // Use default icon for meta tags if no specific image is available
+    const metaImageURL = imageURL || 'https://cauldron-f900a.web.app/icon-light.svg';
+
+    return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -261,7 +267,7 @@ return `
     <meta property="og:type" content="article">
     <meta property="og:title" content="${title}">
     <meta property="og:description" content="${description}">
-    <meta property="og:image" content="${imageURL}">
+    <meta property="og:image" content="${metaImageURL}">
     <meta property="og:url" content="${appURL}">
     <meta property="og:site_name" content="Cauldron">
 
@@ -269,47 +275,88 @@ return `
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${title}">
     <meta name="twitter:description" content="${description}">
-    <meta name="twitter:image" content="${imageURL}">
+    <meta name="twitter:image" content="${metaImageURL}">
     <meta name="twitter:app:name:iphone" content="Cauldron">
     <meta name="twitter:app:id:iphone" content="6468697878">
 
     <style>
         :root {
-            --cauldron-orange: #FF6B35;
-            --cauldron-bg: #000000;
-            --cauldron-card: #1C1C1E;
-            --text-primary: #FFFFFF;
+            --cauldron-orange: #FF9933;
+            --bg-color: #F2F2F7;
+            --card-bg: #FFFFFF;
+            --text-primary: #000000;
             --text-secondary: #8E8E93;
+            --shadow-color: rgba(0,0,0,0.1);
+            --border-color: rgba(0,0,0,0.05);
+            --button-text: #FFFFFF;
+            --secondary-button-bg: rgba(0, 0, 0, 0.05);
+            --secondary-button-text: #FF6B35;
         }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #000000;
+                --card-bg: #1C1C1E;
+                --text-primary: #FFFFFF;
+                --text-secondary: #8E8E93;
+                --shadow-color: rgba(0,0,0,0.5);
+                --border-color: #333;
+                --secondary-button-bg: rgba(255, 255, 255, 0.1);
+            }
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--cauldron-bg);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
+
         .container {
-            background: var(--cauldron-card);
+            background: var(--card-bg);
             border-radius: 24px;
             padding: 40px;
             max-width: 480px;
             width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            box-shadow: 0 20px 60px var(--shadow-color);
             text-align: center;
-            border: 1px solid #333;
+            border: 1px solid var(--border-color);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px auto;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-image: url('/icon-light.svg');
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .logo {
+                background-image: url('/icon-dark.svg');
+            }
+        }
+
         .preview-image {
             width: 100%;
             height: 320px;
             object-fit: cover;
             border-radius: 16px;
             margin-bottom: 24px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            box-shadow: 0 8px 24px var(--shadow-color);
+            background-color: var(--secondary-button-bg);
         }
+
         h1 {
             font-size: 28px;
             margin-bottom: 12px;
@@ -317,17 +364,19 @@ return `
             font-weight: 700;
             line-height: 1.2;
         }
+
         .description {
             font-size: 17px;
             color: var(--text-secondary);
             margin-bottom: 32px;
             line-height: 1.5;
         }
+
         .button {
             display: block;
             width: 100%;
             background: var(--cauldron-orange);
-            color: white;
+            color: var(--button-text);
             padding: 16px;
             border-radius: 14px;
             text-decoration: none;
@@ -336,40 +385,26 @@ return `
             margin-bottom: 12px;
             transition: transform 0.2s, opacity 0.2s;
             cursor: pointer;
+            border: none;
         }
+
         .button:active {
             transform: scale(0.98);
             opacity: 0.9;
         }
+
         .button.secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: var(--cauldron-orange);
-        }
-        .logo {
-            font-size: 48px;
-            margin-bottom: 24px;
-            display: inline-block;
-        }
-        .app-icon {
-            width: 80px;
-            height: 80px;
-            border-radius: 18px;
-            margin-bottom: 20px;
+            background: var(--secondary-button-bg);
+            color: var(--secondary-button-text);
         }
     </style>
-    <script>
-        window.onload = function() {
-            // Try to open the app immediately
-            window.location.href = "${appURL}";
-        };
-    </script>
+
 </head>
 <body>
     <div class="container">
-        <!-- Use a placeholder for app icon if we don't have a hosted one, or just emoji -->
-        <div class="logo">🍲</div>
+        <div class="logo"></div>
         
-        <img src="${imageURL}" alt="${title}" class="preview-image" onerror="this.style.display='none'">
+        ${imageURL ? `<img src="${imageURL}" alt="${title}" class="preview-image" onerror="this.style.display='none'">` : ''}
         
         <h1>${title}</h1>
         <p class="description">${description}</p>
@@ -400,10 +435,10 @@ export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async 
 
         const data = doc.data()!;
         const title = data.title || 'Untitled Recipe';
-        const imageURL = data.imageURL || 'https://cauldron.app/default-recipe.png';
+        const imageURL = data.imageURL || null;
         const description = `Check out this recipe on Cauldron!`;
         const appURL = `cauldron://import/recipe/${shareId}`;
-        const downloadURL = 'https://apps.apple.com/app/cauldron';
+        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
@@ -430,11 +465,11 @@ export const previewProfile = onRequest({ cors: true, invoker: 'public' }, async
 
         const data = doc.data()!;
         const title = data.displayName || data.username || 'Cauldron User';
-        const imageURL = data.profileImageURL || 'https://cauldron.app/default-profile.png';
+        const imageURL = data.profileImageURL || null;
         const recipeCount = data.recipeCount || 0;
         const description = `Check out my Cauldron profile! ${recipeCount} recipes and counting 🍲`;
         const appURL = `cauldron://import/profile/${shareId}`;
-        const downloadURL = 'https://apps.apple.com/app/cauldron';
+        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
@@ -461,11 +496,11 @@ export const previewCollection = onRequest({ cors: true, invoker: 'public' }, as
 
         const data = doc.data()!;
         const title = data.title || 'Untitled Collection';
-        const imageURL = data.coverImageURL || 'https://cauldron.app/default-collection.png';
+        const imageURL = data.coverImageURL || null;
         const recipeCount = data.recipeCount || 0;
         const description = `Check out my ${title} collection on Cauldron! ${recipeCount} recipes.`;
         const appURL = `cauldron://import/collection/${shareId}`;
-        const downloadURL = 'https://apps.apple.com/app/cauldron';
+        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {

@@ -198,15 +198,19 @@ final class ExternalShareService: Sendable {
         
         let pathComponents = url.pathComponents.filter { $0 != "/" }
         
-        // Expected format: ["recipe", "123"] or ["import", "recipe", "123"]
+        // Expected format:
+        // Web: ["recipe", "123"]
+        // Deep Link: ["import", "recipe", "123"]
+        
         var type: String?
         var shareId: String?
         
-        if pathComponents.count >= 2 {
-            // Check for /recipe/123 format
-            if ["recipe", "profile", "collection"].contains(pathComponents[pathComponents.count - 2]) {
-                type = pathComponents[pathComponents.count - 2]
-                shareId = pathComponents[pathComponents.count - 1]
+        // Find the index of the type keyword
+        if let index = pathComponents.firstIndex(where: { ["recipe", "profile", "collection"].contains($0) }) {
+            // Ensure there is an ID following the type
+            if index + 1 < pathComponents.count {
+                type = pathComponents[index]
+                shareId = pathComponents[index + 1]
             }
         }
         

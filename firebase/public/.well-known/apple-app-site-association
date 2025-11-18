@@ -1,0 +1,23 @@
+{
+    "applinks": {
+        "apps": [],
+        "details": [
+            {
+                "appID": "C4MRP56MF5.Nadav.Cauldron",
+                "paths": [
+                    "/recipe/*",
+                    "/profile/*",
+                    "/collection/*"
+                ]
+            },
+            {
+                "appID": "C4MRP56MF5.Nadav.Cauldron.dev",
+                "paths": [
+                    "/recipe/*",
+                    "/profile/*",
+                    "/collection/*"
+                ]
+            }
+        ]
+    }
+}
