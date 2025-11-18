@@ -1,0 +1,16 @@
+{
+  "name": "cauldron-api",
+  "version": "1.0.0",
+  "description": "Vercel API for Cauldron recipe sharing",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@vercel/node": "^3.0.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

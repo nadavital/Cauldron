@@ -23,6 +23,8 @@ struct ContentView: View {
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var isDataReady = false
     @State private var preloadedData: PreloadedRecipeData?
+    @State private var showImportSheet = false
+    @State private var importURL: URL?
 
     var body: some View {
         ZStack {
@@ -67,6 +69,17 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
+        .sheet(isPresented: $showImportSheet) {
+            if let url = importURL {
+                ImportPreviewSheet(url: url, dependencies: dependencies)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenExternalShare"))) { notification in
+            if let url = notification.object as? URL {
+                importURL = url
+                showImportSheet = true
+            }
+        }
         .task {
             // CRITICAL LOADING SEQUENCE:
             // Step 1: Initialize user session (determines which view to show)

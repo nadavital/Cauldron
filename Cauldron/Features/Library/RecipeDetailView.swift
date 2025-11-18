@@ -50,6 +50,11 @@ struct RecipeDetailView: View {
     @State private var showErrorAlert = false
     @State private var errorMessage: String?
 
+    // External sharing
+    @State private var showShareSheet = false
+    @State private var shareLink: ShareableLink?
+    @State private var isGeneratingShareLink = false
+
     init(recipe: Recipe, dependencies: DependencyContainer) {
         self.initialRecipe = recipe
         self.dependencies = dependencies
@@ -159,6 +164,27 @@ struct RecipeDetailView: View {
                             showingVisibilityPicker = true
                         } label: {
                             Label("Change Visibility", systemImage: currentVisibility.icon)
+                        }
+
+                        // External share button (only for public recipes)
+                        if recipe.visibility == .publicRecipe {
+                            Button {
+                                Task {
+                                    await generateShareLink()
+                                }
+                            } label: {
+                                if isGeneratingShareLink {
+                                    Label {
+                                        Text("Generating Link...")
+                                    } icon: {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle())
+                                    }
+                                } else {
+                                    Label("Share Recipe", systemImage: "square.and.arrow.up")
+                                }
+                            }
+                            .disabled(isGeneratingShareLink)
                         }
 
                         Button {
@@ -283,6 +309,11 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showingCollectionPicker) {
             AddToCollectionSheet(recipe: recipe, dependencies: dependencies)
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let link = shareLink {
+                ShareSheet(items: [link.url, link.previewText])
+            }
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
@@ -697,6 +728,22 @@ struct RecipeDetailView: View {
                 AppLogger.general.error("Failed to toggle favorite: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func generateShareLink() async {
+        isGeneratingShareLink = true
+
+        do {
+            let link = try await dependencies.externalShareService.shareRecipe(recipe)
+            shareLink = link
+            showShareSheet = true
+        } catch {
+            errorMessage = "Failed to generate share link: \(error.localizedDescription)"
+            showErrorAlert = true
+            AppLogger.general.error("Failed to generate share link: \(error.localizedDescription)")
+        }
+
+        isGeneratingShareLink = false
     }
 
     private func refreshRecipe() async {

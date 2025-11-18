@@ -30,6 +30,7 @@ class DependencyContainer: ObservableObject {
     let groceryService: GroceryService
     let foundationModelsService: FoundationModelsService
     let sharingService: SharingService
+    let externalShareService: ExternalShareService
     let cloudKitService: CloudKitService
     let recipeSyncService: RecipeSyncService
     let imageMigrationService: CloudImageMigration
@@ -108,6 +109,8 @@ class DependencyContainer: ObservableObject {
             recipeRepository: recipeRepository,
             cloudKitService: cloudKitService
         )
+
+        self.externalShareService = ExternalShareService()
 
         self.recipeSyncService = RecipeSyncService(
             cloudKitService: cloudKitService,
