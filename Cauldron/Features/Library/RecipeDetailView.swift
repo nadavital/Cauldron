@@ -55,9 +55,15 @@ struct RecipeDetailView: View {
     @State private var shareLink: ShareableLink?
     @State private var isGeneratingShareLink = false
 
-    init(recipe: Recipe, dependencies: DependencyContainer) {
+    // Shared context
+    let sharedBy: User?
+    let sharedAt: Date?
+
+    init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil) {
         self.initialRecipe = recipe
         self.dependencies = dependencies
+        self.sharedBy = sharedBy
+        self.sharedAt = sharedAt
         self._recipe = State(initialValue: recipe)
         self._localIsFavorite = State(initialValue: recipe.isFavorite)
         self._currentVisibility = State(initialValue: recipe.visibility)
@@ -142,11 +148,29 @@ struct RecipeDetailView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
+                if recipe.visibility == .publicRecipe {
+                    Button {
+                        Task {
+                            await generateShareLink()
+                        }
+                    } label: {
+                        if isGeneratingShareLink {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isGeneratingShareLink)
+                }
+            }
+
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    toggleFavorite()
+                    Task {
+                        await addToGroceryList()
+                    }
                 } label: {
-                    Image(systemName: localIsFavorite ? "star.fill" : "star")
-                        .foregroundStyle(localIsFavorite ? .yellow : .primary)
+                    Image(systemName: "cart.badge.plus")
                 }
             }
 
@@ -158,41 +182,6 @@ struct RecipeDetailView: View {
                             showingEditSheet = true
                         } label: {
                             Label("Edit Recipe", systemImage: "pencil")
-                        }
-
-                        Button {
-                            showingVisibilityPicker = true
-                        } label: {
-                            Label("Change Visibility", systemImage: currentVisibility.icon)
-                        }
-
-                        // External share button (only for public recipes)
-                        if recipe.visibility == .publicRecipe {
-                            Button {
-                                Task {
-                                    await generateShareLink()
-                                }
-                            } label: {
-                                if isGeneratingShareLink {
-                                    Label {
-                                        Text("Generating Link...")
-                                    } icon: {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle())
-                                    }
-                                } else {
-                                    Label("Share Recipe", systemImage: "square.and.arrow.up")
-                                }
-                            }
-                            .disabled(isGeneratingShareLink)
-                        }
-
-                        Button {
-                            Task {
-                                await addToGroceryList()
-                            }
-                        } label: {
-                            Label("Add to Grocery List", systemImage: "cart.badge.plus")
                         }
 
                         Button {
@@ -208,36 +197,6 @@ struct RecipeDetailView: View {
                         } label: {
                             Label("Delete Recipe", systemImage: "trash")
                                 .foregroundStyle(.red)
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                } else {
-                    // Referenced recipe menu (read-only - someone else's recipe)
-                    Menu {
-                        Button {
-                            Task {
-                                await saveRecipeToLibrary()
-                            }
-                        } label: {
-                            if isSavingRecipe {
-                                Label("Saving...", systemImage: "arrow.down.circle")
-                            } else if hasOwnedCopy {
-                                Label("Already in Library", systemImage: "checkmark.circle.fill")
-                            } else {
-                                Label("Save to My Recipes", systemImage: "bookmark")
-                            }
-                        }
-                        .disabled(isSavingRecipe || hasOwnedCopy || isCheckingDuplicates)
-
-                        Divider()
-
-                        Button {
-                            Task {
-                                await addToGroceryList()
-                            }
-                        } label: {
-                            Label("Add to Grocery List", systemImage: "cart.badge.plus")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -312,7 +271,7 @@ struct RecipeDetailView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
-                ShareSheet(items: [link.url, link.previewText])
+                ShareSheet(items: [link])
             }
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
@@ -360,8 +319,25 @@ struct RecipeDetailView: View {
                 }
 
                 Spacer()
+                
+                if recipe.isOwnedByCurrentUser() || hasOwnedCopy {
+                    Button {
+                        toggleFavorite()
+                    } label: {
+                        Image(systemName: localIsFavorite ? "star.fill" : "star")
+                            .foregroundStyle(localIsFavorite ? .yellow : .secondary)
+                            .font(.title3)
+                    }
+
+                    Button {
+                        toggleFavorite()
+                    } label: {
+                        Image(systemName: localIsFavorite ? "star.fill" : "star")
+                            .foregroundStyle(localIsFavorite ? .yellow : .secondary)
+                            .font(.title3)
+                    }
+                }
             }
-            .font(.subheadline)
             .foregroundColor(.secondary)
 
             if !recipe.tags.isEmpty {
@@ -381,6 +357,20 @@ struct RecipeDetailView: View {
                     .padding(.trailing, 1)
                 }
                 .frame(height: 30)
+            }
+
+            // Shared By Banner
+            if let user = sharedBy {
+                HStack {
+                    ProfileAvatar(user: user, size: 32)
+                    
+                    Text("Shared by \(user.displayName)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                }
+                .padding(.vertical, 8)
             }
 
             // Attribution for saved recipes
@@ -441,20 +431,107 @@ struct RecipeDetailView: View {
                 .disabled(isUpdatingRecipe)
             }
 
-            // Scale picker
+            // Settings Row (Visibility & Scale)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Recipe Scale")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                
-                Picker("Scale", selection: $scaleFactor) {
-                    Text("½×").tag(0.5)
-                    Text("1×").tag(1.0)
-                    Text("2×").tag(2.0)
-                    Text("3×").tag(3.0)
+                HStack(spacing: 12) {
+                    // Visibility Picker (Only for owned recipes)
+                    if recipe.isOwnedByCurrentUser() {
+                        Menu {
+                            Picker("Visibility", selection: Binding(
+                                get: { currentVisibility },
+                                set: { newValue in
+                                    Task {
+                                        await changeVisibility(to: newValue)
+                                    }
+                                }
+                            )) {
+                                ForEach([RecipeVisibility.publicRecipe, RecipeVisibility.privateRecipe], id: \.self) { visibility in
+                                    Label(visibility.displayName, systemImage: visibility.icon)
+                                        .tag(visibility)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: currentVisibility.icon)
+                                Text(currentVisibility.displayName)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.cauldronOrange.opacity(0.15))
+                            .foregroundColor(.cauldronOrange)
+                            .clipShape(Capsule())
+                        }
+                    }
+
+                    // Save Button (For non-owned recipes)
+                    if !recipe.isOwnedByCurrentUser() {
+                        Button {
+                            Task {
+                                await saveRecipeToLibrary()
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isSavingRecipe {
+                                    ProgressView()
+                                        .tint(.cauldronOrange)
+                                        .scaleEffect(0.7)
+                                        .frame(width: 12, height: 12)
+                                } else if hasOwnedCopy {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                } else {
+                                    Image(systemName: "bookmark")
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                }
+                                
+                                Text(hasOwnedCopy ? "Saved" : "Save")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.cauldronOrange.opacity(0.15))
+                            .foregroundColor(.cauldronOrange)
+                            .clipShape(Capsule())
+                        }
+                        .disabled(isSavingRecipe || hasOwnedCopy || isCheckingDuplicates)
+                    }
+
+                    // Scale Picker
+                    Menu {
+                        Picker("Scale", selection: $scaleFactor) {
+                            Text("½×").tag(0.5)
+                            Text("1×").tag(1.0)
+                            Text("2×").tag(2.0)
+                            Text("3×").tag(3.0)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            Text("\(scaleFactor.formatted())x")
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                        }
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.cauldronOrange.opacity(0.15))
+                        .foregroundColor(.cauldronOrange)
+                        .clipShape(Capsule())
+                    }
                 }
-                .pickerStyle(.segmented)
                 
                 // Scaling warnings
                 if !scaledResult.warnings.isEmpty {

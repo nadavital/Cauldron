@@ -24,6 +24,8 @@ struct MainTabView: View {
     @State private var selectedTab: AppTab = .cook
     @ObservedObject private var connectionManager: ConnectionManager
 
+    @State private var searchNavigationPath = NavigationPath()
+
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
         self.preloadedData = preloadedData
@@ -41,12 +43,12 @@ struct MainTabView: View {
             }
 
             Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                SharingTabView(dependencies: dependencies)
+                FriendsTabView(dependencies: dependencies)
             }
             .badge(connectionManager.pendingRequestsCount)
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                SearchTabView(dependencies: dependencies)
+                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -78,6 +80,25 @@ struct MainTabView: View {
             // Switch to Friends tab when connection notification is tapped
             AppLogger.general.info("📍 Switching to Friends tab from notification")
             selectedTab = .sharing
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToSharedContent"))) { notification in
+            if let contentWrapper = notification.object as? ContentView.SharedContentWrapper {
+                AppLogger.general.info("📍 Navigating to shared content in Search tab")
+                selectedTab = .search
+                
+                // Reset path first to ensure clean navigation
+                searchNavigationPath = NavigationPath()
+                
+                // Push content based on type
+                switch contentWrapper.content {
+                case .recipe(let recipe, _):
+                    searchNavigationPath.append(recipe)
+                case .profile(let user):
+                    searchNavigationPath.append(user)
+                case .collection(let collection, _):
+                    searchNavigationPath.append(collection)
+                }
+            }
         }
     }
 }

@@ -1,0 +1,13 @@
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# Functions
+functions/node_modules/
+functions/lib/
+functions/.env
+functions/tsconfig.tsbuildinfo
+
+# Hosting
+public/

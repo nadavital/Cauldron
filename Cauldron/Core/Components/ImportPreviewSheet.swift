@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 /// View model for import preview sheet
 @MainActor
@@ -28,15 +29,19 @@ class ImportPreviewViewModel: ObservableObject {
     }
 
     func loadContent() async {
+        print("🔄 ImportPreviewViewModel: Starting loadContent for URL: \(url)")
         state = .loading
 
         do {
+            print("🔄 ImportPreviewViewModel: Calling importFromShareURL...")
             let importedContent = try await dependencies.externalShareService.importFromShareURL(url)
+            print("✅ ImportPreviewViewModel: Successfully imported content: \(importedContent)")
             await MainActor.run {
                 self.content = importedContent
                 self.state = .loaded
             }
         } catch {
+            print("❌ ImportPreviewViewModel: Failed to load content: \(error)")
             await MainActor.run {
                 self.state = .error(error.localizedDescription)
             }
@@ -49,13 +54,12 @@ class ImportPreviewViewModel: ObservableObject {
             throw NSError(domain: "ImportPreview", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
 
-        // Create a copy of the recipe with attribution
-        var importedRecipe = recipe
-        importedRecipe.ownerId = userId
-        importedRecipe.originalRecipeId = recipe.id
-        importedRecipe.originalCreatorId = originalCreator?.id
-        importedRecipe.originalCreatorName = originalCreator?.displayName
-        importedRecipe.savedAt = Date()
+        // Create a copy of the recipe with attribution using the helper method
+        let importedRecipe = recipe.withOwner(
+            userId,
+            originalCreatorId: originalCreator?.id,
+            originalCreatorName: originalCreator?.displayName
+        )
 
         try await dependencies.recipeRepository.create(importedRecipe)
     }
@@ -69,7 +73,7 @@ class ImportPreviewViewModel: ObservableObject {
     func importCollection(_ collection: Collection, owner: User?) async throws {
         // TODO: Implement collection import logic
         // For now, just log it
-        print("Would import collection: \(collection.title)")
+        print("Would import collection: \(collection.name)")
     }
 }
 
@@ -82,10 +86,12 @@ struct ImportPreviewSheet: View {
     @State private var showSuccess = false
 
     init(url: URL, dependencies: DependencyContainer) {
+        print("🏗️ ImportPreviewSheet: init with URL: \(url)")
         _viewModel = StateObject(wrappedValue: ImportPreviewViewModel(url: url, dependencies: dependencies))
     }
 
     var body: some View {
+        let _ = Self._printChanges()
         NavigationStack {
             Group {
                 switch viewModel.state {
@@ -112,7 +118,11 @@ struct ImportPreviewSheet: View {
             }
         }
         .task {
+            print("🚀 ImportPreviewSheet: .task modifier triggered")
             await viewModel.loadContent()
+        }
+        .onAppear {
+            print("👀 ImportPreviewSheet: onAppear triggered")
         }
         .alert("Recipe Added!", isPresented: $showSuccess) {
             Button("OK") {
@@ -211,7 +221,7 @@ struct ImportPreviewSheet: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(recipe.tags, id: \.self) { tag in
-                                    Text(tag.rawValue)
+                                    Text(tag.name)
                                         .font(.caption)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
@@ -371,7 +381,7 @@ struct ImportPreviewSheet: View {
                 }
 
                 VStack(spacing: 12) {
-                    Text(collection.title)
+                    Text(collection.name)
                         .font(.title)
                         .fontWeight(.bold)
                         .multilineTextAlignment(.center)

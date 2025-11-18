@@ -792,6 +792,49 @@ actor RecipeRepository {
         }
     }
 
+    /// Migrate all public recipes to the public database
+    /// This ensures that recipes marked as public are actually accessible to others
+    func migratePublicRecipesToPublicDatabase() async {
+        let migrationKey = "hasMigratedPublicRecipesToPublicDB_v1"
+        
+        // Check if already migrated
+        if UserDefaults.standard.bool(forKey: migrationKey) {
+            logger.info("✅ Public recipes already migrated to PUBLIC database. Skipping.")
+            return
+        }
+        
+        logger.info("🔄 Starting migration of public recipes to PUBLIC database...")
+        
+        do {
+            // 1. Fetch all local recipes
+            let allRecipes = try await fetchAll()
+            
+            // 2. Filter for public recipes
+            let publicRecipes = allRecipes.filter { $0.visibility == .publicRecipe }
+            logger.info("Found \(publicRecipes.count) public recipes to check")
+            
+            // 3. Sync each one to public database
+            var successCount = 0
+            for recipe in publicRecipes {
+                // Skip if no owner ID (can't sync)
+                guard recipe.ownerId != nil else { continue }
+                
+                // Trigger sync to public DB
+                await syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+                successCount += 1
+                
+                // Small delay to avoid rate limiting
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+            }
+            
+            // Mark migration as complete
+            UserDefaults.standard.set(true, forKey: migrationKey)
+            logger.info("✅ Migration complete: Synced \(successCount) public recipes to PUBLIC database")
+        } catch {
+            logger.error("❌ Migration failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Check if a similar recipe already exists
     /// Uses title and ingredient count as heuristics to detect duplicates
     func hasSimilarRecipe(title: String, ownerId: UUID, ingredientCount: Int) async throws -> Bool {

@@ -23,6 +23,11 @@ struct CollectionDetailView: View {
     @State private var recipeImages: [URL?] = []  // For recipe grid display
     @Environment(\.dismiss) private var dismiss
 
+    // External sharing
+    @State private var showShareSheet = false
+    @State private var shareLink: ShareableLink?
+    @State private var isGeneratingShareLink = false
+
     enum ActiveSheet: Identifiable {
         case edit
         case addRecipes
@@ -60,59 +65,7 @@ struct CollectionDetailView: View {
     var body: some View {
         List {
             headerSection
-
-            // Recipes
-            if isLoading {
-                Section {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                }
-            } else if filteredRecipes.isEmpty {
-                Section {
-                    VStack(spacing: 12) {
-                        Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-
-                        Text(searchText.isEmpty ? "No recipes in this collection" : "No recipes found")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-
-                        if searchText.isEmpty {
-                            Text("Add recipes from the recipe detail view")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
-                }
-                .listRowBackground(Color.clear)
-            } else {
-                Section {
-                    ForEach(filteredRecipes) { recipe in
-                        NavigationLink {
-                            RecipeDetailView(recipe: recipe, dependencies: dependencies)
-                        } label: {
-                            RecipeRowView(recipe: recipe, dependencies: dependencies)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                Task {
-                                    await removeRecipe(recipe)
-                                }
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                            .tint(.red)
-                        }
-                    }
-                }
-            }
+            recipesSection
         }
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -150,6 +103,30 @@ struct CollectionDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             Task {
                 await loadRecipes()
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            if let link = shareLink {
+                ShareSheet(items: [link])
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // Only allow sharing if collection is public
+                if collection.visibility == .publicRecipe {
+                    Button {
+                        Task {
+                            await generateShareLink()
+                        }
+                    } label: {
+                        if isGeneratingShareLink {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(isGeneratingShareLink)
+                }
             }
         }
     }
@@ -271,11 +248,83 @@ struct CollectionDetailView: View {
         } catch {
             AppLogger.general.error("❌ Failed to remove recipe: \(error.localizedDescription)")
             errorMessage = "Failed to remove recipe: \(error.localizedDescription)"
+        }
+    }
+
+    private func generateShareLink() async {
+        isGeneratingShareLink = true
+        defer { isGeneratingShareLink = false }
+
+        do {
+            let link = try await dependencies.externalShareService.shareCollection(
+                collection,
+                recipeIds: collection.recipeIds
+            )
+            shareLink = link
+            showShareSheet = true
+        } catch {
+            AppLogger.general.error("Failed to generate collection share link: \(error.localizedDescription)")
+            errorMessage = "Failed to generate share link: \(error.localizedDescription)"
             showError = true
         }
     }
 
     // MARK: - View Components
+
+    @ViewBuilder
+    private var recipesSection: some View {
+        if isLoading {
+            Section {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            }
+        } else if filteredRecipes.isEmpty {
+            Section {
+                VStack(spacing: 12) {
+                    Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
+                        .font(.system(size: 40))
+                        .foregroundColor(.secondary)
+
+                    Text(searchText.isEmpty ? "No recipes in this collection" : "No recipes found")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    if searchText.isEmpty {
+                        Text("Add recipes from the recipe detail view")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            }
+            .listRowBackground(Color.clear)
+        } else {
+            Section {
+                ForEach(filteredRecipes) { recipe in
+                    NavigationLink {
+                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                    } label: {
+                        RecipeRowView(recipe: recipe, dependencies: dependencies)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            Task {
+                                await removeRecipe(recipe)
+                            }
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                        .tint(.red)
+                    }
+                }
+            }
+        }
+    }
 
     private var headerSection: some View {
         Section {

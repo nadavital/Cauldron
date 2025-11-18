@@ -165,11 +165,7 @@ actor SharingService {
         return personalCopy
     }
     
-    /// Remove a shared recipe from the list
-    func removeSharedRecipe(_ sharedRecipe: SharedRecipe) async throws {
-        try await sharingRepository.deleteSharedRecipe(id: sharedRecipe.id)
-        logger.info("Removed shared recipe '\(sharedRecipe.recipe.title)'")
-    }
+
     
     /// Get a specific shared recipe by ID
     func getSharedRecipe(id: UUID) async throws -> SharedRecipe? {

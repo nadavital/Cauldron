@@ -37,14 +37,13 @@ enum ExternalShareError: LocalizedError {
 }
 
 /// Service for creating and importing external share links
-actor ExternalShareService {
+@MainActor
+final class ExternalShareService: Sendable {
     private let logger = Logger(subsystem: "com.cauldron", category: "ExternalShareService")
 
     // Backend API configuration
-    // TODO: Update this URL after deploying to Vercel
-    // After running 'vercel --prod', replace with your actual Vercel URL
-    private let baseURL = "https://your-project.vercel.app/api"
-    // Example: "https://cauldron-api.vercel.app/api"
+    // Firebase Functions URL
+    private let baseURL = "https://us-central1-cauldron-f900a.cloudfunctions.net"
 
     private let session: URLSession
 
@@ -74,16 +73,14 @@ actor ExternalShareService {
             imageURL: recipe.imageURL?.absoluteString,
             ingredientCount: recipe.ingredients.count,
             totalMinutes: recipe.totalMinutes,
-            tags: recipe.tags.map { $0.rawValue }
+            tags: recipe.tags.map { $0.name }
         )
 
         // Send to backend
-        let response = try await createShare(endpoint: "/share/recipe", metadata: metadata)
+        let response = try await createShare(endpoint: "/shareRecipe", metadata: metadata)
 
         // Create preview text
-        let ingredientText = "\(recipe.ingredients.count) ingredients"
-        let timeText = recipe.totalMinutes.map { "\($0) min" } ?? "Quick"
-        let previewText = "Check out my recipe for \(recipe.title) on Cauldron! \(ingredientText) • \(timeText)"
+        let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
 
         // Load image if available
         var image: UIImage?
@@ -114,16 +111,21 @@ actor ExternalShareService {
         )
 
         // Send to backend
-        let response = try await createShare(endpoint: "/share/profile", metadata: metadata)
+        let response = try await createShare(endpoint: "/shareProfile", metadata: metadata)
 
         // Create preview text
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
 
-        // Load profile image if available
+        // Load profile image if available, otherwise use App Icon
         var image: UIImage?
         if let imageURL = user.profileImageURL {
             image = try? await loadImage(from: imageURL)
+        }
+        
+        // Fallback to Cauldron Icon if no profile image
+        if image == nil {
+            image = UIImage(named: "CauldronIcon")
         }
 
         logger.info("✅ Share link generated: \(response.shareUrl)")
@@ -137,10 +139,11 @@ actor ExternalShareService {
 
     /// Generate a shareable link for a collection
     func shareCollection(_ collection: Collection, recipeIds: [UUID]) async throws -> ShareableLink {
-        logger.info("📤 Generating share link for collection: \(collection.title)")
+        logger.info("📤 Generating share link for collection: \(collection.name)")
 
         // Validate collection is public
-        guard collection.visibility == .publicCollection else {
+        // Note: Collection uses RecipeVisibility enum
+        guard collection.visibility == .publicRecipe else {
             logger.warning("⚠️ Attempted to share private collection")
             throw ExternalShareError.notPublic
         }
@@ -148,24 +151,29 @@ actor ExternalShareService {
         // Prepare metadata
         let metadata = ShareMetadata.CollectionShare(
             collectionId: collection.id.uuidString,
-            ownerId: collection.ownerId.uuidString,
-            title: collection.title,
+            ownerId: collection.userId.uuidString,
+            title: collection.name,
             coverImageURL: collection.coverImageURL?.absoluteString,
             recipeCount: recipeIds.count,
             recipeIds: recipeIds.map { $0.uuidString }
         )
 
         // Send to backend
-        let response = try await createShare(endpoint: "/share/collection", metadata: metadata)
+        let response = try await createShare(endpoint: "/shareCollection", metadata: metadata)
 
         // Create preview text
         let recipeText = recipeIds.count == 1 ? "1 recipe" : "\(recipeIds.count) recipes"
-        let previewText = "Check out my \(collection.title) collection on Cauldron! \(recipeText)"
+        let previewText = "Check out my \(collection.name) collection on Cauldron! \(recipeText)"
 
         // Load cover image if available
         var image: UIImage?
         if let imageURL = collection.coverImageURL {
             image = try? await loadImage(from: imageURL)
+        }
+        
+        // Fallback to Cauldron Icon if no cover image
+        if image == nil {
+            image = UIImage(named: "CauldronIcon")
         }
 
         logger.info("✅ Share link generated: \(response.shareUrl)")
@@ -184,22 +192,36 @@ actor ExternalShareService {
         logger.info("📥 Importing from share URL: \(url.absoluteString)")
 
         // Parse URL to determine type and shareId
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
-              let pathComponents = components.path.split(separator: "/") as? [String],
-              pathComponents.count >= 2 else {
+        // Supports:
+        // 1. Web: https://cauldron-f900a.web.app/recipe/123
+        // 2. Deep Link: cauldron://import/recipe/123
+        
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+        
+        // Expected format: ["recipe", "123"] or ["import", "recipe", "123"]
+        var type: String?
+        var shareId: String?
+        
+        if pathComponents.count >= 2 {
+            // Check for /recipe/123 format
+            if ["recipe", "profile", "collection"].contains(pathComponents[pathComponents.count - 2]) {
+                type = pathComponents[pathComponents.count - 2]
+                shareId = pathComponents[pathComponents.count - 1]
+            }
+        }
+        
+        guard let finalType = type, let finalShareId = shareId else {
+            logger.error("❌ Invalid URL format: \(url.absoluteString)")
             throw ExternalShareError.invalidResponse
         }
 
-        let type = pathComponents[pathComponents.count - 2]
-        let shareId = pathComponents[pathComponents.count - 1]
-
-        logger.info("📋 Importing \(type) with ID: \(shareId)")
+        logger.info("📋 Importing \(finalType) with ID: \(finalShareId)")
 
         // Fetch data from backend
-        let shareData = try await fetchShareData(type: type, shareId: shareId)
+        let shareData = try await fetchShareData(type: finalType, shareId: finalShareId)
 
         // Convert to ImportedContent based on type
-        switch type {
+        switch finalType {
         case "recipe":
             return try await convertToRecipe(shareData)
         case "profile":
@@ -239,18 +261,27 @@ actor ExternalShareService {
     }
 
     private func fetchShareData(type: String, shareId: String) async throws -> ShareData {
-        guard let url = URL(string: "\(baseURL)/data/\(type)/\(shareId)") else {
+        guard let url = URL(string: "\(baseURL)/api/data/\(type)/\(shareId)") else {
             throw ExternalShareError.invalidResponse
         }
 
+        print("🌐 ExternalShareService: Fetching data from \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
         do {
             let (data, response) = try await session.data(for: request)
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ ExternalShareService: Response is not HTTPURLResponse")
+                throw ExternalShareError.invalidResponse
+            }
+
+            print("🌐 ExternalShareService: Status Code: \(httpResponse.statusCode)")
+
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? "No body"
+                print("❌ ExternalShareService: Invalid status code. Body: \(body)")
                 throw ExternalShareError.invalidResponse
             }
 
@@ -281,7 +312,7 @@ actor ExternalShareService {
             steps: [],
             yields: "",
             totalMinutes: shareData.data.totalMinutes,
-            tags: shareData.data.tags?.compactMap { Tag(rawValue: $0) } ?? [],
+            tags: shareData.data.tags?.compactMap { Tag(name: $0) } ?? [],
             nutrition: nil,
             sourceURL: nil,
             sourceTitle: nil,
@@ -333,13 +364,18 @@ actor ExternalShareService {
 
         let collection = Collection(
             id: UUID(uuidString: collectionId) ?? UUID(),
-            title: title,
-            ownerId: UUID(uuidString: ownerId) ?? UUID(),
-            visibility: .publicCollection,
+            name: title,
+            description: nil,
+            userId: UUID(uuidString: ownerId) ?? UUID(),
+            recipeIds: [], // We don't have the full list from share data, will fetch
+            visibility: .publicRecipe,
+            emoji: nil,
+            color: nil,
+            coverImageType: .customImage, // Assume custom image if URL present, or fallback
             coverImageURL: shareData.data.coverImageURL.flatMap { URL(string: $0) },
+            cloudCoverImageRecordName: nil,
+            coverImageModifiedAt: nil,
             cloudRecordName: nil,
-            cloudImageRecordName: nil,
-            imageModifiedAt: nil,
             createdAt: Date(),
             updatedAt: Date()
         )

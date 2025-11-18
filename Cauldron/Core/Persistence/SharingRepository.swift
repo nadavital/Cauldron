@@ -127,26 +127,7 @@ actor SharingRepository {
         }
     }
     
-    /// Delete a shared recipe
-    func deleteSharedRecipe(id: UUID) async throws {
-        let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<SharedRecipeModel>(
-            predicate: #Predicate { $0.id == id }
-        )
-        let models = try context.fetch(descriptor)
-        
-        if let model = models.first {
-            context.delete(model)
-            try context.save()
-            logger.info("Deleted shared recipe with id: \(id)")
-        }
-    }
+
     
-    /// Delete all shared recipes
-    func deleteAllSharedRecipes() async throws {
-        let context = ModelContext(modelContainer)
-        try context.delete(model: SharedRecipeModel.self)
-        try context.save()
-        logger.info("Deleted all shared recipes")
-    }
+
 }

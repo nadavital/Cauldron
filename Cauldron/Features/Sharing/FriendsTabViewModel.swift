@@ -11,8 +11,8 @@ import Combine
 import os
 
 @MainActor
-class SharingTabViewModel: ObservableObject {
-    static let shared = SharingTabViewModel()
+class FriendsTabViewModel: ObservableObject {
+    static let shared = FriendsTabViewModel()
 
     @Published var sharedRecipes: [SharedRecipe] = []
     @Published var sharedCollections: [Collection] = []
@@ -34,7 +34,7 @@ class SharingTabViewModel: ObservableObject {
 
     func loadSharedRecipes() async {
         guard let dependencies = dependencies else {
-            AppLogger.general.warning("SharingTabViewModel not configured with dependencies")
+            AppLogger.general.warning("FriendsTabViewModel not configured with dependencies")
             return
         }
 
@@ -98,7 +98,7 @@ class SharingTabViewModel: ObservableObject {
         do {
             let copiedRecipe = try await dependencies.sharingService.copySharedRecipeToPersonal(sharedRecipe)
             AppLogger.general.info("Copied shared recipe to personal collection: \(copiedRecipe.title)")
-            // Toast notification is shown in SharedRecipeDetailView
+            // Toast notification is shown in RecipeDetailView
         } catch {
             AppLogger.general.error("Failed to copy recipe: \(error.localizedDescription)")
             alertMessage = "Failed to copy recipe: \(error.localizedDescription)"
@@ -106,16 +106,5 @@ class SharingTabViewModel: ObservableObject {
         }
     }
     
-    func removeSharedRecipe(_ sharedRecipe: SharedRecipe) async {
-        guard let dependencies = dependencies else { return }
-        do {
-            try await dependencies.sharingService.removeSharedRecipe(sharedRecipe)
-            await loadSharedRecipes() // Refresh the list
-            AppLogger.general.info("Removed shared recipe")
-        } catch {
-            AppLogger.general.error("Failed to remove shared recipe: \(error.localizedDescription)")
-            alertMessage = "Failed to remove shared recipe: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
+
 }

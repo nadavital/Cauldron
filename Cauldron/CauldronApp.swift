@@ -341,11 +341,13 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
             if isExternalShareURL(url) {
                 AppLogger.general.info("🟣 SceneDelegate: Detected external share URL, processing...")
 
-                await MainActor.run {
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("OpenExternalShare"),
-                        object: url
-                    )
+                Task {
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("OpenExternalShare"),
+                            object: url
+                        )
+                    }
                 }
                 return
             }
@@ -389,6 +391,13 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
         // Check for Firebase hosting domain pattern
         // Matches: *.web.app, *.firebaseapp.com, or custom domain like cauldron.app
         guard let host = url.host else { return false }
+        
+        // Check for Firebase domains
+        if host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app" {
+            // Continue to check path
+        } else {
+            return false
+        }
 
         // Check if path matches share URL pattern: /recipe/*, /profile/*, /collection/*
         let pathComponents = url.pathComponents

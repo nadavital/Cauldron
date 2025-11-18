@@ -218,21 +218,17 @@ struct SharedCollectionDetailView: View {
 
             ForEach(recipes) { recipe in
                 NavigationLink {
-                    // Navigate to SharedRecipeDetailView for consistency
-                    // Since these are recipes from a shared collection
+                    // Navigate to RecipeDetailView
+                    // Since these are recipes from a shared collection, we provide shared context
                     if let sharedRecipe = createSharedRecipe(from: recipe) {
-                        SharedRecipeDetailView(
-                            sharedRecipe: sharedRecipe,
+                        RecipeDetailView(
+                            recipe: recipe,
                             dependencies: dependencies,
-                            onCopy: {
-                                await copyRecipe(recipe)
-                            },
-                            onRemove: {
-                                // Not applicable for collection recipes
-                            }
+                            sharedBy: sharedRecipe.sharedBy,
+                            sharedAt: sharedRecipe.sharedAt
                         )
                     } else {
-                        // Fallback to regular recipe detail if we can't create SharedRecipe
+                        // Fallback to regular recipe detail
                         RecipeDetailView(recipe: recipe, dependencies: dependencies)
                     }
                 } label: {

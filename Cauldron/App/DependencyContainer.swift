@@ -110,7 +110,9 @@ class DependencyContainer: ObservableObject {
             cloudKitService: cloudKitService
         )
 
-        self.externalShareService = ExternalShareService()
+        self.externalShareService = MainActor.assumeIsolated {
+            ExternalShareService()
+        }
 
         self.recipeSyncService = RecipeSyncService(
             cloudKitService: cloudKitService,

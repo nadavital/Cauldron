@@ -529,26 +529,45 @@ actor CloudKitService {
     
     // MARK: - Recipes
     
-    /// Save recipe to CloudKit (always uses custom zone for sharing support)
-    /// Note: ALL recipes are saved to iCloud regardless of visibility.
-    /// Visibility controls social sharing/discovery, not cloud storage.
+    /// Save recipe to CloudKit
+    /// Public recipes go to PUBLIC database (for sharing/discovery)
+    /// Private recipes go to PRIVATE database (for user's eyes only)
     func saveRecipe(_ recipe: Recipe, ownerId: UUID) async throws {
         logger.info("📤 Starting CloudKit save for recipe: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
 
-        // Ensure custom zone exists (required for sharing and proper sync)
-        let zone = try await ensureCustomZone()
-        logger.info("Using custom zone: \(zone.zoneID.zoneName)")
-
-        // Always use custom zone for recipes to support sharing
-        let recordID: CKRecord.ID
-        if let cloudRecordName = recipe.cloudRecordName {
-            recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zone.zoneID)
+        // Determine target database and zone based on visibility
+        let db: CKDatabase
+        let zoneID: CKRecordZone.ID?
+        
+        if recipe.visibility == .publicRecipe {
+            // Public recipes go to PUBLIC database in default zone
+            db = try getPublicDatabase()
+            zoneID = nil // Public DB doesn't support custom zones in the same way for this use case
+            logger.info("Target: PUBLIC database (Default Zone)")
         } else {
-            recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zone.zoneID)
+            // Private recipes go to PRIVATE database in custom zone (for sharing support if needed later)
+            db = try getPrivateDatabase()
+            let zone = try await ensureCustomZone()
+            zoneID = zone.zoneID
+            logger.info("Target: PRIVATE database (Zone: \(zone.zoneID.zoneName))")
         }
 
-        // All recipes save to private database (visibility controls who can query/share them)
-        let db = try getPrivateDatabase()
+        // Create record ID
+        let recordID: CKRecord.ID
+        if let cloudRecordName = recipe.cloudRecordName {
+            if let zoneID = zoneID {
+                recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zoneID)
+            } else {
+                recordID = CKRecord.ID(recordName: cloudRecordName)
+            }
+        } else {
+            if let zoneID = zoneID {
+                recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zoneID)
+            } else {
+                // For public records, use a consistent ID format to avoid duplicates if re-saved
+                recordID = CKRecord.ID(recordName: recipe.id.uuidString)
+            }
+        }
 
         // Try to fetch existing record first to update it, otherwise create new one
         let record: CKRecord
@@ -569,7 +588,7 @@ actor CloudKitService {
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
         record["title"] = recipe.title as CKRecordValue
-        record["visibility"] = recipe.visibility.rawValue as CKRecordValue  // Controls social sharing, not storage
+        record["visibility"] = recipe.visibility.rawValue as CKRecordValue
 
         // Encode complex data as JSON
         let encoder = JSONEncoder()
@@ -608,11 +627,11 @@ actor CloudKitService {
         // We preserve existing imageAsset and imageModifiedAt if they exist
         // This allows recipe data sync to happen independently from image sync
 
-        logger.info("Saving recipe to CloudKit private database...")
+        logger.info("Saving recipe to CloudKit...")
         do {
             let savedRecord = try await db.save(record)
             logger.info("✅ Successfully saved recipe to CloudKit: \(recipe.title)")
-            logger.info("Record ID: \(savedRecord.recordID.recordName), Zone: \(savedRecord.recordID.zoneID.zoneName)")
+            logger.info("Record ID: \(savedRecord.recordID.recordName)")
         } catch let error as CKError {
             logger.error("❌ CloudKit save failed: \(error.localizedDescription)")
             logger.error("Error code: \(error.code.rawValue), User info: \(error.userInfo)")
@@ -660,6 +679,56 @@ actor CloudKitService {
         
         return recipes
     }
+
+    /// Fetch a single public recipe by ID
+    func fetchPublicRecipe(id: UUID) async throws -> Recipe? {
+        logger.info("🔍 Fetching public recipe with ID: \(id.uuidString)")
+        
+        let db = try getPublicDatabase()
+        
+        // 1. Try fetching directly by Record ID (fastest and most reliable)
+        // We use the UUID string as the record name in copyRecipeToPublic
+        let recordID = CKRecord.ID(recordName: id.uuidString)
+        
+        do {
+            let record = try await db.record(for: recordID)
+            logger.info("✅ Found public recipe by Record ID: \(record.recordID.recordName)")
+            return try? recipeFromRecord(record)
+        } catch let error as CKError {
+            if error.code == .unknownItem {
+                logger.info("ℹ️ Record not found by ID, trying query fallback...")
+            } else {
+                logger.error("❌ Error fetching by ID: \(error.localizedDescription)")
+                // Don't throw yet, try query
+            }
+        } catch {
+            logger.error("❌ Unexpected error fetching by ID: \(error.localizedDescription)")
+        }
+        
+        // 2. Fallback: Query by recipeId field (slower, depends on indexing)
+        let predicate = NSPredicate(format: "recipeId == %@", id.uuidString)
+        let query = CKQuery(recordType: recipeRecordType, predicate: predicate)
+        
+        do {
+            let results = try await db.records(matching: query, resultsLimit: 1)
+            
+            for (_, result) in results.matchResults {
+                switch result {
+                case .success(let record):
+                    logger.info("✅ Found public recipe by Query: \(record.recordID.recordName)")
+                    return try? recipeFromRecord(record)
+                case .failure(let error):
+                    logger.error("❌ Error fetching record from query: \(error.localizedDescription)")
+                }
+            }
+            
+            logger.warning("⚠️ No public recipe found with ID: \(id.uuidString)")
+            return nil
+        } catch {
+            logger.error("❌ Query failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
     
     /// Delete recipe from CloudKit
     func deleteRecipe(_ recipe: Recipe) async throws {
@@ -669,11 +738,12 @@ actor CloudKitService {
         }
 
         let recordID = CKRecord.ID(recordName: cloudRecordName)
-        let database = try recipe.visibility == .publicRecipe ? getPublicDatabase() : getPrivateDatabase()
+        // Always delete from private database (where the master copy lives)
+        let database = try getPrivateDatabase()
 
         do {
             try await database.deleteRecord(withID: recordID)
-            logger.info("Deleted recipe from CloudKit: \(recipe.title)")
+            logger.info("Deleted recipe from CloudKit private database: \(recipe.title)")
         } catch let error as CKError {
             if error.code == .unknownItem {
                 // Recipe doesn't exist in CloudKit - that's okay
@@ -683,6 +753,8 @@ actor CloudKitService {
             throw error
         }
     }
+    
+    
 
     /// Sync all recipes for a user - fetch from CloudKit and return for local merge
     func syncUserRecipes(ownerId: UUID) async throws -> [Recipe] {
@@ -774,6 +846,12 @@ actor CloudKitService {
         // Cloud image metadata (optional)
         let cloudImageRecordName: String? = (record["imageAsset"] as? CKAsset) != nil ? record.recordID.recordName : nil
         let imageModifiedAt = record["imageModifiedAt"] as? Date
+        
+        // Extract image URL from asset if available
+        var imageURL: URL?
+        if let asset = record["imageAsset"] as? CKAsset, let fileURL = asset.fileURL {
+            imageURL = fileURL
+        }
 
         // Attribution fields (optional)
         let originalRecipeId: UUID? = {
@@ -799,6 +877,12 @@ actor CloudKitService {
             yields: yields,
             totalMinutes: totalMinutes,
             tags: tags,
+            nutrition: nil,
+            sourceURL: nil,
+            sourceTitle: nil,
+            notes: nil,
+            imageURL: imageURL,
+            isFavorite: false,
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: record.recordID.recordName,
