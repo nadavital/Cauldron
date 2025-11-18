@@ -10,4 +10,4 @@ functions/.env
 functions/tsconfig.tsbuildinfo
 
 # Hosting
-public/
+
