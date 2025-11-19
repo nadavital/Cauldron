@@ -201,37 +201,75 @@ struct SearchTabView: View {
     
     private var peopleSearchView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if viewModel.isLoadingPeople {
+            if searchText.isEmpty {
+                // Show friends list if available, otherwise show empty state
+                if !viewModel.friends.isEmpty {
+                    Text("Your Friends")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 8)
+                    
+                    ForEach(viewModel.friends) { user in
+                        NavigationLink {
+                            UserProfileView(user: user, dependencies: viewModel.dependencies)
+                        } label: {
+                            UserSearchRowView(
+                                user: user,
+                                viewModel: viewModel,
+                                currentUserId: viewModel.currentUserId
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    VStack(spacing: 16) {
+                        Image(systemName: "person.2")
+                            .font(.system(size: 48))
+                            .foregroundColor(.secondary)
+                        
+                        Text("Search for People")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            
+                        Text("Find friends to share recipes with")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                }
+            } else if viewModel.isLoadingPeople && viewModel.peopleSearchResults.isEmpty {
                 ProgressView("Searching...")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
             } else if viewModel.peopleSearchResults.isEmpty {
                 VStack(spacing: 16) {
-                    Image(systemName: "person.2")
+                    Image(systemName: "person.2.slash")
                         .font(.system(size: 48))
                         .foregroundColor(.secondary)
-                    Text(searchText.isEmpty ? "No users found" : "No matching users")
+                    
+                    Text("No matching users")
                         .font(.headline)
                         .foregroundColor(.secondary)
-                    if searchText.isEmpty {
-                        #if DEBUG
-                        Text("Create demo users from the Sharing tab menu")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                        #endif
-                    } else {
-                        Text("Try searching for a different name")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+                        
+                    Text("Try searching for a different name")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
             } else {
-                Text("\(viewModel.peopleSearchResults.count) people found")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
+                HStack {
+                    Text("\(viewModel.peopleSearchResults.count) people found")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    if viewModel.isLoadingPeople {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .padding(.leading, 8)
+                    }
+                }
                 
                 ForEach(viewModel.peopleSearchResults) { user in
                     NavigationLink {

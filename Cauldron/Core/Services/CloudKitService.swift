@@ -496,6 +496,30 @@ actor CloudKitService {
         return nil
     }
 
+    /// Fetch multiple users by their userIds (UUID)
+    func fetchUsers(byUserIds userIds: [UUID]) async throws -> [User] {
+        guard !userIds.isEmpty else { return [] }
+        
+        let db = try getPublicDatabase()
+        let userIdStrings = userIds.map { $0.uuidString }
+        
+        // Use IN predicate to fetch all users at once
+        let predicate = NSPredicate(format: "userId IN %@", userIdStrings)
+        let query = CKQuery(recordType: userRecordType, predicate: predicate)
+        
+        let results = try await db.records(matching: query, resultsLimit: userIds.count)
+        
+        var users: [User] = []
+        for (_, result) in results.matchResults {
+            if let record = try? result.get(),
+               let user = try? userFromRecord(record) {
+                users.append(user)
+            }
+        }
+        
+        return users
+    }
+
     private func userFromRecord(_ record: CKRecord) throws -> User {
         guard let userIdString = record["userId"] as? String,
               let userId = UUID(uuidString: userIdString),
