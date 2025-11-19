@@ -15,6 +15,7 @@ struct GroceriesView: View {
     @State private var showingAddItem = false
     @State private var viewMode: GroceryGroupingType = .recipe  // Default to grouped by recipe
     @State private var collapsedGroups: Set<String> = []  // Track which groups are collapsed
+    @State private var isAIAvailable = false
 
     init(dependencies: DependencyContainer) {
         _viewModel = StateObject(wrappedValue: GroceriesViewModel(dependencies: dependencies))
@@ -37,24 +38,29 @@ struct GroceriesView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Picker("View Mode", selection: $viewMode) {
-                            Label("Grouped by Recipe", systemImage: "list.bullet.rectangle")
+                        Picker("Sort By", selection: $viewMode) {
+                            Label("Sorted by Recipe", systemImage: "list.bullet.rectangle")
                                 .tag(GroceryGroupingType.recipe)
-                            Label("Ungrouped", systemImage: "list.bullet")
+                            if isAIAvailable {
+                                Label("AI Sort", systemImage: "apple.intelligence")
+                                    .tag(GroceryGroupingType.aiSort)
+                            }
+                            Label("Unsorted", systemImage: "list.bullet")
                                 .tag(GroceryGroupingType.none)
                         }
-
-                        if !viewModel.items.isEmpty {
-                            Divider()
-
-                            Button(role: .destructive) {
-                                Task { await viewModel.deleteCheckedItems() }
-                            } label: {
-                                Label("Delete Checked Items", systemImage: "trash")
-                            }
-                        }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                }
+
+                if viewModel.hasCheckedItems {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(role: .destructive) {
+                            Task { await viewModel.deleteCheckedItems() }
+                        } label: {
+                            Label("Clear Checked", systemImage: "checkmark.circle.badge.xmark")
+                                .labelStyle(.iconOnly)
+                        }
                     }
                 }
 
@@ -68,14 +74,18 @@ struct GroceriesView: View {
             }
             .sheet(isPresented: $showingAddItem) {
                 AddGroceryItemView(dependencies: viewModel.dependencies, onAdd: {
-                    await viewModel.loadItems()
+                    await viewModel.loadItems(viewMode: viewMode)
                 })
             }
             .task {
-                await viewModel.loadItems()
+                await viewModel.loadItems(viewMode: viewMode)
+                isAIAvailable = await viewModel.checkAIAvailability()
             }
             .refreshable {
-                await viewModel.loadItems()
+                await viewModel.loadItems(viewMode: viewMode)
+            }
+            .onChange(of: viewMode) { _, newMode in
+                viewModel.updateGroups(for: newMode)
             }
         }
     }
@@ -114,6 +124,8 @@ struct GroceriesView: View {
                     if !collapsedGroups.contains(group.id) {
                         ForEach(group.items) { item in
                             itemRow(item: item)
+                                .id(item.id)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
                         }
                         .onDelete { offsets in
                             deleteItemsFromGroup(group: group, at: offsets)
@@ -165,6 +177,7 @@ struct GroceriesView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.groups.map { $0.id })
     }
 
     // MARK: - Ungrouped View
@@ -173,9 +186,12 @@ struct GroceriesView: View {
         List {
             ForEach(viewModel.sortedItems) { item in
                 itemRow(item: item)
+                    .id(item.id)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
             .onDelete(perform: deleteItems)
         }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.sortedItems.map { $0.id })
     }
 
     // MARK: - Item Row
@@ -309,33 +325,95 @@ class GroceriesViewModel: ObservableObject {
     @Published var sortedItems: [GroceryItemDisplay] = []
 
     let dependencies: DependencyContainer
+    private var currentViewMode: GroceryGroupingType = .recipe
+
+    var hasCheckedItems: Bool {
+        items.contains { $0.isChecked }
+    }
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
 
-    func loadItems() async {
+    func loadItems(viewMode: GroceryGroupingType? = nil, animated: Bool = false) async {
+        if let viewMode = viewMode {
+            currentViewMode = viewMode
+        }
         do {
             items = try await dependencies.groceryRepository.fetchAllItemsForDisplay()
-            updateGroups()
-            updateSortedItems()
+
+            if animated {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    updateSortedItems()
+                    updateGroups(for: currentViewMode)
+                }
+            } else {
+                updateSortedItems()
+                updateGroups(for: currentViewMode)
+            }
+
+            // Categorize uncategorized items in background
+            await categorizeUncategorizedItems()
         } catch {
             AppLogger.persistence.error("Failed to load grocery items: \(error.localizedDescription)")
         }
     }
 
-    private func updateGroups() {
-        groups = items.groupByRecipe()
+    /// Categorize items that don't have an AI category yet
+    private func categorizeUncategorizedItems() async {
+        guard await dependencies.groceryCategorizer.isAvailable else {
+            return
+        }
+
+        do {
+            let uncategorized = try await dependencies.groceryRepository.fetchUncategorizedItems()
+            guard !uncategorized.isEmpty else { return }
+
+            // Categorize in background
+            Task.detached { [weak self] in
+                guard let self = self else { return }
+                do {
+                    let results = try await self.dependencies.groceryCategorizer.categorizeItems(uncategorized)
+                    for (itemId, category) in results {
+                        try await self.dependencies.groceryRepository.updateCategory(itemId: itemId, category: category)
+                    }
+                    // Reload items to show new categories
+                    await MainActor.run {
+                        Task { await self.loadItems() }
+                    }
+                } catch {
+                    AppLogger.persistence.error("Failed to categorize items: \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            AppLogger.persistence.error("Failed to fetch uncategorized items: \(error.localizedDescription)")
+        }
+    }
+
+    func updateGroups(for mode: GroceryGroupingType) {
+        currentViewMode = mode
+        switch mode {
+        case .recipe:
+            groups = items.groupByRecipe()
+        case .aiSort:
+            groups = items.groupByAICategory()
+        case .none:
+            groups = []
+        }
     }
 
     private func updateSortedItems() {
         sortedItems = items.sortForUngroupedView()
     }
 
+    func checkAIAvailability() async -> Bool {
+        return await dependencies.groceryCategorizer.isAvailable
+    }
+
     func toggleItem(id: UUID) async {
         do {
             try await dependencies.groceryRepository.toggleItem(id: id)
-            await loadItems()
+            await loadItems(animated: true)
         } catch {
             AppLogger.persistence.error("Failed to toggle item: \(error.localizedDescription)")
         }
@@ -358,7 +436,7 @@ class GroceriesViewModel: ObservableObject {
                 // For recipe items, use the bulk operation
                 try await dependencies.groceryRepository.setRecipeChecked(recipeID: recipeID, isChecked: !allChecked)
             }
-            await loadItems()
+            await loadItems(animated: true)
         } catch {
             AppLogger.persistence.error("Failed to toggle recipe: \(error.localizedDescription)")
         }

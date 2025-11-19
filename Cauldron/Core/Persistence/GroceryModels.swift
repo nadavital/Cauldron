@@ -13,7 +13,7 @@ import SwiftData
 /// Types of grouping available for grocery items
 enum GroceryGroupingType: String, CaseIterable {
     case recipe = "Recipe"
-    case aisle = "Aisle"      // For future implementation
+    case aiSort = "AI Sort"
     case none = "None"         // Ungrouped view
 }
 
@@ -44,6 +44,7 @@ struct GroceryItemDisplay: Identifiable {
     let recipeID: String?
     let recipeName: String?
     let addedOrder: Int
+    let aiCategory: String?
 }
 
 /// SwiftData persistence model for Grocery items
@@ -59,6 +60,9 @@ final class GroceryItemModel {
     var recipeName: String?     // Display name of the recipe
     var addedOrder: Int = 0     // Order in which items were added (for sorting)
 
+    // AI categorization
+    var aiCategory: String?     // AI-generated category (e.g., "Produce", "Dairy")
+
     // Relationship to grocery list
     var list: GroceryListModel?
 
@@ -69,7 +73,8 @@ final class GroceryItemModel {
         isChecked: Bool = false,
         recipeID: String? = nil,
         recipeName: String? = nil,
-        addedOrder: Int = 0
+        addedOrder: Int = 0,
+        aiCategory: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -78,6 +83,7 @@ final class GroceryItemModel {
         self.recipeID = recipeID
         self.recipeName = recipeName
         self.addedOrder = addedOrder
+        self.aiCategory = aiCategory
     }
     
     /// Create from name and optional quantity
@@ -190,6 +196,75 @@ extension Array where Element == GroceryItemDisplay {
             return item1.addedOrder < item2.addedOrder
         }
     }
+
+    /// Group items by AI-generated category
+    func groupByAICategory() -> [GroceryGroup] {
+        // Standard category order for typical shopping flow
+        let categoryOrder = [
+            "Uncategorized",
+            "Produce",
+            "Meat & Seafood",
+            "Deli",
+            "Dairy & Eggs",
+            "Cheese",
+            "Bakery",
+            "Frozen",
+            "Canned & Jarred",
+            "Pasta & Grains",
+            "Baking",
+            "Spices & Seasonings",
+            "Condiments & Sauces",
+            "Oils & Vinegars",
+            "International",
+            "Beverages",
+            "Snacks",
+            "Breakfast & Cereal",
+            "Health & Beauty",
+            "Household & Cleaning",
+            "Pet Supplies"
+        ]
+
+        var groups: [String: [GroceryItemDisplay]] = [:]
+
+        for item in self {
+            let category = item.aiCategory ?? "Uncategorized"
+            groups[category, default: []].append(item)
+        }
+
+        return groups.map { category, items in
+            // Sort items: unchecked first, then by addedOrder within each section
+            let sortedItems = items.sorted { item1, item2 in
+                // Unchecked items first
+                if item1.isChecked != item2.isChecked {
+                    return !item1.isChecked
+                }
+                // Within same checked state, sort by addedOrder
+                return item1.addedOrder < item2.addedOrder
+            }
+            let allChecked = !sortedItems.isEmpty && sortedItems.allSatisfy { $0.isChecked }
+
+            return GroceryGroup(
+                id: category,
+                name: category,
+                items: sortedItems,
+                isChecked: allChecked
+            )
+        }.sorted { group1, group2 in
+            // Fully checked groups go to bottom
+            if group1.allItemsChecked != group2.allItemsChecked {
+                return !group1.allItemsChecked
+            }
+            // Sort by category order
+            let index1 = categoryOrder.firstIndex(of: group1.name) ?? categoryOrder.count
+            let index2 = categoryOrder.firstIndex(of: group2.name) ?? categoryOrder.count
+
+            if index1 != index2 {
+                return index1 < index2
+            }
+            // If not in predefined order, sort alphabetically
+            return group1.name < group2.name
+        }
+    }
 }
 
 extension GroceryItemModel {
@@ -203,7 +278,8 @@ extension GroceryItemModel {
             isChecked: isChecked,
             recipeID: recipeID,
             recipeName: recipeName,
-            addedOrder: addedOrder
+            addedOrder: addedOrder,
+            aiCategory: aiCategory
         )
     }
 }
