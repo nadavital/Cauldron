@@ -53,16 +53,9 @@ struct RecipeRowView: View {
 
                     if !recipe.tags.isEmpty {
                         // Show only first tag to prevent overflow
-                        Text(recipe.tags.first!.name)
-                            .font(.caption2)
+                        TagView(recipe.tags.first!)
+                            .frame(maxWidth: 120)
                             .lineLimit(1)
-                            .truncationMode(.tail)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.cauldronOrange.opacity(0.2))
-                            .foregroundColor(.cauldronOrange)
-                            .cornerRadius(4)
-                            .frame(maxWidth: 100)
                     }
                 }
             }

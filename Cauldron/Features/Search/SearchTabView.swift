@@ -113,22 +113,11 @@ struct SearchTabView: View {
                             Button {
                                 viewModel.toggleCategory(category)
                             } label: {
-                                HStack {
-                                    Text(category.emoji)
-                                    Text(category.displayName)
-                                    Image(systemName: "xmark")
-                                        .font(.caption)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(category.color.opacity(0.2))
-                                .foregroundColor(category.color)
-                                .cornerRadius(20)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .stroke(category.color, lineWidth: 1)
-                                )
+                                TagView(category.tagValue, isSelected: true, onRemove: {
+                                    viewModel.toggleCategory(category)
+                                })
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }

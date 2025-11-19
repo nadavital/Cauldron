@@ -607,6 +607,19 @@ struct RecipeCard: View {
                         .foregroundColor(.secondary)
                 }
             }
+            
+            // Tags (if any)
+            if !sharedRecipe.recipe.tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(sharedRecipe.recipe.tags.prefix(2)) { tag in
+                            TagView(tag)
+                                .scaleEffect(0.8) // Make them slightly smaller for the card
+                        }
+                    }
+                }
+                .frame(height: 24)
+            }
         }
         .padding(12)
         .background(Color.cauldronSecondaryBackground)

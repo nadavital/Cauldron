@@ -95,6 +95,24 @@ class AIRecipeGeneratorViewModel: ObservableObject {
         return allCategories.map { $0.displayName }.joined(separator: ", ")
     }
 
+    var allSelectedCategories: [RecipeCategory] {
+        Array(selectedCuisines) + Array(selectedDiets) +
+        Array(selectedTimes) + Array(selectedTypes)
+    }
+
+    func removeCategory(_ category: RecipeCategory) {
+        switch category.section {
+        case .cuisine:
+            selectedCuisines.remove(category)
+        case .dietary:
+            selectedDiets.remove(category)
+        case .other:
+            selectedTimes.remove(category)
+        case .mealType:
+            selectedTypes.remove(category)
+        }
+    }
+
     private var generationPrompt: String {
         var instructions: [String] = []
 
