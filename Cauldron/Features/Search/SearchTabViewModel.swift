@@ -17,6 +17,7 @@ class SearchTabViewModel: ObservableObject {
     @Published var recipesByTag: [String: [Recipe]] = [:]
     @Published var recipeSearchResults: [Recipe] = []
     @Published var peopleSearchResults: [User] = []
+    @Published var friends: [User] = []
     @Published var isLoading = false
     @Published var isLoadingPeople = false
     @Published var connections: [Connection] = [] // Derived from connectionManager
@@ -28,10 +29,9 @@ class SearchTabViewModel: ObservableObject {
     private var recipeSearchText: String = ""
     private var peopleSearchText: String = ""
     private var cancellables = Set<AnyCancellable>()
+    private var searchTask: Task<Void, Never>?
 
     // Caching
-    private var cachedUsers: [User] = []
-    private var usersCacheTimestamp: Date?
     private var cachedPublicRecipes: [Recipe] = []
     private var publicRecipesCacheTimestamp: Date?
     private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
@@ -48,11 +48,18 @@ class SearchTabViewModel: ObservableObject {
 
         // Subscribe to connection manager updates
         dependencies.connectionManager.$connections
-            .map { managedConnections in
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] managedConnections in
+                guard let self = self else { return }
                 // Convert ManagedConnection to Connection for backward compatibility
-                managedConnections.values.map { $0.connection }
+                self.connections = managedConnections.values.map { $0.connection }
+                
+                // Load friends details when connections change
+                Task {
+                    await self.loadFriends()
+                }
             }
-            .assign(to: &$connections)
+            .store(in: &cancellables)
 
         // Set up debounced people search
         peopleSearchSubject
@@ -60,7 +67,8 @@ class SearchTabViewModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] query in
                 guard let self = self else { return }
-                Task {
+                self.searchTask?.cancel()
+                self.searchTask = Task {
                     await self.performPeopleSearch(query)
                 }
             }
@@ -83,9 +91,6 @@ class SearchTabViewModel: ObservableObject {
 
             // Load connections (for determining connection status in user search)
             await loadConnections()
-
-            // Load users for people search
-            await loadUsers()
 
         } catch {
             AppLogger.general.error("Failed to load search tab data: \(error.localizedDescription)")
@@ -131,6 +136,23 @@ class SearchTabViewModel: ObservableObject {
         AppLogger.general.info("Loaded connections via ConnectionManager")
     }
 
+    func loadFriends() async {
+        let friendIds = connections
+            .filter { $0.isAccepted }
+            .compactMap { $0.otherUserId(currentUserId: currentUserId) }
+            
+        guard !friendIds.isEmpty else {
+            friends = []
+            return
+        }
+        
+        do {
+            friends = try await dependencies.sharingService.getUsers(byIds: friendIds)
+        } catch {
+            AppLogger.general.error("Failed to load friends: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Connection Actions
 
     /// Accept a connection request
@@ -164,50 +186,6 @@ class SearchTabViewModel: ObservableObject {
             AppLogger.general.error("❌ Failed to send connection request: \(error.localizedDescription)")
             connectionError = error as? ConnectionError ?? .networkFailure(error)
         }
-    }
-    
-    func loadUsers() async {
-        isLoadingPeople = true
-        defer { isLoadingPeople = false }
-
-        do {
-            let allUsers = try await fetchUsersWithCache()
-
-            // Preserve search filtering after reload
-            if peopleSearchText.isEmpty {
-                peopleSearchResults = allUsers
-            } else {
-                let lowercased = peopleSearchText.lowercased()
-                peopleSearchResults = allUsers.filter { user in
-                    user.username.lowercased().contains(lowercased) ||
-                    user.displayName.lowercased().contains(lowercased)
-                }
-            }
-        } catch {
-            AppLogger.general.error("Failed to load users: \(error.localizedDescription)")
-            peopleSearchResults = []
-        }
-    }
-
-    /// Fetch users with caching to avoid unnecessary CloudKit queries
-    private func fetchUsersWithCache() async throws -> [User] {
-        // Check if cache is valid
-        if let timestamp = usersCacheTimestamp,
-           Date().timeIntervalSince(timestamp) < cacheValidityDuration,
-           !cachedUsers.isEmpty {
-            AppLogger.general.info("Using cached users (\(self.cachedUsers.count) users)")
-            return cachedUsers
-        }
-
-        // Cache expired or empty, fetch fresh data
-        AppLogger.general.info("Fetching fresh user data from CloudKit")
-        let users = try await dependencies.sharingService.getAllUsers()
-
-        // Update cache
-        cachedUsers = users
-        usersCacheTimestamp = Date()
-
-        return users
     }
     
     func updateRecipeSearch(_ query: String) {
@@ -269,31 +247,39 @@ class SearchTabViewModel: ObservableObject {
     
     func updatePeopleSearch(_ query: String) {
         peopleSearchText = query
-        // Send to debounced subject instead of fetching immediately
-        peopleSearchSubject.send(query)
+        if query.isEmpty {
+            peopleSearchResults = []
+        } else {
+            // Send to debounced subject instead of fetching immediately
+            peopleSearchSubject.send(query)
+        }
     }
 
-    /// Perform the actual people search with caching (called after debounce)
+    /// Perform the actual people search (called after debounce)
     private func performPeopleSearch(_ query: String) async {
+        // Don't search if query is empty
+        guard !query.isEmpty else {
+            peopleSearchResults = []
+            return
+        }
+        
         isLoadingPeople = true
-        defer { isLoadingPeople = false }
 
         do {
-            let allUsers = try await fetchUsersWithCache()
-
-            if query.isEmpty {
-                peopleSearchResults = allUsers
-            } else {
-                // Filter locally for better UX (allows substring matching)
-                let lowercased = query.lowercased()
-                peopleSearchResults = allUsers.filter { user in
-                    user.username.lowercased().contains(lowercased) ||
-                    user.displayName.lowercased().contains(lowercased)
-                }
+            // Use server-side search instead of fetching all users
+            let results = try await dependencies.sharingService.searchUsers(query)
+            
+            // Only update if not cancelled
+            if !Task.isCancelled {
+                peopleSearchResults = results
+                isLoadingPeople = false
             }
         } catch {
-            AppLogger.general.error("Failed to search users: \(error.localizedDescription)")
-            peopleSearchResults = []
+            if !Task.isCancelled {
+                AppLogger.general.error("Failed to search users: \(error.localizedDescription)")
+                peopleSearchResults = []
+                isLoadingPeople = false
+            }
         }
     }
     

@@ -60,6 +60,34 @@ actor SharingService {
         try await sharingRepository.save(user)
     }
     
+    /// Get specific users by their IDs
+    func getUsers(byIds userIds: [UUID]) async throws -> [User] {
+        guard !userIds.isEmpty else { return [] }
+        
+        // Try to fetch from CloudKit
+        do {
+            let users = try await cloudKitService.fetchUsers(byUserIds: userIds)
+            
+            // Cache fetched users
+            for user in users {
+                try? await sharingRepository.save(user)
+            }
+            
+            return users
+        } catch {
+            logger.warning("Failed to fetch users from CloudKit, checking local cache: \(error.localizedDescription)")
+            
+            // Fallback to local cache
+            var users: [User] = []
+            for id in userIds {
+                if let user = try? await sharingRepository.fetchUser(id: id) {
+                    users.append(user)
+                }
+            }
+            return users
+        }
+    }
+    
     // MARK: - Recipe Sharing
 
     /// Share a recipe with another user via CloudKit
