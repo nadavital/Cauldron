@@ -42,11 +42,11 @@ struct SearchTabView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         if searchMode == .recipes {
-                            if searchText.isEmpty {
-                                // Show categories when not searching
+                            if searchText.isEmpty && viewModel.selectedCategories.isEmpty {
+                                // Show categories when not searching and no filters
                                 categoriesView
                             } else {
-                                // Show recipe search results
+                                // Show recipe search results (filtered by text or categories)
                                 recipeSearchResultsView
                             }
                         } else {
@@ -104,20 +104,72 @@ struct SearchTabView: View {
     }
     
     private var categoriesView: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Browse by Category")
-                .font(.title2)
-                .fontWeight(.bold)
+        VStack(alignment: .leading, spacing: 24) {
+            // Active Filters (if any)
+            if !viewModel.selectedCategories.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(Array(viewModel.selectedCategories), id: \.self) { category in
+                            Button {
+                                viewModel.toggleCategory(category)
+                            } label: {
+                                HStack {
+                                    Text(category.emoji)
+                                    Text(category.displayName)
+                                    Image(systemName: "xmark")
+                                        .font(.caption)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(category.color.opacity(0.2))
+                                .foregroundColor(category.color)
+                                .cornerRadius(20)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(category.color, lineWidth: 1)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             
-            if viewModel.recipesByTag.isEmpty {
-                emptyState
-            } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                    ForEach(Array(viewModel.recipesByTag.keys).sorted(), id: \.self) { tagName in
-                        if let recipes = viewModel.recipesByTag[tagName], !recipes.isEmpty {
-                            NavigationLink(destination: CategoryRecipesListView(categoryName: tagName, recipes: recipes, dependencies: viewModel.dependencies)) {
-                                CategoryCardView(categoryName: tagName, recipeCount: recipes.count)
-                                    .frame(maxWidth: .infinity)
+            // Categories Grid
+            ForEach(RecipeCategory.Section.allCases, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(section.rawValue)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                    
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                        ForEach(RecipeCategory.all(in: section)) { category in
+                            Button {
+                                viewModel.toggleCategory(category)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    // Icon Container
+                                    ZStack {
+                                        Circle()
+                                            .fill(category.color.opacity(0.15))
+                                            .frame(width: 40, height: 40)
+                                        Text(category.emoji)
+                                            .font(.title3)
+                                    }
+                                    
+                                    Text(category.displayName)
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    
+                                    Spacer()
+                                }
+                                .padding(8)
+                                .background(Color(.secondarySystemGroupedBackground))
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(viewModel.selectedCategories.contains(category) ? category.color : Color.clear, lineWidth: 2)
+                                )
                             }
                             .buttonStyle(.plain)
                         }

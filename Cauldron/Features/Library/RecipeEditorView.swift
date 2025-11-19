@@ -119,19 +119,61 @@ struct RecipeEditorView: View {
                 
                 // Tags
                 Section("Tags") {
-                    TextField("Add tags (comma-separated)", text: $viewModel.tagsInput)
-                        .textInputAutocapitalization(.words)
-                    
-                    if !viewModel.tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack {
-                                ForEach(viewModel.tags, id: \.self) { tag in
-                                    Text(tag)
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.cauldronOrange.opacity(0.2))
-                                        .cornerRadius(6)
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField("Add tags (comma-separated)", text: $viewModel.tagsInput)
+                            .textInputAutocapitalization(.words)
+                        
+                        // Selected Tags
+                        if !viewModel.tags.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(viewModel.tags, id: \.self) { tag in
+                                        Text(tag)
+                                            .font(.caption)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.cauldronOrange.opacity(0.2))
+                                            .cornerRadius(6)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Suggested Tags
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Suggestions")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            ForEach(RecipeCategory.Section.allCases, id: \.self) { section in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(section.rawValue)
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.secondary)
+                                    
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack {
+                                            ForEach(RecipeCategory.all(in: section), id: \.self) { category in
+                                                if !viewModel.tags.contains(where: { $0.caseInsensitiveCompare(category.tagValue) == .orderedSame }) {
+                                                    Button {
+                                                        viewModel.addTag(category.tagValue)
+                                                    } label: {
+                                                        HStack(spacing: 4) {
+                                                            Text(category.emoji)
+                                                            Text(category.displayName)
+                                                        }
+                                                        .font(.caption)
+                                                        .padding(.horizontal, 8)
+                                                        .padding(.vertical, 4)
+                                                        .background(category.color.opacity(0.1))
+                                                        .foregroundColor(category.color)
+                                                        .cornerRadius(6)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

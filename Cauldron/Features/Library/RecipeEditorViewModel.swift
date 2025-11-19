@@ -109,6 +109,23 @@ class RecipeEditorViewModel: ObservableObject {
             .filter { !$0.isEmpty }
     }
     
+    func addTag(_ tag: String) {
+        let currentTags = tags
+        if !currentTags.contains(tag) {
+            if tagsInput.isEmpty {
+                tagsInput = tag
+            } else {
+                // Check if the last character is a comma or space to avoid double separators
+                let trimmed = tagsInput.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasSuffix(",") {
+                    tagsInput = "\(trimmed) \(tag)"
+                } else {
+                    tagsInput = "\(trimmed), \(tag)"
+                }
+            }
+        }
+    }
+    
     var canSave: Bool {
         !title.isEmpty &&
         ingredients.contains(where: { !$0.name.isEmpty }) &&

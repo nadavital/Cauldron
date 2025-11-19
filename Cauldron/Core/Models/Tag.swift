@@ -14,13 +14,30 @@ struct Tag: Codable, Sendable, Hashable, Identifiable {
     
     init(id: UUID = UUID(), name: String) {
         self.id = id
-        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Check if this matches a known category and use the canonical name
+        if let category = RecipeCategory.match(string: trimmed) {
+            self.name = category.displayName
+        } else {
+            // Otherwise just Title Case it
+            self.name = trimmed.capitalized
+        }
     }
     
     /// Create a tag from a string
     static func from(_ string: String) -> Tag {
         Tag(name: string)
     }
+    
+    /// Common tags to suggest to users
+    static let commonTags: [String] = [
+        "Breakfast", "Lunch", "Dinner", "Dessert", "Snack",
+        "Vegetarian", "Vegan", "Gluten-Free", "Keto", "Paleo",
+        "Quick & Easy", "Healthy", "Comfort Food", "Baking",
+        "Italian", "Mexican", "Asian", "Mediterranean", "American"
+    ]
 }
 
 extension Tag: Comparable {

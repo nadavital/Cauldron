@@ -14,10 +14,10 @@ import FoundationModels
 @MainActor
 class AIRecipeGeneratorViewModel: ObservableObject {
     @Published var prompt: String = ""
-    @Published var selectedCuisines: Set<String> = []
-    @Published var selectedDiets: Set<String> = []
-    @Published var selectedTimes: Set<String> = []
-    @Published var selectedTypes: Set<String> = []
+    @Published var selectedCuisines: Set<RecipeCategory> = []
+    @Published var selectedDiets: Set<RecipeCategory> = []
+    @Published var selectedTimes: Set<RecipeCategory> = []
+    @Published var selectedTypes: Set<RecipeCategory> = []
     @Published var additionalNotes: String = ""
     @Published var useCategoryMode: Bool = true
     @Published var isGenerating: Bool = false
@@ -92,26 +92,44 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     var selectedCategoriesSummary: String {
         let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
                            Array(selectedTimes) + Array(selectedTypes)
-        return allCategories.joined(separator: ", ")
+        return allCategories.map { $0.displayName }.joined(separator: ", ")
     }
 
     private var generationPrompt: String {
-        var promptParts: [String] = []
+        var instructions: [String] = []
 
-        // Add selected categories
-        let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
-                           Array(selectedTimes) + Array(selectedTypes)
-
-        if !allCategories.isEmpty {
-            promptParts.append(allCategories.joined(separator: ", "))
+        // Add selected categories with explicit instruction
+        if !selectedCuisines.isEmpty {
+            let cuisines = selectedCuisines.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("Create an AUTHENTIC \(cuisines) recipe.")
+        }
+        
+        if !selectedDiets.isEmpty {
+            let diets = selectedDiets.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("It must be \(diets).")
+        }
+        
+        if !selectedTimes.isEmpty {
+             let times = selectedTimes.map { $0.displayName }.joined(separator: " and ")
+             instructions.append("It should be \(times).")
+        }
+        
+        if !selectedTypes.isEmpty {
+            let types = selectedTypes.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("It is a \(types) dish.")
         }
 
         // Add prompt/notes
         if !prompt.trimmed.isEmpty {
-            promptParts.append(prompt.trimmed)
+            instructions.append("Additional requirements: \(prompt.trimmed)")
+        }
+        
+        // Fallback if nothing selected
+        if instructions.isEmpty {
+            return "Create a delicious recipe."
         }
 
-        return promptParts.joined(separator: " - ")
+        return instructions.joined(separator: " ")
     }
 
     func checkAvailability() async -> Bool {
@@ -256,6 +274,17 @@ class AIRecipeGeneratorViewModel: ObservableObject {
             guard let text = partialStep.text else { return nil }
             return GeneratedStep(text: text, timerSeconds: partialStep.timerSeconds)
         }
+        
+        // Combine AI-generated tags with selected categories
+        // Note: AI no longer generates tags to save context, so we rely on selected categories
+        
+        // Add selected categories as tags
+        let selectedCategoryTags = (Array(selectedCuisines) + Array(selectedDiets) +
+                                  Array(selectedTimes) + Array(selectedTypes))
+            .map { $0.tagValue }
+        
+        // Deduplicate
+        let uniqueTags = Array(Set(selectedCategoryTags))
 
         return GeneratedRecipe(
             title: title,
@@ -263,7 +292,6 @@ class AIRecipeGeneratorViewModel: ObservableObject {
             totalMinutes: partial.totalMinutes,
             ingredients: fullIngredients,
             steps: fullSteps,
-            tags: partial.tags ?? [],
             notes: partial.notes
         )
     }
