@@ -21,6 +21,8 @@ class SearchTabViewModel: ObservableObject {
     @Published var isLoadingPeople = false
     @Published var connections: [Connection] = [] // Derived from connectionManager
     @Published var connectionError: ConnectionError?
+    @Published var popularTags: [String] = []
+    @Published var selectedCategories: Set<RecipeCategory> = []
 
     let dependencies: DependencyContainer
     private var recipeSearchText: String = ""
@@ -210,21 +212,59 @@ class SearchTabViewModel: ObservableObject {
     
     func updateRecipeSearch(_ query: String) {
         recipeSearchText = query
-
-        if query.isEmpty {
-            recipeSearchResults = []
+        filterRecipes()
+    }
+    
+    func toggleCategory(_ category: RecipeCategory) {
+        if selectedCategories.contains(category) {
+            selectedCategories.remove(category)
         } else {
-            let lowercased = query.lowercased()
-
-            // Search both personal recipes AND public recipes
-            let combinedRecipes = allRecipes + publicRecipes
-
-            recipeSearchResults = combinedRecipes.filter { recipe in
+            selectedCategories.insert(category)
+        }
+        filterRecipes()
+    }
+    
+    private func filterRecipes() {
+        // Start with all recipes (personal + public)
+        let combinedRecipes = allRecipes + publicRecipes
+        
+        // If no filters active, show nothing (or maybe show all? The UI currently shows categories when empty)
+        // The UI logic is: if searchText is empty AND selectedCategories is empty -> Show Categories View
+        // If either is active -> Show Results View
+        
+        if recipeSearchText.isEmpty && selectedCategories.isEmpty {
+            recipeSearchResults = []
+            return
+        }
+        
+        var results = combinedRecipes
+        
+        // 1. Filter by Search Text
+        if !recipeSearchText.isEmpty {
+            let lowercased = recipeSearchText.lowercased()
+            results = results.filter { recipe in
                 recipe.title.lowercased().contains(lowercased) ||
                 recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
                 recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
             }
         }
+        
+        // 2. Filter by Selected Categories
+        if !selectedCategories.isEmpty {
+            results = results.filter { recipe in
+                // Recipe must match ALL selected categories (AND logic)
+                // Or ANY? Usually tags are AND logic for drill-down. Let's do AND for now.
+                // Actually, for categories like "Dinner" and "Italian", AND makes sense.
+                // For "Dinner" and "Lunch", AND makes no sense (usually).
+                // Let's do AND for now as it's a stricter filter.
+                
+                selectedCategories.allSatisfy { category in
+                    recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
+                }
+            }
+        }
+        
+        recipeSearchResults = results
     }
     
     func updatePeopleSearch(_ query: String) {
@@ -259,20 +299,41 @@ class SearchTabViewModel: ObservableObject {
     
     private func groupRecipesByTags() {
         var grouped: [String: [Recipe]] = [:]
+        var tagCounts: [String: Int] = [:]
         
         for recipe in allRecipes {
             for tag in recipe.tags {
-                if grouped[tag.name] == nil {
-                    grouped[tag.name] = []
+                // Normalize tag name for grouping (Title Case)
+                let normalizedName = tag.name.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
+                
+                if grouped[normalizedName] == nil {
+                    grouped[normalizedName] = []
                 }
                 // Only add if not already in this tag's list
-                if !(grouped[tag.name]?.contains(where: { $0.id == recipe.id }) ?? false) {
-                    grouped[tag.name]?.append(recipe)
+                if !(grouped[normalizedName]?.contains(where: { $0.id == recipe.id }) ?? false) {
+                    grouped[normalizedName]?.append(recipe)
                 }
+                
+                tagCounts[normalizedName, default: 0] += 1
             }
         }
         
         // Store all recipes per tag
         recipesByTag = grouped
+        
+        // Calculate popular tags (Common tags + most used user tags)
+        let userTopTags = tagCounts.sorted { $0.value > $1.value }
+            .prefix(10)
+            .map { $0.key }
+        
+        // Combine common tags with user's top tags, removing duplicates
+        var tags = Tag.commonTags
+        for tag in userTopTags {
+            if !tags.contains(tag) {
+                tags.append(tag)
+            }
+        }
+        
+        popularTags = tags
     }
 }

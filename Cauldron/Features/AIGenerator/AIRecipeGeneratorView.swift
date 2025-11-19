@@ -232,7 +232,7 @@ struct AIRecipeGeneratorView: View {
                     CategorySelectionRow(
                         title: "Cuisine",
                         icon: "map",
-                        options: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                        options: RecipeCategory.all(in: .cuisine),
                         selected: $viewModel.selectedCuisines
                     )
 
@@ -240,7 +240,7 @@ struct AIRecipeGeneratorView: View {
                     CategorySelectionRow(
                         title: "Diet",
                         icon: "leaf",
-                        options: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                        options: RecipeCategory.all(in: .dietary),
                         selected: $viewModel.selectedDiets
                     )
 
@@ -248,7 +248,7 @@ struct AIRecipeGeneratorView: View {
                     CategorySelectionRow(
                         title: "Time",
                         icon: "clock",
-                        options: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                        options: [.quickEasy, .onePot, .airFryer],
                         selected: $viewModel.selectedTimes
                     )
 
@@ -256,7 +256,7 @@ struct AIRecipeGeneratorView: View {
                     CategorySelectionRow(
                         title: "Meal",
                         icon: "fork.knife",
-                        options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                        options: RecipeCategory.all(in: .mealType),
                         selected: $viewModel.selectedTypes
                     )
                 }
@@ -419,7 +419,7 @@ struct AIRecipeGeneratorView: View {
             CategorySelectionRow(
                 title: "Cuisine",
                 icon: "map",
-                options: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                options: RecipeCategory.all(in: .cuisine),
                 selected: $viewModel.selectedCuisines
             )
 
@@ -427,7 +427,7 @@ struct AIRecipeGeneratorView: View {
             CategorySelectionRow(
                 title: "Diet",
                 icon: "leaf",
-                options: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                options: RecipeCategory.all(in: .dietary),
                 selected: $viewModel.selectedDiets
             )
 
@@ -435,7 +435,7 @@ struct AIRecipeGeneratorView: View {
             CategorySelectionRow(
                 title: "Time",
                 icon: "clock",
-                options: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                options: [.quickEasy, .onePot, .airFryer],
                 selected: $viewModel.selectedTimes
             )
 
@@ -443,7 +443,7 @@ struct AIRecipeGeneratorView: View {
             CategorySelectionRow(
                 title: "Meal",
                 icon: "fork.knife",
-                options: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                options: RecipeCategory.all(in: .mealType),
                 selected: $viewModel.selectedTypes
             )
         }
@@ -533,9 +533,9 @@ struct AIRecipeGeneratorView: View {
                 RecipeTagSection(
                     title: "Cuisine",
                     icon: "map",
-                    tags: ["Italian", "Mexican", "Asian", "Mediterranean", "French", "Indian"],
+                    tags: RecipeCategory.all(in: .cuisine),
                     onTagTap: { tag in
-                        appendToPrompt(tag)
+                        appendToPrompt(tag.displayName)
                     }
                 )
 
@@ -543,9 +543,9 @@ struct AIRecipeGeneratorView: View {
                 RecipeTagSection(
                     title: "Diet",
                     icon: "leaf",
-                    tags: ["Vegetarian", "Vegan", "Gluten-free", "Low-carb", "Keto", "Paleo"],
+                    tags: RecipeCategory.all(in: .dietary),
                     onTagTap: { tag in
-                        appendToPrompt(tag)
+                        appendToPrompt(tag.displayName)
                     }
                 )
 
@@ -553,9 +553,9 @@ struct AIRecipeGeneratorView: View {
                 RecipeTagSection(
                     title: "Time",
                     icon: "clock",
-                    tags: ["Quick (< 30 min)", "Weeknight", "Weekend project"],
+                    tags: [.quickEasy, .onePot, .airFryer],
                     onTagTap: { tag in
-                        appendToPrompt(tag)
+                        appendToPrompt(tag.displayName)
                     }
                 )
 
@@ -563,9 +563,9 @@ struct AIRecipeGeneratorView: View {
                 RecipeTagSection(
                     title: "Type",
                     icon: "fork.knife",
-                    tags: ["Breakfast", "Lunch", "Dinner", "Dessert", "Snack", "Comfort food"],
+                    tags: RecipeCategory.all(in: .mealType),
                     onTagTap: { tag in
-                        appendToPrompt(tag)
+                        appendToPrompt(tag.displayName)
                     }
                 )
             }
@@ -622,23 +622,7 @@ struct AIRecipeGeneratorView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                    // Tags
-                    if let tags = partial.tags, !tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(tags, id: \.self) { tag in
-                                    Text(tag)
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(Color.cauldronOrange.opacity(0.15))
-                                        .foregroundColor(.cauldronOrange)
-                                        .cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
+
                 }
                 .padding()
                 .cardStyle()
@@ -756,8 +740,8 @@ struct AIRecipeGeneratorView: View {
 struct RecipeTagSection: View {
     let title: String
     let icon: String
-    let tags: [String]
-    let onTagTap: (String) -> Void
+    let tags: [RecipeCategory]
+    let onTagTap: (RecipeCategory) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -770,7 +754,7 @@ struct RecipeTagSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(tags, id: \.self) { tag in
-                        SuggestionChip(text: tag, onTap: {
+                        SuggestionChip(category: tag, onTap: {
                             onTagTap(tag)
                         })
                     }
@@ -783,25 +767,24 @@ struct RecipeTagSection: View {
 // MARK: - Suggestion Chip
 
 struct SuggestionChip: View {
-    let text: String
+    let category: RecipeCategory
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            Text(text)
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule()
-                        .fill(Color.cauldronOrange.opacity(0.1))
-                )
-                .foregroundColor(.cauldronOrange)
-                .overlay(
-                    Capsule()
-                        .stroke(Color.cauldronOrange.opacity(0.3), lineWidth: 1)
-                )
+            HStack(spacing: 4) {
+                Text(category.emoji)
+                Text(category.displayName)
+            }
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(category.color.opacity(0.15))
+            )
+            .foregroundColor(category.color)
         }
         .buttonStyle(.plain)
     }
@@ -812,8 +795,8 @@ struct SuggestionChip: View {
 struct CategorySelectionRow: View {
     let title: String
     let icon: String
-    let options: [String]
-    @Binding var selected: Set<String>
+    let options: [RecipeCategory]
+    @Binding var selected: Set<RecipeCategory>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -826,7 +809,7 @@ struct CategorySelectionRow: View {
                 HStack(spacing: 10) {
                     ForEach(options, id: \.self) { option in
                         CategoryChip(
-                            text: option,
+                            category: option,
                             isSelected: selected.contains(option),
                             onTap: {
                                 if selected.contains(option) {
@@ -846,27 +829,30 @@ struct CategorySelectionRow: View {
 // MARK: - Category Chip
 
 struct CategoryChip: View {
-    let text: String
+    let category: RecipeCategory
     let isSelected: Bool
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            Text(text)
-                .font(.caption)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? Color.cauldronOrange : Color.cauldronOrange.opacity(0.1))
-                )
-                .foregroundColor(isSelected ? .white : .cauldronOrange)
-                .overlay(
-                    Capsule()
-                        .stroke(Color.cauldronOrange, lineWidth: isSelected ? 0 : 1)
-                )
+            HStack(spacing: 4) {
+                Text(category.emoji)
+                Text(category.displayName)
+            }
+            .font(.caption)
+            .fontWeight(.medium)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(isSelected ? category.color : category.color.opacity(0.15))
+            )
+            .foregroundColor(isSelected ? .white : category.color)
+            .overlay(
+                Capsule()
+                    .stroke(category.color, lineWidth: isSelected ? 0 : 1)
+            )
         }
         .buttonStyle(.plain)
         .fixedSize()
