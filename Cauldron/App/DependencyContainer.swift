@@ -29,6 +29,7 @@ class DependencyContainer: ObservableObject {
     let cookSessionManager: CookSessionManager
     let groceryService: GroceryService
     let foundationModelsService: FoundationModelsService
+    let groceryCategorizer: GroceryCategorizer
     let sharingService: SharingService
     let externalShareService: ExternalShareService
     let cloudKitService: CloudKitService
@@ -97,6 +98,7 @@ class DependencyContainer: ObservableObject {
         self.unitsService = UnitsService()
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
+        self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
         self.timerManager = TimerManager()
         self.profileCacheManager = ProfileCacheManager()
 

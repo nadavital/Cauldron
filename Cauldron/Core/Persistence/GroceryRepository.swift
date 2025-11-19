@@ -250,15 +250,49 @@ actor GroceryRepository {
         let listDescriptor = FetchDescriptor<GroceryListModel>(
             predicate: #Predicate { $0.id == listId }
         )
-        
+
         guard let list = try context.fetch(listDescriptor).first else {
             throw RepositoryError.notFound
         }
-        
+
         let checkedItems = (list.items ?? []).filter { $0.isChecked }
         for item in checkedItems {
             context.delete(item)
         }
         try context.save()
+    }
+
+    // MARK: - AI Categorization
+
+    /// Update AI category for an item
+    func updateCategory(itemId: UUID, category: String) async throws {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<GroceryItemModel>(
+            predicate: #Predicate { $0.id == itemId }
+        )
+
+        guard let item = try context.fetch(descriptor).first else {
+            throw RepositoryError.notFound
+        }
+
+        item.aiCategory = category
+        try context.save()
+    }
+
+    /// Get all items without AI categories
+    func fetchUncategorizedItems() async throws -> [(id: UUID, name: String)] {
+        let listId = try await getOrCreateDefaultList()
+        let context = ModelContext(modelContainer)
+        let listDescriptor = FetchDescriptor<GroceryListModel>(
+            predicate: #Predicate { $0.id == listId }
+        )
+
+        guard let list = try context.fetch(listDescriptor).first else {
+            throw RepositoryError.notFound
+        }
+
+        return (list.items ?? [])
+            .filter { $0.aiCategory == nil }
+            .map { (id: $0.id, name: $0.name) }
     }
 }
