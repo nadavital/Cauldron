@@ -609,7 +609,7 @@ struct RecipeDetailView: View {
 
     private var ingredientsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Ingredients")
+            Label("Ingredients", systemImage: "basket")
                 .font(.title2)
                 .fontWeight(.bold)
 
@@ -637,7 +637,7 @@ struct RecipeDetailView: View {
     
     private var stepsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Instructions")
+            Label("Instructions", systemImage: "list.number")
                 .font(.title2)
                 .fontWeight(.bold)
 
@@ -679,7 +679,7 @@ struct RecipeDetailView: View {
     
     private func nutritionSection(_ nutrition: Nutrition) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Nutrition")
+            Label("Nutrition", systemImage: "chart.bar.fill")
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -718,7 +718,7 @@ struct RecipeDetailView: View {
     
     private func notesSection(_ notes: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Notes")
+            Label("Notes", systemImage: "note.text")
                 .font(.title2)
                 .fontWeight(.bold)
             

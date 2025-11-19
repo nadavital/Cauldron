@@ -96,22 +96,40 @@ class AIRecipeGeneratorViewModel: ObservableObject {
     }
 
     private var generationPrompt: String {
-        var promptParts: [String] = []
+        var instructions: [String] = []
 
-        // Add selected categories
-        let allCategories = Array(selectedCuisines) + Array(selectedDiets) +
-                           Array(selectedTimes) + Array(selectedTypes)
-
-        if !allCategories.isEmpty {
-            promptParts.append(allCategories.map { $0.displayName }.joined(separator: ", "))
+        // Add selected categories with explicit instruction
+        if !selectedCuisines.isEmpty {
+            let cuisines = selectedCuisines.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("Create an AUTHENTIC \(cuisines) recipe.")
+        }
+        
+        if !selectedDiets.isEmpty {
+            let diets = selectedDiets.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("It must be \(diets).")
+        }
+        
+        if !selectedTimes.isEmpty {
+             let times = selectedTimes.map { $0.displayName }.joined(separator: " and ")
+             instructions.append("It should be \(times).")
+        }
+        
+        if !selectedTypes.isEmpty {
+            let types = selectedTypes.map { $0.displayName }.joined(separator: " and ")
+            instructions.append("It is a \(types) dish.")
         }
 
         // Add prompt/notes
         if !prompt.trimmed.isEmpty {
-            promptParts.append(prompt.trimmed)
+            instructions.append("Additional requirements: \(prompt.trimmed)")
+        }
+        
+        // Fallback if nothing selected
+        if instructions.isEmpty {
+            return "Create a delicious recipe."
         }
 
-        return promptParts.joined(separator: " - ")
+        return instructions.joined(separator: " ")
     }
 
     func checkAvailability() async -> Bool {
