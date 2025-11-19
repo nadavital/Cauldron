@@ -329,13 +329,7 @@ struct RecipeDetailView: View {
                             .font(.title3)
                     }
 
-                    Button {
-                        toggleFavorite()
-                    } label: {
-                        Image(systemName: localIsFavorite ? "star.fill" : "star")
-                            .foregroundStyle(localIsFavorite ? .yellow : .secondary)
-                            .font(.title3)
-                    }
+
                 }
             }
             .foregroundColor(.secondary)
@@ -344,19 +338,12 @@ struct RecipeDetailView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(recipe.tags) { tag in
-                            Text(tag.name)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color.cauldronOrange.opacity(0.15))
-                                .foregroundColor(.cauldronOrange)
-                                .cornerRadius(8)
+                            TagView(tag)
                         }
                     }
                     .padding(.trailing, 1)
                 }
-                .frame(height: 30)
+                .frame(height: 34)
             }
 
             // Shared By Banner
@@ -903,14 +890,16 @@ struct RecipeDetailView: View {
             try await dependencies.recipeRepository.create(copiedRecipe)
             AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
 
-            // Update state
-            hasOwnedCopy = true
-
             // Notify other views
             NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
 
-            // Show success toast
+            // Update state and switch to the new recipe immediately
+            // This ensures the UI transitions from "Save" button to Visibility Picker
             withAnimation {
+                recipe = copiedRecipe
+                currentVisibility = copiedRecipe.visibility
+                localIsFavorite = copiedRecipe.isFavorite
+                hasOwnedCopy = true
                 showSaveSuccessToast = true
             }
         } catch {
@@ -953,6 +942,36 @@ struct RecipeDetailView: View {
 
             // Update local state
             currentVisibility = newVisibility
+            
+            // CRITICAL: Update the recipe object itself so the toolbar updates immediately
+            withAnimation {
+                recipe = Recipe(
+                    id: recipe.id,
+                    title: recipe.title,
+                    ingredients: recipe.ingredients,
+                    steps: recipe.steps,
+                    yields: recipe.yields,
+                    totalMinutes: recipe.totalMinutes,
+                    tags: recipe.tags,
+                    nutrition: recipe.nutrition,
+                    sourceURL: recipe.sourceURL,
+                    sourceTitle: recipe.sourceTitle,
+                    notes: recipe.notes,
+                    imageURL: recipe.imageURL,
+                    isFavorite: recipe.isFavorite,
+                    visibility: newVisibility, // Update visibility
+                    ownerId: recipe.ownerId,
+                    cloudRecordName: recipe.cloudRecordName,
+                    cloudImageRecordName: recipe.cloudImageRecordName,
+                    imageModifiedAt: recipe.imageModifiedAt,
+                    createdAt: recipe.createdAt,
+                    updatedAt: Date(), // Update timestamp
+                    originalRecipeId: recipe.originalRecipeId,
+                    originalCreatorId: recipe.originalCreatorId,
+                    originalCreatorName: recipe.originalCreatorName,
+                    savedAt: recipe.savedAt
+                )
+            }
 
             AppLogger.general.info("Changed recipe '\(recipe.title)' visibility to \(newVisibility.displayName)")
 

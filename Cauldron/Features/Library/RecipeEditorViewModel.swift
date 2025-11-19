@@ -85,7 +85,7 @@ class RecipeEditorViewModel: ObservableObject {
     @Published var title: String = ""
     @Published var yields: String = "4 servings"
     @Published var totalMinutes: Int? = nil
-    @Published var tagsInput: String = ""
+    @Published var selectedTags: Set<RecipeCategory> = []
     @Published var notes: String = ""
     @Published var ingredients: [IngredientInput] = [IngredientInput()]
     @Published var steps: [StepInput] = [StepInput()]
@@ -102,27 +102,11 @@ class RecipeEditorViewModel: ObservableObject {
 
     var isEditing: Bool { existingRecipe != nil && !isImporting }
     
-    var tags: [String] {
-        tagsInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-    }
-    
-    func addTag(_ tag: String) {
-        let currentTags = tags
-        if !currentTags.contains(tag) {
-            if tagsInput.isEmpty {
-                tagsInput = tag
-            } else {
-                // Check if the last character is a comma or space to avoid double separators
-                let trimmed = tagsInput.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasSuffix(",") {
-                    tagsInput = "\(trimmed) \(tag)"
-                } else {
-                    tagsInput = "\(trimmed), \(tag)"
-                }
-            }
+    func toggleTag(_ category: RecipeCategory) {
+        if selectedTags.contains(category) {
+            selectedTags.remove(category)
+        } else {
+            selectedTags.insert(category)
         }
     }
     
@@ -146,7 +130,12 @@ class RecipeEditorViewModel: ObservableObject {
         title = recipe.title
         yields = recipe.yields
         totalMinutes = recipe.totalMinutes
-        tagsInput = recipe.tags.map { $0.name }.joined(separator: ", ")
+        
+        // Load tags by matching them to RecipeCategory
+        selectedTags = Set(recipe.tags.compactMap { tag in
+            RecipeCategory.match(string: tag.name)
+        })
+        
         notes = recipe.notes ?? ""
         visibility = recipe.visibility
         
@@ -288,7 +277,7 @@ class RecipeEditorViewModel: ObservableObject {
         }
         
         // Build tags
-        let recipeTags = tags.map { Tag(name: $0) }
+        let recipeTags = selectedTags.map { Tag(name: $0.tagValue) }
         
         // Build nutrition
         let recipeNutrition: Nutrition?

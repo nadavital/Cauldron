@@ -54,10 +54,12 @@ struct AIRecipeGeneratorView: View {
                 }
                 
                 // Floating action button (generate/generating/regenerate)
-                if isAvailable {
+                if isAvailable && (viewModel.canGenerate || viewModel.isGenerating || viewModel.generatedRecipe != nil) {
                     floatingActionButton
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .animation(.spring(), value: viewModel.canGenerate)
             .navigationTitle("Generate Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -244,11 +246,15 @@ struct AIRecipeGeneratorView: View {
 
                     // Categories
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("Or select categories")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 20)
+                        if viewModel.allSelectedCategories.isEmpty {
+                            Text("Or select categories")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 20)
+                        }
+
+                        selectedTagsSummary
 
                         // Cuisine
                         CategorySelectionRow(
@@ -294,6 +300,36 @@ struct AIRecipeGeneratorView: View {
             RoundedRectangle(cornerRadius: 24)
                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
         )
+    }
+
+    private var selectedTagsSummary: some View {
+        Group {
+            if !viewModel.allSelectedCategories.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Selected", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(.cauldronOrange)
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 20)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(viewModel.allSelectedCategories.sorted(by: { $0.tagValue < $1.tagValue })) { tag in
+                                TagView(tag.tagValue, isSelected: true, onRemove: {
+                                    withAnimation {
+                                        viewModel.removeCategory(tag)
+                                    }
+                                })
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
     }
 
     private var unifiedStatusSection: some View {
@@ -519,9 +555,6 @@ struct AIRecipeGeneratorView: View {
             .padding(.vertical, 16)
             .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
         }
-        .disabled(viewModel.isGenerating || (!viewModel.canGenerate && viewModel.generatedRecipe == nil))
-        .scaleEffect(viewModel.isGenerating ? 0.98 : 1.0)
-        .animation(.spring(response: 0.3), value: viewModel.isGenerating)
         .padding(.bottom, 32)
     }
 
@@ -732,9 +765,12 @@ struct RecipeTagSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(tags, id: \.self) { tag in
-                        SuggestionChip(category: tag, onTap: {
+                        Button {
                             onTagTap(tag)
-                        })
+                        } label: {
+                            TagView(tag.tagValue)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 4)
@@ -744,121 +780,7 @@ struct RecipeTagSection: View {
     }
 }
 
-// MARK: - Suggestion Chip
 
-struct SuggestionChip: View {
-    let category: RecipeCategory
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Text(category.emoji)
-                    .font(.subheadline)
-                Text(category.displayName)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
-            .background(
-                category.color.opacity(0.1)
-            )
-            .overlay(
-                Capsule()
-                    .stroke(category.color.opacity(0.3), lineWidth: 1)
-            )
-            .clipShape(Capsule())
-            .shadow(color: category.color.opacity(0.1), radius: 4, x: 0, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Category Selection Row
-
-struct CategorySelectionRow: View {
-    let title: String
-    let icon: String
-    let options: [RecipeCategory]
-    @Binding var selected: Set<RecipeCategory>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: icon)
-                .font(.caption)
-                .fontWeight(.bold)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-                .padding(.horizontal, 20)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(options, id: \.self) { option in
-                        CategoryChip(
-                            category: option,
-                            isSelected: selected.contains(option),
-                            onTap: {
-                                toggleSelection(option)
-                            }
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-            }
-        }
-    }
-
-    private func toggleSelection(_ option: RecipeCategory) {
-        withAnimation(.spring(response: 0.3)) {
-            if selected.contains(option) {
-                selected.remove(option)
-            } else {
-                selected.insert(option)
-            }
-        }
-    }
-}
-
-struct CategoryChip: View {
-    let category: RecipeCategory
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Text(category.emoji)
-                Text(category.displayName)
-            }
-            .font(.subheadline)
-            .fontWeight(isSelected ? .semibold : .medium)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                ZStack {
-                    if isSelected {
-                        category.color
-                    } else {
-                        Rectangle().fill(.ultraThinMaterial)
-                    }
-                }
-            )
-            .background(
-                isSelected ? Color.clear : category.color.opacity(0.05)
-            )
-            .foregroundColor(isSelected ? .white : .primary)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(isSelected ? Color.clear : category.color.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
 
 // MARK: - Animated Mesh Gradient
 

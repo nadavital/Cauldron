@@ -551,13 +551,9 @@ struct RecipeCardView: View {
 
                 // Tag - always reserve space
                 if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
-                    Text(firstTag.name)
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.cauldronOrange.opacity(0.2))
-                        .cornerRadius(4)
+                    TagView(firstTag)
+                        .scaleEffect(0.9) // Scale down slightly for the card
+                        .frame(maxWidth: 100, alignment: .trailing)
                 } else {
                     Text(" ")
                         .font(.caption2)

@@ -30,6 +30,8 @@ struct ContentView: View {
     @State private var preloadedData: PreloadedRecipeData?
     @State private var sharedContentWrapper: SharedContentWrapper?
     @State private var isLoadingShare = false
+    @State private var showShareError = false
+    @State private var shareErrorMessage = ""
 
     struct SharedContentWrapper: Identifiable {
         let id = UUID()
@@ -97,7 +99,14 @@ struct ContentView: View {
                     .cornerRadius(16)
                 }
             }
-        }
+            }
+            
+            // Share Error Alert
+            .alert("Cannot Open Link", isPresented: $showShareError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(shareErrorMessage)
+            }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
         .animation(.easeInOut(duration: 0.2), value: isLoadingShare)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenExternalShare"))) { notification in
@@ -138,10 +147,24 @@ struct ContentView: View {
         do {
             let content = try await dependencies.externalShareService.importFromShareURL(url)
             
-            // If it's a recipe, we need to fetch the full details from CloudKit
+            // If it's a recipe, we need to fetch the full details
             // because the share data only contains a summary
             if case .recipe(let partialRecipe, let owner) = content {
-                print("🌐 ContentView: Fetching full recipe details for \(partialRecipe.title)")
+                print("🌐 ContentView: Processing recipe share for \(partialRecipe.title)")
+                
+                // 1. Check if we already have this recipe locally (e.g. we are the owner)
+                // This prevents fetching a stale public version if we just made it private
+                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id) {
+                    print("✅ ContentView: Found local copy of recipe, using that")
+                    await MainActor.run {
+                        let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
+                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                    }
+                    return
+                }
+                
+                // 2. If not found locally, fetch from CloudKit public database
+                print("🌐 ContentView: Fetching full recipe details from CloudKit")
                 if let fullRecipe = try await dependencies.cloudKitService.fetchPublicRecipe(id: partialRecipe.id) {
                     print("✅ ContentView: Successfully fetched full recipe")
                     await MainActor.run {
@@ -152,10 +175,10 @@ struct ContentView: View {
                     }
                 } else {
                     print("❌ ContentView: Recipe not found in public database")
-                    // Fallback to partial recipe if fetch fails
+                    // CRITICAL: Do NOT fallback to partial recipe. If it's not in public DB, it's private or deleted.
                     await MainActor.run {
-                        let wrapper = SharedContentWrapper(content: content)
-                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                        shareErrorMessage = "This recipe is no longer available or has been made private."
+                        showShareError = true
                     }
                 }
             } else {
@@ -167,7 +190,10 @@ struct ContentView: View {
             }
         } catch {
             print("❌ ContentView: Failed to load shared content: \(error)")
-            // Ideally show an alert here
+            await MainActor.run {
+                shareErrorMessage = "Failed to load shared content. The link may be invalid or expired."
+                showShareError = true
+            }
         }
     }
 
