@@ -50,7 +50,7 @@ class FriendsTabViewModel: ObservableObject {
 
         do {
             sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
-            AppLogger.general.info("Loaded \(self.sharedRecipes.count) shared recipes")
+            // Loaded shared recipes (don't log routine operations)
 
             // Load shared collections from friends
             await loadSharedCollections()
@@ -85,7 +85,7 @@ class FriendsTabViewModel: ObservableObject {
 
             // Fetch shared collections from friends
             sharedCollections = try await dependencies.cloudKitService.fetchSharedCollections(friendIds: friendIds)
-            AppLogger.general.info("Loaded \(self.sharedCollections.count) shared collections")
+            // Loaded shared collections (don't log routine operations)
         } catch {
             AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
             sharedCollections = []

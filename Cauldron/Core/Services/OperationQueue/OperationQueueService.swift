@@ -210,12 +210,12 @@ actor OperationQueueService {
     private func loadPersistedOperations() {
         guard let data = UserDefaults.standard.data(forKey: persistenceKey),
               let loaded = try? JSONDecoder().decode([UUID: SyncOperation].self, from: data) else {
-            AppLogger.general.info("No persisted operations found")
+            // No persisted operations found (routine)
             return
         }
 
         operations = loaded
-        AppLogger.general.info("📂 Loaded \(operations.count) persisted operations")
+        // Loaded persisted operations (don't log routine operations)
     }
 
     /// Persist operations to UserDefaults

@@ -11,6 +11,7 @@ import os
 /// Main Cook tab - central hub for recipe discovery and cooking
 struct CookTabView: View {
     @StateObject private var viewModel: CookTabViewModel
+    @State private var navigationPath = NavigationPath()
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
@@ -24,9 +25,9 @@ struct CookTabView: View {
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
     }
-    
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     // My Collections
@@ -134,6 +135,9 @@ struct CookTabView: View {
                 Task {
                     await viewModel.loadData()
                 }
+            }
+            .navigationDestination(for: Tag.self) { tag in
+                ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
             }
         }
     }
@@ -296,7 +300,6 @@ struct CookTabView: View {
                                 recipeContextMenu(for: recipe)
                             } preview: {
                                 RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
-                                    .frame(width: 200)
                                     .padding()
                                     .background(Color(.systemBackground))
                             }
@@ -509,6 +512,7 @@ struct CategoryCardView: View {
 struct RecipeCardView: View {
     let recipe: Recipe
     let dependencies: DependencyContainer
+    var onTagTap: ((Tag) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -550,7 +554,14 @@ struct RecipeCardView: View {
                 Spacer()
 
                 // Tag - always reserve space
-                if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
+                if !recipe.tags.isEmpty, let firstTag = recipe.tags.first, onTagTap != nil {
+                    TagView(firstTag)
+                        .scaleEffect(0.9) // Scale down slightly for the card
+                        .frame(maxWidth: 100, alignment: .trailing)
+                        .onTapGesture {
+                            onTagTap?(firstTag)
+                        }
+                } else if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
                     TagView(firstTag)
                         .scaleEffect(0.9) // Scale down slightly for the card
                         .frame(maxWidth: 100, alignment: .trailing)

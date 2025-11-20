@@ -198,12 +198,40 @@ struct ContentView: View {
     }
 
     private func performInitialLoad() async -> PreloadedRecipeData? {
-        // OPTIMIZATION: Load local data immediately WITHOUT syncing from CloudKit first
-        // This makes launch much faster - sync happens in background after UI is shown
-        // The periodic sync will keep data up to date
-
         // Preload ALL data that will be needed by the main view
         do {
+            // IMPORTANT: On first app launch (or after reinstall), we need to sync from CloudKit FIRST
+            // to download recipe images before showing the UI. On subsequent launches, we can skip
+            // the initial sync and just show local data immediately (images already downloaded).
+            let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+
+            if !hasLaunchedBefore {
+                // First launch - sync from CloudKit FIRST to download images
+                AppLogger.general.info("🚀 First launch detected - syncing from CloudKit before showing UI...")
+
+                // Run one-time migration to fix recipe ownership from old reference system
+                if let userId = userSession.userId {
+                    do {
+                        try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+                    } catch {
+                        AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
+                    }
+                }
+
+                // Perform sync (this will download images)
+                if let userId = userSession.userId, userSession.isCloudSyncAvailable {
+                    do {
+                        try await dependencies.recipeSyncService.performFullSync(for: userId)
+                        AppLogger.general.info("✅ Initial CloudKit sync completed with images")
+                    } catch {
+                        AppLogger.general.warning("Initial sync failed (continuing): \(error.localizedDescription)")
+                    }
+                }
+
+                // Mark as launched
+                UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+            }
+
             // OPTIMIZATION: Parallelize independent data fetches using async let
             async let ownedRecipes = dependencies.recipeRepository.fetchAll()
             async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
@@ -213,30 +241,34 @@ struct ContentView: View {
             let allRecipes = try await ownedRecipes
             let recentlyCookedIds = try await cookingHistory
             let collections = try await localCollections
-            AppLogger.general.info("✅ All data preloaded successfully: \(allRecipes.count) recipes, \(recentlyCookedIds.count) recent, \(collections.count) collections")
+            // Data preloaded successfully (don't log routine operations)
 
-            // Run one-time migration to fix recipe ownership from old reference system
-            if let userId = userSession.userId {
+            // Run one-time migrations (for existing users)
+            if hasLaunchedBefore, let userId = userSession.userId {
                 do {
+                    // Fix recipe ownership from old reference system
                     try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
-                    
+
+                    // Fix corrupted image filenames (CloudKit version suffixes)
+                    try await dependencies.recipeRepository.fixCorruptedImageFilenames()
+
                     // Run migration to ensure public recipes are in the public database
                     // This runs in the background
                     Task.detached(priority: .utility) {
                         await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
                     }
                 } catch {
-                    AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
+                    AppLogger.general.warning("Migration failed (continuing): \(error.localizedDescription)")
                 }
             }
 
-            // OPTIMIZATION: Start background sync AFTER UI is shown
+            // OPTIMIZATION: For subsequent launches, start background sync AFTER UI is shown
             // This keeps the UI responsive while CloudKit syncs in the background
-            if let userId = userSession.userId, userSession.isCloudSyncAvailable {
+            if hasLaunchedBefore, let userId = userSession.userId, userSession.isCloudSyncAvailable {
                 Task.detached(priority: .utility) {
                     do {
                         try await dependencies.recipeSyncService.performFullSync(for: userId)
-                        AppLogger.general.info("🔄 Background sync completed")
+                        // Background sync completed (don't log routine operations)
                     } catch {
                         AppLogger.general.warning("Background sync failed: \(error.localizedDescription)")
                     }

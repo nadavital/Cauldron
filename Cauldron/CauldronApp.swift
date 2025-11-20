@@ -99,10 +99,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        AppLogger.general.info("🔵 App did finish launching")
-        AppLogger.general.info("🔵 Launch options: \(launchOptions ?? [:])")
-
-        // Log if launched with CloudKit activity
+        // Log only if launched with CloudKit activity (debugging share URLs)
         if let userActivityDictionary = launchOptions?[.userActivityDictionary] as? [AnyHashable: Any] {
             AppLogger.general.info("🔵 Launched with user activity: \(userActivityDictionary)")
         }
@@ -124,11 +121,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if let error = error {
                 AppLogger.general.error("Failed to request notification permissions: \(error.localizedDescription)")
-            } else if granted {
-                AppLogger.general.info("✅ Notification permissions granted")
-            } else {
+            } else if !granted {
                 AppLogger.general.warning("⚠️ Notification permissions denied")
             }
+            // Don't log on success - it's routine
         }
     }
 
@@ -139,8 +135,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        AppLogger.general.info("📱 Registered for remote notifications with token: \(tokenString)")
+        // Registration successful - don't log routine operations
     }
 
     /// Called when registration for remote notifications fails
@@ -278,15 +273,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
-        AppLogger.general.info("🔵 AppDelegate: configurationForConnecting scene")
-
-        // Log if there's a user activity
+        // Only log if there's interesting activity (debugging share URLs)
         if let userActivity = options.userActivities.first {
             AppLogger.general.info("🔵 Scene connecting with user activity: \(userActivity.activityType)")
             AppLogger.general.info("🔵 User activity URL: \(userActivity.webpageURL?.absoluteString ?? "nil")")
         }
 
-        // Log if there's a URL context
         for urlContext in options.urlContexts {
             AppLogger.general.info("🔵 Scene connecting with URL: \(urlContext.url.absoluteString)")
         }
@@ -300,8 +292,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 // Scene Delegate for handling URLs in SwiftUI lifecycle
 class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        AppLogger.general.info("🟣 SceneDelegate: willConnectTo")
-
         // Handle user activity (Universal Links)
         if let userActivity = connectionOptions.userActivities.first {
             AppLogger.general.info("🟣 SceneDelegate: Got user activity: \(userActivity.activityType)")

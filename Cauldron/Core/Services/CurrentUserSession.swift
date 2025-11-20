@@ -45,11 +45,11 @@ class CurrentUserSession: ObservableObject {
 
         for attempt in 1...maxAttempts {
             do {
-                logger.info("Attempting to fetch CloudKit user profile (attempt \(attempt)/\(maxAttempts))")
-                let user = try await dependencies.cloudKitService.fetchCurrentUserProfile()
-                if user != nil {
-                    logger.info("Successfully fetched CloudKit user on attempt \(attempt)")
+                // Only log on retries (not first attempt)
+                if attempt > 1 {
+                    logger.info("Retrying CloudKit user profile fetch (attempt \(attempt)/\(maxAttempts))")
                 }
+                let user = try await dependencies.cloudKitService.fetchCurrentUserProfile()
                 return user
             } catch {
                 lastError = error
@@ -81,18 +81,14 @@ class CurrentUserSession: ObservableObject {
 
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
-        logger.info("Initializing user session...")
-
         // Step 1: Check iCloud account status
         let accountStatus = await dependencies.cloudKitService.checkAccountStatus()
         cloudKitAccountStatus = accountStatus
-        logger.info("iCloud account status: \(String(describing: accountStatus))")
 
         // Step 2: Try to fetch existing user from CloudKit if available (with retries)
         if accountStatus.isAvailable {
             if let cloudUser = try? await fetchCloudUserWithRetry(dependencies: dependencies) {
                 // Found existing user in CloudKit - use it
-                logger.info("Found existing user in CloudKit: \(cloudUser.username)")
                 currentUser = cloudUser
                 saveUserToDefaults(cloudUser)
 
@@ -103,8 +99,6 @@ class CurrentUserSession: ObservableObject {
                 needsOnboarding = false
                 needsiCloudSignIn = false
                 return
-            } else {
-                logger.info("No existing CloudKit user profile found after retries")
             }
         }
 
@@ -113,8 +107,6 @@ class CurrentUserSession: ObservableObject {
            let userId = UUID(uuidString: userIdString),
            let username = UserDefaults.standard.string(forKey: usernameKey),
            let displayName = UserDefaults.standard.string(forKey: displayNameKey) {
-
-            logger.info("Found existing local user: \(username)")
 
             // Retrieve optional profile emoji and color
             let profileEmoji = UserDefaults.standard.string(forKey: profileEmojiKey)
@@ -256,7 +248,6 @@ class CurrentUserSession: ObservableObject {
         // Subscribe to connection requests
         do {
             try await dependencies.cloudKitService.subscribeToConnectionRequests(forUserId: userId)
-            logger.info("Successfully set up connection request notifications")
         } catch {
             logger.warning("Failed to set up connection request notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
@@ -265,7 +256,6 @@ class CurrentUserSession: ObservableObject {
         // Subscribe to connection acceptances
         do {
             try await dependencies.cloudKitService.subscribeToConnectionAcceptances(forUserId: userId)
-            logger.info("Successfully set up connection acceptance notifications")
         } catch {
             logger.warning("Failed to set up connection acceptance notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails

@@ -608,18 +608,18 @@ struct RecipeCard: View {
                 }
             }
             
-            // Tags (if any)
-            if !sharedRecipe.recipe.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
+            // Tags (always reserve space for consistent card height)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    if !sharedRecipe.recipe.tags.isEmpty {
                         ForEach(sharedRecipe.recipe.tags.prefix(2)) { tag in
                             TagView(tag)
                                 .scaleEffect(0.8) // Make them slightly smaller for the card
                         }
                     }
                 }
-                .frame(height: 24)
             }
+            .frame(height: 24)
         }
         .padding(12)
         .background(Color.cauldronSecondaryBackground)

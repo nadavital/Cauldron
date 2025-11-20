@@ -87,7 +87,7 @@ actor CloudKitService {
             self.privateDatabase = testContainer.privateCloudDatabase
             self.publicDatabase = testContainer.publicCloudDatabase
             self.isEnabled = true
-            logger.info("CloudKit initialized successfully with container: iCloud.Nadav.Cauldron")
+            // CloudKit initialized successfully (don't log routine operations)
         } catch {
             logger.warning("CloudKit not available: \(error.localizedDescription)")
             logger.warning("Enable CloudKit capability in Xcode to use cloud features")
@@ -112,7 +112,10 @@ actor CloudKitService {
             let accountStatus = CloudKitAccountStatus(from: status)
             cachedAccountStatus = accountStatus
 
-            logger.info("iCloud account status: \(String(describing: accountStatus))")
+            // Only log if account is NOT available (routine check otherwise)
+            if !accountStatus.isAvailable {
+                logger.warning("iCloud account status: \(String(describing: accountStatus))")
+            }
 
             return accountStatus
         } catch {
@@ -174,7 +177,7 @@ actor CloudKitService {
         do {
             let zone = try await db.recordZone(for: customZoneID)
             self.customZone = zone
-            logger.info("Fetched existing custom zone: \(self.customZoneID.zoneName)")
+            // Fetched existing custom zone (don't log routine operations)
             return zone
         } catch let error as CKError where error.code == .zoneNotFound {
             // Zone doesn't exist, create it
@@ -182,7 +185,7 @@ actor CloudKitService {
             let newZone = CKRecordZone(zoneID: customZoneID)
             let savedZone = try await db.save(newZone)
             self.customZone = savedZone
-            logger.info("Created custom zone: \(self.customZoneID.zoneName)")
+            logger.info("✅ Created custom zone: \(self.customZoneID.zoneName)")
             return savedZone
         }
     }
@@ -216,7 +219,6 @@ actor CloudKitService {
         do {
             let record = try await db.record(for: CKRecord.ID(recordName: customRecordName))
             let user = try userFromRecord(record)
-            logger.info("Fetched existing user profile: \(user.username)")
             return user
         } catch let error as CKError where error.code == .unknownItem {
             logger.info("No user record found with custom record ID in PUBLIC database")
@@ -231,7 +233,6 @@ actor CloudKitService {
             // Check if this record has valid User fields
             if record["userId"] != nil {
                 let user = try userFromRecord(record)
-                logger.info("Fetched existing user profile from system ID: \(user.username)")
                 return user
             } else {
                 logger.info("Found record at system ID but it's invalid (missing userId)")
@@ -554,50 +555,27 @@ actor CloudKitService {
     // MARK: - Recipes
     
     /// Save recipe to CloudKit
-    /// Public recipes go to PUBLIC database (for sharing/discovery)
-    /// Private recipes go to PRIVATE database (for user's eyes only)
+    /// ALL recipes go to PRIVATE database (for owner's backup/sync)
+    /// Public recipes ALSO go to PUBLIC database (for sharing/discovery) - handled separately
     func saveRecipe(_ recipe: Recipe, ownerId: UUID) async throws {
-        logger.info("📤 Starting CloudKit save for recipe: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
+        // ALL recipes go to PRIVATE database in custom zone for owner's backup
+        // This ensures recipes (and their images) survive app reinstalls
+        let db = try getPrivateDatabase()
+        let zone = try await ensureCustomZone()
+        let zoneID = zone.zoneID
 
-        // Determine target database and zone based on visibility
-        let db: CKDatabase
-        let zoneID: CKRecordZone.ID?
-        
-        if recipe.visibility == .publicRecipe {
-            // Public recipes go to PUBLIC database in default zone
-            db = try getPublicDatabase()
-            zoneID = nil // Public DB doesn't support custom zones in the same way for this use case
-            logger.info("Target: PUBLIC database (Default Zone)")
-        } else {
-            // Private recipes go to PRIVATE database in custom zone (for sharing support if needed later)
-            db = try getPrivateDatabase()
-            let zone = try await ensureCustomZone()
-            zoneID = zone.zoneID
-            logger.info("Target: PRIVATE database (Zone: \(zone.zoneID.zoneName))")
-        }
-
-        // Create record ID
+        // Create record ID in custom zone
         let recordID: CKRecord.ID
         if let cloudRecordName = recipe.cloudRecordName {
-            if let zoneID = zoneID {
-                recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zoneID)
-            } else {
-                recordID = CKRecord.ID(recordName: cloudRecordName)
-            }
+            recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zoneID)
         } else {
-            if let zoneID = zoneID {
-                recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zoneID)
-            } else {
-                // For public records, use a consistent ID format to avoid duplicates if re-saved
-                recordID = CKRecord.ID(recordName: recipe.id.uuidString)
-            }
+            recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zoneID)
         }
 
         // Try to fetch existing record first to update it, otherwise create new one
         let record: CKRecord
         do {
             record = try await db.record(for: recordID)
-            logger.info("Updating existing record in CloudKit: \(recipe.title)")
         } catch let error as CKError where error.code == .unknownItem {
             // Record doesn't exist, create new one
             record = CKRecord(recordType: recipeRecordType, recordID: recordID)
@@ -651,14 +629,10 @@ actor CloudKitService {
         // We preserve existing imageAsset and imageModifiedAt if they exist
         // This allows recipe data sync to happen independently from image sync
 
-        logger.info("Saving recipe to CloudKit...")
         do {
             let savedRecord = try await db.save(record)
-            logger.info("✅ Successfully saved recipe to CloudKit: \(recipe.title)")
-            logger.info("Record ID: \(savedRecord.recordID.recordName)")
         } catch let error as CKError {
-            logger.error("❌ CloudKit save failed: \(error.localizedDescription)")
-            logger.error("Error code: \(error.code.rawValue), User info: \(error.userInfo)")
+            logger.error("❌ CloudKit save failed for '\(recipe.title)': \(error.localizedDescription)")
             throw error
         }
     }
@@ -782,7 +756,7 @@ actor CloudKitService {
 
     /// Sync all recipes for a user - fetch from CloudKit and return for local merge
     func syncUserRecipes(ownerId: UUID) async throws -> [Recipe] {
-        logger.info("🔄 Syncing recipes from CloudKit for owner: \(ownerId)")
+        // Syncing recipes from CloudKit (don't log routine operations)
 
         // Check account status first
         let accountStatus = await checkAccountStatus()
@@ -793,7 +767,7 @@ actor CloudKitService {
 
         // Ensure custom zone exists
         let zone = try await ensureCustomZone()
-        logger.info("Using custom zone for sync: \(zone.zoneID.zoneName)")
+        // Using custom zone for sync (don't log routine operations)
 
         var allRecipes: [Recipe] = []
         let db = try getPrivateDatabase()
@@ -817,14 +791,14 @@ actor CloudKitService {
                 }
             }
 
-            logger.info("✅ Fetched \(allRecipes.count) recipes from CloudKit custom zone")
+            // Fetched recipes from CloudKit (don't log routine operations)
         } catch let error as CKError {
             logger.error("❌ Failed to fetch recipes from CloudKit: \(error.localizedDescription)")
             logger.error("Error code: \(error.code.rawValue)")
             throw error
         }
 
-        logger.info("Total recipes synced from CloudKit: \(allRecipes.count)")
+        // Return recipes (don't log count - routine operation)
         return allRecipes
     }
 
@@ -870,12 +844,13 @@ actor CloudKitService {
         // Cloud image metadata (optional)
         let cloudImageRecordName: String? = (record["imageAsset"] as? CKAsset) != nil ? record.recordID.recordName : nil
         let imageModifiedAt = record["imageModifiedAt"] as? Date
-        
-        // Extract image URL from asset if available
-        var imageURL: URL?
-        if let asset = record["imageAsset"] as? CKAsset, let fileURL = asset.fileURL {
-            imageURL = fileURL
-        }
+
+        // IMPORTANT: Do NOT extract imageURL from CloudKit asset's fileURL!
+        // The asset.fileURL is a temporary CloudKit cache path with version suffixes.
+        // The imageURL should only be set AFTER downloading and saving the image locally.
+        // During sync, RecipeSyncService.downloadImageIfNeeded() will handle downloading
+        // and setting the correct local imageURL.
+        let imageURL: URL? = nil
 
         // Attribution fields (optional)
         let originalRecipeId: UUID? = {
@@ -926,7 +901,6 @@ actor CloudKitService {
     /// Copy recipe to PUBLIC database when visibility != .private
     /// This makes the recipe discoverable by everyone
     func copyRecipeToPublic(_ recipe: Recipe) async throws {
-        logger.info("📤 Copying recipe to PUBLIC database: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
 
         // Only copy if visibility is public
         guard recipe.visibility != .privateRecipe else {
@@ -1019,7 +993,7 @@ actor CloudKitService {
 
     /// Query shared recipes by visibility and optional owner IDs
     func querySharedRecipes(ownerIds: [UUID]?, visibility: RecipeVisibility) async throws -> [Recipe] {
-        logger.info("🔍 Querying shared recipes with visibility: \(visibility.rawValue)")
+        // Querying shared recipes (don't log routine operations)
 
         let db = try getPublicDatabase()
 
@@ -1049,7 +1023,7 @@ actor CloudKitService {
             }
         }
 
-        logger.info("✅ Found \(recipes.count) shared recipes")
+        // Return shared recipes (don't log routine operations)
         return recipes
     }
 
@@ -1160,7 +1134,7 @@ actor CloudKitService {
     
     /// Fetch connections for a user from CloudKit PUBLIC database
     func fetchConnections(forUserId userId: UUID) async throws -> [Connection] {
-        logger.info("📡 Fetching connections for user: \(userId)")
+        // Fetching connections (don't log routine operations)
         let db = try getPublicDatabase()
         var connections: [Connection] = []
         var connectionIds = Set<UUID>() // Track IDs to avoid duplicates
@@ -1177,7 +1151,6 @@ actor CloudKitService {
                     if !connectionIds.contains(connection.id) {
                         connections.append(connection)
                         connectionIds.insert(connection.id)
-                        logger.debug("  Found connection (from): \(connection.id) - status: \(connection.status.rawValue)")
                     }
                 } catch {
                     // Skip legacy connections (rejected/blocked) - they should be deleted
@@ -1198,7 +1171,6 @@ actor CloudKitService {
                     if !connectionIds.contains(connection.id) {
                         connections.append(connection)
                         connectionIds.insert(connection.id)
-                        logger.debug("  Found connection (to): \(connection.id) - status: \(connection.status.rawValue)")
                     }
                 } catch {
                     // Skip legacy connections (rejected/blocked) - they should be deleted
@@ -1207,13 +1179,12 @@ actor CloudKitService {
             }
         }
 
-        logger.info("✅ Fetched \(connections.count) total connections for user from PUBLIC database")
-        logger.info("  Status breakdown: \(connections.filter { $0.status == .pending }.count) pending, \(connections.filter { $0.status == .accepted }.count) accepted")
+        // Fetched connections from CloudKit (don't log routine operations)
 
         // Clean up duplicates - remove duplicate connections between same two users
         let cleanedConnections = try await removeDuplicateConnections(connections)
 
-        logger.info("Returning \(cleanedConnections.count) connections")
+        // Return cleaned connections (don't log count - routine operation)
         return cleanedConnections
     }
 
@@ -1320,10 +1291,8 @@ actor CloudKitService {
         let db = try getPublicDatabase()
         do {
             try await db.deleteSubscription(withID: subscriptionID)
-            logger.info("Deleted old connection request subscription")
         } catch {
-            // Subscription doesn't exist yet, that's fine
-            logger.info("No existing subscription to delete (creating fresh)")
+            // Subscription doesn't exist yet, that's fine (routine)
         }
 
         // Create predicate: toUserId == current user AND status == pending
@@ -1361,7 +1330,6 @@ actor CloudKitService {
         // Save subscription
         do {
             _ = try await db.save(subscription)
-            logger.info("Successfully subscribed to connection requests")
         } catch {
             logger.error("Failed to save connection request subscription: \(error.localizedDescription)")
             throw error
@@ -1390,10 +1358,8 @@ actor CloudKitService {
         let db = try getPublicDatabase()
         do {
             try await db.deleteSubscription(withID: subscriptionID)
-            logger.info("Deleted old connection acceptance subscription")
         } catch {
-            // Subscription doesn't exist yet, that's fine
-            logger.info("No existing acceptance subscription to delete (creating fresh)")
+            // Subscription doesn't exist yet, that's fine (routine)
         }
 
         // Create predicate: fromUserId == current user AND status == accepted
@@ -1426,7 +1392,6 @@ actor CloudKitService {
         // Save subscription
         do {
             _ = try await db.save(subscription)
-            logger.info("Successfully subscribed to connection acceptances")
         } catch {
             logger.error("Failed to save connection acceptance subscription: \(error.localizedDescription)")
             throw error
@@ -1521,7 +1486,7 @@ actor CloudKitService {
 
     /// Fetch shared collections from friends (friends-only and public visibility)
     func fetchSharedCollections(friendIds: [UUID]) async throws -> [Collection] {
-        logger.info("📥 Fetching shared collections from \(friendIds.count) friends")
+        // Fetching shared collections (don't log routine operations)
 
         guard !friendIds.isEmpty else { return [] }
 
@@ -1550,7 +1515,7 @@ actor CloudKitService {
                 }
             }
 
-            logger.info("✅ Fetched \(collections.count) shared collections")
+            // Return shared collections (don't log routine operations)
             return collections
         } catch let error as CKError {
             // Handle schema not yet deployed - record type doesn't exist until first save
@@ -1698,8 +1663,6 @@ actor CloudKitService {
     ///   - database: The database to upload to (private or public)
     /// - Returns: The CloudKit record name for the uploaded asset
     func uploadImageAsset(recipeId: UUID, imageData: Data, to database: CKDatabase) async throws -> String {
-        logger.info("📤 Uploading image asset for recipe: \(recipeId)")
-
         // Optimize image before upload
         let optimizedData = try await optimizeImageForCloudKit(imageData)
 
@@ -1718,7 +1681,16 @@ actor CloudKitService {
         let asset = CKAsset(fileURL: tempURL)
 
         // Find existing recipe record to attach asset to
-        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        // For PRIVATE database, we need to use the custom zone
+        let recordID: CKRecord.ID
+        if database == self.container?.privateCloudDatabase {
+            // PRIVATE database - use custom zone
+            let zone = try await ensureCustomZone()
+            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zone.zoneID)
+        } else {
+            // PUBLIC database - use default zone
+            recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        }
 
         do {
             // Fetch existing record
@@ -1730,7 +1702,6 @@ actor CloudKitService {
 
             // Save updated record
             let savedRecord = try await database.save(record)
-            logger.info("✅ Uploaded image asset")
             return savedRecord.recordID.recordName
 
         } catch let error as CKError {
@@ -1751,26 +1722,31 @@ actor CloudKitService {
     ///   - database: The database to download from (private or public)
     /// - Returns: The image data, or nil if no image exists
     func downloadImageAsset(recipeId: UUID, from database: CKDatabase) async throws -> Data? {
-        logger.info("📥 Downloading image asset for recipe: \(recipeId)")
 
-        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        // For PRIVATE database, we need to use the custom zone
+        let recordID: CKRecord.ID
+        if database == self.container?.privateCloudDatabase {
+            // PRIVATE database - use custom zone
+            let zone = try await ensureCustomZone()
+            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zone.zoneID)
+        } else {
+            // PUBLIC database - use default zone
+            recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        }
 
         do {
             let record = try await database.record(for: recordID)
 
             guard let asset = record["imageAsset"] as? CKAsset,
                   let fileURL = asset.fileURL else {
-                logger.info("No image asset found for recipe: \(recipeId)")
                 return nil
             }
 
             let data = try Data(contentsOf: fileURL)
-            logger.info("✅ Downloaded image asset (\(data.count) bytes)")
             return data
 
         } catch let error as CKError {
             if error.code == .unknownItem {
-                logger.info("Recipe record not found: \(recipeId)")
                 return nil
             }
             throw error
@@ -1784,7 +1760,16 @@ actor CloudKitService {
     func deleteImageAsset(recipeId: UUID, from database: CKDatabase) async throws {
         logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
 
-        let recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        // For PRIVATE database, we need to use the custom zone
+        let recordID: CKRecord.ID
+        if database == self.container?.privateCloudDatabase {
+            // PRIVATE database - use custom zone
+            let zone = try await ensureCustomZone()
+            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zone.zoneID)
+        } else {
+            // PUBLIC database - use default zone
+            recordID = CKRecord.ID(recordName: recipeId.uuidString)
+        }
 
         do {
             let record = try await database.record(for: recordID)
@@ -2087,8 +2072,6 @@ actor CloudKitService {
     /// - Returns: Optimized image data
     /// - Throws: CloudKitError if optimization fails or image is too large
     private func optimizeImageForCloudKit(_ imageData: Data) async throws -> Data {
-        logger.info("Image size: \(imageData.count) bytes, optimizing...")
-
         #if canImport(UIKit)
         guard let image = UIImage(data: imageData) else {
             throw CloudKitError.compressionFailed
@@ -2100,11 +2083,9 @@ actor CloudKitService {
         // Try 80% quality compression first
         if let data = image.jpegData(compressionQuality: 0.8) {
             if data.count <= compressionThreshold {
-                logger.info("Optimized to \(data.count) bytes")
                 return data
             }
             if data.count <= maxSizeBytes {
-                logger.info("Optimized to \(data.count) bytes")
                 return data
             }
         }
@@ -2112,7 +2093,6 @@ actor CloudKitService {
         // Try 60% compression
         if let compressedData = image.jpegData(compressionQuality: 0.6),
            compressedData.count <= maxSizeBytes {
-            logger.info("Optimized to \(compressedData.count) bytes")
             return compressedData
         }
 
@@ -2130,7 +2110,6 @@ actor CloudKitService {
             if let resizedImage = resizedImage,
                let compressedData = resizedImage.jpegData(compressionQuality: 0.8),
                compressedData.count <= maxSizeBytes {
-                logger.info("Optimized to \(compressedData.count) bytes")
                 return compressedData
             }
         }

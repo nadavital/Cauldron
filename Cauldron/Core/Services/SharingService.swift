@@ -109,7 +109,7 @@ actor SharingService {
     /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
     /// To save a recipe for later, users must explicitly add it to their personal collection via "Add to My Recipes".
     func getSharedRecipes() async throws -> [SharedRecipe] {
-        logger.info("📥 Fetching shared recipes from PUBLIC database")
+        // Fetching shared recipes (don't log routine operations)
 
         // Get current user to know who we are
         let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
@@ -134,7 +134,7 @@ actor SharingService {
             return ids
         }
 
-        logger.info("Found \(friendIds.count) connected friends")
+        // Found connected friends (don't log routine operations)
 
         var allSharedRecipes: [SharedRecipe] = []
 
@@ -144,7 +144,7 @@ actor SharingService {
                 ownerIds: friendIds,
                 visibility: .publicRecipe
             )
-            logger.info("Found \(friendsPublicRecipes.count) public recipes from friends")
+            // Found public recipes (don't log routine operations)
 
             // Convert to SharedRecipe objects
             for recipe in friendsPublicRecipes {
@@ -166,7 +166,7 @@ actor SharingService {
             }
         }
 
-        logger.info("✅ Found \(allSharedRecipes.count) total shared recipes from friends")
+        // Return shared recipes (don't log routine operations)
         return allSharedRecipes
     }
     

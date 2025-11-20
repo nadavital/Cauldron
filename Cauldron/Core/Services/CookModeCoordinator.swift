@@ -253,7 +253,7 @@ class CookModeCoordinator {
         // Check if we have a saved session
         guard let recipeIdString = sharedDefaults?.string(forKey: "\(storageKey).recipeId"),
               let recipeId = UUID(uuidString: recipeIdString) else {
-            AppLogger.general.info("No saved cooking session to restore")
+            // No saved cooking session to restore (routine)
             return
         }
 

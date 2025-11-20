@@ -217,11 +217,16 @@ class RecipeEditorViewModel: ObservableObject {
         do {
             var recipe = try buildRecipe()
 
-            // Handle image if selected
+            // Handle image changes
             if let image = selectedImage {
+                // New or changed image - save it
                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: recipe.id)
                 let imageURL = await dependencies.imageManager.imageURL(for: filename)
                 recipe = recipe.withImageURL(imageURL)
+            } else if existingRecipe?.imageURL != nil && selectedImage == nil {
+                // Image was removed (existing recipe had image, but selectedImage is nil and wasn't loaded)
+                // Clear the image URL so it gets deleted from CloudKit
+                recipe = recipe.withImageURL(nil)
             }
 
             // Save to local database (CloudKit sync happens automatically in repository)

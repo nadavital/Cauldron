@@ -178,7 +178,6 @@ final class RecipeModel {
             // Reconstruct full URL using current Documents directory
             let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
             finalImageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
-            AppLogger.general.debug("✅ Image URL reconstructed: \(filename) -> \(finalImageURL?.path ?? "nil")")
         }
 
         return Recipe(

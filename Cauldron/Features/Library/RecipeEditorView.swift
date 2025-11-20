@@ -218,10 +218,10 @@ struct RecipeEditorView: View {
                     horizontalPadding: 0
                 )
                 
-                // Time
+                // Other
                 CategorySelectionRow(
-                    title: "Time",
-                    icon: "clock",
+                    title: "Other",
+                    icon: "tag",
                     options: RecipeCategory.all(in: .other),
                     selected: $viewModel.selectedTags,
                     horizontalPadding: 0

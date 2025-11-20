@@ -31,7 +31,7 @@ actor CloudImageMigration {
     }
 
     // UserDefaults keys for persistence
-    private let migrationCompletedKey = "com.cauldron.imageMigrationCompleted"
+    private let migrationCompletedKey = "com.cauldron.imageMigrationCompleted_v2" // v2 = re-upload to PRIVATE custom zone
     private let lastMigrationAttemptKey = "com.cauldron.lastImageMigrationAttempt"
 
     init(
@@ -59,7 +59,7 @@ actor CloudImageMigration {
     func startMigration() {
         // Check if migration already completed
         if UserDefaults.standard.bool(forKey: migrationCompletedKey) {
-            logger.info("Migration already completed, skipping")
+            // Migration already completed (don't log routine check)
             return
         }
 
@@ -236,6 +236,93 @@ actor CloudImageMigration {
         UserDefaults.standard.removeObject(forKey: "com.cauldron.imageMigrationCount")
         migrationStatus = .notStarted
         startMigration()
+    }
+
+    /// Force re-upload ALL images to CloudKit, even if they claim to be already uploaded
+    /// Use this to fix cases where metadata says images are in cloud but they're actually missing
+    func forceReuploadAllImages() async {
+        logger.info("🔄 Force re-uploading ALL images to CloudKit...")
+
+        // Check if CloudKit is available
+        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        guard isAvailable else {
+            logger.warning("CloudKit not available - cannot force re-upload")
+            return
+        }
+
+        do {
+            // Get all recipes with images
+            let recipes = try await recipeRepository.fetchAll()
+            let recipesWithImages = recipes.filter { $0.imageURL != nil }
+
+            logger.info("Found \(recipesWithImages.count) recipes with images to re-upload")
+
+            guard !recipesWithImages.isEmpty else {
+                logger.info("No recipes with images to re-upload")
+                return
+            }
+
+            var uploadedCount = 0
+            var failedCount = 0
+
+            for recipe in recipesWithImages {
+                // Check if image exists locally
+                let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
+                guard hasLocalImage else {
+                    logger.warning("⚠️ Skipping '\(recipe.title)' - no local image file found")
+                    continue
+                }
+
+                // Upload to Private database (ALWAYS - for owner's backup/reinstall recovery)
+                do {
+                    let privateDB = try await cloudKitService.getPrivateDatabase()
+                    let imageData = try await getImageData(recipeId: recipe.id)
+
+                    logger.info("📤 Force uploading image for: \(recipe.title) to PRIVATE DB")
+
+                    let recordName = try await cloudKitService.uploadImageAsset(
+                        recipeId: recipe.id,
+                        imageData: imageData,
+                        to: privateDB
+                    )
+
+                    // Update recipe with cloud metadata
+                    let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
+                    let updatedRecipe = recipe.withCloudImageMetadata(
+                        recordName: recordName,
+                        modifiedAt: modificationDate
+                    )
+
+                    try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+
+                    // If recipe is public, ALSO upload to Public database (for discovery/sharing)
+                    if recipe.visibility == .publicRecipe {
+                        logger.info("📤 Force uploading image for: \(recipe.title) to PUBLIC DB")
+                        let publicDB = try await cloudKitService.getPublicDatabase()
+                        _ = try? await cloudKitService.uploadImageAsset(
+                            recipeId: recipe.id,
+                            imageData: imageData,
+                            to: publicDB
+                        )
+                    }
+
+                    uploadedCount += 1
+                    logger.info("✅ Force uploaded image \(uploadedCount)/\(recipesWithImages.count): \(recipe.title)")
+
+                    // Rate limiting: 100ms between uploads
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+
+                } catch {
+                    failedCount += 1
+                    logger.error("❌ Failed to force upload image for '\(recipe.title)': \(error.localizedDescription)")
+                }
+            }
+
+            logger.info("✅ Force re-upload complete - Uploaded: \(uploadedCount), Failed: \(failedCount)")
+
+        } catch {
+            logger.error("Force re-upload failed: \(error.localizedDescription)")
+        }
     }
 }
 

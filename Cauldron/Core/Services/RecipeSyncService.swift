@@ -72,12 +72,12 @@ actor RecipeSyncService {
 
                 // Perform sync if needed
                 if shouldAutoSync() {
-                    logger.info("Performing automatic periodic sync")
+                    // Performing automatic periodic sync
                     // Get current user ID from session
                     if let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) {
                         do {
                             try await performFullSync(for: userId)
-                            logger.info("Automatic periodic sync completed")
+                            // Automatic periodic sync completed
                         } catch {
                             logger.warning("Automatic periodic sync failed: \(error.localizedDescription)")
                         }
@@ -91,8 +91,6 @@ actor RecipeSyncService {
 
     /// Perform full bidirectional sync
     func performFullSync(for userId: UUID) async throws {
-        logger.info("Starting full recipe sync for user: \(userId)")
-
         // Check if CloudKit is available
         let isAvailable = await cloudKitService.isCloudKitAvailable()
         guard isAvailable else {
@@ -102,11 +100,9 @@ actor RecipeSyncService {
 
         // Fetch recipes from CloudKit
         let cloudRecipes = try await cloudKitService.syncUserRecipes(ownerId: userId)
-        logger.info("Fetched \(cloudRecipes.count) recipes from CloudKit")
 
         // Fetch local recipes
         let localRecipes = try await recipeRepository.fetchAll()
-        logger.info("Found \(localRecipes.count) local recipes")
 
         // Merge strategies
         try await mergeRecipes(cloudRecipes: cloudRecipes, localRecipes: localRecipes, userId: userId)
@@ -118,7 +114,7 @@ actor RecipeSyncService {
         // Clean up old tombstones (older than 30 days)
         try await deletedRecipeRepository.cleanupOldTombstones()
 
-        logger.info("Recipe sync completed successfully")
+        // Sync completed successfully (don't log routine operations)
     }
 
     /// Sync a single recipe to CloudKit
@@ -129,15 +125,15 @@ actor RecipeSyncService {
             return
         }
 
-        logger.info("📤 Syncing recipe to CloudKit: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
+        // Syncing recipe to CloudKit
         try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
-        logger.info("✅ Recipe synced successfully: \(recipe.title)")
+        // Recipe synced successfully
     }
 
     /// Force sync of all local recipes to CloudKit (useful for recovery)
     /// Syncs ALL recipes regardless of visibility - visibility only controls social sharing
     func forceSyncAllRecipesToCloud(for userId: UUID) async throws {
-        logger.info("🔄 Force syncing all local recipes to CloudKit...")
+        // Force syncing all local recipes to CloudKit
 
         // Check if CloudKit is available
         let isAvailable = await cloudKitService.isCloudKitAvailable()
@@ -148,7 +144,7 @@ actor RecipeSyncService {
 
         // Fetch all local recipes
         let localRecipes = try await recipeRepository.fetchAll()
-        logger.info("Found \(localRecipes.count) local recipes to sync")
+        // Found local recipes to sync
 
         var syncedCount = 0
         var failedCount = 0
@@ -163,7 +159,7 @@ actor RecipeSyncService {
             do {
                 try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
                 syncedCount += 1
-                logger.info("Synced \(syncedCount)/\(localRecipes.count): \(recipe.title)")
+                // Synced recipe
             } catch {
                 failedCount += 1
                 logger.error("Failed to sync recipe '\(recipe.title)': \(error.localizedDescription)")
@@ -175,14 +171,14 @@ actor RecipeSyncService {
 
     /// Delete recipe from CloudKit
     func deleteRecipeFromCloud(_ recipe: Recipe) async throws {
-        logger.info("Deleting recipe from CloudKit: \(recipe.title)")
+        // Deleting recipe from CloudKit
         try await cloudKitService.deleteRecipe(recipe)
     }
 
     // MARK: - Merge Logic
 
     private func mergeRecipes(cloudRecipes: [Recipe], localRecipes: [Recipe], userId: UUID) async throws {
-        logger.info("🔄 Starting recipe merge process...")
+        // Starting recipe merge process
 
         // Create dictionaries for faster lookup
         var cloudRecipesByID: [UUID: Recipe] = [:]
@@ -195,20 +191,21 @@ actor RecipeSyncService {
             localRecipesByID[recipe.id] = recipe
         }
 
-        logger.info("Cloud recipes: \(cloudRecipes.count), Local recipes: \(localRecipes.count)")
+        // Cloud and local recipes ready for merge
 
         // Track statistics
         var created = 0
         var updated = 0
         var skipped = 0
         var pushedToCloud = 0
+        var deletedLocally = 0
 
         // Process cloud recipes
         for cloudRecipe in cloudRecipes {
             // Check if this recipe was intentionally deleted locally
             let wasDeleted = try await deletedRecipeRepository.isDeleted(recipeId: cloudRecipe.id)
             if wasDeleted {
-                logger.info("⛔️ Skipping cloud recipe (deleted locally): \(cloudRecipe.title)")
+                deletedLocally += 1
                 skipped += 1
                 continue
             }
@@ -217,7 +214,7 @@ actor RecipeSyncService {
                 // Recipe exists both locally and in cloud - check which is newer
                 if cloudRecipe.updatedAt > localRecipe.updatedAt {
                     // Cloud version is newer - update local (preserve local-only fields like isFavorite)
-                    logger.info("⬇️ Updating local recipe from cloud: \(cloudRecipe.title)")
+                    // Updating local recipe from cloud
                     let mergedRecipe = Recipe(
                         id: cloudRecipe.id,
                         title: cloudRecipe.title,
@@ -248,7 +245,7 @@ actor RecipeSyncService {
                     updated += 1
                 } else if localRecipe.updatedAt > cloudRecipe.updatedAt {
                     // Local version is newer - push to cloud (preserve CloudKit metadata)
-                    logger.info("⬆️ Updating cloud recipe from local: \(localRecipe.title)")
+                    // Updating cloud recipe from local
                     if let ownerId = localRecipe.ownerId {
                         let cloudSyncRecipe = Recipe(
                             id: localRecipe.id,
@@ -316,7 +313,7 @@ actor RecipeSyncService {
                 }
             } else {
                 // Recipe exists in cloud but not locally - create local
-                logger.info("⬇️ Creating local recipe from cloud: \(cloudRecipe.title)")
+                // Creating local recipe from cloud
                 try await recipeRepository.create(cloudRecipe)
 
                 // Download image if exists in cloud
@@ -332,14 +329,19 @@ actor RecipeSyncService {
                 // Recipe exists locally but not in cloud
                 if let ownerId = localRecipe.ownerId, ownerId == userId {
                     // Push ALL recipes to cloud (visibility controls social sharing, not cloud backup)
-                    logger.info("⬆️ Pushing local recipe to cloud: \(localRecipe.title) (visibility: \(localRecipe.visibility.rawValue))")
+                    // Pushing local recipe to cloud
                     try await cloudKitService.saveRecipe(localRecipe, ownerId: ownerId)
                     pushedToCloud += 1
                 }
             }
         }
 
-        logger.info("✅ Merge complete - Downloaded: \(created), Updated: \(updated), Pushed to Cloud: \(pushedToCloud), Skipped: \(skipped)")
+        // Log summary with deleted count if any
+        if deletedLocally > 0 {
+            logger.info("✅ Merge complete - Downloaded: \(created), Updated: \(updated), Pushed to Cloud: \(pushedToCloud), Skipped: \(skipped) (including \(deletedLocally) deleted locally)")
+        } else {
+            logger.info("✅ Merge complete - Downloaded: \(created), Updated: \(updated), Pushed to Cloud: \(pushedToCloud), Skipped: \(skipped)")
+        }
     }
 
     // MARK: - Sync Info
@@ -372,23 +374,27 @@ actor RecipeSyncService {
     ///   - recipe: The recipe to check and download image for
     ///   - userId: The current user's ID (to determine which database to use)
     private func downloadImageIfNeeded(recipe: Recipe, userId: UUID) async {
-        // Check if recipe has a cloud image
-        guard recipe.cloudImageRecordName != nil else {
-            return
-        }
-
         // Check if image already exists locally
         let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
         if hasLocalImage {
-            // Check if cloud image is newer
-            let localModified = await imageManager.getImageModificationDate(recipeId: recipe.id)
-            if let cloudModified = recipe.imageModifiedAt,
-               let localModified = localModified,
-               localModified >= cloudModified {
-                // Local image is same or newer, no need to download
+            // If local image exists and we have cloud metadata, check if cloud image is newer
+            if let cloudModified = recipe.imageModifiedAt {
+                let localModified = await imageManager.getImageModificationDate(recipeId: recipe.id)
+                if let localModified = localModified,
+                   localModified >= cloudModified {
+                    // Local image is same or newer, no need to download
+                    return
+                }
+            } else {
+                // Local image exists but no cloud metadata - assume local is fine
                 return
             }
         }
+
+        // If we get here, either:
+        // 1. No local image exists, OR
+        // 2. Cloud image is newer than local
+        // Always attempt download from CloudKit, regardless of cloudImageRecordName
 
         // Determine which database to use based on recipe ownership
         let isOwnRecipe = recipe.ownerId == userId
@@ -399,11 +405,29 @@ actor RecipeSyncService {
                 try await cloudKitService.getPrivateDatabase() :
                 try await cloudKitService.getPublicDatabase()
 
-            let dbName = isOwnRecipe ? "PRIVATE" : "PUBLIC"
-            logger.info("📥 Downloading image for recipe: \(recipe.title) from \(dbName) DB")
+            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, database: database) {
 
-            if let _ = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, database: database) {
-                logger.info("✅ Image downloaded successfully for: \(recipe.title)")
+                // IMPORTANT: Update recipe's imageURL to point to the local file
+                // Build the proper local URL (not the CloudKit temporary path)
+                let imageURL = await imageManager.imageURL(for: filename)
+                let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
+
+                // Update recipe with correct imageURL and cloud metadata
+                let updatedRecipe = recipe
+                    .withImageURL(imageURL)
+                    .withCloudImageMetadata(
+                        recordName: recipe.cloudImageRecordName ?? recipe.id.uuidString,
+                        modifiedAt: modificationDate
+                    )
+                try? await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+
+                // Notify views that recipe image was downloaded (so they can refresh and show the image)
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RecipeUpdated"),
+                        object: recipe.id
+                    )
+                }
             }
         } catch {
             logger.warning("Failed to download image for recipe '\(recipe.title)': \(error.localizedDescription)")
