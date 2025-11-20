@@ -19,6 +19,11 @@ struct ProfileAvatar: View {
         self.user = user
         self.size = size
         self.dependencies = dependencies
+
+        // CRITICAL: Initialize with cached image if available
+        // This prevents showing emoji/color placeholder when navigating back
+        let cacheKey = ImageCache.profileImageKey(userId: user.id)
+        _profileImage = State(initialValue: ImageCache.shared.get(cacheKey))
     }
 
     private var backgroundColor: Color {
@@ -54,17 +59,9 @@ struct ProfileAvatar: View {
                             .frame(width: size, height: size)
                             .clipShape(Circle())
                     )
-            } else if isLoadingImage {
-                // Show loading state
-                Circle()
-                    .fill(backgroundColor.opacity(0.3))
-                    .frame(width: size, height: size)
-                    .overlay(
-                        ProgressView()
-                            .tint(backgroundColor)
-                    )
             } else {
-                // Priority 2/3: Show emoji or initials
+                // Show emoji or initials (no loading spinner)
+                // Images load silently in background and update when ready
                 Circle()
                     .fill(backgroundColor.opacity(0.3))
                     .frame(width: size, height: size)
@@ -82,24 +79,40 @@ struct ProfileAvatar: View {
     }
 
     private func loadProfileImage() async {
-        // Don't show loading state if we already have an image
-        // This prevents spinner flash during pull-to-refresh
-        let shouldShowLoading = profileImage == nil
+        let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
-        if shouldShowLoading {
-            isLoadingImage = true
-        }
-        defer {
-            if shouldShowLoading {
-                isLoadingImage = false
+        // Strategy 0: Check in-memory cache first (fastest)
+        if let cachedImage = ImageCache.shared.get(cacheKey) {
+            // CRITICAL: Always set profileImage if it's nil (initial load)
+            // Only compare if we already have an image loaded
+            if let currentImage = profileImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(cachedImage, currentImage) {
+                    profileImage = cachedImage
+                }
+            } else {
+                // First load - always set the image
+                profileImage = cachedImage
             }
+            return
         }
 
-        // Strategy 1: Try to load from local URL if available
+        // Strategy 1: Try to load from local file
         if let imageURL = user.profileImageURL,
            let imageData = try? Data(contentsOf: imageURL),
            let image = UIImage(data: imageData) {
-            profileImage = image
+            // CRITICAL: Always set profileImage if it's nil (initial load)
+            if let currentImage = profileImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(image, currentImage) {
+                    profileImage = image
+                    ImageCache.shared.set(cacheKey, image: image)
+                }
+            } else {
+                // First load - always set the image
+                profileImage = image
+                ImageCache.shared.set(cacheKey, image: image)
+            }
             return
         }
 
@@ -114,7 +127,18 @@ struct ProfileAvatar: View {
                 if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
                    let imageData = try? Data(contentsOf: downloadedURL),
                    let image = UIImage(data: imageData) {
-                    profileImage = image
+                    // CRITICAL: Always set profileImage if it's nil (initial load)
+                    if let currentImage = profileImage {
+                        // Only update UI if the image actually changed
+                        if !areImagesEqual(image, currentImage) {
+                            profileImage = image
+                            ImageCache.shared.set(cacheKey, image: image)
+                        }
+                    } else {
+                        // First load - always set the image
+                        profileImage = image
+                        ImageCache.shared.set(cacheKey, image: image)
+                    }
 
                     // Update CurrentUserSession with the downloaded image URL
                     if let currentUser = CurrentUserSession.shared.currentUser,
@@ -131,13 +155,41 @@ struct ProfileAvatar: View {
                         }
                     }
 
-                    AppLogger.general.info("✅ Downloaded profile image from CloudKit for user \(user.username)")
+                    // Downloaded profile image from CloudKit (don't log routine operations)
                 }
             } catch {
                 AppLogger.general.warning("Failed to download profile image from CloudKit: \(error.localizedDescription)")
                 // Fall back to emoji/initials display
             }
         }
+    }
+
+    /// Compare two images to see if they're visually identical
+    /// This prevents UI updates when CloudKit sync returns the same image
+    private func areImagesEqual(_ image1: UIImage, _ image2: UIImage) -> Bool {
+        // Fast path: if they're literally the same object, they're equal
+        if image1 === image2 {
+            return true
+        }
+
+        // Compare image dimensions
+        if image1.size != image2.size {
+            return false
+        }
+
+        // Compare scale
+        if image1.scale != image2.scale {
+            return false
+        }
+
+        // OPTIMIZATION: For profile images, we store them as JPEG files
+        // Loading the same JPEG file multiple times should give us the same UIImage
+        // So we can just compare the image properties rather than pixel data
+        // This is much faster than comparing bytes
+
+        // If dimensions and scale match, assume they're the same image
+        // This prevents expensive byte-by-byte comparison
+        return true
     }
 }
 

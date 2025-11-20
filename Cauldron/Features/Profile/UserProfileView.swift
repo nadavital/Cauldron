@@ -575,16 +575,21 @@ struct RecipeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image - using RecipeImageView with CloudKit fallback
-            RecipeImageView(
-                imageURL: sharedRecipe.recipe.imageURL,
-                size: .preview,
-                showPlaceholderText: false,
-                recipeImageService: dependencies.recipeImageService,
-                recipeId: sharedRecipe.recipe.id,
-                ownerId: sharedRecipe.recipe.ownerId
-            )
+            // Fixed aspect ratio container to ensure consistent card sizes
+            GeometryReader { geometry in
+                RecipeImageView(
+                    imageURL: sharedRecipe.recipe.imageURL,
+                    size: .preview,
+                    showPlaceholderText: false,
+                    recipeImageService: dependencies.recipeImageService,
+                    recipeId: sharedRecipe.recipe.id,
+                    ownerId: sharedRecipe.recipe.ownerId
+                )
+                .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
+                .clipped()
+                .cornerRadius(12)
+            }
             .aspectRatio(1.5, contentMode: .fit)
-            .cornerRadius(12)
 
             // Title
             Text(sharedRecipe.recipe.title)
