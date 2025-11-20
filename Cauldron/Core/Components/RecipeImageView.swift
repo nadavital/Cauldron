@@ -87,7 +87,13 @@ struct RecipeImageView: View {
     }
 
     private func loadImage() async {
-        isLoading = true
+        // Don't show loading state if we already have an image
+        // This prevents placeholder flash during pull-to-refresh
+        let shouldShowLoading = loadedImage == nil
+
+        if shouldShowLoading {
+            isLoading = true
+        }
 
         let result: Result<UIImage, ImageLoadError>
 
@@ -102,16 +108,20 @@ struct RecipeImageView: View {
         switch result {
         case .success(let image):
             loadedImage = image
-            // Smooth fade-in animation
-            withAnimation(.easeOut(duration: 0.3)) {
-                imageOpacity = 1.0
+            // Smooth fade-in animation only for first load
+            if imageOpacity == 0 {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    imageOpacity = 1.0
+                }
             }
         case .failure:
-            // Keep showing placeholder
+            // Keep showing placeholder or existing image
             break
         }
 
-        isLoading = false
+        if shouldShowLoading {
+            isLoading = false
+        }
     }
 }
 
@@ -318,12 +328,14 @@ struct HeroRecipeImageView: View {
         switch result {
         case .success(let image):
             loadedImage = image
-            // Smooth fade-in animation
-            withAnimation(.easeOut(duration: 0.3)) {
-                imageOpacity = 1.0
+            // Smooth fade-in animation only for first load
+            if imageOpacity == 0 {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    imageOpacity = 1.0
+                }
             }
         case .failure:
-            // Keep showing placeholder
+            // Keep showing placeholder or existing image
             break
         }
     }

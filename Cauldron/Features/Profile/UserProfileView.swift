@@ -11,6 +11,7 @@ import SwiftUI
 struct UserProfileView: View {
     let user: User
     @StateObject private var viewModel: UserProfileViewModel
+    @StateObject private var currentUserSession = CurrentUserSession.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
@@ -27,6 +28,15 @@ struct UserProfileView: View {
             user: user,
             dependencies: dependencies
         ))
+    }
+
+    // Use the live current user from session if viewing own profile
+    // This enables optimistic UI updates to show immediately
+    private var displayUser: User {
+        if viewModel.isCurrentUser, let currentUser = currentUserSession.currentUser {
+            return currentUser
+        }
+        return user
     }
 
     var body: some View {
@@ -120,16 +130,16 @@ struct UserProfileView: View {
     private var profileHeader: some View {
         VStack(spacing: 16) {
             // Avatar
-            ProfileAvatar(user: user, size: 100, dependencies: viewModel.dependencies)
+            ProfileAvatar(user: displayUser, size: 100, dependencies: viewModel.dependencies)
 
             // Display Name
-            Text(user.displayName)
+            Text(displayUser.displayName)
                 .font(.title2)
                 .fontWeight(.bold)
 
             // Username, Friends Count, and Connection Status Badge
             VStack(spacing: 8) {
-                Text("@\(user.username)")
+                Text("@\(displayUser.username)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
@@ -564,18 +574,17 @@ struct RecipeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Image
-            if let imageURL = sharedRecipe.recipe.imageURL {
-                ProfileRecipeImage(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
-                    .onAppear {
-                        AppLogger.general.debug("📸 RecipeCard loading image for '\(sharedRecipe.recipe.title)': \(imageURL.absoluteString)")
-                    }
-            } else {
-                placeholderImage
-                    .onAppear {
-                        AppLogger.general.warning("⚠️ RecipeCard: No imageURL for recipe '\(sharedRecipe.recipe.title)'")
-                    }
-            }
+            // Image - using RecipeImageView with CloudKit fallback
+            RecipeImageView(
+                imageURL: sharedRecipe.recipe.imageURL,
+                size: .preview,
+                showPlaceholderText: false,
+                recipeImageService: dependencies.recipeImageService,
+                recipeId: sharedRecipe.recipe.id,
+                ownerId: sharedRecipe.recipe.ownerId
+            )
+            .aspectRatio(1.5, contentMode: .fit)
+            .cornerRadius(12)
 
             // Title
             Text(sharedRecipe.recipe.title)

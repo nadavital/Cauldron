@@ -82,8 +82,18 @@ struct ProfileAvatar: View {
     }
 
     private func loadProfileImage() async {
-        isLoadingImage = true
-        defer { isLoadingImage = false }
+        // Don't show loading state if we already have an image
+        // This prevents spinner flash during pull-to-refresh
+        let shouldShowLoading = profileImage == nil
+
+        if shouldShowLoading {
+            isLoadingImage = true
+        }
+        defer {
+            if shouldShowLoading {
+                isLoadingImage = false
+            }
+        }
 
         // Strategy 1: Try to load from local URL if available
         if let imageURL = user.profileImageURL,
