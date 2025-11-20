@@ -1817,32 +1817,39 @@ actor CloudKitService {
         // Create CKAsset
         let asset = CKAsset(fileURL: tempURL)
 
-        // Get user's CloudKit record
+        // Get public database
         let db = try getPublicDatabase()
 
-        // Find user record - try with custom record name format
-        let systemUserRecordID = try await getCurrentUserRecordID()
-        let recordName = "user_\(systemUserRecordID.recordName)"
-        let recordID = CKRecord.ID(recordName: recordName)
+        // Create a separate ProfileImage record instead of storing in User record
+        // This avoids schema issues and is cleaner architecture
+        let imageRecordName = "profileImage_\(userId.uuidString)"
+        let imageRecordID = CKRecord.ID(recordName: imageRecordName)
 
         do {
-            // Fetch existing user record
-            let record = try await db.record(for: recordID)
+            // Try to fetch existing image record first
+            let imageRecord: CKRecord
+            do {
+                imageRecord = try await db.record(for: imageRecordID)
+                logger.info("Updating existing profile image record")
+            } catch let error as CKError where error.code == .unknownItem {
+                // Create new image record
+                imageRecord = CKRecord(recordType: "ProfileImage", recordID: imageRecordID)
+                logger.info("Creating new profile image record")
+            }
 
-            // Add profile image asset and modification timestamp
-            record["profileImageAsset"] = asset
-            record["profileImageModifiedAt"] = Date() as CKRecordValue
+            // Set the asset and metadata
+            imageRecord["imageAsset"] = asset
+            imageRecord["userId"] = userId.uuidString as CKRecordValue
+            imageRecord["modifiedAt"] = Date() as CKRecordValue
 
-            // Save updated record
-            let savedRecord = try await db.save(record)
-            logger.info("✅ Uploaded profile image asset")
-            return savedRecord.recordID.recordName
+            // Save the image record
+            let savedImageRecord = try await db.save(imageRecord)
+            logger.info("✅ Uploaded profile image to separate record")
+
+            return savedImageRecord.recordID.recordName
 
         } catch let error as CKError {
-            if error.code == .unknownItem {
-                logger.error("User record not found in CloudKit: \(userId)")
-                throw CloudKitError.invalidRecord
-            } else if error.code == .quotaExceeded {
+            if error.code == .quotaExceeded {
                 logger.error("iCloud storage quota exceeded - cannot upload profile image")
                 throw CloudKitError.quotaExceeded
             }
@@ -1858,20 +1865,14 @@ actor CloudKitService {
 
         let db = try getPublicDatabase()
 
-        // Try to find user record
-        // First, try to fetch the user to get their cloud record name
-        guard let user = try await fetchUser(byUserId: userId),
-              let cloudRecordName = user.cloudRecordName else {
-            logger.warning("Cannot download profile image - user not found or no cloud record")
-            return nil
-        }
-
-        let recordID = CKRecord.ID(recordName: cloudRecordName)
+        // Look for ProfileImage record using the userId-based naming convention
+        let imageRecordName = "profileImage_\(userId.uuidString)"
+        let imageRecordID = CKRecord.ID(recordName: imageRecordName)
 
         do {
-            let record = try await db.record(for: recordID)
+            let imageRecord = try await db.record(for: imageRecordID)
 
-            guard let asset = record["profileImageAsset"] as? CKAsset,
+            guard let asset = imageRecord["imageAsset"] as? CKAsset,
                   let fileURL = asset.fileURL else {
                 logger.info("No profile image asset found for user: \(userId)")
                 return nil
@@ -1883,7 +1884,7 @@ actor CloudKitService {
 
         } catch let error as CKError {
             if error.code == .unknownItem {
-                logger.info("User record not found: \(userId)")
+                logger.info("No profile image record found for user: \(userId)")
                 return nil
             }
             throw error
@@ -1897,24 +1898,17 @@ actor CloudKitService {
 
         let db = try getPublicDatabase()
 
-        // Get user's CloudKit record
-        let systemUserRecordID = try await getCurrentUserRecordID()
-        let recordName = "user_\(systemUserRecordID.recordName)"
-        let recordID = CKRecord.ID(recordName: recordName)
+        // Delete the separate ProfileImage record
+        let imageRecordName = "profileImage_\(userId.uuidString)"
+        let imageRecordID = CKRecord.ID(recordName: imageRecordName)
 
         do {
-            let record = try await db.record(for: recordID)
-
-            // Remove profile image asset fields
-            record["profileImageAsset"] = nil
-            record["profileImageModifiedAt"] = nil
-
-            _ = try await db.save(record)
-            logger.info("✅ Deleted profile image asset")
+            try await db.deleteRecord(withID: imageRecordID)
+            logger.info("✅ Deleted profile image record")
 
         } catch let error as CKError {
             if error.code == .unknownItem {
-                logger.info("User record not found: \(userId)")
+                logger.info("No profile image record found to delete for user: \(userId)")
                 return
             }
             throw error

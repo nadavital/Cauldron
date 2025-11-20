@@ -11,8 +11,15 @@ import SwiftUI
 struct ProfileAvatar: View {
     let user: User
     let size: CGFloat
+    let dependencies: DependencyContainer?
     @State private var profileImage: UIImage?
     @State private var isLoadingImage = false
+
+    init(user: User, size: CGFloat, dependencies: DependencyContainer? = nil) {
+        self.user = user
+        self.size = size
+        self.dependencies = dependencies
+    }
 
     private var backgroundColor: Color {
         if let colorHex = user.profileColor, let color = Color.fromHex(colorHex) {
@@ -75,18 +82,51 @@ struct ProfileAvatar: View {
     }
 
     private func loadProfileImage() async {
-        // Check if user has a profile image URL
-        guard let imageURL = user.profileImageURL else {
-            return
-        }
-
         isLoadingImage = true
         defer { isLoadingImage = false }
 
-        // Try to load image from local URL
-        if let imageData = try? Data(contentsOf: imageURL),
+        // Strategy 1: Try to load from local URL if available
+        if let imageURL = user.profileImageURL,
+           let imageData = try? Data(contentsOf: imageURL),
            let image = UIImage(data: imageData) {
             profileImage = image
+            return
+        }
+
+        // Strategy 2: If local file is missing but we have a cloud record, try downloading
+        // This handles the case where app was reinstalled or local storage was cleared
+        if let dependencies = dependencies,
+           user.cloudProfileImageRecordName != nil,
+           user.profileImageURL == nil {
+            AppLogger.general.info("Local profile image missing, attempting download from CloudKit for user \(user.username)")
+
+            do {
+                if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
+                   let imageData = try? Data(contentsOf: downloadedURL),
+                   let image = UIImage(data: imageData) {
+                    profileImage = image
+
+                    // Update CurrentUserSession with the downloaded image URL
+                    if let currentUser = CurrentUserSession.shared.currentUser,
+                       currentUser.id == user.id {
+                        let updatedUser = currentUser.updatedProfile(
+                            profileEmoji: currentUser.profileEmoji,
+                            profileColor: currentUser.profileColor,
+                            profileImageURL: downloadedURL,
+                            cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
+                            profileImageModifiedAt: currentUser.profileImageModifiedAt
+                        )
+                        await MainActor.run {
+                            CurrentUserSession.shared.currentUser = updatedUser
+                        }
+                    }
+
+                    AppLogger.general.info("✅ Downloaded profile image from CloudKit for user \(user.username)")
+                }
+            } catch {
+                AppLogger.general.warning("Failed to download profile image from CloudKit: \(error.localizedDescription)")
+                // Fall back to emoji/initials display
+            }
         }
     }
 }

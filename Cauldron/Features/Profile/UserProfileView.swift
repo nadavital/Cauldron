@@ -120,7 +120,7 @@ struct UserProfileView: View {
     private var profileHeader: some View {
         VStack(spacing: 16) {
             // Avatar
-            ProfileAvatar(user: user, size: 100)
+            ProfileAvatar(user: user, size: 100, dependencies: viewModel.dependencies)
 
             // Display Name
             Text(user.displayName)

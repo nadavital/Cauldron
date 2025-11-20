@@ -297,83 +297,152 @@ struct ProfileEditView: View {
         do {
             // Handle avatar update
             if selectedAvatarType == .photo, let image = profileImage {
-                // Save image locally
+                // OPTIMISTIC UI: Save image locally and update UI immediately
                 let profileImageURL = try await dependencies.profileImageManager.saveImage(image, userId: currentUser.id)
 
-                // Check if upload is needed
-                let localModified = await dependencies.profileImageManager.getImageModificationDate(userId: currentUser.id)
-                let needsUpload = currentUser.needsProfileImageUpload(localImageModified: localModified)
-
-                // Upload to CloudKit if needed
-                var cloudProfileImageRecordName = currentUser.cloudProfileImageRecordName
-                var profileImageModifiedAt = currentUser.profileImageModifiedAt
-
-                if needsUpload {
-                    do {
-                        cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: currentUser.id)
-                        profileImageModifiedAt = Date()
-                        AppLogger.general.info("✅ Uploaded profile image to CloudKit")
-                    } catch {
-                        AppLogger.general.warning("⚠️ Failed to upload profile image: \(error.localizedDescription)")
-                        throw error
-                    }
-                } else {
-                    AppLogger.general.info("⏭️ Skipping profile image upload - already in sync")
-                }
-
-                // Update user with image references
-                let updatedUser = currentUser.updatedProfile(
+                // Create optimistic user update (without cloud sync yet)
+                let optimisticUser = currentUser.updatedProfile(
                     profileEmoji: nil,
                     profileColor: nil,
                     profileImageURL: profileImageURL,
-                    cloudProfileImageRecordName: cloudProfileImageRecordName,
-                    profileImageModifiedAt: profileImageModifiedAt
+                    cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName, // Keep existing for now
+                    profileImageModifiedAt: currentUser.profileImageModifiedAt
                 )
 
-                // Save to CloudKit
-                try await dependencies.cloudKitService.saveUser(updatedUser)
+                // Update UI immediately
+                CurrentUserSession.shared.currentUser = optimisticUser
+                Self.saveUserToDefaults(optimisticUser)
+                AppLogger.general.info("✅ Updated profile locally (optimistic)")
 
-                // Update session
-                CurrentUserSession.shared.currentUser = updatedUser
-                saveUserToDefaults(updatedUser)
+                // Dismiss sheet immediately for snappy UX
+                dismiss()
 
-                AppLogger.general.info("✅ Updated profile with photo")
+                // Background sync to CloudKit
+                Task.detached { [dependencies, currentUser] in
+                    do {
+                        let localModified = await dependencies.profileImageManager.getImageModificationDate(userId: currentUser.id)
+                        let needsUpload = currentUser.needsProfileImageUpload(localImageModified: localModified)
+
+                        var cloudProfileImageRecordName = currentUser.cloudProfileImageRecordName
+                        var profileImageModifiedAt = currentUser.profileImageModifiedAt
+
+                        if needsUpload {
+                            cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: currentUser.id)
+                            profileImageModifiedAt = Date()
+                            AppLogger.general.info("☁️ Uploaded profile image to CloudKit in background")
+
+                            // Update with cloud record name after successful upload
+                            let finalUser = optimisticUser.updatedProfile(
+                                profileEmoji: nil,
+                                profileColor: nil,
+                                profileImageURL: profileImageURL,
+                                cloudProfileImageRecordName: cloudProfileImageRecordName,
+                                profileImageModifiedAt: profileImageModifiedAt
+                            )
+
+                            try await dependencies.cloudKitService.saveUser(finalUser)
+
+                            // Update session with cloud-synced version
+                            await MainActor.run {
+                                CurrentUserSession.shared.currentUser = finalUser
+                                Self.saveUserToDefaults(finalUser)
+                            }
+                        } else {
+                            // Still save user record to CloudKit even if image didn't need upload
+                            try await dependencies.cloudKitService.saveUser(optimisticUser)
+                            AppLogger.general.info("☁️ Synced user profile to CloudKit (image already up-to-date)")
+                        }
+                    } catch {
+                        AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
+                        // Note: UI already updated optimistically, so user doesn't see this error
+                        // Could add a notification or retry mechanism here
+                    }
+                }
+
             } else if selectedAvatarType == .emoji {
-                // Clear existing profile image
-                await dependencies.profileImageManager.deleteImage(userId: currentUser.id)
-
-                // Update with emoji avatar
-                try await CurrentUserSession.shared.updateUser(
+                // OPTIMISTIC UI: Update locally first
+                let updatedUser = User(
+                    id: currentUser.id,
                     username: username,
                     displayName: displayName,
+                    email: currentUser.email,
+                    cloudRecordName: currentUser.cloudRecordName,
+                    createdAt: currentUser.createdAt,
                     profileEmoji: profileEmoji,
                     profileColor: profileColor,
-                    dependencies: dependencies
+                    profileImageURL: nil,
+                    cloudProfileImageRecordName: nil,
+                    profileImageModifiedAt: nil
                 )
 
-                AppLogger.general.info("✅ Updated profile with emoji")
+                // Update UI immediately
+                CurrentUserSession.shared.currentUser = updatedUser
+                Self.saveUserToDefaults(updatedUser)
+                AppLogger.general.info("✅ Updated profile locally with emoji (optimistic)")
+
+                // Dismiss immediately
+                dismiss()
+
+                // Background sync
+                Task.detached { [dependencies, currentUser] in
+                    // Clear existing profile image
+                    await dependencies.profileImageManager.deleteImage(userId: currentUser.id)
+
+                    do {
+                        // Delete from CloudKit if exists
+                        if currentUser.cloudProfileImageRecordName != nil {
+                            try await dependencies.profileImageManager.deleteImageFromCloud(userId: currentUser.id)
+                        }
+
+                        // Save updated user to CloudKit
+                        try await dependencies.cloudKitService.saveUser(updatedUser)
+                        AppLogger.general.info("☁️ Synced emoji profile to CloudKit in background")
+                    } catch {
+                        AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
+                    }
+                }
+
             } else if username != currentUser.username || displayName != currentUser.displayName {
-                // Just update basic info
-                try await CurrentUserSession.shared.updateUser(
+                // OPTIMISTIC UI: Update basic info immediately
+                let updatedUser = User(
+                    id: currentUser.id,
                     username: username,
                     displayName: displayName,
+                    email: currentUser.email,
+                    cloudRecordName: currentUser.cloudRecordName,
+                    createdAt: currentUser.createdAt,
                     profileEmoji: currentUser.profileEmoji,
                     profileColor: currentUser.profileColor,
-                    dependencies: dependencies
+                    profileImageURL: currentUser.profileImageURL,
+                    cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
+                    profileImageModifiedAt: currentUser.profileImageModifiedAt
                 )
 
-                AppLogger.general.info("✅ Updated profile info")
+                CurrentUserSession.shared.currentUser = updatedUser
+                Self.saveUserToDefaults(updatedUser)
+                AppLogger.general.info("✅ Updated basic profile info locally (optimistic)")
+
+                dismiss()
+
+                // Background sync
+                Task.detached { [dependencies] in
+                    do {
+                        try await dependencies.cloudKitService.saveUser(updatedUser)
+                        AppLogger.general.info("☁️ Synced basic profile to CloudKit in background")
+                    } catch {
+                        AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
+                    }
+                }
             }
 
-            dismiss()
         } catch {
-            AppLogger.general.error("❌ Failed to save profile: \(error.localizedDescription)")
+            AppLogger.general.error("❌ Failed to save profile locally: \(error.localizedDescription)")
             errorMessage = "Failed to save profile: \(error.localizedDescription)"
             showError = true
         }
     }
 
-    private func saveUserToDefaults(_ user: User) {
+    private static func saveUserToDefaults(_ user: User) {
         let defaults = UserDefaults.standard
         defaults.set(user.id.uuidString, forKey: "currentUserId")
         defaults.set(user.username, forKey: "currentUsername")
