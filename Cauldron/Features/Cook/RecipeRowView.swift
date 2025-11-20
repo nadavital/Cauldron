@@ -11,6 +11,7 @@ import SwiftUI
 struct RecipeRowView: View {
     let recipe: Recipe
     let dependencies: DependencyContainer
+    var onTagTap: ((Tag) -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -51,8 +52,16 @@ struct RecipeRowView: View {
 
                     Spacer(minLength: 4)
 
-                    if !recipe.tags.isEmpty {
-                        // Show only first tag to prevent overflow
+                    if !recipe.tags.isEmpty, onTagTap != nil {
+                        // Show only first tag to prevent overflow - tappable if callback provided
+                        TagView(recipe.tags.first!)
+                            .frame(maxWidth: 120)
+                            .lineLimit(1)
+                            .onTapGesture {
+                                onTagTap?(recipe.tags.first!)
+                            }
+                    } else if !recipe.tags.isEmpty {
+                        // Show tag but not tappable
                         TagView(recipe.tags.first!)
                             .frame(maxWidth: 120)
                             .lineLimit(1)

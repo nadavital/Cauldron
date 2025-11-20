@@ -89,7 +89,7 @@ actor ConnectionRepository {
         }
         
         try context.save()
-        logger.info("Saved connection: \(connection.id)")
+        // Saved connection to cache (don't log routine operations)
     }
     
     // MARK: - Delete

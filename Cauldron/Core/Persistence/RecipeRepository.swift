@@ -372,13 +372,6 @@ actor RecipeRepository {
         // Only update timestamp for user actions, not sync operations
         model.updatedAt = shouldUpdateTimestamp ? Date() : recipe.updatedAt
 
-        // Log image filename being saved
-        if let imageFilename = recipe.imageURL?.lastPathComponent {
-            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with image filename: \(imageFilename)")
-        } else {
-            AppLogger.general.debug("💾 Saving recipe '\(recipe.title)' with NO image")
-        }
-
         try context.save()
     }
 
@@ -392,10 +385,18 @@ actor RecipeRepository {
         let hasImage = newRecipe.imageURL != nil
         let imageWasRemoved = hadImage && !hasImage
 
-        // Early return: If image URL is unchanged, skip all image processing
+        // Early return: If image URL is unchanged AND file hasn't been modified, skip image processing
         if oldRecipe.imageURL == newRecipe.imageURL && hasImage {
-            AppLogger.general.debug("⏭️ Skipping image sync - image URL unchanged")
-            return newRecipe
+            // Check if the image file was actually modified (e.g., user edited recipe and changed image)
+            if let imageModifiedAt = newRecipe.imageModifiedAt,
+               let fileModifiedAt = await imageManager.getImageModificationDate(recipeId: newRecipe.id),
+               fileModifiedAt <= imageModifiedAt {
+                // File hasn't changed since last upload
+                AppLogger.general.debug("⏭️ Skipping image sync - image URL and file unchanged")
+                return newRecipe
+            }
+            // File was modified - fall through to upload
+            AppLogger.general.debug("📤 Image file was modified - uploading to CloudKit")
         }
 
         // Case 1: Image was removed
@@ -446,19 +447,26 @@ actor RecipeRepository {
             return cleanedRecipe
         }
 
-        // Check if upload is needed
-        let localModified = await imageManager.getImageModificationDate(recipeId: recipe.id)
-        guard recipe.needsImageUpload(localImageModified: localModified) else {
-            return recipe
+        // IMPORTANT: Upload to PRIVATE database to ensure owner can download after reinstalling.
+        // Only upload if:
+        // 1. No cloud metadata exists (never uploaded), OR
+        // 2. Local image was modified after last upload
+        let shouldUploadToPrivate: Bool
+        if let cloudImageRecordName = recipe.cloudImageRecordName,
+           let imageModifiedAt = recipe.imageModifiedAt,
+           let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id) {
+            // We have cloud metadata - check if local file is newer
+            shouldUploadToPrivate = localImageModifiedAt > imageModifiedAt
+        } else {
+            // No cloud metadata - need to upload
+            shouldUploadToPrivate = true
         }
 
-        // Upload to private database
-        await uploadRecipeImage(recipe, to: .private)
-
-        // Upload to public database if recipe is public
-        if recipe.visibility == .publicRecipe {
-            await uploadRecipeImage(recipe, to: .public)
+        if shouldUploadToPrivate {
+            await uploadRecipeImage(recipe, to: .private)
         }
+
+        // Public recipes are handled by syncRecipeToPublicDatabase() separately
 
         // Fetch updated recipe with cloud metadata
         if let updatedRecipe = try await fetch(id: recipe.id) {
@@ -630,7 +638,6 @@ actor RecipeRepository {
     private func shouldUploadImageToPublic(_ recipe: Recipe) async -> Bool {
         // Check if recipe exists in PUBLIC database and already has an image
         guard let ownerId = recipe.ownerId else {
-            logger.debug("Image needs upload - no ownerId")
             return true
         }
 
@@ -641,25 +648,25 @@ actor RecipeRepository {
             // If PUBLIC recipe has an image record name, image already exists
             if publicRecipe.cloudImageRecordName != nil {
                 // Check if local image has been modified since last upload
+                // Use a 1-second tolerance to avoid false positives from date precision differences
                 if let imageModifiedAt = publicRecipe.imageModifiedAt,
-                   let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id),
-                   localImageModifiedAt > imageModifiedAt {
-                    logger.debug("Image needs upload - modified locally")
-                    return true
+                   let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id) {
+                    let timeDifference = localImageModifiedAt.timeIntervalSince(imageModifiedAt)
+                    if timeDifference > 1.0 {
+                        // Local image is more than 1 second newer - needs upload
+                        return true
+                    }
                 }
 
                 // Image already exists and hasn't been modified
-                logger.debug("⏭️ Skipping image upload - already synced to PUBLIC database")
                 return false
             } else {
                 // PUBLIC recipe exists but has no image
-                logger.debug("Image needs upload - PUBLIC recipe has no image")
                 return true
             }
         } catch {
             // If we can't fetch the PUBLIC recipe, assume we need to upload
             // (recipe might not exist yet, or there's a network error)
-            logger.debug("Image needs upload - couldn't verify PUBLIC recipe status: \(error.localizedDescription)")
             return true
         }
     }
@@ -797,9 +804,8 @@ actor RecipeRepository {
     func migratePublicRecipesToPublicDatabase() async {
         let migrationKey = "hasMigratedPublicRecipesToPublicDB_v1"
         
-        // Check if already migrated
+        // Check if already migrated (don't log - it's the common case)
         if UserDefaults.standard.bool(forKey: migrationKey) {
-            logger.info("✅ Public recipes already migrated to PUBLIC database. Skipping.")
             return
         }
         
@@ -863,8 +869,6 @@ actor RecipeRepository {
     /// One-time migration: Update all recipes to set current user as owner
     /// This fixes recipes from the old reference system that may have wrong owner IDs
     func migrateRecipeOwnership(currentUserId: UUID) async throws {
-        logger.info("🔄 Starting recipe ownership migration for user: \(currentUserId)")
-
         let context = ModelContext(modelContainer)
         let fetchDescriptor = FetchDescriptor<RecipeModel>()
         let allModels = try context.fetch(fetchDescriptor)
@@ -881,24 +885,20 @@ actor RecipeRepository {
                 if let oldOwnerId = oldOwnerId {
                     if model.originalCreatorId == nil {
                         model.originalCreatorId = oldOwnerId
-                        logger.info("  Preserved original creator ID: \(oldOwnerId)")
                     }
                 }
 
                 // Set current user as the owner
                 model.ownerId = currentUserId
                 migratedCount += 1
-
-                logger.info("  ✅ Migrated recipe '\(model.title)' - old owner: \(oldOwnerId?.uuidString ?? "nil") → new owner: \(currentUserId)")
             }
         }
 
         if migratedCount > 0 {
             try context.save()
-            logger.info("✅ Migration complete: Updated \(migratedCount) recipes to have current user as owner")
-        } else {
-            logger.info("✅ Migration complete: No recipes needed updating")
+            logger.info("Migration complete: Updated \(migratedCount) recipes to have current user as owner")
         }
+        // Don't log if no migration needed - it's the common case
     }
 
     // MARK: - Image Sync Methods
@@ -929,7 +929,6 @@ actor RecipeRepository {
                 try await cloudKitService.getPrivateDatabase() :
                 try await cloudKitService.getPublicDatabase()
 
-            logger.info("📤 Uploading image for recipe: \(recipe.title) to \(databaseType == .private ? "PRIVATE" : "PUBLIC") DB")
             let recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, database: database)
 
             // Update recipe with cloud metadata
@@ -939,7 +938,12 @@ actor RecipeRepository {
 
             // Remove from pending uploads
             await imageSyncManager.removePendingUpload(recipe.id)
-            logger.info("✅ Image uploaded successfully")
+
+            // Notify views that recipe was updated (so RecipeDetailView can refresh and show the image)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("RecipeUpdated"),
+                object: recipe.id
+            )
 
         } catch let error as CloudKitError {
             logger.error("❌ Image upload failed: \(error.localizedDescription)")
@@ -1142,6 +1146,87 @@ actor RecipeRepository {
         // Create the recipe (will trigger cloud sync with image)
         try await create(recipeToSave)
         return recipeToSave
+    }
+
+    // MARK: - Image Filename Migration
+
+    /// Fix corrupted image filenames that may have CloudKit version suffixes
+    /// This migration removes any non-.jpg suffixes and ensures proper filename format
+    func fixCorruptedImageFilenames() async throws {
+        let migrationKey = "hasFixedCorruptedImageFilenames_v2"  // Changed from v1 to v2 to re-run migration
+
+        // Check if already migrated
+        if UserDefaults.standard.bool(forKey: migrationKey) {
+            return
+        }
+
+        logger.info("🔧 Starting image filename corruption fix...")
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>()
+        let models = try context.fetch(descriptor)
+
+        var fixedCount = 0
+
+        for model in models {
+            // Check if imageURL has a corrupted filename (contains extra suffix after .jpg)
+            guard let imageURLString = model.imageURL,
+                  !imageURLString.isEmpty,
+                  imageURLString.contains(".") else {
+                continue
+            }
+
+            // Extract just the filename (handle full URLs or filenames)
+            let filename: String
+            if imageURLString.contains("/") {
+                // Full URL - extract last component
+                if let url = URL(string: imageURLString) {
+                    filename = url.lastPathComponent
+                } else {
+                    continue
+                }
+            } else {
+                // Already a filename
+                filename = imageURLString
+            }
+
+            // Expected correct filename format: {UUID}.jpg
+            let correctFilename = "\(model.id.uuidString).jpg"
+
+            // Check if filename is corrupted (doesn't match expected format)
+            // Corrupted files have CloudKit version suffixes like: 4F973D88-8DF3-42E6-94B6-92A22F41C44D.01c2c398ff072c0fc6bae69cd0f05d8031707ed35f
+            if filename != correctFilename {
+                // Filename is corrupted or incorrect!
+                logger.info("🔧 Fixing corrupted/incorrect image filename for recipe '\(model.title)'")
+                logger.info("   Old: \(filename)")
+                logger.info("   New: \(correctFilename)")
+
+                // Check if correct file exists
+                let imageURL = await imageManager.imageURL(for: correctFilename)
+                let fileExists = await imageManager.imageExists(recipeId: model.id)
+
+                if fileExists {
+                    // Correct file exists - just update the database
+                    model.imageURL = correctFilename
+                    fixedCount += 1
+                } else {
+                    // Correct file doesn't exist - clear imageURL (will be re-downloaded on next sync)
+                    logger.warning("   Image file not found - clearing imageURL (will re-download on next sync)")
+                    model.imageURL = nil
+                    fixedCount += 1
+                }
+            }
+        }
+
+        if fixedCount > 0 {
+            try context.save()
+            logger.info("✅ Fixed \(fixedCount) corrupted image filenames")
+        } else {
+            logger.info("✅ No corrupted image filenames found")
+        }
+
+        // Mark migration as complete
+        UserDefaults.standard.set(true, forKey: migrationKey)
     }
 
     // MARK: - Account Deletion

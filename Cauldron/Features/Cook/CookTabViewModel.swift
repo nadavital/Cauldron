@@ -47,7 +47,7 @@ class CookTabViewModel: ObservableObject {
                 // Load favorites (simple filter, very fast)
                 self.favoriteRecipes = preloadedData.allRecipes.filter { $0.isFavorite }
 
-                AppLogger.general.info("Cook tab initialized with preloaded data: \(preloadedData.allRecipes.count) recipes, \(self.favoriteRecipes.count) favorites, \(preloadedData.collections.count) collections")
+                // Cook tab initialized with preloaded data (don't log routine operations)
             }
         } else {
             // Fallback: Load data if not preloaded (e.g., in previews or when returning from onboarding)

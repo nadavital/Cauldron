@@ -81,7 +81,7 @@ actor SharingRepository {
         }
         
         try context.save()
-        logger.info("Saved user: \(user.username)")
+        // Saved user to cache (don't log routine operations)
     }
     
     // MARK: - Shared Recipes

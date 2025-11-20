@@ -72,7 +72,7 @@ actor CollectionRepository {
         context.insert(model)
         try context.save()
 
-        logger.info("✅ Created collection locally: \(collection.name)")
+        // Created collection locally
 
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
@@ -160,7 +160,7 @@ actor CollectionRepository {
         // 1. Update locally (immediate)
         let updatedModel = try CollectionModel.from(collection)
 
-        logger.info("🔄 Updating collection '\(collection.name)' with \(collection.recipeCount) recipes")
+        // Updating collection
 
         // Copy properties (SwiftData doesn't support direct replacement)
         existingModel.name = updatedModel.name
@@ -174,13 +174,13 @@ actor CollectionRepository {
         existingModel.updatedAt = shouldUpdateTimestamp ? Date() : collection.updatedAt
 
         try context.save()
-        logger.info("✅ Updated collection in local database: \(collection.name)")
+        // Updated collection in local database
 
         // Verify the save by reading it back
         let verifyDescriptor = FetchDescriptor(predicate: predicate)
         if let verified = try context.fetch(verifyDescriptor).first {
             let verifiedCollection = try verified.toDomain()
-            logger.info("✅ Verification: collection now has \(verifiedCollection.recipeCount) recipes")
+            // Verification: collection updated successfully
         }
 
         // Post notifications for changes (immediate)
@@ -238,14 +238,11 @@ actor CollectionRepository {
             throw CollectionRepositoryError.collectionNotFound
         }
 
-        logger.info("➕ Adding recipe \(recipeId) to collection '\(collection.name)'")
-        logger.info("📊 Collection currently has \(collection.recipeCount) recipes: \(collection.recipeIds)")
-
+        // Adding recipe to collection
         let updated = collection.addingRecipe(recipeId)
-        logger.info("📊 After adding: collection will have \(updated.recipeCount) recipes: \(updated.recipeIds)")
 
         try await update(updated)
-        logger.info("✅ Successfully added recipe to collection '\(collection.name)'")
+        // Successfully added recipe to collection
     }
 
     /// Remove a recipe from a collection
@@ -267,7 +264,7 @@ actor CollectionRepository {
             try await update(updated)
         }
 
-        logger.info("🗑️ Removed recipe from \(collections.count) collections")
+        // Removed recipe from collections
     }
 
     // MARK: - Delete
@@ -289,7 +286,7 @@ actor CollectionRepository {
         context.delete(model)
         try context.save()
 
-        logger.info("🗑️ Deleted collection locally")
+        // Deleted collection locally
 
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
@@ -308,7 +305,7 @@ actor CollectionRepository {
             // Delete from CloudKit
             do {
                 try await cloudKitService.deleteCollection(id)
-                self.logger.info("✅ Deleted collection from CloudKit")
+                // Deleted collection from CloudKit
 
                 // Mark operation as completed
                 await self.operationQueueService.markCompleted(
@@ -346,10 +343,8 @@ actor CollectionRepository {
 
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
-        logger.info("🔄 Attempting to sync collection '\(collection.name)' (visibility: \(collection.visibility.rawValue)) to CloudKit")
-
+        // Attempting to sync collection to CloudKit
         let isAvailable = await cloudKitService.isCloudKitAvailable()
-        logger.info("CloudKit availability check: \(isAvailable)")
 
         guard isAvailable else {
             logger.warning("⚠️ CloudKit not available - collection will sync later: \(collection.name)")
@@ -358,9 +353,9 @@ actor CollectionRepository {
         }
 
         do {
-            logger.info("☁️ Syncing collection to CloudKit: \(collection.name)")
+            // Syncing collection to CloudKit
             try await cloudKitService.saveCollection(collection)
-            logger.info("✅ Successfully synced collection '\(collection.name)' to CloudKit")
+            // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
             pendingSyncCollections.remove(collection.id)
@@ -391,11 +386,10 @@ actor CollectionRepository {
     private func retryPendingSyncs() async {
         guard !self.pendingSyncCollections.isEmpty else { return }
 
-        logger.info("Retrying sync for \(self.pendingSyncCollections.count) pending collections")
-
+        // Retrying sync for pending collections
         let isAvailable = await cloudKitService.isCloudKitAvailable()
         guard isAvailable else {
-            logger.info("CloudKit still not available - will retry later")
+            // CloudKit still not available - will retry later
             return
         }
 
@@ -413,7 +407,7 @@ actor CollectionRepository {
 
                 try await cloudKitService.saveCollection(collection)
                 self.pendingSyncCollections.remove(collectionId)
-                logger.info("✅ Retry successful for collection: \(collection.name)")
+                // Retry successful for collection
             } catch {
                 logger.error("❌ Retry failed for collection: \(error.localizedDescription)")
             }
@@ -425,18 +419,18 @@ actor CollectionRepository {
     /// Handle recipe visibility changes and update affected collections
     /// This ensures collections stay in sync when recipes change visibility
     func handleRecipeVisibilityChange(recipeId: UUID, oldVisibility: RecipeVisibility, newVisibility: RecipeVisibility) async {
-        logger.info("🔄 Handling visibility change for recipe \(recipeId): \(oldVisibility.rawValue) → \(newVisibility.rawValue)")
+        // Handling visibility change for recipe
 
         do {
             // Find all collections containing this recipe
             let affectedCollections = try await fetchCollections(containingRecipe: recipeId)
 
             guard !affectedCollections.isEmpty else {
-                logger.info("No collections affected by recipe visibility change")
+                // No collections affected by recipe visibility change
                 return
             }
 
-            logger.info("Found \(affectedCollections.count) collections containing this recipe")
+            // Found collections containing this recipe
 
             // Update each affected collection's timestamp to trigger CloudKit sync
             // This ensures that anyone with a reference to this collection will see the update
@@ -451,7 +445,7 @@ actor CollectionRepository {
                 )
 
                 try await update(updated)
-                logger.info("✅ Updated collection '\(collection.name)' due to recipe visibility change")
+                // Updated collection due to recipe visibility change
             }
         } catch {
             logger.error("❌ Failed to handle recipe visibility change: \(error.localizedDescription)")
@@ -464,13 +458,13 @@ actor CollectionRepository {
     func syncFromCloudKit(userId: UUID) async throws {
         let isAvailable = await cloudKitService.isCloudKitAvailable()
         guard isAvailable else {
-            logger.info("CloudKit not available - skipping sync")
+            // CloudKit not available - skipping sync
             return
         }
 
         do {
             let cloudCollections = try await cloudKitService.fetchCollections(forUserId: userId)
-            logger.info("📥 Fetched \(cloudCollections.count) collections from CloudKit")
+            // Fetched collections from CloudKit
 
             // Merge with local collections
             for cloudCollection in cloudCollections {
@@ -480,12 +474,12 @@ actor CollectionRepository {
                     // Update if cloud version is newer (don't update timestamp - sync operation)
                     if cloudCollection.updatedAt > local.updatedAt {
                         try await update(cloudCollection, shouldUpdateTimestamp: false)
-                        logger.info("🔄 Updated collection from cloud: \(cloudCollection.name)")
+                        // Updated collection from cloud
                     }
                 } else {
                     // Insert new collection from cloud
                     try await create(cloudCollection)
-                    logger.info("➕ Added new collection from cloud: \(cloudCollection.name)")
+                    // Added new collection from cloud
                 }
             }
         } catch {
@@ -499,7 +493,7 @@ actor CollectionRepository {
     /// Delete all collections owned by a user (for account deletion)
     /// - Parameter userId: The ID of the user whose collections to delete
     func deleteAllUserCollections(userId: UUID) async throws {
-        logger.info("🗑️ Deleting all collections for user: \(userId)")
+        // Deleting all collections for user
 
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionModel>(
@@ -509,14 +503,14 @@ actor CollectionRepository {
         )
 
         let models = try context.fetch(descriptor)
-        logger.info("Found \(models.count) collections to delete")
+        // Found collections to delete
 
         // Delete each collection (includes CloudKit cleanup)
         for model in models {
             try await delete(id: model.id)
         }
 
-        logger.info("✅ Deleted all user collections")
+        // Deleted all user collections
     }
 }
 

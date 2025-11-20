@@ -23,12 +23,6 @@ struct RecentlyCookedListView: View {
     
     var body: some View {
         List {
-            Section {
-                Text("Recipes you've cooked recently")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            
             ForEach(localRecipes) { recipe in
                 NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
                     RecipeRowView(recipe: recipe, dependencies: dependencies)

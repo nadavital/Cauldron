@@ -38,6 +38,7 @@ struct RecipeDetailView: View {
     @State private var isCheckingDuplicates = false
     @State private var originalCreator: User?
     @State private var isLoadingCreator = false
+    @State private var imageRefreshID = UUID() // Force image refresh
 
     // Recipe update sync state
     @State private var originalRecipe: Recipe?
@@ -85,6 +86,7 @@ struct RecipeDetailView: View {
                     if let imageURL = recipe.imageURL {
                         HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
                             .ignoresSafeArea(edges: .top)
+                            .id("\(imageURL.absoluteString)-\(imageRefreshID)") // Force refresh when image URL or refresh ID changes
                     }
 
                     // Content sections
@@ -278,6 +280,22 @@ struct RecipeDetailView: View {
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
         .toast(isShowing: $showSaveSuccessToast, icon: "checkmark.circle.fill", message: "Saved to your recipes")
         .toast(isShowing: $showUpdateSuccessToast, icon: "arrow.triangle.2.circlepath", message: "Recipe updated successfully")
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { notification in
+            // Refresh recipe when it's updated (e.g., CloudKit metadata added after image upload)
+            // Only refresh if this is the same recipe (or if no specific recipe ID was provided)
+            if let updatedRecipeId = notification.object as? UUID {
+                if updatedRecipeId == recipe.id {
+                    Task {
+                        await refreshRecipe()
+                    }
+                }
+            } else {
+                // No specific recipe ID - refresh anyway (for backwards compatibility)
+                Task {
+                    await refreshRecipe()
+                }
+            }
+        }
         .task {
             // Check for duplicates when viewing someone else's recipe
             if !recipe.isOwnedByCurrentUser() {
@@ -338,7 +356,10 @@ struct RecipeDetailView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(recipe.tags) { tag in
-                            TagView(tag)
+                            NavigationLink(destination: ExploreTagView(tag: tag, dependencies: dependencies)) {
+                                TagView(tag)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.trailing, 1)
@@ -827,6 +848,11 @@ struct RecipeDetailView: View {
                 recipe = updatedRecipe
                 localIsFavorite = updatedRecipe.isFavorite
                 currentVisibility = updatedRecipe.visibility
+
+                // Force image view to refresh by changing its ID
+                // This is necessary because the view is behind a sheet and might not detect URL changes
+                imageRefreshID = UUID()
+
                 AppLogger.general.info("✅ Refreshed recipe: \(updatedRecipe.title)")
             }
         } catch {

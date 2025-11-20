@@ -88,6 +88,9 @@ struct SearchTabView: View {
             .navigationDestination(for: Collection.self) { collection in
                 CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)
             }
+            .navigationDestination(for: Tag.self) { tag in
+                ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
+            }
         }
         .searchable(text: $searchText, prompt: searchMode == .recipes ? "Search recipes" : "Search people")
         .onChange(of: searchText) { _, newValue in
@@ -133,7 +136,7 @@ struct SearchTabView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                         ForEach(RecipeCategory.all(in: section)) { category in
                             Button {
-                                viewModel.toggleCategory(category)
+                                navigationPath.append(Tag(name: category.tagValue))
                             } label: {
                                 HStack(spacing: 12) {
                                     // Icon Container
@@ -144,21 +147,17 @@ struct SearchTabView: View {
                                         Text(category.emoji)
                                             .font(.title3)
                                     }
-                                    
+
                                     Text(category.displayName)
                                         .font(.body)
                                         .fontWeight(.medium)
                                         .foregroundColor(.primary)
-                                    
+
                                     Spacer()
                                 }
                                 .padding(8)
                                 .background(Color(.secondarySystemGroupedBackground))
                                 .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(viewModel.selectedCategories.contains(category) ? category.color : Color.clear, lineWidth: 2)
-                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -190,7 +189,9 @@ struct SearchTabView: View {
                     .foregroundColor(.secondary)
 
                 ForEach(viewModel.recipeSearchResults) { recipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                    Button {
+                        navigationPath.append(recipe)
+                    } label: {
                         RecipeRowView(recipe: recipe, dependencies: viewModel.dependencies)
                     }
                     .buttonStyle(.plain)

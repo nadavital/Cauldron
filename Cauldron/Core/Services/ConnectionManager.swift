@@ -132,13 +132,10 @@ class ConnectionManager: ObservableObject {
     ///   - userId: The user ID to load connections for
     ///   - forceRefresh: If true, bypasses cache and forces a CloudKit sync
     func loadConnections(forUserId userId: UUID, forceRefresh: Bool = false) async {
-        logger.info("📥 Loading connections for user: \(userId) (forceRefresh: \(forceRefresh))")
-
-        // Check if cache is still valid
+        // Check if cache is still valid (don't log routine cache hits)
         if !forceRefresh, let lastSync = lastSyncTime {
             let timeSinceLastSync = Date().timeIntervalSince(lastSync)
             if timeSinceLastSync < cacheValidityDuration {
-                logger.info("📦 Using cached connections (synced \(Int(timeSinceLastSync))s ago)")
                 // Only load from cache if we don't have any connections yet
                 if connections.isEmpty {
                     await loadFromCache(userId: userId)
@@ -159,7 +156,7 @@ class ConnectionManager: ObservableObject {
 
     /// Accept a connection request (optimistic update)
     func acceptConnection(_ connection: Connection) async throws {
-        logger.info("✅ Accepting connection: \(connection.id)")
+        // Accepting connection (don't log routine operations)
 
         guard connection.toUserId == currentUserId else {
             throw ConnectionError.permissionDenied
@@ -200,8 +197,6 @@ class ConnectionManager: ObservableObject {
 
     /// Reject a connection request (optimistic delete)
     func rejectConnection(_ connection: Connection) async throws {
-        logger.info("❌ Rejecting connection: \(connection.id)")
-
         guard connection.toUserId == currentUserId else {
             throw ConnectionError.permissionDenied
         }
@@ -215,7 +210,7 @@ class ConnectionManager: ObservableObject {
         // Delete from CloudKit (rejection = deletion for cleaner UX)
         do {
             try await dependencies.cloudKitService.rejectConnectionRequest(connection)
-            logger.info("✅ Connection rejected and deleted successfully")
+            // Connection rejected successfully (don't log routine operations)
 
             // Update badge count (one less pending request)
             updateBadgeCount()
@@ -227,11 +222,9 @@ class ConnectionManager: ObservableObject {
 
     /// Send a connection request (optimistic update)
     func sendConnectionRequest(to userId: UUID, user: User) async throws {
-        logger.info("📤 Sending connection request to: \(user.username)")
-
         // Check if there's an existing connection (including rejected ones)
         if let existingConnection = connectionStatus(with: userId) {
-            logger.info("Found existing connection with status: \(existingConnection.connection.status.rawValue)")
+            // Found existing connection (only log for debugging duplicates)
 
             // Connection already exists (pending or accepted)
             if existingConnection.connection.status == .pending || existingConnection.connection.status == .accepted {
@@ -283,7 +276,7 @@ class ConnectionManager: ObservableObject {
             return
         }
 
-        logger.info("🔄 Manually retrying operation for connection: \(connectionId)")
+        // Manually retrying operation (don't log routine retries)
 
         // Reset retry count for manual retry
         var resetOperation = operation
@@ -324,7 +317,7 @@ class ConnectionManager: ObservableObject {
 
     /// Delete a connection (removes friend/unfriends)
     func deleteConnection(_ connection: Connection) async throws {
-        logger.info("🗑️ Deleting connection: \(connection.id) between \(connection.fromUserId) and \(connection.toUserId)")
+        // Deleting connection (don't log routine operations)
 
         // Remove from local state immediately (optimistic)
         connections.removeValue(forKey: connection.id)
@@ -332,7 +325,7 @@ class ConnectionManager: ObservableObject {
         // Delete from local cache
         do {
             try await dependencies.connectionRepository.delete(connection)
-            logger.info("Deleted connection from local cache")
+            // Deleted from local cache
         } catch {
             logger.warning("Failed to delete from cache: \(error.localizedDescription)")
         }
@@ -340,7 +333,7 @@ class ConnectionManager: ObservableObject {
         // Delete from CloudKit
         do {
             try await dependencies.cloudKitService.deleteConnection(connection)
-            logger.info("✅ Connection deleted successfully from CloudKit")
+            // Connection deleted successfully
         } catch {
             logger.error("❌ Failed to delete connection from CloudKit: \(error.localizedDescription)")
             throw error
@@ -369,7 +362,7 @@ class ConnectionManager: ObservableObject {
                 )
             }
 
-            logger.info("Loaded \(cachedConnections.count) connections from cache")
+            // Loaded connections from cache (don't log routine operations)
         } catch {
             logger.error("Failed to load from cache: \(error.localizedDescription)")
         }
@@ -406,7 +399,7 @@ class ConnectionManager: ObservableObject {
                     continue
                 }
 
-                logger.info("🗑️ Removing locally cached connection deleted in CloudKit: \(deletedId)")
+                // Removing locally cached connection deleted in CloudKit
 
                 // Remove from in-memory state
                 if let connection = connections[deletedId]?.connection {
@@ -417,7 +410,7 @@ class ConnectionManager: ObservableObject {
                 }
             }
 
-            logger.info("Synced \(cloudConnections.count) connections from CloudKit (removed \(deletedConnectionIds.count) deleted)")
+            // Synced connections from CloudKit (don't log routine operations)
 
             // Update badge count after syncing
             updateBadgeCount()
@@ -448,7 +441,7 @@ class ConnectionManager: ObservableObject {
 
     /// Process a pending operation
     private func processOperation(_ operation: PendingOperation) async {
-        logger.info("🔄 Processing operation for connection: \(operation.id)")
+        // Processing operation (don't log routine operations)
 
         // Update sync state to syncing
         if var managedConn = connections[operation.id] {
@@ -481,7 +474,7 @@ class ConnectionManager: ObservableObject {
                 connections[operation.id] = managedConn
             }
 
-            logger.info("✅ Successfully synced connection: \(operation.id)")
+            // Successfully synced connection
 
         } catch {
             logger.error("❌ Failed to sync connection: \(error.localizedDescription)")
@@ -500,7 +493,7 @@ class ConnectionManager: ObservableObject {
                     connections[operation.id] = managedConn
                 }
 
-                logger.info("⏳ Scheduled retry \(operation.retryCount + 1)/\(self.maxRetries) for connection: \(operation.id)")
+                // Scheduled retry (don't log routine retries)
             } else {
                 // Max retries exceeded, mark as failed
                 pendingOperations.removeValue(forKey: operation.id)
@@ -551,7 +544,7 @@ class ConnectionManager: ObservableObject {
 
     /// Update app icon badge count based on pending connection requests
     func updateBadgeCount() {
-        logger.info("📛 Updating badge count to: \(pendingRequestsCount)")
+        // Updating badge count (don't log routine updates)
 
         Task {
             do {
@@ -564,7 +557,7 @@ class ConnectionManager: ObservableObject {
 
     /// Clear app icon badge (call when user views connection requests)
     func clearBadge() {
-        logger.info("📛 Clearing badge")
+        // Clearing badge
 
         Task {
             do {
