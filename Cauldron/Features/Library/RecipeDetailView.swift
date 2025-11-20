@@ -84,7 +84,7 @@ struct RecipeDetailView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero Image - Stretches to top
                     if let imageURL = recipe.imageURL {
-                        HeroRecipeImageView(imageURL: imageURL, recipeImageService: dependencies.recipeImageService)
+                        HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
                             .ignoresSafeArea(edges: .top)
                             .id("\(imageURL.absoluteString)-\(imageRefreshID)") // Force refresh when image URL or refresh ID changes
                     }
@@ -373,7 +373,7 @@ struct RecipeDetailView: View {
                     UserProfileView(user: user, dependencies: dependencies)
                 } label: {
                     HStack {
-                        ProfileAvatar(user: user, size: 32)
+                        ProfileAvatar(user: user, size: 32, dependencies: dependencies)
                         
                         Text("Shared by \(user.displayName)")
                             .font(.subheadline)

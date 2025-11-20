@@ -13,6 +13,8 @@ struct RecipeImageView: View {
     let size: ImageSize
     let showPlaceholderText: Bool
     let recipeImageService: RecipeImageService
+    let recipeId: UUID?
+    let ownerId: UUID?
 
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
@@ -22,12 +24,16 @@ struct RecipeImageView: View {
         imageURL: URL?,
         size: ImageSize = .card,
         showPlaceholderText: Bool = false,
-        recipeImageService: RecipeImageService
+        recipeImageService: RecipeImageService,
+        recipeId: UUID? = nil,
+        ownerId: UUID? = nil
     ) {
         self.imageURL = imageURL
         self.size = size
         self.showPlaceholderText = showPlaceholderText
         self.recipeImageService = recipeImageService
+        self.recipeId = recipeId
+        self.ownerId = ownerId
     }
 
     var body: some View {
@@ -83,7 +89,15 @@ struct RecipeImageView: View {
     private func loadImage() async {
         isLoading = true
 
-        let result = await recipeImageService.loadImage(from: imageURL)
+        let result: Result<UIImage, ImageLoadError>
+
+        // If we have recipe metadata, use the enhanced method with CloudKit fallback
+        if let recipeId = recipeId {
+            result = await recipeImageService.loadImage(forRecipeId: recipeId, localURL: imageURL, ownerId: ownerId)
+        } else {
+            // Fallback to simple URL loading
+            result = await recipeImageService.loadImage(from: imageURL)
+        }
 
         switch result {
         case .success(let image):
@@ -174,23 +188,40 @@ extension RecipeImageView {
 
 extension RecipeImageView {
     /// Create a hero-sized image view
-    init(heroImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(heroImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a card-sized image view
-    init(cardImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(cardImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a thumbnail-sized image view
-    init(thumbnailImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(thumbnailImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a preview-sized image view
-    init(previewImageURL: URL?, showPlaceholderText: Bool = true, recipeImageService: RecipeImageService) {
-        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText, recipeImageService: recipeImageService)
+    init(previewImageURL: URL?, showPlaceholderText: Bool = true, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
+    }
+
+    /// Create a card-sized image view from a Recipe object (with CloudKit fallback)
+    init(recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+    }
+
+    /// Create a thumbnail-sized image view from a Recipe object (with CloudKit fallback)
+    init(thumbnailForRecipe recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+    }
+}
+
+extension HeroRecipeImageView {
+    /// Create from a Recipe object (with CloudKit fallback)
+    init(recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
     }
 }
 
@@ -200,9 +231,18 @@ extension RecipeImageView {
 struct HeroRecipeImageView: View {
     let imageURL: URL?
     let recipeImageService: RecipeImageService
+    let recipeId: UUID?
+    let ownerId: UUID?
 
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
+
+    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.imageURL = imageURL
+        self.recipeImageService = recipeImageService
+        self.recipeId = recipeId
+        self.ownerId = ownerId
+    }
 
     var body: some View {
         Group {
@@ -265,7 +305,15 @@ struct HeroRecipeImageView: View {
     }
 
     private func loadImage() async {
-        let result = await recipeImageService.loadImage(from: imageURL)
+        let result: Result<UIImage, ImageLoadError>
+
+        // If we have recipe metadata, use the enhanced method with CloudKit fallback
+        if let recipeId = recipeId {
+            result = await recipeImageService.loadImage(forRecipeId: recipeId, localURL: imageURL, ownerId: ownerId)
+        } else {
+            // Fallback to simple URL loading
+            result = await recipeImageService.loadImage(from: imageURL)
+        }
 
         switch result {
         case .success(let image):

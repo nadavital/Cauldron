@@ -120,8 +120,9 @@ class RecipeImageService {
     /// - Parameters:
     ///   - recipeId: The recipe ID
     ///   - url: The local URL (optional, for cache key)
+    ///   - ownerId: The owner ID of the recipe (to determine which database to use)
     /// - Returns: Result containing UIImage or error
-    func loadImage(forRecipeId recipeId: UUID, localURL url: URL?) async -> Result<UIImage, ImageLoadError> {
+    func loadImage(forRecipeId recipeId: UUID, localURL url: URL?, ownerId: UUID? = nil) async -> Result<UIImage, ImageLoadError> {
         // Try loading from local URL first
         if let url = url {
             let result = await loadImage(from: url)
@@ -131,21 +132,31 @@ class RecipeImageService {
         }
 
         // If local load failed, try CloudKit fallback
+        // Strategy: Try both databases - public first (for shared recipes), then private
         do {
-            let privateDB = try await cloudKitService.getPrivateDatabase()
+            // Determine which database to try first based on ownership
+            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            let isOwnRecipe = (ownerId == currentUserId) || (ownerId == nil)
 
-            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, database: privateDB) {
-                // Image downloaded successfully, load it
-                let fileManager = FileManager.default
-                guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-                    return .failure(.invalidURL)
+            // Try public database first for shared recipes, private first for own recipes
+            let databases = isOwnRecipe
+                ? [try await cloudKitService.getPrivateDatabase(), try await cloudKitService.getPublicDatabase()]
+                : [try await cloudKitService.getPublicDatabase(), try await cloudKitService.getPrivateDatabase()]
+
+            for database in databases {
+                if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, database: database) {
+                    // Image downloaded successfully, load it
+                    let fileManager = FileManager.default
+                    guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                        return .failure(.invalidURL)
+                    }
+
+                    let imageURL = documentsURL
+                        .appendingPathComponent("RecipeImages")
+                        .appendingPathComponent(filename)
+
+                    return await loadImage(from: imageURL)
                 }
-
-                let imageURL = documentsURL
-                    .appendingPathComponent("RecipeImages")
-                    .appendingPathComponent(filename)
-
-                return await loadImage(from: imageURL)
             }
         } catch {
             // CloudKit fallback failed, return original error

@@ -357,7 +357,7 @@ struct UserSearchRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ProfileAvatar(user: user, size: 50)
+            ProfileAvatar(user: user, size: 50, dependencies: viewModel.dependencies)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(user.displayName)

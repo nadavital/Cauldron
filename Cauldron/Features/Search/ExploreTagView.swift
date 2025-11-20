@@ -227,7 +227,7 @@ struct ExploreTagRecipeCard: View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with badges
             ZStack(alignment: .topTrailing) {
-                RecipeImageView(cardImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
 
                 // Favorite indicator (top-right)
                 if recipe.isFavorite {
@@ -265,7 +265,7 @@ struct ExploreTagRecipeCard: View {
                 // Shared by indicator or tag
                 if let sharedBy = sharedBy {
                     HStack(spacing: 4) {
-                        ProfileAvatar(user: sharedBy, size: 16)
+                        ProfileAvatar(user: sharedBy, size: 16, dependencies: dependencies)
                         Text(sharedBy.displayName)
                             .font(.caption2)
                             .foregroundColor(.secondary)

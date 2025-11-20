@@ -151,7 +151,7 @@ struct ConnectionRequestCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                ProfileAvatar(user: user, size: 60)
+                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)
@@ -240,7 +240,7 @@ struct ConnectionCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                ProfileAvatar(user: user, size: 60)
+                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)
@@ -281,7 +281,7 @@ struct SentRequestCard: View {
         } label: {
             HStack(spacing: 16) {
                 // Avatar
-                ProfileAvatar(user: user, size: 60)
+                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)

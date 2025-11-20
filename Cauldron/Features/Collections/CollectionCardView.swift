@@ -10,9 +10,16 @@ import SwiftUI
 struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
+    let dependencies: DependencyContainer?
 
     @State private var customCoverImage: UIImage?
     @State private var isLoadingImage = false
+
+    init(collection: Collection, recipeImages: [URL?], dependencies: DependencyContainer? = nil) {
+        self.collection = collection
+        self.recipeImages = recipeImages
+        self.dependencies = dependencies
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -193,17 +200,35 @@ struct CollectionCardView: View {
 
     @MainActor
     private func loadCustomImage() async {
-        guard let coverImageURL = collection.coverImageURL else {
-            return
-        }
-
         isLoadingImage = true
         defer { isLoadingImage = false }
 
-        // Load image from local file URL
-        if let imageData = try? Data(contentsOf: coverImageURL),
+        // Strategy 1: Try loading from local file URL
+        if let coverImageURL = collection.coverImageURL,
+           let imageData = try? Data(contentsOf: coverImageURL),
            let image = UIImage(data: imageData) {
             customCoverImage = image
+            return
+        }
+
+        // Strategy 2: If local file is missing but we have a cloud record, try downloading
+        // This handles the case where app was reinstalled or local storage was cleared
+        if let dependencies = dependencies,
+           collection.cloudCoverImageRecordName != nil,
+           collection.coverImageURL == nil {
+            AppLogger.general.info("Local collection cover image missing, attempting download from CloudKit for collection \(collection.name)")
+
+            do {
+                if let downloadedURL = try await dependencies.collectionImageManager.downloadImageFromCloud(collectionId: collection.id),
+                   let imageData = try? Data(contentsOf: downloadedURL),
+                   let image = UIImage(data: imageData) {
+                    customCoverImage = image
+                    AppLogger.general.info("✅ Downloaded collection cover image from CloudKit for collection \(collection.name)")
+                }
+            } catch {
+                AppLogger.general.warning("Failed to download collection cover image from CloudKit: \(error.localizedDescription)")
+                // Fall back to recipe grid display
+            }
         }
     }
 
