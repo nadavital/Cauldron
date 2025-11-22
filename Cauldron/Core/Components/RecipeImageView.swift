@@ -65,7 +65,7 @@ struct RecipeImageView: View {
             x: 0,
             y: size.shadowY
         )
-        .task {
+        .task(id: recipeId) {
             await loadImage()
         }
     }
@@ -339,7 +339,7 @@ struct HeroRecipeImageView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-        .task {
+        .task(id: recipeId) {
             await loadImage()
         }
         .onChange(of: imageURL) { _, _ in

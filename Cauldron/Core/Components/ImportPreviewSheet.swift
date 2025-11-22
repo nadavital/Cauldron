@@ -177,27 +177,20 @@ struct ImportPreviewSheet: View {
     private func recipePreview(_ recipe: Recipe, originalCreator: User?) -> some View {
         ScrollView {
             VStack(spacing: 20) {
-                // Recipe Image
-                if let imageURL = recipe.imageURL {
-                    AsyncImage(url: imageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: 250)
-                                .clipped()
-                        case .failure:
-                            placeholderImage
-                        case .empty:
-                            ProgressView()
-                                .frame(height: 250)
-                        @unknown default:
-                            placeholderImage
-                        }
-                    }
-                    .cornerRadius(12)
-                    .padding(.horizontal)
+                // Recipe Image - Using RecipeImageView with CloudKit fallback
+                RecipeImageView(
+                    imageURL: recipe.imageURL,
+                    size: .preview,
+                    showPlaceholderText: false,
+                    recipeImageService: viewModel.dependencies.recipeImageService,
+                    recipeId: recipe.id,
+                    ownerId: recipe.ownerId
+                )
+                .frame(height: 250)
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .task(id: recipe.id) {
+                    // Task will automatically cancel when recipe.id changes
                 }
 
                 VStack(spacing: 12) {

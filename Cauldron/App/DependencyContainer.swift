@@ -112,10 +112,6 @@ class DependencyContainer: ObservableObject {
             cloudKitService: cloudKitService
         )
 
-        self.externalShareService = MainActor.assumeIsolated {
-            ExternalShareService()
-        }
-
         self.recipeSyncService = RecipeSyncService(
             cloudKitService: cloudKitService,
             recipeRepository: recipeRepository,
@@ -139,10 +135,16 @@ class DependencyContainer: ObservableObject {
         self.instagramParser = InstagramRecipeParser(foundationModelsService: foundationModelsService)
         self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)
 
-        // RecipeImageService is MainActor-isolated
-        // Create it with a temporary reference to avoid capture issues
+        // MainActor-isolated services require temporary references to avoid capture issues
         let tempCloudKitService = cloudKitService
         let tempImageManager = imageManager
+
+        self.externalShareService = MainActor.assumeIsolated {
+            ExternalShareService(
+                imageManager: tempImageManager,
+                cloudKitService: tempCloudKitService
+            )
+        }
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(
                 cloudKitService: tempCloudKitService,
