@@ -15,7 +15,7 @@ struct ConnectionAvatarCard: View {
     var body: some View {
         NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
             VStack(spacing: 6) {
-                ProfileAvatar(user: user, size: 60)
+                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 
                 Text(user.displayName)
                     .font(.caption)

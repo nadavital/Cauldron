@@ -297,12 +297,73 @@ struct ContentView: View {
                         userIds.insert(connection.toUserId)
                     }
 
+                    // Build a map of users for profile image preloading
+                    var usersMap: [UUID: User] = [:]
+
                     // Fetch and cache all user details
                     for userId in userIds {
+                        // Try local cache first
+                        if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                            usersMap[userId] = cachedUser
+                        }
+
+                        // Then fetch from CloudKit to get latest data
                         if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
+                            usersMap[userId] = cloudUser
                             try? await dependencies.sharingRepository.save(cloudUser)
                         }
                     }
+
+                    // Preload profile images for all friends into memory cache
+                    // Preloading during app launch (don't log routine operations)
+
+                    await withTaskGroup(of: (UUID, UIImage?).self) { group in
+                        for user in usersMap.values {
+                            // Skip if user doesn't have a cloud profile image and no local image
+                            guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
+                                continue
+                            }
+
+                            group.addTask {
+                                // Try to load from local file first
+                                if let imageURL = user.profileImageURL,
+                                   let imageData = try? Data(contentsOf: imageURL),
+                                   let image = UIImage(data: imageData) {
+                                    return (user.id, image)
+                                }
+
+                                // If no local file, download from CloudKit
+                                if user.cloudProfileImageRecordName != nil {
+                                    do {
+                                        if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
+                                           let imageData = try? Data(contentsOf: downloadedURL),
+                                           let image = UIImage(data: imageData) {
+                                            // Downloaded profile image (don't log routine operations)
+                                            return (user.id, image)
+                                        }
+                                    } catch {
+                                        AppLogger.general.warning("⚠️ Failed to download profile image for \(user.username): \(error.localizedDescription)")
+                                    }
+                                }
+
+                                return (user.id, nil)
+                            }
+                        }
+
+                        // Collect results and load into memory cache
+                        for await (userId, image) in group {
+                            if let image = image {
+                                let cacheKey = ImageCache.profileImageKey(userId: userId)
+                                await ImageCache.shared.set(cacheKey, image: image)
+                            }
+                        }
+                    }
+
+                    // Finished preloading friend profile images (don't log routine operations)
+
+                    // Set the shared cache timestamp so ConnectionsViewModel knows data is fresh
+                    // This is a workaround since we can't directly access the static variable
+                    // But loading connections will trigger ConnectionsViewModel to set it
                 }
             }
 

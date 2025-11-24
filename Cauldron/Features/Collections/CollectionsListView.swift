@@ -39,7 +39,8 @@ struct CollectionsListView: View {
                                     NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                                         CollectionCardView(
                                             collection: collection,
-                                            recipeImages: recipeImageCache[collection.id] ?? []
+                                            recipeImages: recipeImageCache[collection.id] ?? [],
+                                            dependencies: dependencies
                                         )
                                     }
                                     .buttonStyle(PlainButtonStyle())

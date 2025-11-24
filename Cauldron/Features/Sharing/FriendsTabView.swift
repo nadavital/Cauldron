@@ -264,7 +264,7 @@ struct SharedRecipeRowView: View {
     var body: some View {
         HStack(spacing: 14) {
             // Recipe Image
-            RecipeImageView(thumbnailImageURL: sharedRecipe.recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+            RecipeImageView(thumbnailForRecipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
 
             VStack(alignment: .leading, spacing: 8) {
                 // Title
@@ -275,7 +275,7 @@ struct SharedRecipeRowView: View {
 
                 // Shared by info
                 HStack(spacing: 6) {
-                    ProfileAvatar(user: sharedRecipe.sharedBy, size: 20)
+                    ProfileAvatar(user: sharedRecipe.sharedBy, size: 20, dependencies: dependencies)
 
                     Text(sharedRecipe.sharedBy.displayName)
                         .font(.caption)

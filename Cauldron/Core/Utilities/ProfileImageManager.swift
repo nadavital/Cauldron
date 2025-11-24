@@ -136,6 +136,13 @@ actor ProfileImageManager {
         return fileURL
     }
 
+    /// Delete profile image from CloudKit
+    /// - Parameter userId: The user ID to delete image for
+    func deleteImageFromCloud(userId: UUID) async throws {
+        AppLogger.general.info("☁️ Deleting profile image from CloudKit for user \(userId)")
+        try await cloudKitService.deleteUserProfileImage(userId: userId)
+    }
+
     // MARK: - Helper Methods
 
     /// Optimize image for CloudKit upload

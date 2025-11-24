@@ -246,7 +246,8 @@ struct CookTabView: View {
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: collectionImageCache[collection.id] ?? []
+                                    recipeImages: collectionImageCache[collection.id] ?? [],
+                                    dependencies: viewModel.dependencies
                                 )
                             }
                             .buttonStyle(.plain)
@@ -518,7 +519,7 @@ struct RecipeCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with badges
             ZStack(alignment: .topTrailing) {
-                RecipeImageView(cardImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
 
                 // Favorite indicator (top-right)
                 if recipe.isFavorite {

@@ -10,9 +10,16 @@ import SwiftUI
 struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
+    let dependencies: DependencyContainer?
 
     @State private var customCoverImage: UIImage?
     @State private var isLoadingImage = false
+
+    init(collection: Collection, recipeImages: [URL?], dependencies: DependencyContainer? = nil) {
+        self.collection = collection
+        self.recipeImages = recipeImages
+        self.dependencies = dependencies
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -193,18 +200,95 @@ struct CollectionCardView: View {
 
     @MainActor
     private func loadCustomImage() async {
-        guard let coverImageURL = collection.coverImageURL else {
+        let cacheKey = ImageCache.collectionImageKey(collectionId: collection.id)
+
+        // Strategy 0: Check in-memory cache first (fastest)
+        if let cachedImage = ImageCache.shared.get(cacheKey) {
+            // CRITICAL: Always set customCoverImage if it's nil (initial load)
+            if let currentImage = customCoverImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(cachedImage, currentImage) {
+                    customCoverImage = cachedImage
+                }
+            } else {
+                // First load - always set the image
+                customCoverImage = cachedImage
+            }
             return
         }
 
-        isLoadingImage = true
-        defer { isLoadingImage = false }
-
-        // Load image from local file URL
-        if let imageData = try? Data(contentsOf: coverImageURL),
+        // Strategy 1: Try loading from local file URL
+        if let coverImageURL = collection.coverImageURL,
+           let imageData = try? Data(contentsOf: coverImageURL),
            let image = UIImage(data: imageData) {
-            customCoverImage = image
+            // CRITICAL: Always set customCoverImage if it's nil (initial load)
+            if let currentImage = customCoverImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(image, currentImage) {
+                    customCoverImage = image
+                    ImageCache.shared.set(cacheKey, image: image)
+                }
+            } else {
+                // First load - always set the image
+                customCoverImage = image
+                ImageCache.shared.set(cacheKey, image: image)
+            }
+            return
         }
+
+        // Strategy 2: If local file is missing but we have a cloud record, try downloading
+        // This handles the case where app was reinstalled or local storage was cleared
+        if let dependencies = dependencies,
+           collection.cloudCoverImageRecordName != nil,
+           collection.coverImageURL == nil {
+            AppLogger.general.info("Local collection cover image missing, attempting download from CloudKit for collection \(collection.name)")
+
+            do {
+                if let downloadedURL = try await dependencies.collectionImageManager.downloadImageFromCloud(collectionId: collection.id),
+                   let imageData = try? Data(contentsOf: downloadedURL),
+                   let image = UIImage(data: imageData) {
+                    // CRITICAL: Always set customCoverImage if it's nil (initial load)
+                    if let currentImage = customCoverImage {
+                        // Only update UI if the image actually changed
+                        if !areImagesEqual(image, currentImage) {
+                            customCoverImage = image
+                            ImageCache.shared.set(cacheKey, image: image)
+                        }
+                    } else {
+                        // First load - always set the image
+                        customCoverImage = image
+                        ImageCache.shared.set(cacheKey, image: image)
+                    }
+                    // Downloaded collection cover image from CloudKit (don't log routine operations)
+                }
+            } catch {
+                AppLogger.general.warning("Failed to download collection cover image from CloudKit: \(error.localizedDescription)")
+                // Fall back to recipe grid display
+            }
+        }
+    }
+
+    /// Compare two images to see if they're visually identical
+    /// This prevents UI updates when CloudKit sync returns the same image
+    private func areImagesEqual(_ image1: UIImage, _ image2: UIImage) -> Bool {
+        // Fast path: if they're literally the same object, they're equal
+        if image1 === image2 {
+            return true
+        }
+
+        // Compare image dimensions
+        if image1.size != image2.size {
+            return false
+        }
+
+        // Compare scale
+        if image1.scale != image2.scale {
+            return false
+        }
+
+        // If dimensions and scale match, assume they're the same image
+        // This prevents expensive byte-by-byte comparison
+        return true
     }
 
     // MARK: - Color

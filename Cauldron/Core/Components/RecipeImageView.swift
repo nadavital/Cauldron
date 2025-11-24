@@ -13,6 +13,8 @@ struct RecipeImageView: View {
     let size: ImageSize
     let showPlaceholderText: Bool
     let recipeImageService: RecipeImageService
+    let recipeId: UUID?
+    let ownerId: UUID?
 
     @State private var loadedImage: UIImage?
     @State private var isLoading = true
@@ -22,12 +24,26 @@ struct RecipeImageView: View {
         imageURL: URL?,
         size: ImageSize = .card,
         showPlaceholderText: Bool = false,
-        recipeImageService: RecipeImageService
+        recipeImageService: RecipeImageService,
+        recipeId: UUID? = nil,
+        ownerId: UUID? = nil
     ) {
         self.imageURL = imageURL
         self.size = size
         self.showPlaceholderText = showPlaceholderText
         self.recipeImageService = recipeImageService
+        self.recipeId = recipeId
+        self.ownerId = ownerId
+
+        // CRITICAL: Initialize with cached image if available
+        // This prevents showing placeholder when navigating back
+        if let recipeId = recipeId {
+            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+            if let cachedImage = ImageCache.shared.get(cacheKey) {
+                _loadedImage = State(initialValue: cachedImage)
+                _imageOpacity = State(initialValue: 1.0)
+            }
+        }
     }
 
     var body: some View {
@@ -49,7 +65,7 @@ struct RecipeImageView: View {
             x: 0,
             y: size.shadowY
         )
-        .task {
+        .task(id: recipeId) {
             await loadImage()
         }
     }
@@ -81,23 +97,88 @@ struct RecipeImageView: View {
     }
 
     private func loadImage() async {
-        isLoading = true
+        // Strategy 0: Check in-memory cache first (fastest)
+        if let recipeId = recipeId {
+            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+            if let cachedImage = ImageCache.shared.get(cacheKey) {
+                // CRITICAL: Always set loadedImage if it's nil (initial load)
+                if let currentImage = loadedImage {
+                    // Only update UI if the image actually changed
+                    if !areImagesEqual(cachedImage, currentImage) {
+                        loadedImage = cachedImage
+                        imageOpacity = 1.0
+                    }
+                } else {
+                    // First load - always set the image
+                    loadedImage = cachedImage
+                    imageOpacity = 1.0
+                }
+                return
+            }
+        }
 
-        let result = await recipeImageService.loadImage(from: imageURL)
+        let result: Result<UIImage, ImageLoadError>
+
+        // If we have recipe metadata, use the enhanced method with CloudKit fallback
+        if let recipeId = recipeId {
+            result = await recipeImageService.loadImage(forRecipeId: recipeId, localURL: imageURL, ownerId: ownerId)
+        } else {
+            // Fallback to simple URL loading
+            result = await recipeImageService.loadImage(from: imageURL)
+        }
 
         switch result {
         case .success(let image):
-            loadedImage = image
-            // Smooth fade-in animation
-            withAnimation(.easeOut(duration: 0.3)) {
-                imageOpacity = 1.0
+            // CRITICAL: Always set loadedImage if it's nil (initial load)
+            if let currentImage = loadedImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(image, currentImage) {
+                    loadedImage = image
+                    // Smooth fade-in animation (only for changed images)
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        imageOpacity = 1.0
+                    }
+                }
+            } else {
+                // First load - always set the image with animation
+                loadedImage = image
+                withAnimation(.easeOut(duration: 0.3)) {
+                    imageOpacity = 1.0
+                }
+            }
+
+            // Always cache the loaded image
+            if let recipeId = recipeId {
+                let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+                ImageCache.shared.set(cacheKey, image: image)
             }
         case .failure:
             // Keep showing placeholder
             break
         }
+    }
 
-        isLoading = false
+    /// Compare two images to see if they're visually identical
+    /// This prevents UI updates when CloudKit sync returns the same image
+    private func areImagesEqual(_ image1: UIImage, _ image2: UIImage) -> Bool {
+        // Fast path: if they're literally the same object, they're equal
+        if image1 === image2 {
+            return true
+        }
+
+        // Compare image dimensions
+        if image1.size != image2.size {
+            return false
+        }
+
+        // Compare scale
+        if image1.scale != image2.scale {
+            return false
+        }
+
+        // If dimensions and scale match, assume they're the same image
+        // This prevents expensive byte-by-byte comparison
+        return true
     }
 }
 
@@ -174,23 +255,40 @@ extension RecipeImageView {
 
 extension RecipeImageView {
     /// Create a hero-sized image view
-    init(heroImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(heroImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: heroImageURL, size: .hero, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a card-sized image view
-    init(cardImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(cardImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: cardImageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a thumbnail-sized image view
-    init(thumbnailImageURL: URL?, recipeImageService: RecipeImageService) {
-        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService)
+    init(thumbnailImageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: thumbnailImageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
     }
 
     /// Create a preview-sized image view
-    init(previewImageURL: URL?, showPlaceholderText: Bool = true, recipeImageService: RecipeImageService) {
-        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText, recipeImageService: recipeImageService)
+    init(previewImageURL: URL?, showPlaceholderText: Bool = true, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.init(imageURL: previewImageURL, size: .preview, showPlaceholderText: showPlaceholderText, recipeImageService: recipeImageService, recipeId: recipeId, ownerId: ownerId)
+    }
+
+    /// Create a card-sized image view from a Recipe object (with CloudKit fallback)
+    init(recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+    }
+
+    /// Create a thumbnail-sized image view from a Recipe object (with CloudKit fallback)
+    init(thumbnailForRecipe recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+    }
+}
+
+extension HeroRecipeImageView {
+    /// Create from a Recipe object (with CloudKit fallback)
+    init(recipe: Recipe, recipeImageService: RecipeImageService) {
+        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
     }
 }
 
@@ -200,9 +298,28 @@ extension RecipeImageView {
 struct HeroRecipeImageView: View {
     let imageURL: URL?
     let recipeImageService: RecipeImageService
+    let recipeId: UUID?
+    let ownerId: UUID?
 
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
+
+    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+        self.imageURL = imageURL
+        self.recipeImageService = recipeImageService
+        self.recipeId = recipeId
+        self.ownerId = ownerId
+
+        // CRITICAL: Initialize with cached image if available
+        // This prevents showing placeholder when navigating back
+        if let recipeId = recipeId {
+            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+            if let cachedImage = ImageCache.shared.get(cacheKey) {
+                _loadedImage = State(initialValue: cachedImage)
+                _imageOpacity = State(initialValue: 1.0)
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -222,7 +339,7 @@ struct HeroRecipeImageView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-        .task {
+        .task(id: recipeId) {
             await loadImage()
         }
         .onChange(of: imageURL) { _, _ in
@@ -265,19 +382,88 @@ struct HeroRecipeImageView: View {
     }
 
     private func loadImage() async {
-        let result = await recipeImageService.loadImage(from: imageURL)
+        // Strategy 0: Check in-memory cache first (fastest)
+        if let recipeId = recipeId {
+            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+            if let cachedImage = ImageCache.shared.get(cacheKey) {
+                // CRITICAL: Always set loadedImage if it's nil (initial load)
+                if let currentImage = loadedImage {
+                    // Only update UI if the image actually changed
+                    if !areImagesEqual(cachedImage, currentImage) {
+                        loadedImage = cachedImage
+                        imageOpacity = 1.0
+                    }
+                } else {
+                    // First load - always set the image
+                    loadedImage = cachedImage
+                    imageOpacity = 1.0
+                }
+                return
+            }
+        }
+
+        let result: Result<UIImage, ImageLoadError>
+
+        // If we have recipe metadata, use the enhanced method with CloudKit fallback
+        if let recipeId = recipeId {
+            result = await recipeImageService.loadImage(forRecipeId: recipeId, localURL: imageURL, ownerId: ownerId)
+        } else {
+            // Fallback to simple URL loading
+            result = await recipeImageService.loadImage(from: imageURL)
+        }
 
         switch result {
         case .success(let image):
-            loadedImage = image
-            // Smooth fade-in animation
-            withAnimation(.easeOut(duration: 0.3)) {
-                imageOpacity = 1.0
+            // CRITICAL: Always set loadedImage if it's nil (initial load)
+            if let currentImage = loadedImage {
+                // Only update UI if the image actually changed
+                if !areImagesEqual(image, currentImage) {
+                    loadedImage = image
+                    // Smooth fade-in animation (only for changed images)
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        imageOpacity = 1.0
+                    }
+                }
+            } else {
+                // First load - always set the image with animation
+                loadedImage = image
+                withAnimation(.easeOut(duration: 0.3)) {
+                    imageOpacity = 1.0
+                }
+            }
+
+            // Always cache the loaded image
+            if let recipeId = recipeId {
+                let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+                ImageCache.shared.set(cacheKey, image: image)
             }
         case .failure:
             // Keep showing placeholder
             break
         }
+    }
+
+    /// Compare two images to see if they're visually identical
+    /// This prevents UI updates when CloudKit sync returns the same image
+    private func areImagesEqual(_ image1: UIImage, _ image2: UIImage) -> Bool {
+        // Fast path: if they're literally the same object, they're equal
+        if image1 === image2 {
+            return true
+        }
+
+        // Compare image dimensions
+        if image1.size != image2.size {
+            return false
+        }
+
+        // Compare scale
+        if image1.scale != image2.scale {
+            return false
+        }
+
+        // If dimensions and scale match, assume they're the same image
+        // This prevents expensive byte-by-byte comparison
+        return true
     }
 }
 

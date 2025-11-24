@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import CloudKit
 import os
 
 /// Errors that can occur during external sharing
@@ -17,6 +18,7 @@ enum ExternalShareError: LocalizedError {
     case networkError(Error)
     case invalidResponse
     case notPublic
+    case imageUploadFailed
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +34,8 @@ enum ExternalShareError: LocalizedError {
             return "Invalid response from server"
         case .notPublic:
             return "Only public recipes and collections can be shared externally"
+        case .imageUploadFailed:
+            return "Failed to upload image to cloud"
         }
     }
 }
@@ -46,11 +50,15 @@ final class ExternalShareService: Sendable {
     private let baseURL = "https://us-central1-cauldron-f900a.cloudfunctions.net"
 
     private let session: URLSession
+    private let imageManager: ImageManager
+    private let cloudKitService: CloudKitService
 
-    init() {
+    init(imageManager: ImageManager, cloudKitService: CloudKitService) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
+        self.imageManager = imageManager
+        self.cloudKitService = cloudKitService
     }
 
     // MARK: - Share Link Generation
@@ -65,12 +73,31 @@ final class ExternalShareService: Sendable {
             throw ExternalShareError.notPublic
         }
 
-        // Prepare metadata
+        // Upload image to CloudKit public database if available
+        var cloudImageRecordName: String?
+        if let imageURL = recipe.imageURL {
+            logger.info("📸 Uploading recipe image to CloudKit public database")
+            do {
+                // Ensure image exists in CloudKit public database
+                let publicDB = try await cloudKitService.getPublicDatabase()
+                cloudImageRecordName = try await imageManager.uploadImageToCloud(
+                    recipeId: recipe.id,
+                    database: publicDB
+                )
+                logger.info("✅ Image uploaded to public database: \(cloudImageRecordName ?? "nil")")
+            } catch {
+                logger.warning("⚠️ Failed to upload image to CloudKit: \(error.localizedDescription)")
+                // Continue with share even if image upload fails
+                // The app-to-app import will still work via RecipeImageView fallback
+            }
+        }
+
+        // Prepare metadata with recipeId and ownerId for CloudKit fallback
         let metadata = ShareMetadata.RecipeShare(
             recipeId: recipe.id.uuidString,
             ownerId: recipe.ownerId?.uuidString ?? "",
             title: recipe.title,
-            imageURL: recipe.imageURL?.absoluteString,
+            imageURL: nil, // Don't send local file path
             ingredientCount: recipe.ingredients.count,
             totalMinutes: recipe.totalMinutes,
             tags: recipe.tags.map { $0.name }
@@ -82,7 +109,7 @@ final class ExternalShareService: Sendable {
         // Create preview text
         let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
 
-        // Load image if available
+        // Load image for iOS share sheet preview
         var image: UIImage?
         if let imageURL = recipe.imageURL {
             image = try? await loadImage(from: imageURL)

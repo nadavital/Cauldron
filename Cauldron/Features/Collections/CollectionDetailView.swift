@@ -723,7 +723,7 @@ struct CollectionRecipeSelectorSheet: View {
     @ViewBuilder
     private func recipeRow(recipe: Recipe, isSelectable: Bool, dependencies: DependencyContainer) -> some View {
         HStack(spacing: 12) {
-            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
                 .overlay(
                     Group {
                         if !isSelectable {
@@ -1089,7 +1089,7 @@ struct ConformanceFixSheet: View {
     @ViewBuilder
     private func recipeRow(recipe: Recipe, selectable: Bool, dependencies: DependencyContainer) -> some View {
         HStack(spacing: 12) {
-            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
                 .overlay(
                     Group {
                         if !selectable {

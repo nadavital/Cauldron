@@ -16,7 +16,7 @@ struct RecipeRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Thumbnail image
-            RecipeImageView(thumbnailImageURL: recipe.imageURL, recipeImageService: dependencies.recipeImageService)
+            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {

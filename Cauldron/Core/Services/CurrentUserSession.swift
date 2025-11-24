@@ -92,6 +92,9 @@ class CurrentUserSession: ObservableObject {
                 currentUser = cloudUser
                 saveUserToDefaults(cloudUser)
 
+                // Download profile image from CloudKit if it exists and local copy is missing
+                await downloadProfileImageIfNeeded(for: cloudUser, dependencies: dependencies)
+
                 // Set up push notification subscription for connection requests
                 await setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
 
@@ -133,6 +136,9 @@ class CurrentUserSession: ObservableObject {
                     currentUser = cloudUser
                     saveUserToDefaults(cloudUser)
 
+                    // Download profile image from CloudKit if it exists and local copy is missing
+                    await downloadProfileImageIfNeeded(for: cloudUser, dependencies: dependencies)
+
                     // Set up push notification subscription
                     await setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
 
@@ -171,6 +177,44 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.set(user.displayName, forKey: displayNameKey)
         UserDefaults.standard.set(user.profileEmoji, forKey: profileEmojiKey)
         UserDefaults.standard.set(user.profileColor, forKey: profileColorKey)
+    }
+
+    /// Download profile image from CloudKit if it exists in cloud but not locally
+    private func downloadProfileImageIfNeeded(for user: User, dependencies: DependencyContainer) async {
+        // Only download if:
+        // 1. User has a cloud profile image record
+        // 2. Local image file doesn't exist
+        guard user.cloudProfileImageRecordName != nil else {
+            return
+        }
+
+        let imageExists = await dependencies.profileImageManager.imageExists(userId: user.id)
+        guard !imageExists else {
+            logger.info("Profile image already exists locally - skipping download")
+            return
+        }
+
+        logger.info("Downloading profile image from CloudKit for user \(user.username)")
+
+        do {
+            if let imageURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id) {
+                // Update the current user with the local image URL
+                let updatedUser = user.updatedProfile(
+                    profileEmoji: user.profileEmoji,
+                    profileColor: user.profileColor,
+                    profileImageURL: imageURL,
+                    cloudProfileImageRecordName: user.cloudProfileImageRecordName,
+                    profileImageModifiedAt: user.profileImageModifiedAt
+                )
+                currentUser = updatedUser
+                logger.info("✅ Downloaded and set profile image")
+            } else {
+                logger.info("No profile image found in CloudKit (record may be stale)")
+            }
+        } catch {
+            logger.warning("Failed to download profile image: \(error.localizedDescription)")
+            // Don't block user session if image download fails
+        }
     }
     
     /// Create and save a new user during onboarding

@@ -54,11 +54,94 @@ class FriendsTabViewModel: ObservableObject {
 
             // Load shared collections from friends
             await loadSharedCollections()
+
+            // CRITICAL: Preload images into memory cache to prevent flickering
+            await preloadImagesForSharedRecipes()
         } catch {
             AppLogger.general.error("Failed to load shared recipes: \(error.localizedDescription)")
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
             showErrorAlert = true
         }
+    }
+
+    /// Preload recipe images and profile avatars into memory cache
+    /// This prevents flickering when scrolling through shared recipes
+    private func preloadImagesForSharedRecipes() async {
+        guard let dependencies = dependencies else { return }
+
+        // OPTIMIZATION: Check if all images are already in cache
+        // If so, skip the entire preload process
+        var needsPreload = false
+        for sharedRecipe in sharedRecipes {
+            let recipeKey = ImageCache.recipeImageKey(recipeId: sharedRecipe.recipe.id)
+            let profileKey = ImageCache.profileImageKey(userId: sharedRecipe.sharedBy.id)
+
+            if ImageCache.shared.get(recipeKey) == nil || ImageCache.shared.get(profileKey) == nil {
+                needsPreload = true
+                break
+            }
+        }
+
+        // If all images are already cached, skip preloading entirely
+        guard needsPreload else {
+            // Images already cached, skip preload (don't log routine operations)
+            return
+        }
+
+        // Preloading images (don't log routine operations)
+
+        await withTaskGroup(of: (String, UIImage?).self) { group in
+            for sharedRecipe in sharedRecipes {
+                // Preload recipe image
+                let recipeId = sharedRecipe.recipe.id
+                group.addTask { @MainActor in
+                    let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+
+                    // Skip if already in cache
+                    if ImageCache.shared.get(cacheKey) != nil {
+                        return (cacheKey, nil)
+                    }
+
+                    // Try to load from local file
+                    if let imageURL = sharedRecipe.recipe.imageURL,
+                       let imageData = try? Data(contentsOf: imageURL),
+                       let image = UIImage(data: imageData) {
+                        return (cacheKey, image)
+                    }
+
+                    return (cacheKey, nil)
+                }
+
+                // Preload profile avatar
+                let userId = sharedRecipe.sharedBy.id
+                group.addTask { @MainActor in
+                    let cacheKey = ImageCache.profileImageKey(userId: userId)
+
+                    // Skip if already in cache
+                    if ImageCache.shared.get(cacheKey) != nil {
+                        return (cacheKey, nil)
+                    }
+
+                    // Try to load from local file
+                    if let imageURL = sharedRecipe.sharedBy.profileImageURL,
+                       let imageData = try? Data(contentsOf: imageURL),
+                       let image = UIImage(data: imageData) {
+                        return (cacheKey, image)
+                    }
+
+                    return (cacheKey, nil)
+                }
+            }
+
+            // Collect results and store in cache
+            for await (cacheKey, image) in group {
+                if let image = image {
+                    ImageCache.shared.set(cacheKey, image: image)
+                }
+            }
+        }
+
+        // Finished preloading images (don't log routine operations)
     }
 
     /// Load shared collections from friends
