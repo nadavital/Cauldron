@@ -73,23 +73,16 @@ final class ExternalShareService: Sendable {
             throw ExternalShareError.notPublic
         }
 
-        // Upload image to CloudKit public database if available
-        var cloudImageRecordName: String?
-        if let imageURL = recipe.imageURL {
-            logger.info("📸 Uploading recipe image to CloudKit public database")
-            do {
-                // Ensure image exists in CloudKit public database
-                let publicDB = try await cloudKitService.getPublicDatabase()
-                cloudImageRecordName = try await imageManager.uploadImageToCloud(
-                    recipeId: recipe.id,
-                    database: publicDB
-                )
-                logger.info("✅ Image uploaded to public database: \(cloudImageRecordName ?? "nil")")
-            } catch {
-                logger.warning("⚠️ Failed to upload image to CloudKit: \(error.localizedDescription)")
-                // Continue with share even if image upload fails
-                // The app-to-app import will still work via RecipeImageView fallback
-            }
+        // Ensure recipe is in CloudKit public database
+        // (This is usually already done when recipe is made public, but we ensure it here for sharing)
+        // Note: Image upload happens automatically when recipe visibility is toggled to public,
+        // so we don't need to re-upload it here
+        do {
+            try await cloudKitService.copyRecipeToPublic(recipe)
+            logger.info("✅ Recipe confirmed in public database")
+        } catch {
+            logger.error("❌ Failed to ensure recipe in public database: \(error.localizedDescription)")
+            // Don't fail the share - recipe might already be there
         }
 
         // Prepare metadata with recipeId and ownerId for CloudKit fallback
@@ -296,7 +289,7 @@ final class ExternalShareService: Sendable {
             throw ExternalShareError.invalidResponse
         }
 
-        print("🌐 ExternalShareService: Fetching data from \(url.absoluteString)")
+        logger.info("🌐 Fetching data from \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
 
@@ -304,15 +297,15 @@ final class ExternalShareService: Sendable {
             let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ ExternalShareService: Response is not HTTPURLResponse")
+                logger.error("❌ Response is not HTTPURLResponse")
                 throw ExternalShareError.invalidResponse
             }
 
-            print("🌐 ExternalShareService: Status Code: \(httpResponse.statusCode)")
+            logger.info("🌐 Status Code: \(httpResponse.statusCode)")
 
             guard (200...299).contains(httpResponse.statusCode) else {
                 let body = String(data: data, encoding: .utf8) ?? "No body"
-                print("❌ ExternalShareService: Invalid status code. Body: \(body)")
+                logger.error("❌ Invalid status code. Body: \(body)")
                 throw ExternalShareError.invalidResponse
             }
 

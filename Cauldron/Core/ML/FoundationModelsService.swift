@@ -152,7 +152,7 @@ struct GeneratedRecipe: Equatable {
     let notes: String?
 
     /// Convert to domain Recipe model
-    func toRecipe() -> Recipe {
+    func toRecipe(withTags tags: [Tag] = []) -> Recipe {
         let recipeIngredients = ingredients.map { genIng -> Ingredient in
             var quantity: Quantity? = nil
             if let value = genIng.quantityValue,
@@ -184,7 +184,7 @@ struct GeneratedRecipe: Equatable {
             steps: recipeSteps,
             yields: yields,
             totalMinutes: totalMinutes,
-            tags: [], // Tags are now handled by manual selection
+            tags: tags, // Use provided tags from selected categories
             nutrition: nil,
             sourceURL: nil,
             sourceTitle: nil,

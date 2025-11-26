@@ -125,9 +125,25 @@ class RecipeImageService {
     func loadImage(forRecipeId recipeId: UUID, localURL url: URL?, ownerId: UUID? = nil) async -> Result<UIImage, ImageLoadError> {
         // Try loading from local URL first
         if let url = url {
-            let result = await loadImage(from: url)
-            if case .success = result {
-                return result
+            // For non-owned recipes, verify file exists before attempting load
+            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            if let ownerId = ownerId, ownerId != currentUserId {
+                // This is a friend's recipe - check if file exists
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    // Skip local load, file doesn't exist for friend's recipe
+                    // Fall through to CloudKit
+                } else {
+                    let result = await loadImage(from: url)
+                    if case .success = result {
+                        return result
+                    }
+                }
+            } else {
+                // Own recipe - try loading normally
+                let result = await loadImage(from: url)
+                if case .success = result {
+                    return result
+                }
             }
         }
 
