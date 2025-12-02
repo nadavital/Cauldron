@@ -420,14 +420,29 @@ class GroceriesViewModel: ObservableObject {
     }
 
     func toggleRecipe(recipeID: String) async {
-        // Find if all items in recipe are currently checked
-        let recipeItems = items.filter { $0.recipeID == recipeID || (recipeID == "other" && $0.recipeID == nil) }
-        let allChecked = !recipeItems.isEmpty && recipeItems.allSatisfy { $0.isChecked }
+        // Determine what we're toggling based on current view mode
+        let itemsToToggle: [GroceryItemDisplay]
+
+        switch currentViewMode {
+        case .recipe:
+            // Filter by recipeID
+            itemsToToggle = items.filter { $0.recipeID == recipeID || (recipeID == "other" && $0.recipeID == nil) }
+        case .aiSort:
+            // Filter by AI category
+            itemsToToggle = items.filter { $0.aiCategory == recipeID }
+        case .none:
+            return
+        }
+
+        let allChecked = !itemsToToggle.isEmpty && itemsToToggle.allSatisfy { $0.isChecked }
 
         do {
-            if recipeID == "other" {
+            if currentViewMode == .aiSort {
+                // Use category-specific method
+                try await dependencies.groceryRepository.setCategoryChecked(category: recipeID, isChecked: !allChecked)
+            } else if recipeID == "other" {
                 // For "Other Items", toggle each individual item
-                for item in recipeItems {
+                for item in itemsToToggle {
                     if item.isChecked != !allChecked {
                         try await dependencies.groceryRepository.toggleItem(id: item.id)
                     }
@@ -438,7 +453,7 @@ class GroceriesViewModel: ObservableObject {
             }
             await loadItems(animated: true)
         } catch {
-            AppLogger.persistence.error("Failed to toggle recipe: \(error.localizedDescription)")
+            AppLogger.persistence.error("Failed to toggle group: \(error.localizedDescription)")
         }
     }
 

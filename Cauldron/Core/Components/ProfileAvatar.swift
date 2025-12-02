@@ -182,14 +182,15 @@ struct ProfileAvatar: View {
             return false
         }
 
-        // OPTIMIZATION: For profile images, we store them as JPEG files
-        // Loading the same JPEG file multiple times should give us the same UIImage
-        // So we can just compare the image properties rather than pixel data
-        // This is much faster than comparing bytes
+        // Compare PNG data for accurate equality check
+        // Profile images are typically small (< 200KB), so this is fast enough
+        guard let data1 = image1.pngData(),
+              let data2 = image2.pngData() else {
+            // If we can't get PNG data, fall back to assuming they're different
+            return false
+        }
 
-        // If dimensions and scale match, assume they're the same image
-        // This prevents expensive byte-by-byte comparison
-        return true
+        return data1 == data2
     }
 }
 

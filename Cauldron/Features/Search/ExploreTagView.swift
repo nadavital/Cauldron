@@ -326,35 +326,87 @@ class ExploreTagViewModel: ObservableObject {
             let connections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
             let acceptedConnections = connections.filter { $0.isAccepted }
 
-            var friendRecipesTemp: [SharedRecipe] = []
+            // Fetch friend recipes in parallel using task group with concurrency limits
+            // Limit to 5 concurrent CloudKit operations to avoid rate limiting
+            let friendRecipesTemp = await withTaskGroup(of: [SharedRecipe].self) { group in
+                var activeTasks = 0
+                let maxConcurrent = 5
+                var connectionIterator = acceptedConnections.makeIterator()
 
-            // For each friend, fetch their shared recipes
-            for connection in acceptedConnections {
-                let friendId = connection.fromUserId == userId ? connection.toUserId : connection.fromUserId
+                // Start initial batch of tasks
+                while activeTasks < maxConcurrent, let connection = connectionIterator.next() {
+                    activeTasks += 1
+                    group.addTask { [dependencies, tag] in
+                        let friendId = connection.fromUserId == userId ? connection.toUserId : connection.fromUserId
 
-                // Fetch friend's user record to get their info
-                if let friendUser = try? await dependencies.cloudKitService.fetchUser(byUserId: friendId) {
-                    // Fetch recipes shared by this friend (public and friends-only)
-                    let friendRecipesList = try? await dependencies.cloudKitService.fetchUserRecipes(ownerId: friendId)
+                        do {
+                            // Fetch friend's user record and their public recipes
+                            guard let friendUser = try await dependencies.cloudKitService.fetchUser(byUserId: friendId) else {
+                                AppLogger.general.warning("Friend user not found: \(friendId)")
+                                return []
+                            }
 
-                    // Filter by tag and visibility (only show public and friends-only recipes)
-                    if let friendRecipesList = friendRecipesList {
-                        let taggedAndVisibleRecipes = friendRecipesList.filter { recipe in
-                            let hasTag = recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
-                            let isVisible = recipe.visibility == .publicRecipe
-                            return hasTag && isVisible
-                        }
+                            let friendRecipesList = try await dependencies.cloudKitService.fetchPublicRecipesForUser(ownerId: friendId)
 
-                        // Add with friend info
-                        for recipe in taggedAndVisibleRecipes {
-                            friendRecipesTemp.append(SharedRecipe(
-                                recipe: recipe,
-                                sharedBy: friendUser,
-                                sharedAt: recipe.createdAt
-                            ))
+                            // Filter by tag and map to SharedRecipe
+                            return friendRecipesList
+                                .filter { recipe in
+                                    recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
+                                }
+                                .map { recipe in
+                                    SharedRecipe(
+                                        recipe: recipe,
+                                        sharedBy: friendUser,
+                                        sharedAt: recipe.createdAt
+                                    )
+                                }
+                        } catch {
+                            AppLogger.general.warning("Failed to load recipes for friend \(friendId): \(error.localizedDescription)")
+                            return []
                         }
                     }
                 }
+
+                // Collect results and spawn new tasks as others complete
+                var allRecipes: [SharedRecipe] = []
+                for await recipes in group {
+                    allRecipes.append(contentsOf: recipes)
+                    activeTasks -= 1
+
+                    // Start next task if more connections available
+                    if let connection = connectionIterator.next() {
+                        activeTasks += 1
+                        group.addTask { [dependencies, tag] in
+                            let friendId = connection.fromUserId == userId ? connection.toUserId : connection.fromUserId
+
+                            do {
+                                guard let friendUser = try await dependencies.cloudKitService.fetchUser(byUserId: friendId) else {
+                                    AppLogger.general.warning("Friend user not found: \(friendId)")
+                                    return []
+                                }
+
+                                let friendRecipesList = try await dependencies.cloudKitService.fetchPublicRecipesForUser(ownerId: friendId)
+
+                                return friendRecipesList
+                                    .filter { recipe in
+                                        recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
+                                    }
+                                    .map { recipe in
+                                        SharedRecipe(
+                                            recipe: recipe,
+                                            sharedBy: friendUser,
+                                            sharedAt: recipe.createdAt
+                                        )
+                                    }
+                            } catch {
+                                AppLogger.general.warning("Failed to load recipes for friend \(friendId): \(error.localizedDescription)")
+                                return []
+                            }
+                        }
+                    }
+                }
+
+                return allRecipes
             }
 
             friendRecipes = friendRecipesTemp.sorted { $0.sharedAt > $1.sharedAt }

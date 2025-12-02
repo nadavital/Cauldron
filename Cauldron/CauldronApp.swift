@@ -26,8 +26,6 @@ struct CauldronApp: App {
 
 // App Delegate to handle CloudKit share acceptance
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    static var pendingShareURL: URL?
-    static var pendingShareMetadata: CKShare.Metadata?
 
     func application(
         _ application: UIApplication,
@@ -46,19 +44,39 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         AppLogger.general.info("🔵 AppDelegate: webpageURL: \(userActivity.webpageURL?.absoluteString ?? "nil")")
         AppLogger.general.info("🔵 AppDelegate: userInfo: \(userActivity.userInfo ?? [:])")
 
-        // Check for CloudKit share
+        // Check for CloudKit share or external share
         if userActivity.activityType == NSUserActivityTypeBrowsingWeb,
            let url = userActivity.webpageURL {
             AppLogger.general.info("🔵 AppDelegate: Got browsing web activity with URL: \(url)")
+
+            // Check if it's an external share URL (from Firebase)
+            if isExternalShareURL(url) {
+                AppLogger.general.info("🔵 AppDelegate: Detected external share URL, storing for processing...")
+
+                // Store URL for later processing when UI is ready
+                Task {
+                    await PendingShareManager.shared.setPendingURL(url)
+
+                    // Post notification immediately in case UI is ready
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: .openExternalShare,
+                            object: url
+                        )
+                    }
+                }
+
+                return true
+            }
 
             // Check if it's an iCloud share URL
             if url.host == "www.icloud.com" || url.host == "icloud.com" {
                 AppLogger.general.info("🔵 AppDelegate: Detected iCloud share URL, fetching metadata...")
 
-                // Store URL for later if UI not ready
-                AppDelegate.pendingShareURL = url
-
                 Task {
+                    // Store URL for later if UI not ready
+                    await PendingShareManager.shared.setPendingURL(url)
+
                     do {
                         let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
                         let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in
@@ -74,11 +92,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                         }
 
                         AppLogger.general.info("🔵 AppDelegate: Successfully fetched share metadata, posting notification")
-                        AppDelegate.pendingShareMetadata = metadata
+                        await PendingShareManager.shared.setPendingMetadata(metadata)
 
                         await MainActor.run {
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("AcceptCloudKitShare"),
+                                name: .acceptCloudKitShare,
                                 object: metadata
                             )
                         }
@@ -93,6 +111,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         AppLogger.general.warning("🔵 AppDelegate: Did not handle user activity")
         return false
+    }
+
+    /// Check if URL is an external share link (from Firebase)
+    private func isExternalShareURL(_ url: URL) -> Bool {
+        // Check for Firebase hosting domain pattern
+        guard let host = url.host else { return false }
+
+        // Check for Firebase domains
+        if host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app" {
+            // Continue to check path
+        } else {
+            return false
+        }
+
+        // Check if path matches share URL pattern: /recipe/*, /profile/*, /collection/*
+        let pathComponents = url.pathComponents
+        guard pathComponents.count >= 3 else { return false }
+
+        let shareTypes = ["recipe", "profile", "collection"]
+        return shareTypes.contains(pathComponents[1])
     }
 
     func application(
@@ -171,7 +209,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Post notification to navigate to Connections view
         DispatchQueue.main.async {
             NotificationCenter.default.post(
-                name: NSNotification.Name("NavigateToConnections"),
+                name: .navigateToConnections,
                 object: nil
             )
         }
@@ -209,7 +247,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             // Post notification to trigger connection refresh
             DispatchQueue.main.async {
                 NotificationCenter.default.post(
-                    name: NSNotification.Name("RefreshConnections"),
+                    name: .refreshConnections,
                     object: nil
                 )
             }
@@ -236,7 +274,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Post notification to handle in SwiftUI
         NotificationCenter.default.post(
-            name: NSNotification.Name("TestOpenURL"),
+            name: .testOpenURL,
             object: url
         )
 
@@ -247,14 +285,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         AppLogger.general.info("🔵 AppDelegate: applicationDidBecomeActive")
 
         // Check for pending share metadata
-        if let metadata = AppDelegate.pendingShareMetadata {
-            AppLogger.general.info("🔵 AppDelegate: Processing pending share metadata")
-            NotificationCenter.default.post(
-                name: NSNotification.Name("AcceptCloudKitShare"),
-                object: metadata
-            )
-            AppDelegate.pendingShareMetadata = nil
-            AppDelegate.pendingShareURL = nil
+        Task {
+            if let metadata = await PendingShareManager.shared.consumePendingMetadata() {
+                AppLogger.general.info("🔵 AppDelegate: Processing pending share metadata")
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: .acceptCloudKitShare,
+                        object: metadata
+                    )
+                }
+            }
         }
 
         // Update badge count when app becomes active
@@ -334,7 +374,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
                 Task {
                     await MainActor.run {
                         NotificationCenter.default.post(
-                            name: NSNotification.Name("OpenExternalShare"),
+                            name: .openExternalShare,
                             object: url
                         )
                     }
@@ -364,7 +404,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
                         AppLogger.general.info("🟣 SceneDelegate: Successfully fetched share metadata")
                         await MainActor.run {
                             NotificationCenter.default.post(
-                                name: NSNotification.Name("AcceptCloudKitShare"),
+                                name: .acceptCloudKitShare,
                                 object: metadata
                             )
                         }
@@ -404,7 +444,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
         if url.scheme == "cauldron" && url.host == "import" {
             AppLogger.general.info("🟣 SceneDelegate: Detected external share deep link")
             NotificationCenter.default.post(
-                name: NSNotification.Name("OpenExternalShare"),
+                name: .openExternalShare,
                 object: url
             )
             return
@@ -412,7 +452,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
 
         // Legacy URL handling for testing
         NotificationCenter.default.post(
-            name: NSNotification.Name("TestOpenURL"),
+            name: .testOpenURL,
             object: url
         )
     }

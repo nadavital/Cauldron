@@ -637,6 +637,80 @@ actor CloudKitService {
         }
     }
     
+    /// Save recipe to public database for external sharing
+    /// - Parameter recipe: The recipe to save to public database
+    /// - Returns: The CloudKit record name
+    func saveRecipeToPublicDatabase(_ recipe: Recipe) async throws -> String {
+        logger.info("📤 Saving recipe '\(recipe.title)' to CloudKit public database")
+
+        let db = try getPublicDatabase()
+
+        // Create record ID in public database's default zone
+        // Use recipe UUID as record name for easy lookup
+        let recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: .default)
+
+        // Try to fetch existing record first to update it, otherwise create new one
+        let record: CKRecord
+        do {
+            record = try await db.record(for: recordID)
+            logger.info("Updating existing public record: \(recipe.title)")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Record doesn't exist, create new one
+            record = CKRecord(recordType: recipeRecordType, recordID: recordID)
+            logger.info("Creating new public record: \(recipe.title)")
+        } catch {
+            // Other error, rethrow
+            logger.error("Error fetching existing public record: \(error.localizedDescription)")
+            throw error
+        }
+
+        // Update/set all fields (same as private database save)
+        record["recipeId"] = recipe.id.uuidString as CKRecordValue
+        record["ownerId"] = (recipe.ownerId?.uuidString ?? "") as CKRecordValue
+        record["title"] = recipe.title as CKRecordValue
+        record["visibility"] = recipe.visibility.rawValue as CKRecordValue
+
+        // Encode complex data as JSON
+        let encoder = JSONEncoder()
+        if let ingredientsData = try? encoder.encode(recipe.ingredients) {
+            record["ingredientsData"] = ingredientsData as CKRecordValue
+        }
+        if let stepsData = try? encoder.encode(recipe.steps) {
+            record["stepsData"] = stepsData as CKRecordValue
+        }
+        if let tagsData = try? encoder.encode(recipe.tags) {
+            record["tagsData"] = tagsData as CKRecordValue
+        }
+
+        record["yields"] = recipe.yields as CKRecordValue
+        if let totalMinutes = recipe.totalMinutes {
+            record["totalMinutes"] = totalMinutes as CKRecordValue
+        }
+        record["createdAt"] = recipe.createdAt as CKRecordValue
+        record["updatedAt"] = recipe.updatedAt as CKRecordValue
+
+        // Attribution fields
+        if let originalRecipeId = recipe.originalRecipeId {
+            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
+        }
+        if let originalCreatorId = recipe.originalCreatorId {
+            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
+        }
+        if let originalCreatorName = recipe.originalCreatorName {
+            record["originalCreatorName"] = originalCreatorName as CKRecordValue
+        }
+
+        // Save to public database
+        do {
+            let savedRecord = try await db.save(record)
+            logger.info("✅ Recipe '\(recipe.title)' saved to public database")
+            return savedRecord.recordID.recordName
+        } catch let error as CKError {
+            logger.error("❌ CloudKit public save failed for '\(recipe.title)': \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     /// Fetch user's recipes from CloudKit
     func fetchUserRecipes(ownerId: UUID) async throws -> [Recipe] {
         let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
@@ -662,10 +736,10 @@ actor CloudKitService {
         let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
         let query = CKQuery(recordType: recipeRecordType, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
-        
+
         let db = try getPublicDatabase()
         let results = try await db.records(matching: query, resultsLimit: limit)
-        
+
         var recipes: [Recipe] = []
         for (_, result) in results.matchResults {
             if let record = try? result.get() {
@@ -674,7 +748,30 @@ actor CloudKitService {
                 }
             }
         }
-        
+
+        return recipes
+    }
+
+    /// Fetch public recipes for a specific user from the public database
+    func fetchPublicRecipesForUser(ownerId: UUID) async throws -> [Recipe] {
+        let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
+                                   ownerId.uuidString,
+                                   RecipeVisibility.publicRecipe.rawValue)
+        let query = CKQuery(recordType: recipeRecordType, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+        let db = try getPublicDatabase()
+        let results = try await db.records(matching: query)
+
+        var recipes: [Recipe] = []
+        for (_, result) in results.matchResults {
+            if let record = try? result.get() {
+                if let recipe = try? recipeFromRecord(record) {
+                    recipes.append(recipe)
+                }
+            }
+        }
+
         return recipes
     }
 

@@ -83,10 +83,10 @@ struct RecipeDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero Image - Stretches to top
-                    if let imageURL = recipe.imageURL {
+                    if recipe.imageURL != nil || recipe.cloudImageRecordName != nil {
                         HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
                             .ignoresSafeArea(edges: .top)
-                            .id("\(imageURL.absoluteString)-\(imageRefreshID)") // Force refresh when image URL or refresh ID changes
+                            .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)") // Force refresh when image URL or refresh ID changes
                     }
 
                     // Content sections

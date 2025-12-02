@@ -210,6 +210,27 @@ actor GroceryRepository {
         try context.save()
     }
 
+    /// Check or uncheck all items in an AI category
+    func setCategoryChecked(category: String, isChecked: Bool) async throws {
+        let listId = try await getOrCreateDefaultList()
+        let context = ModelContext(modelContainer)
+        let listDescriptor = FetchDescriptor<GroceryListModel>(
+            predicate: #Predicate { $0.id == listId }
+        )
+
+        guard let list = try context.fetch(listDescriptor).first else {
+            throw RepositoryError.notFound
+        }
+
+        // Filter items by AI category
+        let categoryItems = (list.items ?? []).filter { $0.aiCategory == category }
+        for item in categoryItems {
+            item.isChecked = isChecked
+        }
+
+        try context.save()
+    }
+
     /// Check or uncheck all items
     func setAllItemsChecked(isChecked: Bool) async throws {
         let listId = try await getOrCreateDefaultList()

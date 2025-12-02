@@ -182,7 +182,10 @@ class AIRecipeGeneratorViewModel: ObservableObject {
 
                 // When stream completes, convert final partial to full recipe
                 if let final = partialRecipe, let fullRecipe = convertPartialToFullRecipe(final) {
-                    let recipe = fullRecipe.toRecipe()
+                    // Build tags from selected categories
+                    let selectedCategoryTags = allSelectedCategories.map { Tag(name: $0.tagValue) }
+
+                    let recipe = fullRecipe.toRecipe(withTags: selectedCategoryTags)
                     self.generatedRecipe = recipe
                     self.generationProgress = .complete
                     self.isGenerating = false
@@ -245,6 +248,9 @@ class AIRecipeGeneratorViewModel: ObservableObject {
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.general.info("AI-generated recipe saved: \(recipe.title)")
+
+            // Notify other views that a recipe was added
+            NotificationCenter.default.post(name: .recipeAdded, object: nil)
 
             return true
         } catch {

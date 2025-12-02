@@ -109,10 +109,10 @@ struct ContentView: View {
             }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
         .animation(.easeInOut(duration: 0.2), value: isLoadingShare)
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenExternalShare"))) { notification in
-            print("🔔 ContentView: Received OpenExternalShare notification")
+        .onReceive(NotificationCenter.default.publisher(for: .openExternalShare)) { notification in
+            AppLogger.general.info("🔔 ContentView: Received OpenExternalShare notification")
             if let url = notification.object as? URL {
-                print("🔔 ContentView: Loading share from URL: \(url)")
+                AppLogger.general.info("🔔 ContentView: Loading share from URL: \(url)")
                 Task {
                     await loadSharedContent(url: url)
                 }
@@ -137,6 +137,15 @@ struct ContentView: View {
             // Only NOW will the view hierarchy render, and CookTabViewModel will
             // receive preloadedData in its initializer, preventing empty arrays
             isDataReady = true
+
+            // Step 5: Check for pending share URL from PendingShareManager
+            // This handles cold-start scenarios where the app was opened via Universal Link
+            if let pendingURL = await PendingShareManager.shared.consumePendingURL() {
+                AppLogger.general.info("🔔 ContentView: Found pending share URL from cold start: \(pendingURL)")
+                Task {
+                    await loadSharedContent(url: pendingURL)
+                }
+            }
         }
     }
 
@@ -150,31 +159,31 @@ struct ContentView: View {
             // If it's a recipe, we need to fetch the full details
             // because the share data only contains a summary
             if case .recipe(let partialRecipe, let owner) = content {
-                print("🌐 ContentView: Processing recipe share for \(partialRecipe.title)")
-                
+                AppLogger.general.info("🌐 ContentView: Processing recipe share for \(partialRecipe.title)")
+
                 // 1. Check if we already have this recipe locally (e.g. we are the owner)
                 // This prevents fetching a stale public version if we just made it private
                 if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id) {
-                    print("✅ ContentView: Found local copy of recipe, using that")
+                    AppLogger.general.info("✅ ContentView: Found local copy of recipe, using that")
                     await MainActor.run {
                         let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
-                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                        NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
                     }
                     return
                 }
-                
+
                 // 2. If not found locally, fetch from CloudKit public database
-                print("🌐 ContentView: Fetching full recipe details from CloudKit")
+                AppLogger.general.info("🌐 ContentView: Fetching full recipe details from CloudKit")
                 if let fullRecipe = try await dependencies.cloudKitService.fetchPublicRecipe(id: partialRecipe.id) {
-                    print("✅ ContentView: Successfully fetched full recipe")
+                    AppLogger.general.info("✅ ContentView: Successfully fetched full recipe")
                     await MainActor.run {
                         // Post notification to navigate to the recipe in the Search tab
                         // Use the full recipe but keep the owner info from the share if available
                         let wrapper = SharedContentWrapper(content: .recipe(fullRecipe, originalCreator: owner))
-                        NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                        NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
                     }
                 } else {
-                    print("❌ ContentView: Recipe not found in public database")
+                    AppLogger.general.error("❌ ContentView: Recipe not found in public database")
                     // CRITICAL: Do NOT fallback to partial recipe. If it's not in public DB, it's private or deleted.
                     await MainActor.run {
                         shareErrorMessage = "This recipe is no longer available or has been made private."
@@ -185,11 +194,11 @@ struct ContentView: View {
                 // For profiles and collections, the share data is usually sufficient or handled differently
                 await MainActor.run {
                     let wrapper = SharedContentWrapper(content: content)
-                    NotificationCenter.default.post(name: NSNotification.Name("NavigateToSharedContent"), object: wrapper)
+                    NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
                 }
             }
         } catch {
-            print("❌ ContentView: Failed to load shared content: \(error)")
+            AppLogger.general.error("❌ ContentView: Failed to load shared content: \(error)")
             await MainActor.run {
                 shareErrorMessage = "Failed to load shared content. The link may be invalid or expired."
                 showShareError = true
