@@ -56,4 +56,28 @@ actor CookingHistoryRepository {
         
         return unique
     }
+    
+    /// Fetch cooking statistics for all recipes
+    /// Returns a dictionary mapping recipe ID to (count, lastCookedDate)
+    @MainActor
+    func fetchCookingStats() throws -> [UUID: (count: Int, lastCooked: Date)] {
+        let context = modelContainer.mainContext
+        let descriptor = FetchDescriptor<CookingHistoryModel>()
+        let history = try context.fetch(descriptor)
+        
+        var stats: [UUID: (count: Int, lastCooked: Date)] = [:]
+        
+        for entry in history {
+            if let existing = stats[entry.recipeId] {
+                stats[entry.recipeId] = (
+                    count: existing.count + 1,
+                    lastCooked: max(existing.lastCooked, entry.cookedAt)
+                )
+            } else {
+                stats[entry.recipeId] = (count: 1, lastCooked: entry.cookedAt)
+            }
+        }
+        
+        return stats
+    }
 }

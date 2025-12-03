@@ -97,7 +97,12 @@ struct RecipeScaler {
             // Match "serves 4", "feeds 6" - number is in group 2
             ("(serves?|feeds?)\\s+(\\d+)", 2),
             // Match "makes 12", "yields 24" - number is in group 2
-            ("(makes?|yields?)\\s+(\\d+)", 2)
+            // Match "makes 12", "yields 24" - number is in group 2
+            ("(makes?|yields?)\\s+(\\d+)", 2),
+            // Generic: Number at start followed by text (e.g., "2 loaves", "12 cookies") - number is in group 1
+            ("^(\\d+)\\s+.+", 1),
+            // Generic: Just a number (e.g., "4") - number is in group 1
+            ("^(\\d+)$", 1)
         ]
 
         var result = yields

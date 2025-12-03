@@ -333,7 +333,7 @@ struct RecipeDetailView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "person.2")
                         .foregroundColor(.cauldronOrange)
-                    Text(recipe.yields)
+                    Text(scaledRecipe.yields)
                 }
 
                 Spacer()
@@ -376,6 +376,30 @@ struct RecipeDetailView: View {
                         ProfileAvatar(user: user, size: 32, dependencies: dependencies)
                         
                         Text("Shared by \(user.displayName)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(Color(uiColor: .tertiaryLabel))
+                        
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Owner Banner (if not shared and not owned)
+            else if let owner = recipeOwner, !recipe.isOwnedByCurrentUser() {
+                NavigationLink {
+                    UserProfileView(user: owner, dependencies: dependencies)
+                } label: {
+                    HStack {
+                        ProfileAvatar(user: owner, size: 32, dependencies: dependencies)
+                        
+                        Text("Recipe by \(owner.displayName)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         

@@ -53,8 +53,13 @@ struct ExploreTagView: View {
                     friendRecipesSection
                 }
 
+                // Community Recipes Section
+                if !viewModel.publicRecipes.isEmpty {
+                    publicRecipesSection
+                }
+
                 // Empty State
-                if viewModel.allRecipes.isEmpty && viewModel.friendRecipes.isEmpty && !viewModel.isLoading {
+                if viewModel.allRecipes.isEmpty && viewModel.friendRecipes.isEmpty && viewModel.publicRecipes.isEmpty && !viewModel.isLoading {
                     emptyState
                 }
 
@@ -121,7 +126,7 @@ struct ExploreTagView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "book.fill")
                         .foregroundColor(color)
-                    Text("All Recipes")
+                    Text("My Recipes")
                 }
                 .font(.title2)
                 .fontWeight(.bold)
@@ -188,6 +193,52 @@ struct ExploreTagView: View {
                             sharedAt: sharedRecipe.sharedAt
                         )) {
                             ExploreTagRecipeCard(recipe: sharedRecipe.recipe, dependencies: dependencies, sharedBy: sharedRecipe.sharedBy)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var publicRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe")
+                        .foregroundColor(color)
+                    Text("Community Recipes")
+                }
+                .font(.title2)
+                .fontWeight(.bold)
+
+                Spacer()
+
+                NavigationLink(destination: TagPublicRecipesListView(
+                    tag: tag,
+                    recipes: viewModel.publicRecipes,
+                    dependencies: dependencies,
+                    color: color
+                )) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.publicRecipes.prefix(10)) { sharedRecipe in
+                        NavigationLink(destination: RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: dependencies,
+                            sharedBy: sharedRecipe.sharedBy
+                        )) {
+                            ExploreTagRecipeCard(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: dependencies,
+                                sharedBy: sharedRecipe.sharedBy
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -297,6 +348,7 @@ class ExploreTagViewModel: ObservableObject {
 
     @Published var allRecipes: [Recipe] = []
     @Published var friendRecipes: [SharedRecipe] = []
+    @Published var publicRecipes: [SharedRecipe] = []
     @Published var isLoading = false
 
     private var currentUserId: UUID? {
@@ -311,6 +363,8 @@ class ExploreTagViewModel: ObservableObject {
     func loadRecipes() async {
         isLoading = true
         defer { isLoading = false }
+        
+        AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
             // Load all recipes with this tag (user's own recipes)
@@ -318,98 +372,67 @@ class ExploreTagViewModel: ObservableObject {
             allRecipes = allUserRecipes.filter { recipe in
                 recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
             }
+            AppLogger.general.info("✅ Found \(allRecipes.count) own recipes")
 
             // Load friend recipes with this tag
-            guard let userId = currentUserId else { return }
-
-            // Get all connections
-            let connections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
-            let acceptedConnections = connections.filter { $0.isAccepted }
-
-            // Fetch friend recipes in parallel using task group with concurrency limits
-            // Limit to 5 concurrent CloudKit operations to avoid rate limiting
-            let friendRecipesTemp = await withTaskGroup(of: [SharedRecipe].self) { group in
-                var activeTasks = 0
-                let maxConcurrent = 5
-                var connectionIterator = acceptedConnections.makeIterator()
-
-                // Start initial batch of tasks
-                while activeTasks < maxConcurrent, let connection = connectionIterator.next() {
-                    activeTasks += 1
-                    group.addTask { [dependencies, tag] in
-                        let friendId = connection.fromUserId == userId ? connection.toUserId : connection.fromUserId
-
-                        do {
-                            // Fetch friend's user record and their public recipes
-                            guard let friendUser = try await dependencies.cloudKitService.fetchUser(byUserId: friendId) else {
-                                AppLogger.general.warning("Friend user not found: \(friendId)")
-                                return []
-                            }
-
-                            let friendRecipesList = try await dependencies.cloudKitService.fetchPublicRecipesForUser(ownerId: friendId)
-
-                            // Filter by tag and map to SharedRecipe
-                            return friendRecipesList
-                                .filter { recipe in
-                                    recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
-                                }
-                                .map { recipe in
-                                    SharedRecipe(
-                                        recipe: recipe,
-                                        sharedBy: friendUser,
-                                        sharedAt: recipe.createdAt
-                                    )
-                                }
-                        } catch {
-                            AppLogger.general.warning("Failed to load recipes for friend \(friendId): \(error.localizedDescription)")
-                            return []
-                        }
-                    }
+            // Use SharingService to get all shared recipes (same logic as Friends tab)
+            let allSharedRecipes = try await dependencies.sharingService.getSharedRecipes()
+            
+            friendRecipes = allSharedRecipes
+                .filter { sharedRecipe in
+                    sharedRecipe.recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
                 }
+                .sorted { $0.sharedAt > $1.sharedAt }
+            
+            AppLogger.general.info("✅ Loaded \(friendRecipes.count) friend recipes via SharingService")
 
-                // Collect results and spawn new tasks as others complete
-                var allRecipes: [SharedRecipe] = []
-                for await recipes in group {
-                    allRecipes.append(contentsOf: recipes)
-                    activeTasks -= 1
-
-                    // Start next task if more connections available
-                    if let connection = connectionIterator.next() {
-                        activeTasks += 1
-                        group.addTask { [dependencies, tag] in
-                            let friendId = connection.fromUserId == userId ? connection.toUserId : connection.fromUserId
-
-                            do {
-                                guard let friendUser = try await dependencies.cloudKitService.fetchUser(byUserId: friendId) else {
-                                    AppLogger.general.warning("Friend user not found: \(friendId)")
-                                    return []
-                                }
-
-                                let friendRecipesList = try await dependencies.cloudKitService.fetchPublicRecipesForUser(ownerId: friendId)
-
-                                return friendRecipesList
-                                    .filter { recipe in
-                                        recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
-                                    }
-                                    .map { recipe in
-                                        SharedRecipe(
-                                            recipe: recipe,
-                                            sharedBy: friendUser,
-                                            sharedAt: recipe.createdAt
-                                        )
-                                    }
-                            } catch {
-                                AppLogger.general.warning("Failed to load recipes for friend \(friendId): \(error.localizedDescription)")
-                                return []
-                            }
-                        }
-                    }
-                }
-
-                return allRecipes
+            // Load public recipes from CloudKit
+            let publicRecipesList = try await dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: nil,
+                visibility: .publicRecipe
+            )
+            
+            // Collect owner IDs from public recipes
+            let ownerIds = Set(publicRecipesList.map { $0.ownerId }.compactMap { $0 })
+            
+            // Fetch owners in batch
+            let owners = try await dependencies.cloudKitService.fetchUsers(byUserIds: Array(ownerIds))
+            let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
+            
+            // Get friend IDs for filtering (if we have connections)
+            var friendIds: Set<UUID> = []
+            if let userId = currentUserId {
+                let connections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
+                let acceptedConnections = connections.filter { $0.isAccepted }
+                friendIds = Set(acceptedConnections.map { 
+                    $0.fromUserId == userId ? $0.toUserId : $0.fromUserId 
+                })
             }
 
-            friendRecipes = friendRecipesTemp.sorted { $0.sharedAt > $1.sharedAt }
+            // Filter and map to SharedRecipe
+            publicRecipes = publicRecipesList.compactMap { recipe -> SharedRecipe? in
+                // Match tag
+                guard recipe.tags.contains(where: { $0.name.lowercased() == tag.name.lowercased() }) else {
+                    return nil
+                }
+                
+                guard let ownerId = recipe.ownerId else { return nil }
+                
+                // Exclude own recipes
+                if let currentUserId = currentUserId, ownerId == currentUserId { return nil }
+                
+                // Exclude friend recipes (using friendIds from connections)
+                if friendIds.contains(ownerId) { return nil }
+                
+                // Get owner
+                guard let owner = ownersMap[ownerId] else { return nil }
+                
+                return SharedRecipe(
+                    recipe: recipe,
+                    sharedBy: owner,
+                    sharedAt: recipe.createdAt
+                )
+            }
 
         } catch {
             AppLogger.general.error("Failed to load recipes for tag '\(tag.name)': \(error.localizedDescription)")
@@ -458,6 +481,29 @@ struct TagFriendRecipesListView: View {
             }
         }
         .navigationTitle("From Friends")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct TagPublicRecipesListView: View {
+    let tag: Tag
+    let recipes: [SharedRecipe]
+    let dependencies: DependencyContainer
+    let color: Color
+
+    var body: some View {
+        List {
+            ForEach(recipes) { sharedRecipe in
+                NavigationLink(destination: RecipeDetailView(
+                    recipe: sharedRecipe.recipe,
+                    dependencies: dependencies,
+                    sharedBy: sharedRecipe.sharedBy
+                )) {
+                    RecipeRowView(recipe: sharedRecipe.recipe, dependencies: dependencies)
+                }
+            }
+        }
+        .navigationTitle("Community Recipes")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
