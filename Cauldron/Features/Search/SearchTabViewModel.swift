@@ -38,6 +38,7 @@ class SearchTabViewModel: ObservableObject {
 
     // Debouncing
     private let peopleSearchSubject = PassthroughSubject<String, Never>()
+    private let recipeSearchSubject = PassthroughSubject<(String, Set<RecipeCategory>), Never>()
 
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
@@ -73,6 +74,19 @@ class SearchTabViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+            
+        // Set up debounced recipe search
+        recipeSearchSubject
+            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
+            .removeDuplicates { $0 == $1 }
+            .sink { [weak self] (query, categories) in
+                guard let self = self else { return }
+                self.searchTask?.cancel()
+                self.searchTask = Task {
+                    await self.performRecipeSearch(query: query, categories: Array(categories))
+                }
+            }
+            .store(in: &cancellables)
     }
     
     func loadData() async {
@@ -83,8 +97,8 @@ class SearchTabViewModel: ObservableObject {
             // Load user's own recipes
             allRecipes = try await dependencies.recipeRepository.fetchAll()
 
-            // Load all public recipes from CloudKit
-            await loadPublicRecipes()
+            // Load initial public recipes (empty search = recent)
+            await performRecipeSearch(query: "", categories: [])
 
             // Group recipes by tags (using own recipes for category browsing)
             groupRecipesByTags()
@@ -97,38 +111,7 @@ class SearchTabViewModel: ObservableObject {
         }
     }
 
-    func loadPublicRecipes() async {
-        // Check if cache is valid
-        if let timestamp = publicRecipesCacheTimestamp,
-           Date().timeIntervalSince(timestamp) < cacheValidityDuration,
-           !cachedPublicRecipes.isEmpty {
-            AppLogger.general.info("Using cached public recipes (\(self.cachedPublicRecipes.count) recipes)")
-            publicRecipes = cachedPublicRecipes
-            return
-        }
-
-        do {
-            // Fetch all public recipes from CloudKit
-            AppLogger.general.info("Fetching fresh public recipes from CloudKit")
-            let recipes = try await dependencies.cloudKitService.querySharedRecipes(
-                ownerIds: nil,
-                visibility: .publicRecipe
-            )
-
-            // Filter out own recipes
-            let filteredRecipes = recipes.filter { $0.ownerId != currentUserId }
-            publicRecipes = filteredRecipes
-
-            // Update cache
-            cachedPublicRecipes = filteredRecipes
-            publicRecipesCacheTimestamp = Date()
-
-            AppLogger.general.info("Loaded \(self.publicRecipes.count) public recipes for search")
-        } catch {
-            AppLogger.general.error("Failed to load public recipes: \(error.localizedDescription)")
-            publicRecipes = []
-        }
-    }
+    // loadPublicRecipes removed in favor of server-side search
 
     func loadConnections() async {
         // Use ConnectionManager - it handles caching and sync automatically
@@ -190,7 +173,10 @@ class SearchTabViewModel: ObservableObject {
     
     func updateRecipeSearch(_ query: String) {
         recipeSearchText = query
-        filterRecipes()
+        // Update local results immediately
+        filterLocalRecipes()
+        // Trigger server search
+        recipeSearchSubject.send((query, selectedCategories))
     }
     
     func toggleCategory(_ category: RecipeCategory) {
@@ -199,23 +185,15 @@ class SearchTabViewModel: ObservableObject {
         } else {
             selectedCategories.insert(category)
         }
-        filterRecipes()
+        // Update local results immediately
+        filterLocalRecipes()
+        // Trigger server search
+        recipeSearchSubject.send((recipeSearchText, selectedCategories))
     }
     
-    private func filterRecipes() {
-        // Start with all recipes (personal + public)
-        let combinedRecipes = allRecipes + publicRecipes
-        
-        // If no filters active, show nothing (or maybe show all? The UI currently shows categories when empty)
-        // The UI logic is: if searchText is empty AND selectedCategories is empty -> Show Categories View
-        // If either is active -> Show Results View
-        
-        if recipeSearchText.isEmpty && selectedCategories.isEmpty {
-            recipeSearchResults = []
-            return
-        }
-        
-        var results = combinedRecipes
+    private func filterLocalRecipes() {
+        // Filter ONLY local recipes
+        var results = allRecipes
         
         // 1. Filter by Search Text
         if !recipeSearchText.isEmpty {
@@ -230,19 +208,47 @@ class SearchTabViewModel: ObservableObject {
         // 2. Filter by Selected Categories
         if !selectedCategories.isEmpty {
             results = results.filter { recipe in
-                // Recipe must match ALL selected categories (AND logic)
-                // Or ANY? Usually tags are AND logic for drill-down. Let's do AND for now.
-                // Actually, for categories like "Dinner" and "Italian", AND makes sense.
-                // For "Dinner" and "Lunch", AND makes no sense (usually).
-                // Let's do AND for now as it's a stricter filter.
-                
                 selectedCategories.allSatisfy { category in
                     recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
                 }
             }
         }
         
-        recipeSearchResults = results
+        // Combine with current public results
+        // Note: publicRecipes are already filtered by the server
+        recipeSearchResults = results + publicRecipes
+    }
+    
+    private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
+        isLoading = true
+        
+        do {
+            // Convert categories to string tags
+            let categoryTags = categories.map { $0.tagValue }
+            
+            // Perform server-side search
+            let results = try await dependencies.cloudKitService.searchPublicRecipes(
+                query: query,
+                categories: categoryTags.isEmpty ? nil : categoryTags
+            )
+            
+            // Filter out own recipes (just in case)
+            let filteredResults = results.filter { $0.ownerId != currentUserId }
+            
+            if !Task.isCancelled {
+                publicRecipes = filteredResults
+                // Re-merge with local results
+                filterLocalRecipes()
+                isLoading = false
+            }
+        } catch {
+            if !Task.isCancelled {
+                AppLogger.general.error("Failed to search public recipes: \(error.localizedDescription)")
+                publicRecipes = [] // Clear on error? Or keep previous? Let's clear to show error state if we had one.
+                filterLocalRecipes()
+                isLoading = false
+            }
+        }
     }
     
     func updatePeopleSearch(_ query: String) {

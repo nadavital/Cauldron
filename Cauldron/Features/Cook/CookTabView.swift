@@ -30,6 +30,26 @@ struct CookTabView: View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    // Dynamic Tag Rows (Promoted & Standard)
+                    ForEach(viewModel.tagRows, id: \.tag) { tagRow in
+                        tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
+                    }
+                    
+                    // Quick & Easy
+                    if !viewModel.quickRecipes.isEmpty {
+                        quickRecipesSection
+                    }
+                    
+                    // On Rotation
+                    if !viewModel.onRotationRecipes.isEmpty {
+                        onRotationSection
+                    }
+                    
+                    // Rediscover Favorites
+                    if !viewModel.forgottenFavorites.isEmpty {
+                        forgottenFavoritesSection
+                    }
+                    
                     // My Collections
                     collectionsSection
 
@@ -265,6 +285,102 @@ struct CookTabView: View {
             }
         }
     }
+    
+    private var quickRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "timer")
+                    .foregroundColor(.cauldronOrange)
+                Text("Quick & Easy")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.quickRecipes.prefix(10)) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private var onRotationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .foregroundColor(.cauldronOrange)
+                Text("On Rotation")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.onRotationRecipes.prefix(10)) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+    
+    private var forgottenFavoritesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundColor(.cauldronOrange)
+                Text("Rediscover Favorites")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.forgottenFavorites.prefix(10)) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
 
     private var allRecipesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -308,6 +424,44 @@ struct CookTabView: View {
                     }
                     .padding(.bottom, 8)
                 }
+            }
+        }
+    }
+    
+    private func tagRowSection(tag: String, recipes: [Recipe]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "tag.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text(tag)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                
+                NavigationLink(destination: ExploreTagView(tag: Tag(name: tag), dependencies: viewModel.dependencies)) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(recipes) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
             }
         }
     }
