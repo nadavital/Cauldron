@@ -71,7 +71,8 @@ struct RecipeScaler {
             id: ingredient.id,
             name: ingredient.name,
             quantity: scaledQuantity,
-            note: ingredient.note
+            note: ingredient.note,
+            section: ingredient.section
         )
     }
     

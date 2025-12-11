@@ -378,4 +378,28 @@ final class RecipeScalerTests: XCTestCase {
         // Then
         XCTAssertEqual(scaled.recipe.id, testRecipe.id)
     }
+
+    func testScale_PreservesSectionOnIngredients() {
+        // Given - Recipe with sectioned ingredients
+        let recipe = Recipe(
+            title: "Test",
+            ingredients: [
+                Ingredient(name: "flour", quantity: Quantity(value: 2, unit: .cup), section: "Dough"),
+                Ingredient(name: "water", quantity: Quantity(value: 1, unit: .cup), section: "Dough"),
+                Ingredient(name: "cream cheese", quantity: Quantity(value: 8, unit: .ounce), section: "Filling"),
+                Ingredient(name: "salt", quantity: nil, section: "Filling") // No quantity
+            ],
+            steps: [CookStep(index: 0, text: "Mix")],
+            yields: "4 servings"
+        )
+
+        // When
+        let scaled = RecipeScaler.scale(recipe, by: 2.0)
+
+        // Then - All sections should be preserved
+        XCTAssertEqual(scaled.recipe.ingredients[0].section, "Dough")
+        XCTAssertEqual(scaled.recipe.ingredients[1].section, "Dough")
+        XCTAssertEqual(scaled.recipe.ingredients[2].section, "Filling")
+        XCTAssertEqual(scaled.recipe.ingredients[3].section, "Filling")
+    }
 }
