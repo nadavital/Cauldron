@@ -31,7 +31,11 @@
                 "function": "previewRecipe"
             },
             {
-                "source": "/u/**",
+                "source": "/u/*/*",
+                "function": "previewRecipe"
+            },
+            {
+                "source": "/u/*",
                 "function": "previewProfile"
             },
             {

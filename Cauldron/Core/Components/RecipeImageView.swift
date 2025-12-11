@@ -329,6 +329,19 @@ struct HeroRecipeImageView: View {
                     .scaledToFill()
                     .frame(height: imageHeight(for: image))
                     .clipped()
+                    .overlay(alignment: .bottom) {
+                        // Bottom gradient for smooth transition to content
+                        LinearGradient(
+                            colors: [
+                                Color(uiColor: .systemBackground).opacity(0),
+                                Color(uiColor: .systemBackground).opacity(0.5),
+                                Color(uiColor: .systemBackground)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 200)
+                    }
                     .opacity(imageOpacity)
             } else {
                 placeholderView
