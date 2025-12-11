@@ -79,6 +79,11 @@ struct SearchTabView: View {
                     await viewModel.loadData()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in
+                // Switch to People search mode when coming from Friends empty state
+                searchMode = .people
+                searchText = "" // Clear any existing search
+            }
             .navigationDestination(for: Recipe.self) { recipe in
                 RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
             }

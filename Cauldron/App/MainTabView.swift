@@ -85,10 +85,10 @@ struct MainTabView: View {
             if let contentWrapper = notification.object as? ContentView.SharedContentWrapper {
                 AppLogger.general.info("📍 Navigating to shared content in Search tab")
                 selectedTab = .search
-                
+
                 // Reset path first to ensure clean navigation
                 searchNavigationPath = NavigationPath()
-                
+
                 // Push content based on type
                 switch contentWrapper.content {
                 case .recipe(let recipe, _):
@@ -99,6 +99,11 @@ struct MainTabView: View {
                     searchNavigationPath.append(collection)
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in
+            // Switch to Search tab when "Find people to add" is tapped from Friends empty state
+            AppLogger.general.info("📍 Switching to Search tab to find people")
+            selectedTab = .search
         }
     }
 }
