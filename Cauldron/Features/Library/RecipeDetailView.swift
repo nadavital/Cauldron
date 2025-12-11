@@ -36,6 +36,8 @@ struct RecipeDetailView: View {
     @State private var isSavingRecipe = false
     @State private var showSaveSuccessToast = false
     @State private var isCheckingDuplicates = false
+    @State private var showSaveRelatedRecipesPrompt = false
+    @State private var relatedRecipesToSave: [Recipe] = []
     @State private var originalCreator: User?
     @State private var isLoadingCreator = false
     @State private var relatedRecipes: [Recipe] = []
@@ -187,6 +189,27 @@ struct RecipeDetailView: View {
             if let errorMessage = errorMessage {
                 Text(errorMessage)
             }
+        }
+        .confirmationDialog(
+            "Save Related Recipes?",
+            isPresented: $showSaveRelatedRecipesPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Save All (\(relatedRecipesToSave.count + 1) recipes)") {
+                Task {
+                    await performSaveRecipe(saveRelatedRecipes: true)
+                }
+            }
+            Button("Just This Recipe") {
+                Task {
+                    await performSaveRecipe(saveRelatedRecipes: false)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                relatedRecipesToSave = []
+            }
+        } message: {
+            Text("This recipe has \(relatedRecipesToSave.count) related recipe\(relatedRecipesToSave.count == 1 ? "" : "s"). Would you like to save them to your library as well?")
         }
         .sheet(isPresented: $showingEditSheet) {
             RecipeEditorView(
@@ -772,10 +795,39 @@ struct RecipeDetailView: View {
             self.relatedRecipes = []
             return
         }
-        
+
         do {
-            let recipes = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-            self.relatedRecipes = recipes
+            // First, try to load from local database
+            let localRecipes = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+            var loadedRecipes = localRecipes
+
+            // If some related recipes are missing from local database, fetch from CloudKit
+            // This handles both viewing friend's recipes and saved recipes with unfetched related recipes
+            if localRecipes.count < recipe.relatedRecipeIds.count {
+                let localIds = Set(localRecipes.map { $0.id })
+                let missingIds = recipe.relatedRecipeIds.filter { !localIds.contains($0) }
+
+                AppLogger.general.info("📥 Fetching \(missingIds.count) missing related recipes from CloudKit")
+
+                // Fetch missing recipes from CloudKit in parallel
+                await withTaskGroup(of: Recipe?.self) { group in
+                    for missingId in missingIds {
+                        group.addTask {
+                            try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
+                        }
+                    }
+
+                    for await recipe in group {
+                        if let recipe = recipe {
+                            loadedRecipes.append(recipe)
+                        }
+                    }
+                }
+
+                AppLogger.general.info("✅ Loaded \(loadedRecipes.count) total related recipes (\(localRecipes.count) local, \(loadedRecipes.count - localRecipes.count) from CloudKit)")
+            }
+
+            self.relatedRecipes = loadedRecipes
         } catch {
             AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
         }
@@ -1001,10 +1053,73 @@ struct RecipeDetailView: View {
             return
         }
 
+        // Check if this recipe has related recipes that aren't in our library
+        if !recipe.relatedRecipeIds.isEmpty {
+            // Check which related recipes we don't already have
+            do {
+                let localRelated = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+                let missingIds = Set(recipe.relatedRecipeIds).subtracting(localRelated.map { $0.id })
+
+                if !missingIds.isEmpty {
+                    // Fetch the missing related recipes from CloudKit
+                    var fetchedRelated: [Recipe] = []
+                    await withTaskGroup(of: Recipe?.self) { group in
+                        for missingId in missingIds {
+                            group.addTask {
+                                try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
+                            }
+                        }
+
+                        for await recipe in group {
+                            if let recipe = recipe {
+                                fetchedRelated.append(recipe)
+                            }
+                        }
+                    }
+
+                    if !fetchedRelated.isEmpty {
+                        // Store the fetched recipes and show prompt
+                        relatedRecipesToSave = fetchedRelated
+                        showSaveRelatedRecipesPrompt = true
+                        return // Wait for user decision
+                    }
+                }
+            } catch {
+                AppLogger.general.warning("Failed to check for related recipes: \(error.localizedDescription)")
+                // Continue with saving anyway
+            }
+        }
+
+        // No related recipes to save, proceed with normal save
+        await performSaveRecipe(saveRelatedRecipes: false)
+    }
+
+    private func performSaveRecipe(saveRelatedRecipes: Bool) async {
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("Cannot save recipe - no current user")
+            return
+        }
+
         isSavingRecipe = true
         defer { isSavingRecipe = false }
 
         do {
+            // Save related recipes first if requested
+            if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
+                AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
+
+                for relatedRecipe in relatedRecipesToSave {
+                    let copiedRelated = relatedRecipe.withOwner(
+                        userId,
+                        originalCreatorId: relatedRecipe.ownerId,
+                        originalCreatorName: nil // We don't have the creator name cached
+                    )
+                    try await dependencies.recipeRepository.create(copiedRelated)
+                }
+
+                AppLogger.general.info("✅ Saved \(relatedRecipesToSave.count) related recipes")
+            }
+
             // Create a copy of the recipe owned by the current user
             let copiedRecipe = recipe.withOwner(
                 userId,
@@ -1027,6 +1142,9 @@ struct RecipeDetailView: View {
                 hasOwnedCopy = true
                 showSaveSuccessToast = true
             }
+
+            // Clear the related recipes cache
+            relatedRecipesToSave = []
         } catch {
             AppLogger.general.error("❌ Failed to save recipe: \(error.localizedDescription)")
             errorMessage = "Failed to save recipe: \(error.localizedDescription)"

@@ -205,7 +205,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalRecipeId: self.id, // Track the original recipe for update sync
             originalCreatorId: creatorId,
             originalCreatorName: creatorName,
-            savedAt: Date()
+            savedAt: Date(),
+            relatedRecipeIds: relatedRecipeIds // Preserve related recipe IDs
         )
     }
 
