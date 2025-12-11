@@ -223,6 +223,7 @@ struct ProfileEditView: View {
                     TextField("Username", text: $username)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
+                        .textCase(.lowercase)
                 } header: {
                     Text("Username")
                 } footer: {
@@ -297,6 +298,10 @@ struct ProfileEditView: View {
         defer { isSaving = false }
 
         do {
+            // Normalize inputs: trim whitespace and lowercase username
+            let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
+            let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
+
             // Handle avatar update
             if selectedAvatarType == .photo, let image = profileImage {
                 // OPTIMISTIC UI: Save image locally and update UI immediately
@@ -365,8 +370,8 @@ struct ProfileEditView: View {
                 // OPTIMISTIC UI: Update locally first
                 let updatedUser = User(
                     id: currentUser.id,
-                    username: username,
-                    displayName: displayName,
+                    username: normalizedUsername,
+                    displayName: normalizedDisplayName,
                     email: currentUser.email,
                     cloudRecordName: currentUser.cloudRecordName,
                     createdAt: currentUser.createdAt,
@@ -404,12 +409,12 @@ struct ProfileEditView: View {
                     }
                 }
 
-            } else if username != currentUser.username || displayName != currentUser.displayName {
+            } else if normalizedUsername != currentUser.username || normalizedDisplayName != currentUser.displayName {
                 // OPTIMISTIC UI: Update basic info immediately
                 let updatedUser = User(
                     id: currentUser.id,
-                    username: username,
-                    displayName: displayName,
+                    username: normalizedUsername,
+                    displayName: normalizedDisplayName,
                     email: currentUser.email,
                     cloudRecordName: currentUser.cloudRecordName,
                     createdAt: currentUser.createdAt,

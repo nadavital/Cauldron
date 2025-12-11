@@ -66,6 +66,7 @@ struct OnboardingView: View {
                             TextField("username", text: $username)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .textCase(.lowercase)
                                 .padding()
                                 .background(Color.cauldronSecondaryBackground)
                                 .cornerRadius(12)
@@ -287,11 +288,16 @@ struct OnboardingView: View {
         errorMessage = nil
 
         do {
+            // Normalize username: trim whitespace and convert to lowercase for consistency
+            // Trim display name whitespace
+            let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
+            let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
+
             // Photo takes precedence over emoji - if user selected a photo, use it
             // Otherwise, use the emoji they selected
             try await CurrentUserSession.shared.createUser(
-                username: username,
-                displayName: displayName,
+                username: normalizedUsername,
+                displayName: normalizedDisplayName,
                 profileEmoji: profileImage == nil ? profileEmoji : nil,
                 profileColor: profileColor,
                 profileImage: profileImage,

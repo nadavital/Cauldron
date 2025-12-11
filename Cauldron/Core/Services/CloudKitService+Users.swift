@@ -141,14 +141,18 @@ extension CloudKitService {
             return existingUser
         }
 
-        // Create new user
-         guard let container = container else { throw CloudKitError.notEnabled }
+        // Create new user with normalized username
+        guard let container = container else { throw CloudKitError.notEnabled }
         let systemUserRecordID = try await container.userRecordID()
         let customRecordName = "user_\(systemUserRecordID.recordName)"
-        
+
+        // Normalize username: trim whitespace and convert to lowercase
+        let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
+        let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
+
         let user = User(
-            username: username,
-            displayName: displayName,
+            username: normalizedUsername,
+            displayName: normalizedDisplayName,
             cloudRecordName: customRecordName,
             profileEmoji: profileEmoji,
             profileColor: profileColor
@@ -161,6 +165,10 @@ extension CloudKitService {
     
     /// Save user to CloudKit
     func saveUser(_ user: User) async throws {
+        // Normalize username and displayName before saving
+        let normalizedUsername = user.username.trimmingCharacters(in: .whitespaces).lowercased()
+        let normalizedDisplayName = user.displayName.trimmingCharacters(in: .whitespaces)
+
         // Use custom record name if provided, otherwise create one
         let recordName: String
         if let cloudRecordName = user.cloudRecordName {
@@ -179,21 +187,21 @@ extension CloudKitService {
         let record: CKRecord
         do {
             record = try await db.record(for: recordID)
-            logger.info("Updating existing user record in CloudKit: \(user.username)")
+            logger.info("Updating existing user record in CloudKit: \(normalizedUsername)")
         } catch let error as CKError where error.code == .unknownItem {
             // Record doesn't exist, create new one
             record = CKRecord(recordType: userRecordType, recordID: recordID)
-            logger.info("Creating new user record in CloudKit: \(user.username)")
+            logger.info("Creating new user record in CloudKit: \(normalizedUsername)")
         } catch {
             // Other error, rethrow
             logger.error("Error fetching existing user record: \(error.localizedDescription)")
             throw error
         }
 
-        // Update/set all fields
+        // Update/set all fields with normalized values
         record["userId"] = user.id.uuidString as CKRecordValue
-        record["username"] = user.username as CKRecordValue
-        record["displayName"] = user.displayName as CKRecordValue
+        record["username"] = normalizedUsername as CKRecordValue
+        record["displayName"] = normalizedDisplayName as CKRecordValue
         if let email = user.email {
             record["email"] = email as CKRecordValue
         }
@@ -213,7 +221,7 @@ extension CloudKitService {
 
         // Save to PUBLIC database so other users can discover this user
         _ = try await db.save(record)
-        logger.info("Saved user: \(user.username) to PUBLIC database")
+        logger.info("Saved user: \(normalizedUsername) to PUBLIC database")
     }
     
     /// Search for users by username (public search)
