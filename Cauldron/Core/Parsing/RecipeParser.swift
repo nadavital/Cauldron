@@ -90,13 +90,46 @@ struct TimerExtractor {
 /// Helper for parsing quantities from text
 struct QuantityParser {
     
-    /// Parse a quantity string like "2 cups" or "1/2 tsp"
+    /// Parse a quantity string like "2 cups" or "1/2 tsp" or "2-3 cups"
     static func parse(_ text: String) -> Quantity? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
-        // Try to extract number and unit
+        // Try to match a range pattern (e.g., "1-2", "1 - 2")
+        // We look for: Number [-] Number [Unit]
+        // Note: This Regex is a bit simplified; for a robust parser we'd handle more
+        // Check for range pattern "X-Y unit"
+        if trimmed.contains("-") {
+             let rangeComponents = trimmed.components(separatedBy: "-")
+             if rangeComponents.count == 2 {
+                 // Format: "1 " and " 2 cups"
+                 let firstPart = rangeComponents[0].trimmingCharacters(in: .whitespaces)
+                 let secondPart = rangeComponents[1].trimmingCharacters(in: .whitespaces)
+                 
+                 // First part should be just a number
+                 if let lowerValue = parseValue(firstPart) {
+                     // Second part usually contains the upper number AND the unit
+                     // Split second part by space to separation number and unit
+                     let secondComponents = secondPart.components(separatedBy: .whitespaces)
+                     if secondComponents.count >= 1 {
+                         let upperValueString = secondComponents[0]
+                         if let upperValue = parseValue(upperValueString) {
+                             // The rest is the unit
+                             let unitText = secondComponents.dropFirst().joined(separator: " ")
+                             if let unit = parseUnit(unitText) {
+                                  return Quantity(value: lowerValue, upperValue: upperValue, unit: unit)
+                             }
+                         }
+                     }
+                 }
+             }
+        }
+        
+        // Try to extract number and unit (standard case)
         let components = trimmed.components(separatedBy: .whitespaces)
         guard components.count >= 2 else { return nil }
+        
+        // Check for "mixed fraction range" edge cases if simple range fail
+        // e.g. "1 1/2" is handled by parseValue, but "1 - 2" is handled above.
         
         let valueText = components[0]
         let unitText = components[1...].joined(separator: " ")

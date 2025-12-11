@@ -47,7 +47,7 @@ actor MockCloudKitService {
         return await checkAccountStatus()
     }
 
-    func isCloudKitAvailable() async -> Bool {
+    func isAvailable() async -> Bool {
         let status = await checkAccountStatus()
         return status.isAvailable
     }

@@ -13,17 +13,52 @@ import Combine
 
 // MARK: - Input Models
 
+struct IngredientSectionInput: Identifiable {
+    let id = UUID()
+    var name: String = ""
+    var ingredients: [IngredientInput] = []
+}
+
+struct StepSectionInput: Identifiable {
+    let id = UUID()
+    var name: String = ""
+    var steps: [StepInput] = []
+}
+
 struct IngredientInput: Identifiable {
     let id = UUID()
     var name: String = ""
-    var quantityText: String = ""  // Supports fractions like "1/2" or decimals like "1.5"
+    var quantityText: String = ""  // Supports fractions like "1/2", decimals "1.5", and ranges "1-2"
     var unit: UnitKind = .cup
+    // Section is now handled by the parent container
     
-    // Parse quantity text to handle fractions and decimals
-    var parsedQuantity: Double? {
+    // Parse quantity text to handle fractions, decimals, and ranges
+    var parsedValues: (value: Double, upperValue: Double?)? {
         guard !quantityText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         
         let trimmed = quantityText.trimmingCharacters(in: .whitespaces)
+        
+        // Handle Range: "1-2" or "1 - 2"
+        if trimmed.contains("-") {
+             let components = trimmed.components(separatedBy: "-")
+             if components.count == 2,
+                let lower = parseSingleValue(components[0]),
+                let upper = parseSingleValue(components[1]) {
+                 return (lower, upper)
+             }
+        }
+        
+        // Handle Single Value
+        if let val = parseSingleValue(trimmed) {
+            return (val, nil)
+        }
+        
+        return nil
+    }
+    
+    private func parseSingleValue(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return nil }
         
         // Handle fractions like "1/2", "1/4", "2/3"
         if trimmed.contains("/") {
@@ -63,6 +98,7 @@ struct StepInput: Identifiable {
     let id = UUID()
     var text: String = ""
     var timers: [TimerInput] = []
+    // Section is now handled by the parent container
 }
 
 struct TimerInput: Identifiable {
@@ -87,8 +123,11 @@ class RecipeEditorViewModel: ObservableObject {
     @Published var totalMinutes: Int? = nil
     @Published var selectedTags: Set<RecipeCategory> = []
     @Published var notes: String = ""
-    @Published var ingredients: [IngredientInput] = [IngredientInput()]
-    @Published var steps: [StepInput] = [StepInput()]
+    
+    // Grouped Sections
+    @Published var ingredientSections: [IngredientSectionInput] = [IngredientSectionInput(name: "", ingredients: [IngredientInput()])]
+    @Published var stepSections: [StepSectionInput] = [StepSectionInput(name: "", steps: [StepInput()])]
+    
     @Published var nutrition: NutritionInput = NutritionInput()
     @Published var errorMessage: String?
     @Published var isSaving: Bool = false
@@ -112,8 +151,36 @@ class RecipeEditorViewModel: ObservableObject {
     
     var canSave: Bool {
         !title.isEmpty &&
-        ingredients.contains(where: { !$0.name.isEmpty }) &&
-        steps.contains(where: { !$0.text.isEmpty })
+        ingredientSections.contains { section in
+            section.ingredients.contains { !$0.name.isEmpty }
+        } &&
+        stepSections.contains { section in
+            section.steps.contains { !$0.text.isEmpty }
+        }
+    }
+    
+    @Published var relatedRecipes: [Recipe] = []
+    @Published var availableRecipes: [Recipe] = []
+    @Published var isRelatedRecipesPickerPresented: Bool = false
+    
+    func loadAvailableRecipes() async {
+        do {
+            let all = try await dependencies.recipeRepository.fetchAll()
+            // Filter out self if editing
+            await MainActor.run {
+                availableRecipes = all.filter { $0.id != existingRecipe?.id }
+            }
+        } catch {
+            AppLogger.general.error("Failed to load available recipes: \(error.localizedDescription)")
+        }
+    }
+    
+    func toggleRelatedRecipe(_ recipe: Recipe) {
+        if relatedRecipes.contains(where: { $0.id == recipe.id }) {
+            relatedRecipes.removeAll(where: { $0.id == recipe.id })
+        } else {
+            relatedRecipes.append(recipe)
+        }
     }
     
     init(dependencies: DependencyContainer, existingRecipe: Recipe? = nil, isImporting: Bool = false) {
@@ -139,6 +206,19 @@ class RecipeEditorViewModel: ObservableObject {
         notes = recipe.notes ?? ""
         visibility = recipe.visibility
         
+        Task {
+            if !recipe.relatedRecipeIds.isEmpty {
+                do {
+                    let related = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+                    await MainActor.run {
+                        self.relatedRecipes = related
+                    }
+                } catch {
+                    AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
+                }
+            }
+        }
+        
         // Load existing image if available
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
@@ -152,25 +232,90 @@ class RecipeEditorViewModel: ObservableObject {
             }
         }
         
-        ingredients = recipe.ingredients.map { ingredient in
-            var input = IngredientInput()
-            input.name = ingredient.name
-            
-            if let quantity = ingredient.quantity {
-                input.quantityText = String(format: "%.2f", quantity.value).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
-                input.unit = quantity.unit
-            }
-            
-            return input
+        // Group Ingredients
+        let groupedIngredients = Dictionary(grouping: recipe.ingredients) { $0.section ?? "" }
+        
+        // Sort sections: Empty ("") goes first (Main), then others by appearance order in original list or alphabetical
+        // To preserve order, we can iterate through the original list and pick up sections as we see them
+        var sections: [String] = []
+        var seenSections = Set<String>()
+        
+        // If there are ingredients without sections, ensure "" is first
+        if groupedIngredients[""] != nil {
+            sections.append("")
+            seenSections.insert("")
         }
         
-        steps = recipe.steps.map { step in
-            var input = StepInput()
-            input.text = step.text
-            input.timers = step.timers.map { timer in
-                TimerInput(seconds: timer.seconds, label: timer.label)
+        for ingredient in recipe.ingredients {
+            let section = ingredient.section ?? ""
+            if !seenSections.contains(section) {
+                sections.append(section)
+                seenSections.insert(section)
             }
-            return input
+        }
+        
+        ingredientSections = sections.map { sectionName in
+            let ingredients = groupedIngredients[sectionName] ?? []
+            let inputIngredients = ingredients.map { ingredient -> IngredientInput in
+                var input = IngredientInput()
+                input.name = ingredient.name
+                
+                if let quantity = ingredient.quantity {
+                    let lowerFormatted = String(format: "%.2f", quantity.value).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
+                    
+                    if let upper = quantity.upperValue {
+                        let upperFormatted = String(format: "%.2f", upper).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
+                        input.quantityText = "\(lowerFormatted)-\(upperFormatted)"
+                    } else {
+                         input.quantityText = lowerFormatted
+                    }
+                    
+                    input.unit = quantity.unit
+                }
+                return input
+            }
+            return IngredientSectionInput(name: sectionName, ingredients: inputIngredients)
+        }
+        
+        // Use default section if empty
+        if ingredientSections.isEmpty {
+            ingredientSections = [IngredientSectionInput(name: "", ingredients: [IngredientInput()])]
+        }
+        
+        // Group Steps
+        let groupedSteps = Dictionary(grouping: recipe.steps) { $0.section ?? "" }
+        
+        var stepSectionNames: [String] = []
+        var seenStepSections = Set<String>()
+        
+        if groupedSteps[""] != nil {
+            stepSectionNames.append("")
+            seenStepSections.insert("")
+        }
+        
+        for step in recipe.steps {
+            let section = step.section ?? ""
+            if !seenStepSections.contains(section) {
+                stepSectionNames.append(section)
+                seenStepSections.insert(section)
+            }
+        }
+        
+        stepSections = stepSectionNames.map { sectionName in
+            let steps = groupedSteps[sectionName] ?? []
+            let inputSteps = steps.map { step -> StepInput in
+                var input = StepInput()
+                input.text = step.text
+                input.timers = step.timers.map { timer in
+                    TimerInput(seconds: timer.seconds, label: timer.label)
+                }
+                return input
+            }
+            return StepSectionInput(name: sectionName, steps: inputSteps)
+        }
+        
+        if stepSections.isEmpty {
+            stepSections = [StepSectionInput(name: "", steps: [StepInput()])]
         }
         
         if let recipeNutrition = recipe.nutrition {
@@ -181,27 +326,167 @@ class RecipeEditorViewModel: ObservableObject {
         }
     }
     
-    func addIngredient() {
-        ingredients.append(IngredientInput())
+    // MARK: - Section Management
+    
+    func addIngredientSection() {
+        ingredientSections.append(IngredientSectionInput(name: "", ingredients: [IngredientInput()]))
     }
     
-    func deleteIngredient(at index: Int) {
-        ingredients.remove(at: index)
+    func removeIngredientSection(id: UUID) {
+        if let index = ingredientSections.firstIndex(where: { $0.id == id }) {
+            ingredientSections.remove(at: index)
+        }
     }
     
-    func addStep() {
-        steps.append(StepInput())
+    // START: Safe Section Binding Helpers
+    func getIngredientSection(id: UUID) -> IngredientSectionInput {
+        guard let section = ingredientSections.first(where: { $0.id == id }) else {
+            return IngredientSectionInput()
+        }
+        return section
     }
     
-    func deleteStep(at index: Int) {
-        steps.remove(at: index)
+    func updateIngredientSection(_ section: IngredientSectionInput) {
+        guard let index = ingredientSections.firstIndex(where: { $0.id == section.id }) else { return }
+        ingredientSections[index] = section
+    }
+    // END: Safe Section Binding Helpers
+    
+    // Deprecated index-based removal
+    func removeIngredientSection(at index: Int) {
+        if ingredientSections.indices.contains(index) {
+            ingredientSections.remove(at: index)
+        }
     }
     
-    func addTimer(to stepIndex: Int) {
-        guard steps.indices.contains(stepIndex) else { return }
-        // Only add a timer if there isn't one already (limit to one timer per step)
-        if steps[stepIndex].timers.isEmpty {
-            steps[stepIndex].timers.append(TimerInput())
+    func addIngredient(to sectionIndex: Int) {
+        guard ingredientSections.indices.contains(sectionIndex) else { return }
+        ingredientSections[sectionIndex].ingredients.append(IngredientInput())
+    }
+    
+    func deleteIngredient(id: UUID, in sectionID: UUID) {
+        guard let sectionIndex = ingredientSections.firstIndex(where: { $0.id == sectionID }) else { return }
+        
+        if let rowIndex = ingredientSections[sectionIndex].ingredients.firstIndex(where: { $0.id == id }) {
+            ingredientSections[sectionIndex].ingredients.remove(at: rowIndex)
+            
+            // Auto-remove empty section if it's not the only one
+            if ingredientSections[sectionIndex].ingredients.isEmpty && ingredientSections.count > 1 {
+                removeIngredientSection(id: sectionID)
+            }
+        }
+    }
+    
+    // START: Safe Binding Helpers
+    func getIngredient(id: UUID, in sectionID: UUID) -> IngredientInput {
+        guard let section = ingredientSections.first(where: { $0.id == sectionID }),
+              let ingredient = section.ingredients.first(where: { $0.id == id }) else {
+            return IngredientInput()
+        }
+        return ingredient
+    }
+    
+    func updateIngredient(_ ingredient: IngredientInput, in sectionID: UUID) {
+        guard let sectionIndex = ingredientSections.firstIndex(where: { $0.id == sectionID }),
+              let rowIndex = ingredientSections[sectionIndex].ingredients.firstIndex(where: { $0.id == ingredient.id }) else {
+            return
+        }
+        ingredientSections[sectionIndex].ingredients[rowIndex] = ingredient
+    }
+    // END: Safe Binding Helpers
+    
+    // Kept for compatibility but should be unused
+    func deleteIngredient(at indexPath: IndexPath) {
+        guard ingredientSections.indices.contains(indexPath.section),
+              ingredientSections[indexPath.section].ingredients.indices.contains(indexPath.row) else { return }
+        let sectionID = ingredientSections[indexPath.section].id
+        let ingredientID = ingredientSections[indexPath.section].ingredients[indexPath.row].id
+        deleteIngredient(id: ingredientID, in: sectionID)
+    }
+    
+    func addStepSection() {
+        stepSections.append(StepSectionInput(name: "", steps: [StepInput()]))
+    }
+    
+    func removeStepSection(id: UUID) {
+        if let index = stepSections.firstIndex(where: { $0.id == id }) {
+            stepSections.remove(at: index)
+        }
+    }
+
+    // START: Safe Section Binding Helpers
+    func getStepSection(id: UUID) -> StepSectionInput {
+        guard let section = stepSections.first(where: { $0.id == id }) else {
+            return StepSectionInput()
+        }
+        return section
+    }
+    
+    func updateStepSection(_ section: StepSectionInput) {
+        guard let index = stepSections.firstIndex(where: { $0.id == section.id }) else { return }
+        stepSections[index] = section
+    }
+    // END: Safe Section Binding Helpers
+
+    // Deprecated index-based removal
+    func removeStepSection(at index: Int) {
+        if stepSections.indices.contains(index) {
+            stepSections.remove(at: index)
+        }
+    }
+    
+    func addStep(to sectionIndex: Int) {
+        guard stepSections.indices.contains(sectionIndex) else { return }
+        stepSections[sectionIndex].steps.append(StepInput())
+    }
+    
+    func deleteStep(id: UUID, in sectionID: UUID) {
+        guard let sectionIndex = stepSections.firstIndex(where: { $0.id == sectionID }) else { return }
+        
+        if let rowIndex = stepSections[sectionIndex].steps.firstIndex(where: { $0.id == id }) {
+            stepSections[sectionIndex].steps.remove(at: rowIndex)
+            
+            // Auto-remove empty section if it's not the only one
+            if stepSections[sectionIndex].steps.isEmpty && stepSections.count > 1 {
+                removeStepSection(id: sectionID)
+            }
+        }
+    }
+    
+    // START: Safe Binding Helpers
+    func getStep(id: UUID, in sectionID: UUID) -> StepInput {
+        guard let section = stepSections.first(where: { $0.id == sectionID }),
+              let step = section.steps.first(where: { $0.id == id }) else {
+            return StepInput()
+        }
+        return step
+    }
+    
+    func updateStep(_ step: StepInput, in sectionID: UUID) {
+        guard let sectionIndex = stepSections.firstIndex(where: { $0.id == sectionID }),
+              let rowIndex = stepSections[sectionIndex].steps.firstIndex(where: { $0.id == step.id }) else {
+            return
+        }
+        stepSections[sectionIndex].steps[rowIndex] = step
+    }
+    // END: Safe Binding Helpers
+
+    // Kept for compatibility but should be unused
+    func deleteStep(at indexPath: IndexPath) {
+        guard stepSections.indices.contains(indexPath.section),
+              stepSections[indexPath.section].steps.indices.contains(indexPath.row) else { return }
+        let sectionID = stepSections[indexPath.section].id
+        let stepID = stepSections[indexPath.section].steps[indexPath.row].id
+        deleteStep(id: stepID, in: sectionID)
+    }
+    
+    func addTimer(to stepIndexPath: IndexPath) {
+        guard stepSections.indices.contains(stepIndexPath.section),
+              stepSections[stepIndexPath.section].steps.indices.contains(stepIndexPath.row) else { return }
+        
+        // Only add timer if not exists
+        if stepSections[stepIndexPath.section].steps[stepIndexPath.row].timers.isEmpty {
+            stepSections[stepIndexPath.section].steps[stepIndexPath.row].timers.append(TimerInput())
         }
     }
     
@@ -256,26 +541,52 @@ class RecipeEditorViewModel: ObservableObject {
     }
     
     private func buildRecipe() throws -> Recipe {
-        // Build ingredients
-        let recipeIngredients = ingredients
-            .filter { !$0.name.isEmpty }
-            .map { input -> Ingredient in
-                let quantity = input.parsedQuantity.map { Quantity(value: $0, unit: input.unit) }
-                return Ingredient(name: input.name, quantity: quantity, note: nil)
+        // Flatten ingredients from sections
+        var recipeIngredients: [Ingredient] = []
+        
+        for section in ingredientSections {
+            let sectionName = section.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.name.trimmingCharacters(in: .whitespaces)
+            
+            for input in section.ingredients where !input.name.isEmpty {
+                let quantity: Quantity?
+                if let parsed = input.parsedValues {
+                    quantity = Quantity(value: parsed.value, upperValue: parsed.upperValue, unit: input.unit)
+                } else {
+                    quantity = nil
+                }
+                
+                recipeIngredients.append(Ingredient(
+                    name: input.name,
+                    quantity: quantity,
+                    note: nil,
+                    section: sectionName
+                ))
             }
+        }
         
         guard !recipeIngredients.isEmpty else {
             throw RecipeEditorError.noIngredients
         }
         
-        // Build steps
-        let recipeSteps = steps
-            .filter { !$0.text.isEmpty }
-            .enumerated()
-            .map { index, input -> CookStep in
+        // Flatten steps from sections
+        var recipeSteps: [CookStep] = []
+        var stepIndex = 0
+        
+        for section in stepSections {
+            let sectionName = section.name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : section.name.trimmingCharacters(in: .whitespaces)
+            
+            for input in section.steps where !input.text.isEmpty {
                 let timers = input.timers.map { TimerSpec(seconds: $0.seconds, label: $0.label) }
-                return CookStep(index: index, text: input.text, timers: timers)
+                
+                recipeSteps.append(CookStep(
+                    index: stepIndex,
+                    text: input.text,
+                    timers: timers,
+                    section: sectionName
+                ))
+                stepIndex += 1
             }
+        }
         
         guard !recipeSteps.isEmpty else {
             throw RecipeEditorError.noSteps
@@ -283,6 +594,9 @@ class RecipeEditorViewModel: ObservableObject {
         
         // Build tags
         let recipeTags = selectedTags.map { Tag(name: $0.tagValue) }
+        
+        // Build related recipe IDs
+        let relatedIds = relatedRecipes.map { $0.id }
         
         // Build nutrition
         let recipeNutrition: Nutrition?
@@ -317,7 +631,12 @@ class RecipeEditorViewModel: ObservableObject {
                 ownerId: existing.ownerId ?? CurrentUserSession.shared.userId,
                 cloudRecordName: existing.cloudRecordName,
                 createdAt: existing.createdAt,
-                updatedAt: Date()
+                updatedAt: Date(),
+                originalRecipeId: existing.originalRecipeId,
+                originalCreatorId: existing.originalCreatorId,
+                originalCreatorName: existing.originalCreatorName,
+                savedAt: existing.savedAt,
+                relatedRecipeIds: relatedIds
             )
         } else {
             return Recipe(
@@ -330,7 +649,8 @@ class RecipeEditorViewModel: ObservableObject {
                 nutrition: recipeNutrition,
                 notes: notes.isEmpty ? nil : notes,
                 visibility: visibility,
-                ownerId: CurrentUserSession.shared.userId
+                ownerId: CurrentUserSession.shared.userId,
+                relatedRecipeIds: relatedIds
             )
         }
     }

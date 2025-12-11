@@ -344,7 +344,7 @@ actor CollectionRepository {
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
         // Attempting to sync collection to CloudKit
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
 
         guard isAvailable else {
             logger.warning("⚠️ CloudKit not available - collection will sync later: \(collection.name)")
@@ -387,7 +387,7 @@ actor CollectionRepository {
         guard !self.pendingSyncCollections.isEmpty else { return }
 
         // Retrying sync for pending collections
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             // CloudKit still not available - will retry later
             return
@@ -456,7 +456,7 @@ actor CollectionRepository {
 
     /// Fetch collections from CloudKit and sync to local database
     func syncFromCloudKit(userId: UUID) async throws {
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             // CloudKit not available - skipping sync
             return

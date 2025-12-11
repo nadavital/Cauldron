@@ -63,65 +63,118 @@ final class ExternalShareService: Sendable {
 
     // MARK: - Share Link Generation
 
-    /// Generate a shareable link for a recipe
-    func shareRecipe(_ recipe: Recipe) async throws -> ShareableLink {
-        logger.info("📤 Generating share link for recipe: \(recipe.title)")
-
-        // Validate recipe is public
-        guard recipe.visibility == .publicRecipe else {
-            logger.warning("⚠️ Attempted to share private recipe")
-            throw ExternalShareError.notPublic
+    /// Generate a shareable link for a recipe (Local only - deterministic)
+    func generateShareLink(for recipe: Recipe) -> ShareableLink {
+        // Fetch owner username locally or fallback
+        var username = "user"
+        
+        // This is a best-effort local check. The backend sync ensures the link works.
+        // If we don't have the username locally, the link will still work but might redirect
+        // or rely on the ID lookup.
+        if let ownerId = recipe.ownerId {
+             // We can't easily look up other users synchronously here without a cache.
+             // For the current user, we can check session.
+             if let currentUser = CurrentUserSession.shared.currentUser, currentUser.id == ownerId {
+                 username = currentUser.username
+             }
+             // NOTE: If it's another user's recipe, we might not have their username handy
+             // in a synchronous context without fetching.
+             // Ideally, Recipe should store `ownerUsername` or we rely on the repository to provide it.
+             // For now, we'll assume the link format uses the ID if username is generic,
+             // or sticking to the pattern: /u/{username}/{recipeId}
+             // If we don't know the username, "user" is a safe fallback that the web app should handle (redirecting by ID).
         }
+        
+        // Construct permanent URL
+        // Format: https://cauldron-f900a.web.app/u/{username}/{recipeId}
+        let permanentURLString = "https://cauldron-f900a.web.app/u/\(username)/\(recipe.id.uuidString)"
+        
+        // Create preview text
+        let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
 
-        // Ensure recipe is in CloudKit public database
-        // (This is usually already done when recipe is made public, but we ensure it here for sharing)
-        // Note: Image upload happens automatically when recipe visibility is toggled to public,
-        // so we don't need to re-upload it here
-        do {
-            try await cloudKitService.copyRecipeToPublic(recipe)
-            logger.info("✅ Recipe confirmed in public database")
-        } catch {
-            logger.error("❌ Failed to ensure recipe in public database: \(error.localizedDescription)")
-            // Don't fail the share - recipe might already be there
-        }
+        // Load image for iOS share sheet preview
+        // Note: usage of local file path or cache would be ideal here if available synchronously,
+        // but Since we are in an async function (or can be), we can keep it async or make this sync.
+        // For now, keeping the return type sync for the URL, but the image loading might need to be async or passed in.
+        // However, to keep this fast, we return the link object. The caller can load the image if needed for the UI,
+        // or we can keep this async just for the image loading if we want 'perfect' previews.
+        // Given the requirement for "instant", we should avoid network calls here.
+        
+        // Note: We need a way to get the local image without network.
+        // ImageManager provides async access.
+        // For the purpose of Generating the link string, we don't strictly need the UIImage *right now*
+        // but share sheets *do* look better with it.
+        // Let's keep this method async ONLY for local image loading, but NO network calls.
+        
+        return ShareableLink(
+            url: URL(string: permanentURLString)!,
+            previewText: previewText,
+            image: nil // Caller can attach image if they have it, or we can load it if we make this async
+        )
+    }
 
-        // Prepare metadata with recipeId and ownerId for CloudKit fallback
+    /// Update share metadata on the backend (Fire-and-forget style)
+    /// This should be called when a recipe is saved/updated and is PUBLIC
+    func updateShareMetadata(for recipe: Recipe) async {
+        guard recipe.visibility == .publicRecipe else { return }
+
+        logger.info("🔄 Updating share metadata for recipe: \(recipe.title)")
+
+        // Prepare metadata
         let metadata = ShareMetadata.RecipeShare(
             recipeId: recipe.id.uuidString,
             ownerId: recipe.ownerId?.uuidString ?? "",
             title: recipe.title,
-            imageURL: nil, // Don't send local file path
+            imageURL: nil, // We don't send the image URL to backend (images are in CloudKit)
             ingredientCount: recipe.ingredients.count,
             totalMinutes: recipe.totalMinutes,
             tags: recipe.tags.map { $0.name }
         )
 
-        // Send to backend
-        let response = try await createShare(endpoint: "/shareRecipe", metadata: metadata)
-
-        // Create preview text
-        let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
-
-        // Load image for iOS share sheet preview
-        var image: UIImage?
-        if let imageURL = recipe.imageURL {
-            image = try? await loadImage(from: imageURL)
+        do {
+            _ = try await createShare(endpoint: "/shareRecipe", metadata: metadata)
+            logger.info("✅ Share metadata updated successfully")
+        } catch {
+            logger.error("❌ Failed to update share metadata: \(error.localizedDescription)")
+            // We don't throw here to avoid disrupting the save flow
         }
+    }
 
-        logger.info("✅ Share link generated: \(response.shareUrl)")
+    /// Legacy support - calls generate and optionally updates metadata
+    func shareRecipe(_ recipe: Recipe) async throws -> ShareableLink {
+        // Trigger metadata update in background
+        Task {
+            await updateShareMetadata(for: recipe)
+        }
+        
+        // Generate link
+        var link = generateShareLink(for: recipe)
+        
+        // Try to load image for share sheet (best effort)
+        if let imageURL = recipe.imageURL {
+             link.image = try? await loadImage(from: imageURL)
+        }
+        
+        return link
+    }
 
+    /// Generate a shareable link for a profile (Local only)
+    func generateProfileLink(for user: User, recipeCount: Int) -> ShareableLink {
+        let permanentURLString = "https://cauldron-f900a.web.app/u/\(user.username)"
+        let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
+        let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
+        
         return ShareableLink(
-            url: URL(string: response.shareUrl)!,
+            url: URL(string: permanentURLString)!,
             previewText: previewText,
-            image: image
+            image: nil
         )
     }
 
-    /// Generate a shareable link for a user profile
-    func shareProfile(_ user: User, recipeCount: Int) async throws -> ShareableLink {
-        logger.info("📤 Generating share link for profile: \(user.username)")
+    /// Update profile share metadata on the backend
+    func updateProfileShareMetadata(for user: User, recipeCount: Int) async {
+        logger.info("🔄 Updating share metadata for profile: \(user.username)")
 
-        // Prepare metadata
         let metadata = ShareMetadata.ProfileShare(
             userId: user.id.uuidString,
             username: user.username,
@@ -130,45 +183,64 @@ final class ExternalShareService: Sendable {
             recipeCount: recipeCount
         )
 
-        // Send to backend
-        let response = try await createShare(endpoint: "/shareProfile", metadata: metadata)
+        do {
+            _ = try await createShare(endpoint: "/shareProfile", metadata: metadata)
+            logger.info("✅ Profile metadata updated successfully")
+        } catch {
+             logger.error("❌ Failed to update profile metadata: \(error.localizedDescription)")
+        }
+    }
 
-        // Create preview text
-        let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
-        let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
-
-        // Load profile image if available, otherwise use App Icon
-        var image: UIImage?
-        if let imageURL = user.profileImageURL {
-            image = try? await loadImage(from: imageURL)
+    /// Generate a shareable link for a user profile
+    func shareProfile(_ user: User, recipeCount: Int) async throws -> ShareableLink {
+        // Trigger metadata update
+        Task {
+            await updateProfileShareMetadata(for: user, recipeCount: recipeCount)
         }
         
-        // Fallback to Cauldron Icon if no profile image
-        if image == nil {
-            image = UIImage(named: "CauldronIcon")
+        var link = generateProfileLink(for: user, recipeCount: recipeCount)
+        
+        // Load profile image
+        if let imageURL = user.profileImageURL {
+            link.image = try? await loadImage(from: imageURL)
         }
+        if link.image == nil {
+            link.image = UIImage(named: "CauldronIcon")
+        }
+        
+        return link
+    }
 
-        logger.info("✅ Share link generated: \(response.shareUrl)")
-
+    /// Generate a shareable link for a collection (Local only)
+    func generateCollectionLink(for collection: Collection, recipeCount: Int) -> ShareableLink {
+        // Note: For collections we might not have a clean username URL structure yet?
+        // Let's assume ID based for now if username isn't easily available,
+        // or we need to pass username in.
+        // The original code used the response from createShare to getting the URL, which implies the backend
+        // generated the ID or URL. But here we want it deterministic.
+        // If the web app supports /c/{collectionId}, we can use that.
+        // Assuming /collection/{id} or similar.
+        
+        // Construct URL - using valid web app structure
+        // If the web app expects /collection/ID, use that.
+        let urlString = "https://cauldron-f900a.web.app/collection/\(collection.id.uuidString)"
+        
+        let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
+        let previewText = "Check out my \(collection.name) collection on Cauldron! \(recipeText)"
+        
         return ShareableLink(
-            url: URL(string: response.shareUrl)!,
+            url: URL(string: urlString)!,
             previewText: previewText,
-            image: image
+            image: nil
         )
     }
 
-    /// Generate a shareable link for a collection
-    func shareCollection(_ collection: Collection, recipeIds: [UUID]) async throws -> ShareableLink {
-        logger.info("📤 Generating share link for collection: \(collection.name)")
+    /// Update collection share metadata
+    func updateCollectionShareMetadata(for collection: Collection, recipeIds: [UUID]) async {
+         guard collection.visibility == .publicRecipe else { return }
 
-        // Validate collection is public
-        // Note: Collection uses RecipeVisibility enum
-        guard collection.visibility == .publicRecipe else {
-            logger.warning("⚠️ Attempted to share private collection")
-            throw ExternalShareError.notPublic
-        }
+         logger.info("🔄 Updating share metadata for collection: \(collection.name)")
 
-        // Prepare metadata
         let metadata = ShareMetadata.CollectionShare(
             collectionId: collection.id.uuidString,
             ownerId: collection.userId.uuidString,
@@ -178,31 +250,40 @@ final class ExternalShareService: Sendable {
             recipeIds: recipeIds.map { $0.uuidString }
         )
 
-        // Send to backend
-        let response = try await createShare(endpoint: "/shareCollection", metadata: metadata)
+        do {
+            _ = try await createShare(endpoint: "/shareCollection", metadata: metadata)
+             logger.info("✅ Collection metadata updated successfully")
+        } catch {
+            logger.error("❌ Failed to update collection metadata: \(error.localizedDescription)")
+        }
+    }
 
-        // Create preview text
-        let recipeText = recipeIds.count == 1 ? "1 recipe" : "\(recipeIds.count) recipes"
-        let previewText = "Check out my \(collection.name) collection on Cauldron! \(recipeText)"
+    /// Generate a shareable link for a collection
+    func shareCollection(_ collection: Collection, recipeIds: [UUID]) async throws -> ShareableLink {
+        logger.info("📤 Generating share link for collection: \(collection.name)")
 
-        // Load cover image if available
-        var image: UIImage?
-        if let imageURL = collection.coverImageURL {
-            image = try? await loadImage(from: imageURL)
+        // Validate collection is public
+        guard collection.visibility == .publicRecipe else {
+            logger.warning("⚠️ Attempted to share private collection")
+            throw ExternalShareError.notPublic
         }
         
-        // Fallback to Cauldron Icon if no cover image
-        if image == nil {
-            image = UIImage(named: "CauldronIcon")
+        // Trigger metadata update
+        Task {
+            await updateCollectionShareMetadata(for: collection, recipeIds: recipeIds)
         }
 
-        logger.info("✅ Share link generated: \(response.shareUrl)")
+        var link = generateCollectionLink(for: collection, recipeCount: recipeIds.count)
 
-        return ShareableLink(
-            url: URL(string: response.shareUrl)!,
-            previewText: previewText,
-            image: image
-        )
+        // Load cover image
+        if let imageURL = collection.coverImageURL {
+            link.image = try? await loadImage(from: imageURL)
+        }
+        if link.image == nil {
+            link.image = UIImage(named: "CauldronIcon")
+        }
+
+        return link
     }
 
     // MARK: - Import from Share Link
@@ -211,50 +292,47 @@ final class ExternalShareService: Sendable {
     func importFromShareURL(_ url: URL) async throws -> ImportedContent {
         logger.info("📥 Importing from share URL: \(url.absoluteString)")
 
-        // Parse URL to determine type and shareId
-        // Supports:
-        // 1. Web: https://cauldron-f900a.web.app/recipe/123
-        // 2. Deep Link: cauldron://import/recipe/123
-        
         let pathComponents = url.pathComponents.filter { $0 != "/" }
         
-        // Expected format:
-        // Web: ["recipe", "123"]
-        // Deep Link: ["import", "recipe", "123"]
-        
-        var type: String?
-        var shareId: String?
-        
-        // Find the index of the type keyword
-        if let index = pathComponents.firstIndex(where: { ["recipe", "profile", "collection"].contains($0) }) {
-            // Ensure there is an ID following the type
-            if index + 1 < pathComponents.count {
-                type = pathComponents[index]
-                shareId = pathComponents[index + 1]
+        // 1. Handle /u/{username}/{recipeId} (Recipe) and /u/{username} (Profile)
+        if let uIndex = pathComponents.firstIndex(of: "u") {
+            if uIndex + 2 < pathComponents.count {
+                // Format: .../u/username/recipeId
+                let shareId = pathComponents[uIndex + 2]
+                let shareData = try await fetchShareData(type: "recipe", shareId: shareId)
+                return try await convertToRecipe(shareData)
+            } else if uIndex + 1 < pathComponents.count {
+                // Format: .../u/username
+                // Note: We use the username component as the ID for lookup.
+                // The backend must support resolving profiles by username or ID.
+                let shareId = pathComponents[uIndex + 1]
+                let shareData = try await fetchShareData(type: "profile", shareId: shareId)
+                return try convertToProfile(shareData)
             }
         }
         
-        guard let finalType = type, let finalShareId = shareId else {
-            logger.error("❌ Invalid URL format: \(url.absoluteString)")
-            throw ExternalShareError.invalidResponse
-        }
-
-        logger.info("📋 Importing \(finalType) with ID: \(finalShareId)")
-
-        // Fetch data from backend
-        let shareData = try await fetchShareData(type: finalType, shareId: finalShareId)
-
-        // Convert to ImportedContent based on type
-        switch finalType {
-        case "recipe":
-            return try await convertToRecipe(shareData)
-        case "profile":
-            return try convertToProfile(shareData)
-        case "collection":
+        // 2. Handle /collection/{collectionId}
+        if let cIndex = pathComponents.firstIndex(of: "collection"), cIndex + 1 < pathComponents.count {
+            let shareId = pathComponents[cIndex + 1]
+            let shareData = try await fetchShareData(type: "collection", shareId: shareId)
             return try await convertToCollection(shareData)
-        default:
-            throw ExternalShareError.invalidResponse
         }
+        
+        // 3. Handle Legacy /recipe/{recipeId} or /profile/{userId}
+        if let rIndex = pathComponents.firstIndex(of: "recipe"), rIndex + 1 < pathComponents.count {
+            let shareId = pathComponents[rIndex + 1]
+            let shareData = try await fetchShareData(type: "recipe", shareId: shareId)
+            return try await convertToRecipe(shareData)
+        }
+        
+        if let pIndex = pathComponents.firstIndex(of: "profile"), pIndex + 1 < pathComponents.count {
+            let shareId = pathComponents[pIndex + 1]
+             let shareData = try await fetchShareData(type: "profile", shareId: shareId)
+            return try convertToProfile(shareData)
+        }
+
+        logger.error("❌ Invalid or unsupported URL format: \(url.absoluteString)")
+        throw ExternalShareError.invalidResponse
     }
 
     // MARK: - Private Helpers

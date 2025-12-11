@@ -92,7 +92,7 @@ actor RecipeSyncService {
     /// Perform full bidirectional sync
     func performFullSync(for userId: UUID) async throws {
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - skipping sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
@@ -136,7 +136,7 @@ actor RecipeSyncService {
         // Force syncing all local recipes to CloudKit
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot force sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
@@ -235,7 +235,8 @@ actor RecipeSyncService {
                         cloudImageRecordName: cloudRecipe.cloudImageRecordName,
                         imageModifiedAt: cloudRecipe.imageModifiedAt,
                         createdAt: cloudRecipe.createdAt,
-                        updatedAt: cloudRecipe.updatedAt
+                        updatedAt: cloudRecipe.updatedAt,
+                        relatedRecipeIds: cloudRecipe.relatedRecipeIds  // Preserve related recipes
                     )
                     try await recipeRepository.update(mergedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
@@ -267,7 +268,8 @@ actor RecipeSyncService {
                             cloudImageRecordName: localRecipe.cloudImageRecordName,
                             imageModifiedAt: localRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
-                            updatedAt: localRecipe.updatedAt
+                            updatedAt: localRecipe.updatedAt,
+                            relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
                         try await cloudKitService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
 
@@ -300,7 +302,8 @@ actor RecipeSyncService {
                             cloudImageRecordName: cloudRecipe.cloudImageRecordName,
                             imageModifiedAt: cloudRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
-                            updatedAt: localRecipe.updatedAt
+                            updatedAt: localRecipe.updatedAt,
+                            relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
                         // Don't update timestamp - just syncing CloudKit metadata (skip image sync for metadata-only updates)
                         try await recipeRepository.update(updated, shouldUpdateTimestamp: false, skipImageSync: true)

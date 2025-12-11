@@ -660,7 +660,7 @@ struct AIRecipeGeneratorView: View {
                                     )
                                     .shadow(color: .orange.opacity(0.3), radius: 4, x: 0, y: 2)
 
-                                Text(step.text ?? "")
+                                Text(step.text?.decodingHTMLEntities ?? "")
                                     .font(.body)
                                     .lineSpacing(4)
                                     .fixedSize(horizontal: false, vertical: true)

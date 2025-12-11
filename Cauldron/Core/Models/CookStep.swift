@@ -14,19 +14,22 @@ struct CookStep: Codable, Sendable, Hashable, Identifiable {
     let text: String
     let timers: [TimerSpec]
     let mediaURL: URL?
+    let section: String?
     
     init(
         id: UUID = UUID(),
         index: Int,
         text: String,
         timers: [TimerSpec] = [],
-        mediaURL: URL? = nil
+        mediaURL: URL? = nil,
+        section: String? = nil
     ) {
         self.id = id
         self.index = index
         self.text = text
         self.timers = timers
         self.mediaURL = mediaURL
+        self.section = section
     }
     
     var hasTimers: Bool {

@@ -85,7 +85,7 @@ actor CloudImageMigration {
         logger.info("🔄 Starting cloud image migration...")
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - migration postponed")
             migrationStatus = .failed("CloudKit not available")
@@ -244,7 +244,7 @@ actor CloudImageMigration {
         logger.info("🔄 Force re-uploading ALL images to CloudKit...")
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isCloudKitAvailable()
+        let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot force re-upload")
             return

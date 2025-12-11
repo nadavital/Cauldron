@@ -7,32 +7,32 @@ const db = admin.firestore();
 
 // --- Utilities ---
 
-function generateShareId(): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
+// function generateShareId(): string {
+//     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+//     let result = '';
+//     for (let i = 0; i < 8; i++) {
+//         result += chars.charAt(Math.floor(Math.random() * chars.length));
+//     }
+//     return result;
+// }
+// 
+// async function isShareIdUnique(collection: string, shareId: string): Promise<boolean> {
+//     const doc = await db.collection(collection).doc(shareId).get();
+//     return !doc.exists;
+// }
 
-async function isShareIdUnique(collection: string, shareId: string): Promise<boolean> {
-    const doc = await db.collection(collection).doc(shareId).get();
-    return !doc.exists;
-}
-
-async function createUniqueShareId(collection: string): Promise<string> {
-    let shareId = generateShareId();
-    let attempts = 0;
-    while (!(await isShareIdUnique(collection, shareId)) && attempts < 10) {
-        shareId = generateShareId();
-        attempts++;
-    }
-    if (attempts >= 10) {
-        throw new Error('Failed to generate unique share ID');
-    }
-    return shareId;
-}
+// function createUniqueShareId(collection: string): Promise<string> {
+//     let shareId = generateShareId();
+//     let attempts = 0;
+//     while (!(await isShareIdUnique(collection, shareId)) && attempts < 10) {
+//         shareId = generateShareId();
+//         attempts++;
+//     }
+//     if (attempts >= 10) {
+//         throw new Error('Failed to generate unique share ID');
+//     }
+//     return shareId;
+// }
 
 // --- API Endpoints ---
 
@@ -59,7 +59,7 @@ export const shareRecipe = onRequest({ cors: true, invoker: 'public' }, async (r
             return;
         }
 
-        const shareId = await createUniqueShareId('shared_recipes');
+        const shareId = recipeId; // Use the recipe UUID as the share ID
         const shareData = {
             recipeId,
             ownerId,
@@ -69,12 +69,17 @@ export const shareRecipe = onRequest({ cors: true, invoker: 'public' }, async (r
             totalMinutes: totalMinutes || null,
             tags: tags || [],
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            viewCount: 0,
+            // Don't overwrite viewCount if it exists
         };
 
-        await db.collection('shared_recipes').doc(shareId).set(shareData);
+        // Use merge: true to preserve viewCount and existing data
+        await db.collection('shared_recipes').doc(shareId).set(shareData, { merge: true });
 
         // Construct URL using the Hosting domain
+        // New Format: /u/{username}/{recipeId} is handled by the client/rewrite, 
+        // but for the direct API response we can return the canonical URL
+        // stored in the app or just the basic one. 
+        // The iOS app generates https://cauldron-f900a.web.app/u/{username}/{recipeId} locally.
         const shareUrl = `https://cauldron-f900a.web.app/recipe/${shareId}`;
 
         res.status(200).json({
@@ -108,7 +113,8 @@ export const shareProfile = onRequest({ cors: true, invoker: 'public' }, async (
             return;
         }
 
-        const shareId = await createUniqueShareId('shared_profiles');
+        // Use username as the share ID for profiles
+        const shareId = username;
         const shareData = {
             userId,
             username,
@@ -116,12 +122,13 @@ export const shareProfile = onRequest({ cors: true, invoker: 'public' }, async (
             profileImageURL: profileImageURL || null,
             recipeCount: recipeCount || 0,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            viewCount: 0,
+            // Don't overwrite viewCount if it exists
         };
 
-        await db.collection('shared_profiles').doc(shareId).set(shareData);
+        // Use merge: true
+        await db.collection('shared_profiles').doc(shareId).set(shareData, { merge: true });
 
-        const shareUrl = `https://cauldron-f900a.web.app/profile/${shareId}`;
+        const shareUrl = `https://cauldron-f900a.web.app/u/${shareId}`;
 
         res.status(200).json({
             shareId,
@@ -155,7 +162,7 @@ export const shareCollection = onRequest({ cors: true, invoker: 'public' }, asyn
             return;
         }
 
-        const shareId = await createUniqueShareId('shared_collections');
+        const shareId = collectionId; // Use collection UUID
         const shareData = {
             collectionId,
             ownerId,
@@ -164,10 +171,10 @@ export const shareCollection = onRequest({ cors: true, invoker: 'public' }, asyn
             recipeCount: recipeCount || 0,
             recipeIds: recipeIds || [],
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            viewCount: 0,
+            // Don't overwrite viewCount
         };
 
-        await db.collection('shared_collections').doc(shareId).set(shareData);
+        await db.collection('shared_collections').doc(shareId).set(shareData, { merge: true });
 
         const shareUrl = `https://cauldron-f900a.web.app/collection/${shareId}`;
 
@@ -421,13 +428,26 @@ export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async 
     const pathParts = req.path.split('/');
     const shareId = pathParts[pathParts.length - 1]; // Last part of path
 
-    if (!shareId) {
+    // Support for /u/{username}/{recipeId} format
+    // In this case, shareId might be the username if we aren't careful, 
+    // but the rewrite sends /recipe/** to this function so usually it's just /recipe/{id}
+    // However, if we add a rewrite for /u/*/* -> previewRecipe, we need to handle it.
+
+    // If path matches /u/username/recipeId
+    // pathParts would be ['', 'u', 'username', 'recipeId']
+
+    let recipeId = shareId;
+    if (req.path.includes('/u/') && pathParts.length >= 4) {
+        recipeId = pathParts[3]; // 0='', 1='u', 2='username', 3='recipeId'
+    }
+
+    if (!recipeId) {
         res.status(400).send('Invalid share ID');
         return;
     }
 
     try {
-        const doc = await db.collection('shared_recipes').doc(shareId).get();
+        const doc = await db.collection('shared_recipes').doc(recipeId).get();
         if (!doc.exists) {
             res.status(404).send('Recipe not found');
             return;
@@ -437,7 +457,7 @@ export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async 
         const title = data.title || 'Untitled Recipe';
         const imageURL = data.imageURL || null;
         const description = `Check out this recipe on Cauldron!`;
-        const appURL = `cauldron://import/recipe/${shareId}`;
+        const appURL = `cauldron://import/recipe/${recipeId}`;
         const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
@@ -456,9 +476,16 @@ export const previewProfile = onRequest({ cors: true, invoker: 'public' }, async
         return;
     }
 
+    // Support for /u/{username}
+    // The rewrite maps /u/* -> previewProfile.
+    // So shareId is the username.
+
     try {
         const doc = await db.collection('shared_profiles').doc(shareId).get();
         if (!doc.exists) {
+            // Because we use username as ID, this is a direct lookup
+            // If it fails, we might want to try to look up by user ID if shareId matches UUID format??
+            // For now, assume username.
             res.status(404).send('Profile not found');
             return;
         }

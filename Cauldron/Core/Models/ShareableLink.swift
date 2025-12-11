@@ -12,7 +12,7 @@ import UIKit
 struct ShareableLink {
     let url: URL
     let previewText: String
-    let image: UIImage?
+    var image: UIImage?
 }
 
 /// Metadata sent to backend when creating a share link
