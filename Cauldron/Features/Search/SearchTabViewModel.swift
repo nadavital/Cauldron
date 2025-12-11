@@ -10,12 +10,14 @@ import SwiftUI
 import Combine
 import os
 
+
+
 @MainActor
 class SearchTabViewModel: ObservableObject {
     @Published var allRecipes: [Recipe] = [] // User's own recipes
     @Published var publicRecipes: [Recipe] = [] // All public recipes from CloudKit
     @Published var recipesByTag: [String: [Recipe]] = [:]
-    @Published var recipeSearchResults: [Recipe] = []
+    @Published var recipeSearchResults: [SearchRecipeGroup] = []
     @Published var peopleSearchResults: [User] = []
     @Published var friends: [User] = []
     @Published var isLoading = false
@@ -105,6 +107,9 @@ class SearchTabViewModel: ObservableObject {
 
             // Load connections (for determining connection status in user search)
             await loadConnections()
+            
+            // Load recommendations (Friends of Friends)
+            await loadRecommendations()
 
         } catch {
             AppLogger.general.error("Failed to load search tab data: \(error.localizedDescription)")
@@ -133,6 +138,53 @@ class SearchTabViewModel: ObservableObject {
             friends = try await dependencies.sharingService.getUsers(byIds: friendIds)
         } catch {
             AppLogger.general.error("Failed to load friends: \(error.localizedDescription)")
+        }
+    }
+    
+    @Published var recommendedUsers: [User] = []
+    
+    func loadRecommendations() async {
+        // 1. Get current friends' IDs
+        let friendIds = connections
+            .filter { $0.isAccepted }
+            .compactMap { $0.otherUserId(currentUserId: currentUserId) }
+            
+        guard !friendIds.isEmpty else {
+            recommendedUsers = []
+            return
+        }
+        
+        do {
+            // 2. Fetch connections of friends (Friends of Friends)
+            let fofConnections = try await dependencies.cloudKitService.fetchConnections(forUserIds: friendIds)
+            
+            // 3. Extract unique User IDs, excluding self and existing friends
+            var recommendedIds = Set<UUID>()
+            for connection in fofConnections {
+                // Determine the "other" person in the FOF connection
+                // (e.g. Friend A is connected to Stranger B)
+                let potentialId: UUID
+                if friendIds.contains(connection.fromUserId) {
+                    potentialId = connection.toUserId
+                } else {
+                    potentialId = connection.fromUserId
+                }
+                
+                // Filter out self and direct friends
+                if potentialId != currentUserId && !friendIds.contains(potentialId) {
+                    recommendedIds.insert(potentialId)
+                }
+            }
+            
+            // 4. Fetch User profiles for recommendations
+            if !recommendedIds.isEmpty {
+                let users = try await dependencies.sharingService.getUsers(byIds: Array(recommendedIds))
+                recommendedUsers = users
+            } else {
+                recommendedUsers = []
+            }
+        } catch {
+            AppLogger.general.error("Failed to load recommendations: \(error.localizedDescription)")
         }
     }
 
@@ -192,31 +244,7 @@ class SearchTabViewModel: ObservableObject {
     }
     
     private func filterLocalRecipes() {
-        // Filter ONLY local recipes
-        var results = allRecipes
-        
-        // 1. Filter by Search Text
-        if !recipeSearchText.isEmpty {
-            let lowercased = recipeSearchText.lowercased()
-            results = results.filter { recipe in
-                recipe.title.lowercased().contains(lowercased) ||
-                recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
-                recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
-            }
-        }
-        
-        // 2. Filter by Selected Categories
-        if !selectedCategories.isEmpty {
-            results = results.filter { recipe in
-                selectedCategories.allSatisfy { category in
-                    recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
-                }
-            }
-        }
-        
-        // Combine with current public results
-        // Note: publicRecipes are already filtered by the server
-        recipeSearchResults = results + publicRecipes
+        processSearchResults()
     }
     
     private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
@@ -233,22 +261,35 @@ class SearchTabViewModel: ObservableObject {
             )
             
             // Filter out own recipes (just in case)
-            let filteredResults = results.filter { $0.ownerId != currentUserId }
+            var filteredResults = results.filter { $0.ownerId != currentUserId }
             
             if !Task.isCancelled {
                 publicRecipes = filteredResults
-                // Re-merge with local results
-                filterLocalRecipes()
+                // Re-merge with local results and process grouping
+                processSearchResults()
                 isLoading = false
             }
         } catch {
             if !Task.isCancelled {
                 AppLogger.general.error("Failed to search public recipes: \(error.localizedDescription)")
-                publicRecipes = [] // Clear on error? Or keep previous? Let's clear to show error state if we had one.
-                filterLocalRecipes()
+                publicRecipes = [] 
+                processSearchResults()
                 isLoading = false
             }
         }
+    }
+    
+    // Process results: Filter local options, merge with public, group copies, rank, and extract friend context
+    private func processSearchResults() {
+        // Use the centralized grouping service to filter, merge, group, and rank recipes
+        self.recipeSearchResults = RecipeGroupingService.groupAndRankRecipes(
+            localRecipes: allRecipes,
+            publicRecipes: publicRecipes,
+            friends: friends,
+            currentUserId: currentUserId,
+            filterText: recipeSearchText,
+            selectedCategories: selectedCategories
+        )
     }
     
     func updatePeopleSearch(_ query: String) {

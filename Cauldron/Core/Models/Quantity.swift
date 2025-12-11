@@ -10,18 +10,29 @@ import Foundation
 /// Represents a quantity with a numeric value and unit
 struct Quantity: Codable, Sendable, Hashable {
     let value: Double
+    let upperValue: Double? // For ranges like "2-3 cups"
     let unit: UnitKind
     
-    init(value: Double, unit: UnitKind) {
+    init(value: Double, upperValue: Double? = nil, unit: UnitKind) {
         self.value = value
+        self.upperValue = upperValue
         self.unit = unit
     }
     
     /// Display the quantity with proper formatting
     var displayString: String {
         let formatted = formatValue(value)
-        let unitStr = value == 1.0 ? unit.displayName : unit.pluralName
-        return "\(formatted) \(unitStr)"
+        
+        let unitStr: String
+        if let upper = upperValue {
+            let formattedUpper = formatValue(upper)
+            // Use plural if upper value is > 1 (e.g. "2-3 cups")
+            unitStr = upper > 1.0 ? unit.pluralName : unit.displayName
+            return "\(formatted) - \(formattedUpper) \(unitStr)"
+        } else {
+            unitStr = value == 1.0 ? unit.displayName : unit.pluralName
+            return "\(formatted) \(unitStr)"
+        }
     }
     
     /// Format value as fraction if appropriate
@@ -51,6 +62,9 @@ struct Quantity: Codable, Sendable, Hashable {
     
     /// Scale the quantity by a factor
     func scaled(by factor: Double) -> Quantity {
-        Quantity(value: value * factor, unit: unit)
+        if let upper = upperValue {
+            return Quantity(value: value * factor, upperValue: upper * factor, unit: unit)
+        }
+        return Quantity(value: value * factor, unit: unit)
     }
 }

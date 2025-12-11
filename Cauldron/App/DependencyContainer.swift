@@ -73,7 +73,19 @@ class DependencyContainer: ObservableObject {
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
 
-        // Initialize repositories (now with CloudKit service)
+        // Initialize MainActor-isolated services first (ExternalShareService needs to be injected into RecipeRepository)
+        // MainActor-isolated services require temporary references to avoid capture issues
+        let tempCloudKitService = cloudKitService
+        let tempImageManager = imageManager
+
+        self.externalShareService = MainActor.assumeIsolated {
+            ExternalShareService(
+                imageManager: tempImageManager,
+                cloudKitService: tempCloudKitService
+            )
+        }
+
+        // Initialize repositories (now with CloudKit service and ExternalShareService)
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
         self.collectionRepository = CollectionRepository(
             modelContainer: modelContainer,
@@ -87,7 +99,8 @@ class DependencyContainer: ObservableObject {
             collectionRepository: collectionRepository,
             imageManager: imageManager,
             imageSyncManager: imageSyncManager,
-            operationQueueService: operationQueueService
+            operationQueueService: operationQueueService,
+            externalShareService: externalShareService
         )
         self.groceryRepository = GroceryRepository(modelContainer: modelContainer)
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
@@ -135,16 +148,6 @@ class DependencyContainer: ObservableObject {
         self.instagramParser = InstagramRecipeParser(foundationModelsService: foundationModelsService)
         self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)
 
-        // MainActor-isolated services require temporary references to avoid capture issues
-        let tempCloudKitService = cloudKitService
-        let tempImageManager = imageManager
-
-        self.externalShareService = MainActor.assumeIsolated {
-            ExternalShareService(
-                imageManager: tempImageManager,
-                cloudKitService: tempCloudKitService
-            )
-        }
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(
                 cloudKitService: tempCloudKitService,

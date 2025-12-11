@@ -329,16 +329,13 @@ struct HeroRecipeImageView: View {
                     .scaledToFill()
                     .frame(height: imageHeight(for: image))
                     .clipped()
-                    .cornerRadius(16)
-                    .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
                     .opacity(imageOpacity)
             } else {
                 placeholderView
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
+
+        .frame(maxWidth: .infinity)
         .task(id: recipeId) {
             await loadImage()
         }
@@ -365,20 +362,21 @@ struct HeroRecipeImageView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(Color.cauldronOrange.opacity(0.3))
         }
-        .frame(height: 280)
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .frame(height: 380)
+        .frame(maxWidth: .infinity)
+        .background(Color.cauldronOrange.opacity(0.05))
     }
 
     private func imageHeight(for image: UIImage) -> CGFloat {
         let aspectRatio = image.size.width / image.size.height
-        let estimatedWidth: CGFloat = 358 // Device width minus padding (390 - 32)
+        let estimatedWidth: CGFloat = UIScreen.main.bounds.width
 
         // Calculate height based on aspect ratio
         let calculatedHeight = estimatedWidth / aspectRatio
 
         // Clamp between min and max values for better UX
-        return min(max(calculatedHeight, 220), 380)
+        // Increased max height for hero effect
+        return min(max(calculatedHeight, 300), 500)
     }
 
     private func loadImage() async {

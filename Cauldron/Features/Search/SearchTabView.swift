@@ -188,11 +188,11 @@ struct SearchTabView: View {
                     .font(.headline)
                     .foregroundColor(.secondary)
 
-                ForEach(viewModel.recipeSearchResults) { recipe in
+                ForEach(viewModel.recipeSearchResults) { group in
                     Button {
-                        navigationPath.append(recipe)
+                        navigationPath.append(group.primaryRecipe)
                     } label: {
-                        RecipeRowView(recipe: recipe, dependencies: viewModel.dependencies)
+                        SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
                     }
                     .buttonStyle(.plain)
                 }
@@ -221,6 +221,27 @@ struct SearchTabView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                    }
+                    
+                    // Recommended Users (Friends of Friends)
+                    if !viewModel.recommendedUsers.isEmpty {
+                        Text("Suggested for You")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 24)
+                        
+                        ForEach(viewModel.recommendedUsers) { user in
+                            NavigationLink {
+                                UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            } label: {
+                                UserSearchRowView(
+                                    user: user,
+                                    viewModel: viewModel,
+                                    currentUserId: viewModel.currentUserId
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 } else {
                     VStack(spacing: 16) {
@@ -590,6 +611,44 @@ struct UserRowView: View {
             Spacer()
         }
         .padding(.vertical, 8)
+    }
+}
+
+struct SearchRecipeGroupRow: View {
+    let group: SearchRecipeGroup
+    let dependencies: DependencyContainer
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            RecipeRowView(recipe: group.primaryRecipe, dependencies: dependencies)
+            
+            // Social Context / Save Count Footer
+            if !group.friendSavers.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.2.fill")
+                        .font(.caption)
+                    
+                    Text("Saved by \(group.friendSavers.map { $0.displayName }.joined(separator: ", "))")
+                        .font(.caption)
+                    
+                    if group.saveCount > group.friendSavers.count {
+                        Text("and \(group.saveCount - group.friendSavers.count) others")
+                            .font(.caption)
+                    }
+                }
+                .foregroundColor(.secondary)
+                .padding(.leading, 80) // Align to text content of row (approx image width + spacing)
+            } else if group.saveCount > 1 {
+                HStack(spacing: 4) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.caption)
+                    Text("\(group.saveCount) saves")
+                        .font(.caption)
+                }
+                .foregroundColor(.secondary)
+                .padding(.leading, 80)
+            }
+        }
     }
 }
 

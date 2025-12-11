@@ -38,6 +38,7 @@ struct RecipeDetailView: View {
     @State private var isCheckingDuplicates = false
     @State private var originalCreator: User?
     @State private var isLoadingCreator = false
+    @State private var relatedRecipes: [Recipe] = []
     @State private var imageRefreshID = UUID() // Force image refresh
 
     // Recipe update sync state
@@ -109,12 +110,18 @@ struct RecipeDetailView: View {
                         if let notes = recipe.notes, !notes.isEmpty {
                             notesSection(notes)
                         }
+
+                        // Related Recipes
+                        if !relatedRecipes.isEmpty {
+                            relatedRecipesSection
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, recipe.imageURL != nil ? 0 : 20)
                     .padding(.bottom, 100) // Add padding for the button
                 }
             }
+            .ignoresSafeArea(edges: (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? .top : [])
 
             // Liquid Glass Cook Button
             HStack {
@@ -140,7 +147,7 @@ struct RecipeDetailView: View {
                 .padding(.bottom, 16)
             }
         }
-        .navigationTitle(recipe.title)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             // Only check for updates if this is a copied recipe
@@ -149,62 +156,7 @@ struct RecipeDetailView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if recipe.visibility == .publicRecipe {
-                    Button {
-                        Task {
-                            await generateShareLink()
-                        }
-                    } label: {
-                        if isGeneratingShareLink {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    }
-                    .disabled(isGeneratingShareLink)
-                }
-            }
-
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task {
-                        await addToGroceryList()
-                    }
-                } label: {
-                    Image(systemName: "cart.badge.plus")
-                }
-            }
-
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if recipe.isOwnedByCurrentUser() {
-                    // Owned recipe menu
-                    Menu {
-                        Button {
-                            showingEditSheet = true
-                        } label: {
-                            Label("Edit Recipe", systemImage: "pencil")
-                        }
-
-                        Button {
-                            showingCollectionPicker = true
-                        } label: {
-                            Label("Add to Collection", systemImage: "folder.badge.plus")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDeleteConfirmation = true
-                        } label: {
-                            Label("Delete Recipe", systemImage: "trash")
-                                .foregroundStyle(.red)
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
-            }
+            toolbarContent
         }
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -273,7 +225,9 @@ struct RecipeDetailView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
-                ShareSheet(items: [link])
+                // Explicitly wrap in LinkMetadataSource to ensure rich preview
+                // and avoid any potential type casting issues
+                ShareSheet(items: [LinkMetadataSource(link: link)])
             }
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
@@ -316,11 +270,24 @@ struct RecipeDetailView: View {
             if recipe.originalRecipeId != nil {
                 await checkForRecipeUpdates()
             }
+            
+            // Load related recipes
+            if !recipe.relatedRecipeIds.isEmpty {
+                await loadRelatedRecipes()
+            }
         }
     }
     
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text(recipe.title)
+                .font(.largeTitle.bold())
+                .fontDesign(.serif)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
             HStack(spacing: 16) {
                 if let time = recipe.displayTime {
                     HStack(spacing: 6) {
@@ -645,21 +612,19 @@ struct RecipeDetailView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            ForEach(scaledRecipe.ingredients) { ingredient in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 6))
-                        .foregroundColor(.cauldronOrange)
-                        .padding(.top, 6)
-                        .fixedSize()
-
-                    Text(ingredient.displayString)
-                        .font(.body)
-                        .lineLimit(nil)
-                        .multilineTextAlignment(.leading)
+            ForEach(sortedIngredientSections, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    if section != "Main" {
+                        Text(section)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                    
+                    ForEach(groupedIngredients[section] ?? []) { ingredient in
+                        ingredientRow(ingredient)
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -667,46 +632,156 @@ struct RecipeDetailView: View {
         .cardStyle()
     }
     
+    private func ingredientRow(_ ingredient: Ingredient) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundColor(.cauldronOrange)
+                .padding(.top, 6)
+                .fixedSize()
+
+            Text(ingredient.displayString)
+                .font(.body)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
+    }
+    
+    private var groupedIngredients: [String: [Ingredient]] {
+        Dictionary(grouping: scaledRecipe.ingredients) { $0.section ?? "Main" }
+    }
+    
+    private var sortedIngredientSections: [String] {
+        groupedIngredients.keys.sorted { section1, section2 in
+            if section1 == "Main" { return true }
+            if section2 == "Main" { return false }
+            
+            let index1 = scaledRecipe.ingredients.firstIndex { $0.section == section1 } ?? 0
+            let index2 = scaledRecipe.ingredients.firstIndex { $0.section == section2 } ?? 0
+            return index1 < index2
+        }
+    }
+    
     private var stepsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Instructions", systemImage: "list.number")
                 .font(.title2)
                 .fontWeight(.bold)
-
-            ForEach(recipe.steps) { step in
-                HStack(alignment: .top, spacing: 12) {
-                    Text("\(step.index + 1)")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(width: 30, height: 30)
-                        .background(Color.cauldronOrange)
-                        .clipShape(Circle())
-                        .fixedSize()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(step.text)
-                            .font(.body)
-                            .lineLimit(nil)
-                            .multilineTextAlignment(.leading)
-
-                        if let timer = step.timers.first {
-                            Label(timer.displayDuration, systemImage: "timer")
-                                .font(.caption)
-                                .foregroundColor(.cauldronOrange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.cauldronOrange.opacity(0.1))
-                                .cornerRadius(6)
-                        }
+            
+            ForEach(sortedStepsSections, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    if section != "Main" {
+                        Text(section)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                    
+                    ForEach(groupedSteps[section] ?? []) { step in
+                        stepRow(step)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
+    }
+    
+    private func stepRow(_ step: CookStep) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(step.index + 1)")
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(width: 30, height: 30)
+                .background(Color.cauldronOrange)
+                .clipShape(Circle())
+                .fixedSize()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(step.text.decodingHTMLEntities)
+                    .font(.body)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
+
+                if let timer = step.timers.first {
+                    Button {
+                        startTimer(timer)
+                    } label: {
+                        Label(timer.displayDuration, systemImage: "timer")
+                            .font(.caption)
+                            .foregroundColor(.cauldronOrange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.cauldronOrange.opacity(0.1))
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+    
+    private var groupedSteps: [String: [CookStep]] {
+        Dictionary(grouping: scaledRecipe.steps) { $0.section ?? "Main" }
+    }
+    
+    private var sortedStepsSections: [String] {
+        groupedSteps.keys.sorted { section1, section2 in
+            if section1 == "Main" { return true }
+            if section2 == "Main" { return false }
+            
+            let index1 = scaledRecipe.steps.firstIndex { $0.section == section1 } ?? 0
+            let index2 = scaledRecipe.steps.firstIndex { $0.section == section2 } ?? 0
+            return index1 < index2
+        }
+    }
+
+    private var relatedRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Related Recipes", systemImage: "link")
+                .font(.title2)
+                .fontWeight(.bold)
+            
+            VStack(spacing: 0) {
+                ForEach(relatedRecipes) { relatedRecipe in
+                    NavigationLink(destination: RecipeDetailView(recipe: relatedRecipe, dependencies: dependencies)) {
+                        RecipeRowView(recipe: relatedRecipe, dependencies: dependencies)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if relatedRecipe.id != relatedRecipes.last?.id {
+                        Divider()
+                            .padding(.leading, 80)
+                    }
+                }
+            }
+        }
+        .padding()
+        .cardStyle()
+    }
+    
+    private func loadRelatedRecipes() async {
+        if recipe.relatedRecipeIds.isEmpty {
+            withAnimation {
+                self.relatedRecipes = []
+            }
+            return
+        }
+        
+        do {
+            let recipes = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+            withAnimation {
+                self.relatedRecipes = recipes
+            }
+        } catch {
+            AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
+        }
     }
     
     private func nutritionSection(_ nutrition: Nutrition) -> some View {
@@ -878,6 +953,9 @@ struct RecipeDetailView: View {
                 imageRefreshID = UUID()
 
                 AppLogger.general.info("✅ Refreshed recipe: \(updatedRecipe.title)")
+                
+                // Reload related recipes
+                await loadRelatedRecipes()
             }
         } catch {
             AppLogger.general.error("Failed to refresh recipe: \(error.localizedDescription)")
@@ -1130,6 +1208,70 @@ struct RecipeDetailView: View {
             AppLogger.general.error("❌ Failed to update recipe: \(error.localizedDescription)")
             errorMessage = "Failed to update recipe: \(error.localizedDescription)"
             showErrorAlert = true
+        }
+    }
+    private func startTimer(_ timer: TimerSpec) {
+        // TODO: Implement timer starting logic, possibly via CookModeCoordinator
+        AppLogger.general.info("Timer tapped: \(timer.displayDuration)")
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            if recipe.visibility == .publicRecipe {
+                Button {
+                    Task {
+                        await generateShareLink()
+                    }
+                } label: {
+                    if isGeneratingShareLink {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                .disabled(isGeneratingShareLink)
+            }
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                Task {
+                    await addToGroceryList()
+                }
+            } label: {
+                Image(systemName: "cart.badge.plus")
+            }
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            if recipe.isOwnedByCurrentUser() {
+                // Owned recipe menu
+                Menu {
+                    Button {
+                        showingEditSheet = true
+                    } label: {
+                        Label("Edit Recipe", systemImage: "pencil")
+                    }
+
+                    Button {
+                        showingCollectionPicker = true
+                    } label: {
+                        Label("Add to Collection", systemImage: "folder.badge.plus")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Recipe", systemImage: "trash")
+                            .foregroundStyle(.red)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
         }
     }
 }

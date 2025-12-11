@@ -36,6 +36,7 @@ struct RecipeEditorView: View {
                 ingredientsSection
                 stepsSection
                 nutritionSection
+                relatedRecipesSection
                 deleteSection
                 errorSection
             }
@@ -69,6 +70,40 @@ struct RecipeEditorView: View {
             }
             .sheet(isPresented: $showingImagePicker) {
                 ImagePicker(image: $viewModel.selectedImage, sourceType: imagePickerSourceType)
+            }
+            .sheet(isPresented: $viewModel.isRelatedRecipesPickerPresented) {
+                NavigationStack {
+                    List(viewModel.availableRecipes) { recipe in
+                        Button {
+                            viewModel.toggleRelatedRecipe(recipe)
+                            viewModel.isRelatedRecipesPickerPresented = false
+                        } label: {
+                            HStack {
+                                RecipeRowView(recipe: recipe, dependencies: viewModel.dependencies)
+                                    .allowsHitTesting(false) // Pass touches to the button
+                                
+                                Spacer()
+                                
+                                if viewModel.relatedRecipes.contains(where: { $0.id == recipe.id }) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.cauldronOrange)
+                                        .font(.title3)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .navigationTitle("Select Recipe")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") {
+                                viewModel.isRelatedRecipesPickerPresented = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
             }
             .confirmationDialog("Add Recipe Image", isPresented: $showingImageOptions) {
                 Button("Choose from Library") {
@@ -271,19 +306,104 @@ struct RecipeEditorView: View {
     
     private var ingredientsSection: some View {
         Section {
-            ForEach(viewModel.ingredients.indices, id: \.self) { index in
-                IngredientEditorRow(
-                    ingredient: $viewModel.ingredients[index],
-                    onDelete: { viewModel.deleteIngredient(at: index) }
-                )
+            ForEach(viewModel.ingredientSections) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    // Section Header
+                    if viewModel.ingredientSections.count > 1 || !section.name.isEmpty {
+                        TextField("Section Name (e.g., Dough)", text: Binding(
+                            get: { viewModel.getIngredientSection(id: section.id).name },
+                            set: { 
+                                var newSection = viewModel.getIngredientSection(id: section.id)
+                                newSection.name = $0
+                                viewModel.updateIngredientSection(newSection)
+                            }
+                        ))
+                            .font(.headline)
+                            .foregroundColor(.cauldronOrange)
+                            .padding(.bottom, 4)
+                        Divider()
+                    }
+
+                    // Ingredients in this section
+                    ForEach(section.ingredients) { ingredient in
+                        IngredientEditorRow(
+                            ingredient: Binding(
+                                get: { viewModel.getIngredient(id: ingredient.id, in: section.id) },
+                                set: { viewModel.updateIngredient($0, in: section.id) }
+                            ),
+                            onDelete: {
+                                withAnimation {
+                                    viewModel.deleteIngredient(id: ingredient.id, in: section.id)
+                                }
+                            }
+                        )
+                        
+                        if ingredient.id != section.ingredients.last?.id {
+                             Divider()
+                                 .padding(.leading, 20)
+                        }
+                    }
+                    
+                    // Add Buttons HStack
+                    HStack(spacing: 8) {
+                        // Add Ingredient Button
+                        Button {
+                            withAnimation {
+                                if let index = viewModel.ingredientSections.firstIndex(where: { $0.id == section.id }) {
+                                    viewModel.addIngredient(to: index)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                Text("Ingredient")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.cauldronOrange.opacity(0.15))
+                            .foregroundColor(.cauldronOrange)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.borderless)
+                        
+                        // Add Section Button (Only in the last section)
+                        if section.id == viewModel.ingredientSections.last?.id {
+                            Button {
+                                withAnimation {
+                                    viewModel.addIngredientSection()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "rectangle.stack.badge.plus")
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                    Text("Section")
+                                }
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Color.cauldronOrange.opacity(0.15))
+                                .foregroundColor(.cauldronOrange)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(12)
+                .padding(.vertical, 4)
+                .overlay(alignment: .topLeading) {
+                }
             }
             
-            Button {
-                viewModel.addIngredient()
-            } label: {
-                Label("Add Ingredient", systemImage: "plus.circle.fill")
-                    .foregroundColor(.cauldronOrange)
-            }
         } header: {
             Text("Ingredients")
         }
@@ -291,30 +411,160 @@ struct RecipeEditorView: View {
     
     private var stepsSection: some View {
         Section {
-            ForEach(viewModel.steps.indices, id: \.self) { index in
-                StepEditorRow(
-                    step: $viewModel.steps[index],
-                    index: index,
-                    onDelete: { viewModel.deleteStep(at: index) },
-                    onAddTimer: { viewModel.addTimer(to: index) }
-                )
+            ForEach(viewModel.stepSections) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    // Section Header
+                    if viewModel.stepSections.count > 1 || !section.name.isEmpty {
+                        TextField("Section Name (e.g., Prep)", text: Binding(
+                            get: { viewModel.getStepSection(id: section.id).name },
+                            set: {
+                                var newSection = viewModel.getStepSection(id: section.id)
+                                newSection.name = $0
+                                viewModel.updateStepSection(newSection)
+                            }
+                        ))
+                            .font(.headline)
+                            .foregroundColor(.cauldronOrange)
+                            .padding(.bottom, 4)
+                        Divider()
+                    }
+                    
+                    // Steps in this section
+                    ForEach(section.steps) { step in
+                        StepEditorRow(
+                            step: Binding(
+                                get: { viewModel.getStep(id: step.id, in: section.id) },
+                                set: { viewModel.updateStep($0, in: section.id) }
+                            ),
+                            index: calculateGlobalStepIndex(for: step),
+                            onDelete: {
+                                withAnimation {
+                                    viewModel.deleteStep(id: step.id, in: section.id)
+                                }
+                            },
+                            onAddTimer: {
+                                if let sectionIndex = viewModel.stepSections.firstIndex(where: { $0.id == section.id }),
+                                   let rowIndex = section.steps.firstIndex(where: { $0.id == step.id }) {
+                                    viewModel.addTimer(to: IndexPath(row: rowIndex, section: sectionIndex))
+                                }
+                            }
+                        )
+                        
+                        if step.id != section.steps.last?.id {
+                             Divider()
+                        }
+                    }
+                    
+                    // Add Buttons HStack
+                    HStack(spacing: 8) {
+                        // Add Step Button
+                        Button {
+                            withAnimation {
+                                if let index = viewModel.stepSections.firstIndex(where: { $0.id == section.id }) {
+                                    viewModel.addStep(to: index)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                Text("Step")
+                            }
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.cauldronOrange.opacity(0.15))
+                            .foregroundColor(.cauldronOrange)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.borderless)
+                        
+                        // Add Step Section Button (Only in the last section)
+                        if section.id == viewModel.stepSections.last?.id {
+                            Button {
+                                withAnimation {
+                                    viewModel.addStepSection()
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "rectangle.stack.badge.plus")
+                                        .font(.caption2)
+                                        .fontWeight(.bold)
+                                    Text("Section")
+                                }
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Color.cauldronOrange.opacity(0.15))
+                                .foregroundColor(.cauldronOrange)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(12)
+                .padding(.vertical, 4)
             }
             
-            Button {
-                viewModel.addStep()
-            } label: {
-                Label("Add Step", systemImage: "plus.circle.fill")
-                    .foregroundColor(.cauldronOrange)
-            }
         } header: {
             Text("Steps")
         }
     }
     
+    private func calculateGlobalStepIndex(for step: StepInput) -> Int {
+        var count = 0
+        for section in viewModel.stepSections {
+            if let index = section.steps.firstIndex(where: { $0.id == step.id }) {
+                return count + index
+            }
+            count += section.steps.count
+        }
+        return count
+    }
+    
+    // ... rest of file (nutritionSection, etc) unused in this replacement but context preserved ...
+
     private var nutritionSection: some View {
         Section("Nutrition (Optional)") {
             NutritionEditorView(nutrition: $viewModel.nutrition)
         }
+    }
+    
+    private var relatedRecipesSection: some View {
+        Section("Related Recipes") {
+            if !viewModel.relatedRecipes.isEmpty {
+                ForEach(viewModel.relatedRecipes) { recipe in
+                    HStack {
+                        Text(recipe.title)
+                        Spacer()
+                        Button(role: .destructive) {
+                            viewModel.toggleRelatedRecipe(recipe)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            
+            Button {
+                Task {
+                    await viewModel.loadAvailableRecipes()
+                    viewModel.isRelatedRecipesPickerPresented = true
+                }
+            } label: {
+                Label("Add Related Recipe", systemImage: "link")
+            }
+        }
+
     }
     
     @ViewBuilder
@@ -340,8 +590,8 @@ struct RecipeEditorView: View {
         if let error = viewModel.errorMessage {
             Section {
                 Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
+                .foregroundColor(.red)
+                .font(.caption)
             }
         }
     }
@@ -382,13 +632,15 @@ struct IngredientEditorRow: View {
     
     var body: some View {
         HStack(spacing: 8) {
-            // Ingredient name
-            TextField("Ingredient", text: $ingredient.name)
-                .frame(minWidth: 100)
+            VStack(alignment: .leading, spacing: 4) {
+                // Ingredient name
+                TextField("Ingredient", text: $ingredient.name)
+                    .frame(minWidth: 100)
+            }
             
             // Quantity
             TextField("Amt", text: $ingredient.quantityText)
-                .frame(width: 50)
+                .frame(width: 60)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             
@@ -398,7 +650,7 @@ struct IngredientEditorRow: View {
                     Text(unit.compactDisplayName).tag(unit)
                 }
             }
-            .frame(width: 80)
+            .frame(width: 70)
             .labelsHidden()
             
             // Delete button
@@ -425,9 +677,12 @@ struct StepEditorRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Text("Step \(index + 1)")
-                    .font(.headline)
-                    .foregroundColor(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Step \(index + 1)")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                }
+                
                 Spacer()
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")

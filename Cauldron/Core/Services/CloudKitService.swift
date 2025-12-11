@@ -1355,6 +1355,60 @@ actor CloudKitService {
         return cleanedConnections
     }
 
+    /// Fetch connections for multiple users (batch fetch)
+    /// Used for finding friends-of-friends
+    func fetchConnections(forUserIds userIds: [UUID]) async throws -> [Connection] {
+        guard !userIds.isEmpty else { return [] }
+        
+        let db = try getPublicDatabase()
+        var connections: [Connection] = []
+        var connectionIds = Set<UUID>() // Track IDs to avoid duplicates
+        
+        // Convert UUIDs to Strings
+        let userIdStrings = userIds.map { $0.uuidString }
+        
+        // Query 1: Connections where any of the users is the sender
+        let fromPredicate = NSPredicate(format: "fromUserId IN %@", userIdStrings)
+        let fromQuery = CKQuery(recordType: connectionRecordType, predicate: fromPredicate)
+        let fromResults = try await db.records(matching: fromQuery, resultsLimit: 200) // Limit to avoid massive queries
+        
+        for (_, result) in fromResults.matchResults {
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                    }
+                } catch {
+                    // Skip legacy/invalid
+                }
+            }
+        }
+        
+        // Query 2: Connections where any of the users is the receiver
+        let toPredicate = NSPredicate(format: "toUserId IN %@", userIdStrings)
+        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
+        let toResults = try await db.records(matching: toQuery, resultsLimit: 200)
+        
+        for (_, result) in toResults.matchResults {
+            if let record = try? result.get() {
+                do {
+                    let connection = try connectionFromRecord(record)
+                    if !connectionIds.contains(connection.id) {
+                        connections.append(connection)
+                        connectionIds.insert(connection.id)
+                    }
+                } catch {
+                    // Skip legacy/invalid
+                }
+            }
+        }
+        
+        // Return raw connections (duplicate Logic is handled by caller if needed for specific pairs, here we just want the graph)
+        return connections
+    }
+
     /// Remove duplicate connections between the same two users
     /// Keeps the most recent one (by updatedAt), deletes older duplicates
     private func removeDuplicateConnections(_ connections: [Connection]) async throws -> [Connection] {

@@ -35,6 +35,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let originalCreatorId: UUID?  // ID of the user who originally created this recipe (if copied)
     let originalCreatorName: String?  // Display name of the original creator (cached for performance)
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
+    let relatedRecipeIds: [UUID] // IDs of related recipes
     
     init(
         id: UUID = UUID(),
@@ -60,7 +61,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
-        savedAt: Date? = nil
+        savedAt: Date? = nil,
+        relatedRecipeIds: [UUID] = []
     ) {
         self.id = id
         self.title = title
@@ -86,6 +88,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
+        self.relatedRecipeIds = relatedRecipeIds
     }
     
     var displayTime: String? {

@@ -24,6 +24,7 @@ final class RecipeModel {
     var stepsBlob: Data = Data()
     var tagsBlob: Data = Data()
     var nutritionBlob: Data?
+    var relatedRecipeIdsBlob: Data = Data()
     
     // Source info
     var sourceURL: String?
@@ -56,6 +57,7 @@ final class RecipeModel {
         yields: String = "4 servings",
         totalMinutes: Int? = nil,
         nutritionBlob: Data? = nil,
+        relatedRecipeIdsBlob: Data = Data(),
         sourceURL: String? = nil,
         sourceTitle: String? = nil,
         notes: String? = nil,
@@ -81,6 +83,7 @@ final class RecipeModel {
         self.yields = yields
         self.totalMinutes = totalMinutes
         self.nutritionBlob = nutritionBlob
+        self.relatedRecipeIdsBlob = relatedRecipeIdsBlob
         self.sourceURL = sourceURL
         self.sourceTitle = sourceTitle
         self.notes = notes
@@ -107,6 +110,7 @@ final class RecipeModel {
         let stepsData = try encoder.encode(recipe.steps)
         let tagsData = try encoder.encode(recipe.tags)
         let nutritionData = try recipe.nutrition.map { try encoder.encode($0) }
+        let relatedIdsData = try encoder.encode(recipe.relatedRecipeIds)
         
         return RecipeModel(
             id: recipe.id,
@@ -117,6 +121,7 @@ final class RecipeModel {
             yields: recipe.yields,
             totalMinutes: recipe.totalMinutes,
             nutritionBlob: nutritionData,
+            relatedRecipeIdsBlob: relatedIdsData,
             sourceURL: recipe.sourceURL?.absoluteString,
             sourceTitle: recipe.sourceTitle,
             notes: recipe.notes,
@@ -146,6 +151,14 @@ final class RecipeModel {
         let steps = try decoder.decode([CookStep].self, from: stepsBlob)
         let tags = try decoder.decode([Tag].self, from: tagsBlob)
         let nutrition = try nutritionBlob.map { try decoder.decode(Nutrition.self, from: $0) }
+        
+        // Handle related recipes - default to empty if blob is empty (migration safety)
+        let relatedRecipeIds: [UUID]
+        if relatedRecipeIdsBlob.isEmpty {
+            relatedRecipeIds = []
+        } else {
+            relatedRecipeIds = try decoder.decode([UUID].self, from: relatedRecipeIdsBlob)
+        }
 
         // Reconstruct image URL from filename
         // Always build the URL dynamically to handle Documents directory path changes
@@ -167,7 +180,8 @@ final class RecipeModel {
                         notes: notes, imageURL: nil, isFavorite: isFavorite,
                         visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
                         ownerId: ownerId, cloudRecordName: cloudRecordName,
-                        createdAt: createdAt, updatedAt: updatedAt
+                        createdAt: createdAt, updatedAt: updatedAt,
+                        relatedRecipeIds: relatedRecipeIds
                     )
                 }
             } else {
@@ -204,7 +218,8 @@ final class RecipeModel {
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
-            savedAt: savedAt
+            savedAt: savedAt,
+            relatedRecipeIds: relatedRecipeIds
         )
     }
 }

@@ -58,7 +58,14 @@ struct RecipeScaler {
         let rawScaled = quantity.value * factor
         let roundedValue = smartRound(rawScaled, unit: quantity.unit)
         
-        let scaledQuantity = Quantity(value: roundedValue, unit: quantity.unit)
+        var scaledQuantity: Quantity
+        if let upper = quantity.upperValue {
+            let rawScaledUpper = upper * factor
+            let roundedUpper = smartRound(rawScaledUpper, unit: quantity.unit)
+            scaledQuantity = Quantity(value: roundedValue, upperValue: roundedUpper, unit: quantity.unit)
+        } else {
+            scaledQuantity = Quantity(value: roundedValue, unit: quantity.unit)
+        }
         
         return Ingredient(
             id: ingredient.id,
@@ -118,8 +125,9 @@ struct RecipeScaler {
                         if let swiftRange = Range(numberRange, in: yields) {
                             let numberStr = String(yields[swiftRange])
                             if let originalNumber = Int(numberStr) {
-                                let scaledNumber = Int(round(Double(originalNumber) * factor))
-                                result = (yields as NSString).replacingCharacters(in: numberRange, with: "\(scaledNumber)")
+                                let scaledNumber = Double(originalNumber) * factor
+                                let formattedNumber = formatFactor(scaledNumber)
+                                result = (yields as NSString).replacingCharacters(in: numberRange, with: "\(formattedNumber)")
                                 return result
                             }
                         }

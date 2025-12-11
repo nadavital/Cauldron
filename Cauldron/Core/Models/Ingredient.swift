@@ -13,17 +13,20 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
     let name: String
     let quantity: Quantity?
     let note: String?
+    let section: String? // e.g. "Dough", "Filling"
     
     init(
         id: UUID = UUID(),
         name: String,
         quantity: Quantity? = nil,
-        note: String? = nil
+        note: String? = nil,
+        section: String? = nil
     ) {
         self.id = id
         self.name = name
         self.quantity = quantity
         self.note = note
+        self.section = section
     }
     
     var displayString: String {
@@ -44,7 +47,8 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
             id: id,
             name: name,
             quantity: quantity?.scaled(by: factor),
-            note: note
+            note: note,
+            section: section
         )
     }
 }

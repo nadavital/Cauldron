@@ -20,6 +20,7 @@ actor RecipeRepository {
     private let imageManager: ImageManager
     private let imageSyncManager: ImageSyncManager
     private let operationQueueService: OperationQueueService
+    private let externalShareService: ExternalShareService
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeRepository")
 
     // Track recipes pending sync
@@ -37,7 +38,8 @@ actor RecipeRepository {
         collectionRepository: CollectionRepository? = nil,
         imageManager: ImageManager,
         imageSyncManager: ImageSyncManager,
-        operationQueueService: OperationQueueService
+        operationQueueService: OperationQueueService,
+        externalShareService: ExternalShareService
     ) {
         self.modelContainer = modelContainer
         self.cloudKitService = cloudKitService
@@ -46,6 +48,7 @@ actor RecipeRepository {
         self.imageManager = imageManager
         self.imageSyncManager = imageSyncManager
         self.operationQueueService = operationQueueService
+        self.externalShareService = externalShareService
 
         // Start retry mechanism for failed syncs
         startSyncRetryTask()
@@ -234,6 +237,18 @@ actor RecipeRepository {
         return try model.toDomain()
     }
     
+    /// Fetch multiple recipes by IDs
+    func fetch(ids: [UUID]) async throws -> [Recipe] {
+        guard !ids.isEmpty else { return [] }
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { ids.contains($0.id) }
+        )
+        
+        let models = try context.fetch(descriptor)
+        return try models.map { try $0.toDomain() }
+    }
+    
     /// Fetch all recipes
     func fetchAll() async throws -> [Recipe] {
         let context = ModelContext(modelContainer)
@@ -358,6 +373,7 @@ actor RecipeRepository {
         model.yields = recipe.yields
         model.totalMinutes = recipe.totalMinutes
         model.nutritionBlob = try recipe.nutrition.map { try encoder.encode($0) }
+        model.relatedRecipeIdsBlob = try encoder.encode(recipe.relatedRecipeIds)
         model.sourceURL = recipe.sourceURL?.absoluteString
         model.sourceTitle = recipe.sourceTitle
         model.notes = recipe.notes
@@ -618,6 +634,10 @@ actor RecipeRepository {
             try await cloudKitService.copyRecipeToPublic(recipe)
             logger.info("✅ Successfully synced recipe to PUBLIC database")
 
+            // Update share metadata for persistent links
+            // This ensures logic is triggered automatically whenever a recipe is made public or updated while public
+            await externalShareService.updateShareMetadata(for: recipe)
+
             // Upload image to PUBLIC database only if it needs to be uploaded
             // Check if image exists and if it's been modified since last upload
             if recipe.imageURL != nil {
@@ -802,7 +822,7 @@ actor RecipeRepository {
     /// Migrate all public recipes to the public database
     /// This ensures that recipes marked as public are actually accessible to others
     func migratePublicRecipesToPublicDatabase() async {
-        let migrationKey = "hasMigratedPublicRecipesToPublicDB_v1"
+        let migrationKey = "hasMigratedPublicRecipesToPublicDB_v2" // Bumped to v2 to ensure share metadata sync
         
         // Check if already migrated (don't log - it's the common case)
         if UserDefaults.standard.bool(forKey: migrationKey) {
