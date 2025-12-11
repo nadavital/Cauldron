@@ -96,6 +96,9 @@ extension CloudKitService {
         if let savedAt = recipe.savedAt {
             record["savedAt"] = savedAt as CKRecordValue
         }
+        if let notes = recipe.notes {
+            record["notes"] = notes as CKRecordValue
+        }
 
         // Note: Image asset is uploaded separately via uploadImageAsset()
         // We preserve existing imageAsset and imageModifiedAt if they exist
@@ -453,6 +456,7 @@ extension CloudKitService {
         }()
         let originalCreatorName = record["originalCreatorName"] as? String
         let savedAt = record["savedAt"] as? Date
+        let notes = record["notes"] as? String
 
         return Recipe(
             id: recipeId,
@@ -465,7 +469,7 @@ extension CloudKitService {
             nutrition: nil,
             sourceURL: nil,
             sourceTitle: nil,
-            notes: nil,
+            notes: notes,
             imageURL: imageURL,
             isFavorite: false,
             visibility: visibility,
@@ -559,6 +563,9 @@ extension CloudKitService {
         }
         if let savedAt = recipe.savedAt {
             record["savedAt"] = savedAt as CKRecordValue
+        }
+        if let notes = recipe.notes {
+            record["notes"] = notes as CKRecordValue
         }
 
         _ = try await db.save(record)

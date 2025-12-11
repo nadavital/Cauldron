@@ -92,8 +92,14 @@ struct RecipeDetailView: View {
 
                     // Content sections
                     VStack(alignment: .leading, spacing: 20) {
-                        // Header
+                        // Header - overlaps the image with negative margin
                         headerSection
+                            .padding(.top, (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? -80 : 0)
+
+                        // Notes (right after header, before ingredients)
+                        if let notes = recipe.notes, !notes.isEmpty {
+                            notesSection(notes)
+                        }
 
                         // Ingredients
                         ingredientsSection
@@ -104,11 +110,6 @@ struct RecipeDetailView: View {
                         // Nutrition
                         if let nutrition = recipe.nutrition, nutrition.hasData {
                             nutritionSection(nutrition)
-                        }
-
-                        // Notes
-                        if let notes = recipe.notes, !notes.isEmpty {
-                            notesSection(notes)
                         }
 
                         // Related Recipes
