@@ -334,8 +334,10 @@ struct CollectionFormView: View {
             .sheet(isPresented: $showingEmojiPicker) {
                 EmojiPickerView(selectedEmoji: $emoji)
             }
-            .sheet(isPresented: $showingImagePicker) {
+            // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
+            .fullScreenCover(isPresented: $showingImagePicker) {
                 ImagePicker(image: $coverImage)
+                    .ignoresSafeArea()
             }
             .sheet(isPresented: $showingRecipeSelector) {
                 RecipeSelectorSheet(

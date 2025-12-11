@@ -68,8 +68,10 @@ struct RecipeEditorView: View {
                     .disabled(!viewModel.canSave || viewModel.isSaving)
                 }
             }
-            .sheet(isPresented: $showingImagePicker) {
+            // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
+            .fullScreenCover(isPresented: $showingImagePicker) {
                 ImagePicker(image: $viewModel.selectedImage, sourceType: imagePickerSourceType)
+                    .ignoresSafeArea()
             }
             .sheet(isPresented: $viewModel.isRelatedRecipesPickerPresented) {
                 NavigationStack {

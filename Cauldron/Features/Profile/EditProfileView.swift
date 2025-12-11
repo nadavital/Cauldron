@@ -274,8 +274,10 @@ struct ProfileEditView: View {
                     selectedColor: $profileColor
                 )
             }
-            .sheet(isPresented: $showingImagePicker) {
+            // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
+            .fullScreenCover(isPresented: $showingImagePicker) {
                 ImagePicker(image: $profileImage, sourceType: imagePickerSourceType)
+                    .ignoresSafeArea()
             }
             .task {
                 // Load existing profile image if available

@@ -158,8 +158,10 @@ struct EditProfileAvatarSheet: View {
                     .disabled(!canSave)
                 }
             }
-            .sheet(isPresented: $showingImagePicker) {
+            // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
+            .fullScreenCover(isPresented: $showingImagePicker) {
                 ImagePicker(image: $profileImage)
+                    .ignoresSafeArea()
             }
             .sheet(isPresented: $showingEmojiPicker) {
                 AvatarCustomizationSheet(
