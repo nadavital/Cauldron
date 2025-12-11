@@ -768,17 +768,13 @@ struct RecipeDetailView: View {
     
     private func loadRelatedRecipes() async {
         if recipe.relatedRecipeIds.isEmpty {
-            withAnimation {
-                self.relatedRecipes = []
-            }
+            self.relatedRecipes = []
             return
         }
         
         do {
             let recipes = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-            withAnimation {
-                self.relatedRecipes = recipes
-            }
+            self.relatedRecipes = recipes
         } catch {
             AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
         }

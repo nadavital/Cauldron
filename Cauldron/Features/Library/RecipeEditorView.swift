@@ -541,14 +541,16 @@ struct RecipeEditorView: View {
         Section("Related Recipes") {
             if !viewModel.relatedRecipes.isEmpty {
                 ForEach(viewModel.relatedRecipes) { recipe in
-                    HStack {
-                        Text(recipe.title)
-                        Spacer()
+                    HStack(spacing: 12) {
+                        RecipeRowView(recipe: recipe, dependencies: viewModel.dependencies)
+                            .allowsHitTesting(false)
+                        
                         Button(role: .destructive) {
                             viewModel.toggleRelatedRecipe(recipe)
                         } label: {
                             Image(systemName: "minus.circle.fill")
                                 .foregroundColor(.red)
+                                .font(.title3)
                         }
                         .buttonStyle(.plain)
                     }
@@ -564,7 +566,6 @@ struct RecipeEditorView: View {
                 Label("Add Related Recipe", systemImage: "link")
             }
         }
-
     }
     
     @ViewBuilder

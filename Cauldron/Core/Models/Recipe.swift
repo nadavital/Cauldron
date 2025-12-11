@@ -129,7 +129,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
-            savedAt: savedAt
+            savedAt: savedAt,
+            relatedRecipeIds: relatedRecipeIds
         )
     }
     
@@ -164,7 +165,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
-            savedAt: savedAt
+            savedAt: savedAt,
+            relatedRecipeIds: relatedRecipeIds
         )
     }
 
@@ -281,7 +283,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
-            savedAt: savedAt
+            savedAt: savedAt,
+            relatedRecipeIds: relatedRecipeIds
         )
     }
 
