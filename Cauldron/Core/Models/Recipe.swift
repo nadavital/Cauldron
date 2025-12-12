@@ -198,13 +198,13 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             sourceURL: sourceURL,
             sourceTitle: sourceTitle,
             notes: notes,
-            imageURL: imageURL,
+            imageURL: nil, // Clear imageURL - will be set after downloading from CloudKit
             isFavorite: false, // Reset favorite status
             visibility: .publicRecipe, // Keep it public by default to maintain sharing spirit
             ownerId: userId,
             cloudRecordName: nil, // Clear cloud record name for new copy
-            cloudImageRecordName: nil, // Clear cloud image record name for new copy
-            imageModifiedAt: nil, // Will be set when image is downloaded and saved
+            cloudImageRecordName: cloudImageRecordName, // Keep cloud image reference so we know to download it
+            imageModifiedAt: imageModifiedAt, // Preserve image modified timestamp
             createdAt: Date(),
             updatedAt: Date(),
             originalRecipeId: self.id, // Track the original recipe for update sync
