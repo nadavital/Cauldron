@@ -106,7 +106,12 @@ extension CloudKitService {
         // Configure notification with personalized message
         let notification = CKSubscription.NotificationInfo()
 
-        // Use simple alert message (can't rely on optional fields like toUsername being present)
+        // Use localization with field substitution to show acceptor's display name
+        // The toDisplayName field is populated when the recipient accepts the request
+        notification.alertLocalizationKey = "CONNECTION_ACCEPTED_ALERT"
+        notification.alertLocalizationArgs = ["toDisplayName"]
+
+        // Fallback message if localization fails or field is missing
         notification.alertBody = "Your friend request was accepted!"
 
         notification.soundName = "default"
@@ -114,8 +119,7 @@ extension CloudKitService {
         notification.shouldSendContentAvailable = true
 
         // Include connection data in userInfo for navigation
-        // Only request fields that are guaranteed to exist (avoid optional fields that may cause errors)
-        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status"]
+        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "toDisplayName", "status"]
 
         subscription.notificationInfo = notification
 

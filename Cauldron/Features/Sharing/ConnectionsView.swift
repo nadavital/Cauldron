@@ -146,85 +146,72 @@ struct ConnectionRequestCard: View {
     @State private var isProcessing = false
 
     var body: some View {
-        NavigationLink {
-            UserProfileView(user: user, dependencies: dependencies)
-        } label: {
-            HStack(spacing: 16) {
-                // Avatar
-                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
+        HStack(spacing: 12) {
+            // Avatar - smaller and more compact
+            NavigationLink {
+                UserProfileView(user: user, dependencies: dependencies)
+            } label: {
+                ProfileAvatar(user: user, size: 48, dependencies: dependencies)
+            }
+            .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(user.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+            // User info - more compact
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.displayName)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
 
-                    Text("@\(user.username)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                Text("@\(user.username)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.caption2)
-                        Text("wants to be friends")
-                            .font(.caption)
+            Spacer()
+
+            // Action buttons - horizontal for compactness
+            if isProcessing {
+                ProgressView()
+            } else {
+                HStack(spacing: 8) {
+                    Button {
+                        Task {
+                            isProcessing = true
+                            await onAccept()
+                            isProcessing = false
+                        }
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.green)
+                            .clipShape(Circle())
                     }
-                    .foregroundColor(.cauldronOrange)
-                }
 
-                Spacer()
-
-                // Action buttons
-                if isProcessing {
-                    ProgressView()
-                        .padding(.trailing, 8)
-                } else {
-                    VStack(spacing: 8) {
-                        Button {
-                            Task {
-                                isProcessing = true
-                                await onAccept()
-                                isProcessing = false
-                            }
-                        } label: {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(
-                                    Circle()
-                                        .fill(Color.green)
-                                )
-                                .shadow(color: Color.green.opacity(0.3), radius: 3, x: 0, y: 2)
+                    Button {
+                        Task {
+                            isProcessing = true
+                            await onReject()
+                            isProcessing = false
                         }
-
-                        Button {
-                            Task {
-                                isProcessing = true
-                                await onReject()
-                                isProcessing = false
-                            }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(
-                                    Circle()
-                                        .fill(Color.red)
-                                )
-                                .shadow(color: Color.red.opacity(0.3), radius: 3, x: 0, y: 2)
-                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.red)
+                            .clipShape(Circle())
                     }
                 }
             }
-            .padding(16)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(16)
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 }
 
