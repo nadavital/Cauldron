@@ -1223,6 +1223,10 @@ struct RecipeDetailView: View {
                 try await dependencies.recipeRepository.delete(id: existingPreview.id)
 
                 // Create a new recipe with a new ID but same content
+                // Store the original cloud image record name for downloading
+                let originalCloudImageRecordName = existingPreview.cloudImageRecordName
+                let originalRecipeId = existingPreview.originalRecipeId ?? existingPreview.id
+
                 copiedRecipe = Recipe(
                     id: UUID(),  // NEW ID to avoid CloudKit conflicts
                     title: existingPreview.title,
@@ -1235,16 +1239,16 @@ struct RecipeDetailView: View {
                     sourceURL: existingPreview.sourceURL,
                     sourceTitle: existingPreview.sourceTitle,
                     notes: existingPreview.notes,
-                    imageURL: nil,  // Will copy image file below
+                    imageURL: nil,  // Will be set after downloading
                     isFavorite: false,
                     visibility: .publicRecipe,  // Make public by default
                     ownerId: userId,  // Change owner
                     cloudRecordName: nil,  // Will be generated automatically
-                    cloudImageRecordName: existingPreview.cloudImageRecordName,  // Keep cloud image reference for download
-                    imageModifiedAt: existingPreview.imageModifiedAt,
+                    cloudImageRecordName: nil,  // Will be generated when we upload OUR copy
+                    imageModifiedAt: nil,
                     createdAt: Date(),  // New creation date
                     updatedAt: Date(),
-                    originalRecipeId: existingPreview.originalRecipeId ?? existingPreview.id,  // Use the REAL original ID
+                    originalRecipeId: originalRecipeId,  // Track the REAL original recipe
                     originalCreatorId: existingPreview.originalCreatorId ?? existingPreview.ownerId,
                     originalCreatorName: existingPreview.originalCreatorName ?? recipeOwner?.displayName,
                     savedAt: Date(),
@@ -1252,12 +1256,33 @@ struct RecipeDetailView: View {
                     isPreview: false  // No longer a preview
                 )
 
-                // Create the new recipe (will trigger CloudKit sync and automatic image download)
+                // Create the recipe first
                 try await dependencies.recipeRepository.create(copiedRecipe)
 
-                // Note: The repository.create() method will automatically download the image from CloudKit
-                // using the cloudImageRecordName and originalRecipeId we preserved above.
-                // No need to manually copy the image file here.
+                // Download the image from the original owner's PUBLIC database if it exists
+                if originalCloudImageRecordName != nil {
+                    do {
+                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
+                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                            recipeId: originalRecipeId,  // Use original recipe ID
+                            from: publicDB
+                        ), let image = UIImage(data: imageData) {
+                            // Save locally with NEW recipe ID
+                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
+                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
+
+                            // Update the recipe with the image
+                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
+                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: false)
+
+                            AppLogger.general.info("✅ Downloaded and saved image for copied recipe")
+                            copiedRecipe = updatedRecipe
+                        }
+                    } catch {
+                        AppLogger.general.warning("Failed to download image for copied recipe: \(error.localizedDescription)")
+                        // Continue without image
+                    }
+                }
 
                 AppLogger.general.info("✅ Converted preview to owned recipe: \(recipe.title)")
             } else {

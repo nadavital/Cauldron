@@ -64,51 +64,22 @@ extension RecipeRepository {
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipeToSave, cloudKitService, imageManager] in
+        Task.detached { [weak self, recipeToSave, cloudKitService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipeToSave.id)
 
-            // Download image from CloudKit if needed (recipe copied from another user)
-            var updatedRecipe = recipeToSave
-            if recipeToSave.cloudImageRecordName != nil && recipeToSave.imageURL == nil {
-                do {
-                    // Recipe has a cloud image but no local file - download it
-                    let publicDB = try await cloudKitService.getPublicDatabase()
-
-                    // Download using ORIGINAL recipe ID (where image is stored)
-                    if let originalId = recipeToSave.originalRecipeId,
-                       let imageData = try await cloudKitService.downloadImageAsset(
-                        recipeId: originalId,
-                        from: publicDB
-                       ), let image = UIImage(data: imageData) {
-                        // Save with NEW recipe ID
-                        let filename = try await imageManager.saveImage(image, recipeId: recipeToSave.id)
-                        let imageURL = await imageManager.imageURL(for: filename)
-
-                        // Update recipe with imageURL in database
-                        updatedRecipe = recipeToSave.withImageURL(imageURL)
-                        try await self.updateRecipeInDatabase(updatedRecipe, shouldUpdateTimestamp: false)
-
-                        self.logger.info("✅ Downloaded image for copied recipe: \(recipeToSave.title)")
-                    }
-                } catch {
-                    self.logger.warning("Failed to download image for copied recipe: \(error.localizedDescription)")
-                    // Continue without image - don't fail the whole operation
-                }
-            }
-
             // Attempt sync
-            await self.syncRecipeToCloudKit(updatedRecipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToCloudKit(recipeToSave, cloudKitService: cloudKitService)
 
             // Upload image to CloudKit if exists
-            if updatedRecipe.imageURL != nil {
-                await self.uploadRecipeImage(updatedRecipe, to: .private)
+            if recipeToSave.imageURL != nil {
+                await self.uploadRecipeImage(recipeToSave, to: .private)
             }
 
             // If visibility is public, also copy to PUBLIC database for sharing
-            await self.syncRecipeToPublicDatabase(updatedRecipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitService: cloudKitService)
 
             // Mark operation as completed
             await self.operationQueueService.markCompleted(
