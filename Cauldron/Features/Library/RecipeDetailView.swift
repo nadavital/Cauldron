@@ -274,6 +274,19 @@ struct RecipeDetailView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
+            // Check if a saved copy of this friend's recipe was deleted
+            // If so, reset hasOwnedCopy so the user can save it again
+            if let deletedRecipeId = notification.object as? UUID {
+                // If we're viewing someone else's recipe and our saved copy was deleted
+                if !recipe.isOwnedByCurrentUser() {
+                    Task {
+                        // Re-check if we still have an owned copy
+                        await checkForOwnedCopy()
+                    }
+                }
+            }
+        }
         .task {
             // Save non-owned recipes as preview for offline access with images
             if !recipe.isOwnedByCurrentUser() && !recipe.isPreview {
@@ -1271,9 +1284,9 @@ struct RecipeDetailView: View {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
                             let imageURL = await dependencies.imageManager.imageURL(for: filename)
 
-                            // Update the recipe with the image
+                            // Update the recipe with the image (skip image sync since we just downloaded it)
                             let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: false)
+                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
                             AppLogger.general.info("✅ Downloaded and saved image for copied recipe")
                             copiedRecipe = updatedRecipe

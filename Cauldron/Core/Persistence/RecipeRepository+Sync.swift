@@ -73,6 +73,12 @@ extension RecipeRepository {
     
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
     func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+        // Don't sync preview recipes to PUBLIC database - they're local-only copies
+        guard !recipe.isPreview else {
+            logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
+            return
+        }
+
         // Only sync if visibility is public
         guard recipe.visibility != .privateRecipe else {
             // If recipe was made private, delete from PUBLIC database (including image)
