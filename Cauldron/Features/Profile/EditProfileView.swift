@@ -168,87 +168,97 @@ struct ProfileEditView: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        // Avatar selection - capsule-style buttons matching onboarding
+                        // Avatar selection - vertical stack for better readability
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Profile Avatar")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
 
-                            // Horizontal button row for all avatar options
-                            HStack(spacing: 10) {
-                                // Emoji Avatar Button
-                                Button {
-                                    selectedAvatarType = .emoji
-                                    profileImage = nil
-                                    showingAvatarPicker = true
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "face.smiling")
-                                        Text(profileEmoji != nil ? "Edit Emoji" : "Emoji")
-                                        if selectedAvatarType == .emoji {
-                                            Image(systemName: "checkmark")
-                                                .font(.caption2)
-                                                .fontWeight(.bold)
-                                        }
+                            // Emoji Avatar Button
+                            Button {
+                                selectedAvatarType = .emoji
+                                profileImage = nil
+                                showingAvatarPicker = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "face.smiling")
+                                        .font(.title3)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(profileEmoji != nil ? "Edit Emoji" : "Emoji Avatar")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Choose an emoji and color")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(selectedAvatarType == .emoji ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
-                                    .foregroundColor(selectedAvatarType == .emoji ? .cauldronOrange : .primary)
-                                    .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-
-                                // Photo Library Button
-                                Button {
-                                    selectedAvatarType = .photo
-                                    imagePickerSourceType = .photoLibrary
-                                    showingImagePicker = true
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "photo.on.rectangle")
-                                        Text("Photos")
-                                        if selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) {
-                                            Image(systemName: "checkmark")
-                                                .font(.caption2)
-                                                .fontWeight(.bold)
-                                        }
+                                    Spacer()
+                                    if selectedAvatarType == .emoji {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.cauldronOrange)
                                     }
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(selectedAvatarType == .photo ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
-                                    .foregroundColor(selectedAvatarType == .photo ? .cauldronOrange : .primary)
-                                    .clipShape(Capsule())
                                 }
-                                .buttonStyle(.plain)
-
-                                // Camera Button
-                                Button {
-                                    selectedAvatarType = .photo
-                                    imagePickerSourceType = .camera
-                                    showingImagePicker = true
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "camera")
-                                        Text("Camera")
-                                    }
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(Color.cauldronSecondaryBackground)
-                                    .foregroundColor(.primary)
-                                    .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
+                                .padding()
+                                .background(selectedAvatarType == .emoji ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
+                                .foregroundColor(selectedAvatarType == .emoji ? .cauldronOrange : .primary)
+                                .cornerRadius(12)
                             }
+                            .buttonStyle(.plain)
+
+                            // Photo Library Button
+                            Button {
+                                selectedAvatarType = .photo
+                                imagePickerSourceType = .photoLibrary
+                                showingImagePicker = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "photo.on.rectangle")
+                                        .font(.title3)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Photo Library")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Choose from your photos")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.cauldronOrange)
+                                    }
+                                }
+                                .padding()
+                                .background(selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
+                                .foregroundColor(selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) ? .cauldronOrange : .primary)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(.plain)
+
+                            // Camera Button
+                            Button {
+                                selectedAvatarType = .photo
+                                imagePickerSourceType = .camera
+                                showingImagePicker = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "camera")
+                                        .font(.title3)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Take Photo")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Use your camera")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .foregroundColor(.primary)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(.plain)
 
                             // Show selected photo preview with remove option
                             if let image = profileImage {

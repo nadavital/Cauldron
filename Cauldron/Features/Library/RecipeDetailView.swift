@@ -1240,42 +1240,24 @@ struct RecipeDetailView: View {
                     visibility: .publicRecipe,  // Make public by default
                     ownerId: userId,  // Change owner
                     cloudRecordName: nil,  // Will be generated automatically
-                    cloudImageRecordName: nil,  // Will be generated on image upload
-                    imageModifiedAt: nil,
+                    cloudImageRecordName: existingPreview.cloudImageRecordName,  // Keep cloud image reference for download
+                    imageModifiedAt: existingPreview.imageModifiedAt,
                     createdAt: Date(),  // New creation date
                     updatedAt: Date(),
-                    originalRecipeId: existingPreview.id,  // Track original recipe ID
-                    originalCreatorId: existingPreview.ownerId,
-                    originalCreatorName: recipeOwner?.displayName,
+                    originalRecipeId: existingPreview.originalRecipeId ?? existingPreview.id,  // Use the REAL original ID
+                    originalCreatorId: existingPreview.originalCreatorId ?? existingPreview.ownerId,
+                    originalCreatorName: existingPreview.originalCreatorName ?? recipeOwner?.displayName,
                     savedAt: Date(),
                     relatedRecipeIds: existingPreview.relatedRecipeIds,
                     isPreview: false  // No longer a preview
                 )
 
-                // Create the new recipe (will trigger CloudKit sync)
+                // Create the new recipe (will trigger CloudKit sync and automatic image download)
                 try await dependencies.recipeRepository.create(copiedRecipe)
 
-                // Copy the image file from preview to new recipe if it exists
-                if let previewImageURL = existingPreview.imageURL {
-                    do {
-                        // Read the preview image data
-                        let imageData = try Data(contentsOf: previewImageURL)
-                        if let image = UIImage(data: imageData) {
-                            // Save with new recipe ID
-                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: false)
-                            AppLogger.general.info("✅ Copied image from preview to new recipe")
-
-                            // Update local reference
-                            copiedRecipe = updatedRecipe
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to copy preview image: \(error.localizedDescription)")
-                        // Continue without image
-                    }
-                }
+                // Note: The repository.create() method will automatically download the image from CloudKit
+                // using the cloudImageRecordName and originalRecipeId we preserved above.
+                // No need to manually copy the image file here.
 
                 AppLogger.general.info("✅ Converted preview to owned recipe: \(recipe.title)")
             } else {

@@ -534,7 +534,8 @@ extension RecipeRepository {
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             // Delete image from CloudKit if exists
-            if recipe.imageURL != nil {
+            // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
+            if recipe.imageURL != nil && !recipe.isPreview {
                 // Delete from Private database
                 await self.deleteRecipeImageFromPrivate(recipe)
 
@@ -545,10 +546,13 @@ extension RecipeRepository {
             }
 
             // Delete recipe metadata from CloudKit
-            await self.deleteRecipeFromCloudKit(recipe, cloudKitService: cloudKitService)
+            // IMPORTANT: Only delete if this is the user's own recipe, NOT a preview
+            if !recipe.isPreview {
+                await self.deleteRecipeFromCloudKit(recipe, cloudKitService: cloudKitService)
 
-            // Also delete from PUBLIC database if it was shared
-            await self.deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
+                // Also delete from PUBLIC database if it was shared
+                await self.deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
+            }
 
             // Mark operation as completed
             await self.operationQueueService.markCompleted(
