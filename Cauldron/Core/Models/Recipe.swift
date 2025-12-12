@@ -36,6 +36,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let originalCreatorName: String?  // Display name of the original creator (cached for performance)
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
     let relatedRecipeIds: [UUID] // IDs of related recipes
+    let isPreview: Bool  // true = saved locally but not owned (invisible in library), false = owned recipe
     
     init(
         id: UUID = UUID(),
@@ -62,7 +63,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil,
-        relatedRecipeIds: [UUID] = []
+        relatedRecipeIds: [UUID] = [],
+        isPreview: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -89,6 +91,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
         self.relatedRecipeIds = relatedRecipeIds
+        self.isPreview = isPreview
     }
     
     var displayTime: String? {
@@ -130,7 +133,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
-            relatedRecipeIds: relatedRecipeIds
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
         )
     }
     
@@ -166,7 +170,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
-            relatedRecipeIds: relatedRecipeIds
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
         )
     }
 
@@ -285,7 +290,8 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
-            relatedRecipeIds: relatedRecipeIds
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
         )
     }
 

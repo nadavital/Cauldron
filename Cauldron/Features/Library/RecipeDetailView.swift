@@ -275,6 +275,11 @@ struct RecipeDetailView: View {
             }
         }
         .task {
+            // Save non-owned recipes as preview for offline access with images
+            if !recipe.isOwnedByCurrentUser() && !recipe.isPreview {
+                await saveAsPreviewIfNeeded()
+            }
+
             // Check for duplicates when viewing someone else's recipe
             if !recipe.isOwnedByCurrentUser() {
                 await checkForOwnedCopy()
@@ -294,7 +299,7 @@ struct RecipeDetailView: View {
             if recipe.originalRecipeId != nil {
                 await checkForRecipeUpdates()
             }
-            
+
             // Load related recipes
             if !recipe.relatedRecipeIds.isEmpty {
                 await loadRelatedRecipes()
@@ -809,7 +814,7 @@ struct RecipeDetailView: View {
 
                 AppLogger.general.info("📥 Fetching \(missingIds.count) missing related recipes from CloudKit")
 
-                // Fetch missing recipes from CloudKit in parallel
+                // Fetch missing recipes from CloudKit in parallel and save as previews
                 await withTaskGroup(of: Recipe?.self) { group in
                     for missingId in missingIds {
                         group.addTask {
@@ -817,9 +822,71 @@ struct RecipeDetailView: View {
                         }
                     }
 
-                    for await recipe in group {
-                        if let recipe = recipe {
-                            loadedRecipes.append(recipe)
+                    for await fetchedRecipe in group {
+                        if let fetchedRecipe = fetchedRecipe {
+                            // Save as preview (isPreview = true) so it's available offline
+                            // but won't appear in user's library
+                            let previewRecipe = Recipe(
+                                id: fetchedRecipe.id,
+                                title: fetchedRecipe.title,
+                                ingredients: fetchedRecipe.ingredients,
+                                steps: fetchedRecipe.steps,
+                                yields: fetchedRecipe.yields,
+                                totalMinutes: fetchedRecipe.totalMinutes,
+                                tags: fetchedRecipe.tags,
+                                nutrition: fetchedRecipe.nutrition,
+                                sourceURL: fetchedRecipe.sourceURL,
+                                sourceTitle: fetchedRecipe.sourceTitle,
+                                notes: fetchedRecipe.notes,
+                                imageURL: nil, // Will be set after download
+                                isFavorite: false,
+                                visibility: fetchedRecipe.visibility,
+                                ownerId: fetchedRecipe.ownerId,
+                                cloudRecordName: fetchedRecipe.cloudRecordName,
+                                cloudImageRecordName: fetchedRecipe.cloudImageRecordName,
+                                imageModifiedAt: fetchedRecipe.imageModifiedAt,
+                                createdAt: fetchedRecipe.createdAt,
+                                updatedAt: fetchedRecipe.updatedAt,
+                                originalRecipeId: fetchedRecipe.originalRecipeId,
+                                originalCreatorId: fetchedRecipe.originalCreatorId,
+                                originalCreatorName: fetchedRecipe.originalCreatorName,
+                                savedAt: fetchedRecipe.savedAt,
+                                relatedRecipeIds: fetchedRecipe.relatedRecipeIds,
+                                isPreview: true  // Mark as preview
+                            )
+
+                            do {
+                                try await self.dependencies.recipeRepository.create(previewRecipe)
+                                AppLogger.general.info("📝 Saved related recipe as preview: \(fetchedRecipe.title)")
+
+                                // Download and save the image if it exists
+                                if fetchedRecipe.cloudImageRecordName != nil {
+                                    do {
+                                        let publicDB = try await self.dependencies.cloudKitService.getPublicDatabase()
+                                        if let filename = try await self.dependencies.imageManager.downloadImageFromCloud(
+                                            recipeId: previewRecipe.id,
+                                            database: publicDB
+                                        ) {
+                                            let imageURL = await self.dependencies.imageManager.imageURL(for: filename)
+                                            let updatedPreview = previewRecipe.withImageURL(imageURL)
+                                            try await self.dependencies.recipeRepository.update(updatedPreview)
+                                            AppLogger.general.info("✅ Downloaded image for preview recipe: \(fetchedRecipe.title)")
+                                            loadedRecipes.append(updatedPreview)
+                                        } else {
+                                            loadedRecipes.append(previewRecipe)
+                                        }
+                                    } catch {
+                                        AppLogger.general.warning("Failed to download image for preview recipe: \(error.localizedDescription)")
+                                        loadedRecipes.append(previewRecipe)
+                                    }
+                                } else {
+                                    loadedRecipes.append(previewRecipe)
+                                }
+                            } catch {
+                                AppLogger.general.warning("Failed to save preview recipe: \(error.localizedDescription)")
+                                // Still add to display even if save failed
+                                loadedRecipes.append(fetchedRecipe)
+                            }
                         }
                     }
                 }
@@ -1115,20 +1182,105 @@ struct RecipeDetailView: View {
                         originalCreatorName: nil // We don't have the creator name cached
                     )
                     try await dependencies.recipeRepository.create(copiedRelated)
+
+                    // Download and save the image if it exists
+                    if relatedRecipe.cloudImageRecordName != nil {
+                        do {
+                            let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
+                            // IMPORTANT: Download using ORIGINAL recipe ID (where image is stored in CloudKit)
+                            // Then save with NEW recipe ID (copiedRelated.id)
+                            if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                                recipeId: relatedRecipe.id,  // Original ID
+                                from: publicDB
+                            ), let image = UIImage(data: imageData) {
+                                // Save with new recipe ID
+                                let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
+                                let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                                let updatedRelated = copiedRelated.withImageURL(imageURL)
+                                try await dependencies.recipeRepository.update(updatedRelated)
+                                AppLogger.general.info("✅ Downloaded image for related recipe: \(relatedRecipe.title)")
+                            }
+                        } catch {
+                            AppLogger.general.warning("Failed to download image for related recipe: \(error.localizedDescription)")
+                            // Don't fail the whole save if image download fails
+                        }
+                    }
                 }
 
                 AppLogger.general.info("✅ Saved \(relatedRecipesToSave.count) related recipes")
             }
 
-            // Create a copy of the recipe owned by the current user
-            let copiedRecipe = recipe.withOwner(
-                userId,
-                originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipeOwner?.displayName
-            )
+            // Check if recipe already exists as a preview
+            let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id)
 
-            try await dependencies.recipeRepository.create(copiedRecipe)
-            AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
+            let copiedRecipe: Recipe
+            if let existingPreview = existingRecipe, existingPreview.isPreview {
+                // Convert preview to owned recipe
+                AppLogger.general.info("🔄 Converting preview to owned recipe: \(recipe.title)")
+                copiedRecipe = Recipe(
+                    id: existingPreview.id,  // Keep same ID
+                    title: existingPreview.title,
+                    ingredients: existingPreview.ingredients,
+                    steps: existingPreview.steps,
+                    yields: existingPreview.yields,
+                    totalMinutes: existingPreview.totalMinutes,
+                    tags: existingPreview.tags,
+                    nutrition: existingPreview.nutrition,
+                    sourceURL: existingPreview.sourceURL,
+                    sourceTitle: existingPreview.sourceTitle,
+                    notes: existingPreview.notes,
+                    imageURL: existingPreview.imageURL,  // Preserve existing image
+                    isFavorite: false,
+                    visibility: .publicRecipe,  // Make public by default
+                    ownerId: userId,  // Change owner
+                    cloudRecordName: nil,  // Clear cloud record (new recipe in cloud)
+                    cloudImageRecordName: existingPreview.cloudImageRecordName,
+                    imageModifiedAt: existingPreview.imageModifiedAt,
+                    createdAt: Date(),  // New creation date
+                    updatedAt: Date(),
+                    originalRecipeId: existingPreview.id,  // Track original
+                    originalCreatorId: existingPreview.ownerId,
+                    originalCreatorName: recipeOwner?.displayName,
+                    savedAt: Date(),
+                    relatedRecipeIds: existingPreview.relatedRecipeIds,
+                    isPreview: false  // No longer a preview
+                )
+                try await dependencies.recipeRepository.update(copiedRecipe)
+                AppLogger.general.info("✅ Converted preview to owned recipe: \(recipe.title)")
+            } else {
+                // Create new copy
+                copiedRecipe = recipe.withOwner(
+                    userId,
+                    originalCreatorId: recipe.ownerId,
+                    originalCreatorName: recipeOwner?.displayName
+                )
+
+                try await dependencies.recipeRepository.create(copiedRecipe)
+                AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
+
+                // Download and save the image if it exists in CloudKit
+                if recipe.cloudImageRecordName != nil && copiedRecipe.imageURL == nil {
+                    do {
+                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
+                        // IMPORTANT: Download using ORIGINAL recipe ID (where image is stored in CloudKit)
+                        // Then save with NEW recipe ID (copiedRecipe.id)
+                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                            recipeId: recipe.id,  // Original ID
+                            from: publicDB
+                        ), let image = UIImage(data: imageData) {
+                            // Save with new recipe ID
+                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
+                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
+                            try await dependencies.recipeRepository.update(updatedRecipe)
+                            AppLogger.general.info("✅ Downloaded and saved recipe image: \(filename)")
+                        }
+                    } catch {
+                        AppLogger.general.warning("Failed to download recipe image: \(error.localizedDescription)")
+                        // Don't fail the whole save if image download fails
+                    }
+                }
+            }
 
             // Notify other views
             NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
@@ -1149,6 +1301,92 @@ struct RecipeDetailView: View {
             AppLogger.general.error("❌ Failed to save recipe: \(error.localizedDescription)")
             errorMessage = "Failed to save recipe: \(error.localizedDescription)"
             showErrorAlert = true
+        }
+    }
+
+    /// Save recipe as preview for offline access with image
+    /// This is called when viewing a public/friend's recipe for the first time
+    private func saveAsPreviewIfNeeded() async {
+        do {
+            // Check if recipe already exists in database (as preview or owned)
+            if let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
+                // Recipe already exists - check if it needs image download
+                if existingRecipe.imageURL == nil && recipe.cloudImageRecordName != nil {
+                    AppLogger.general.info("📥 Downloading image for existing preview recipe: \(recipe.title)")
+                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
+                    if let filename = try await dependencies.imageManager.downloadImageFromCloud(
+                        recipeId: recipe.id,
+                        database: publicDB
+                    ) {
+                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                        let updatedRecipe = existingRecipe.withImageURL(imageURL)
+                        try await dependencies.recipeRepository.update(updatedRecipe)
+                        AppLogger.general.info("✅ Updated preview with image: \(recipe.title)")
+
+                        // Update local state to show image
+                        self.recipe = updatedRecipe
+                        imageRefreshID = UUID()
+                    }
+                }
+                return
+            }
+
+            // Recipe doesn't exist - save as preview
+            let previewRecipe = Recipe(
+                id: recipe.id,
+                title: recipe.title,
+                ingredients: recipe.ingredients,
+                steps: recipe.steps,
+                yields: recipe.yields,
+                totalMinutes: recipe.totalMinutes,
+                tags: recipe.tags,
+                nutrition: recipe.nutrition,
+                sourceURL: recipe.sourceURL,
+                sourceTitle: recipe.sourceTitle,
+                notes: recipe.notes,
+                imageURL: nil, // Will be set after download
+                isFavorite: false,
+                visibility: recipe.visibility,
+                ownerId: recipe.ownerId,
+                cloudRecordName: recipe.cloudRecordName,
+                cloudImageRecordName: recipe.cloudImageRecordName,
+                imageModifiedAt: recipe.imageModifiedAt,
+                createdAt: recipe.createdAt,
+                updatedAt: recipe.updatedAt,
+                originalRecipeId: recipe.originalRecipeId,
+                originalCreatorId: recipe.originalCreatorId,
+                originalCreatorName: recipe.originalCreatorName,
+                savedAt: recipe.savedAt,
+                relatedRecipeIds: recipe.relatedRecipeIds,
+                isPreview: true
+            )
+
+            try await dependencies.recipeRepository.create(previewRecipe)
+            AppLogger.general.info("📝 Saved recipe as preview: \(recipe.title)")
+
+            // Download and save the image if it exists
+            if recipe.cloudImageRecordName != nil {
+                do {
+                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
+                    if let filename = try await dependencies.imageManager.downloadImageFromCloud(
+                        recipeId: previewRecipe.id,
+                        database: publicDB
+                    ) {
+                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                        let updatedPreview = previewRecipe.withImageURL(imageURL)
+                        try await dependencies.recipeRepository.update(updatedPreview)
+                        AppLogger.general.info("✅ Downloaded image for preview recipe: \(recipe.title)")
+
+                        // Update local state to show image
+                        self.recipe = updatedPreview
+                        imageRefreshID = UUID()
+                    }
+                } catch {
+                    AppLogger.general.warning("Failed to download image for preview: \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            AppLogger.general.error("Failed to save preview recipe: \(error.localizedDescription)")
         }
     }
 

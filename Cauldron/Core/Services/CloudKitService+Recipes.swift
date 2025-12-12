@@ -100,6 +100,9 @@ extension CloudKitService {
             record["notes"] = notes as CKRecordValue
         }
 
+        // Preview status (for local-only preview recipes)
+        record["isPreview"] = recipe.isPreview as CKRecordValue
+
         // Note: Image asset is uploaded separately via uploadImageAsset()
         // We preserve existing imageAsset and imageModifiedAt if they exist
         // This allows recipe data sync to happen independently from image sync
@@ -185,6 +188,9 @@ extension CloudKitService {
         if let originalCreatorName = recipe.originalCreatorName {
             record["originalCreatorName"] = originalCreatorName as CKRecordValue
         }
+
+        // Preview status (for local-only preview recipes)
+        record["isPreview"] = recipe.isPreview as CKRecordValue
 
         // Save to public database
         do {
@@ -458,6 +464,9 @@ extension CloudKitService {
         let savedAt = record["savedAt"] as? Date
         let notes = record["notes"] as? String
 
+        // Preview status - defaults to false if not present (for backward compatibility)
+        let isPreview = record["isPreview"] as? Bool ?? false
+
         return Recipe(
             id: recipeId,
             title: title,
@@ -483,7 +492,8 @@ extension CloudKitService {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
-            relatedRecipeIds: relatedRecipeIds
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
         )
     }
 
@@ -567,6 +577,9 @@ extension CloudKitService {
         if let notes = recipe.notes {
             record["notes"] = notes as CKRecordValue
         }
+
+        // Preview status (for local-only preview recipes)
+        record["isPreview"] = recipe.isPreview as CKRecordValue
 
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")

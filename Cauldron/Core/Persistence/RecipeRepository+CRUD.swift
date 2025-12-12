@@ -178,13 +178,15 @@ extension RecipeRepository {
         return try models.map { try $0.toDomain() }
     }
     
-    /// Fetch all recipes
+    /// Fetch all recipes (excludes preview recipes)
     func fetchAll() async throws -> [Recipe] {
         let context = ModelContext(modelContainer)
+        // Filter out preview recipes (isPreview = true) - they're for offline access only
         let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.isPreview == false },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
-        
+
         let models = try context.fetch(descriptor)
         return try models.map { try $0.toDomain() }
     }

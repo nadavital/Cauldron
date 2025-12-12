@@ -47,6 +47,7 @@ final class RecipeModel {
     var originalCreatorId: UUID?
     var originalCreatorName: String?
     var savedAt: Date?
+    var isPreview: Bool = false  // true = saved locally but not owned (invisible in library)
 
     init(
         id: UUID = UUID(),
@@ -73,7 +74,8 @@ final class RecipeModel {
         originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
-        savedAt: Date? = nil
+        savedAt: Date? = nil,
+        isPreview: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -100,6 +102,7 @@ final class RecipeModel {
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
+        self.isPreview = isPreview
     }
     
     /// Convert from domain Recipe to RecipeModel
@@ -139,7 +142,8 @@ final class RecipeModel {
             originalRecipeId: recipe.originalRecipeId,
             originalCreatorId: recipe.originalCreatorId,
             originalCreatorName: recipe.originalCreatorName,
-            savedAt: recipe.savedAt
+            savedAt: recipe.savedAt,
+            isPreview: recipe.isPreview
         )
     }
     
@@ -181,7 +185,7 @@ final class RecipeModel {
                         visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
                         ownerId: ownerId, cloudRecordName: cloudRecordName,
                         createdAt: createdAt, updatedAt: updatedAt,
-                        relatedRecipeIds: relatedRecipeIds
+                        relatedRecipeIds: relatedRecipeIds, isPreview: isPreview
                     )
                 }
             } else {
@@ -219,7 +223,8 @@ final class RecipeModel {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
-            relatedRecipeIds: relatedRecipeIds
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
         )
     }
 }
