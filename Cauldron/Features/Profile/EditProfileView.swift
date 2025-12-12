@@ -71,179 +71,269 @@ struct ProfileEditView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                // Profile Section (Avatar + Preview)
-                Section {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            // Avatar with edit button
-                            ZStack(alignment: .bottomTrailing) {
-                                // Avatar Display
-                                if selectedAvatarType == .photo {
-                                    if let profileImage = profileImage {
-                                        Image(uiImage: profileImage)
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 100, height: 100)
-                                            .clipShape(Circle())
-                                    } else {
-                                        Circle()
-                                            .fill(Color.gray.opacity(0.2))
-                                            .frame(width: 100, height: 100)
-                                            .overlay(
-                                                Image(systemName: "person.crop.circle")
-                                                    .font(.system(size: 50))
-                                                    .foregroundColor(.secondary)
-                                            )
-                                    }
-                                } else {
-                                    Circle()
-                                        .fill((profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange).opacity(0.15))
-                                        .frame(width: 100, height: 100)
-                                        .overlay(
-                                            Group {
-                                                if let emoji = profileEmoji {
-                                                    Text(emoji)
-                                                        .font(.system(size: 50))
-                                                } else {
-                                                    Text(displayName.isEmpty ? "?" : String(displayName.prefix(2)).uppercased())
-                                                        .font(.title)
-                                                        .fontWeight(.semibold)
-                                                        .foregroundColor(profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange)
-                                                }
-                                            }
-                                        )
-                                }
-
-                                // Edit Avatar Button
-                                Button {
-                                    showingAvatarPicker = true
-                                } label: {
-                                    Image(systemName: "pencil.circle.fill")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.cauldronOrange)
-                                        .background(
-                                            Circle()
-                                                .fill(Color.cauldronSecondaryBackground)
-                                                .frame(width: 28, height: 28)
-                                        )
-                                }
-                                .offset(x: 4, y: 4)
+            ScrollView {
+                VStack(spacing: 32) {
+                    // Profile Preview (matching onboarding)
+                    VStack(spacing: 16) {
+                        // Avatar Display
+                        if selectedAvatarType == .photo {
+                            if let profileImage = profileImage {
+                                Image(uiImage: profileImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(Circle())
+                            } else if let profileImageURL = currentUser.profileImageURL,
+                                      let imageData = try? Data(contentsOf: profileImageURL),
+                                      let image = UIImage(data: imageData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(Color.gray.opacity(0.2))
+                                    .frame(width: 100, height: 100)
+                                    .overlay(
+                                        Image(systemName: "person.crop.circle")
+                                            .font(.system(size: 50))
+                                            .foregroundColor(.secondary)
+                                    )
                             }
+                        } else {
+                            Circle()
+                                .fill((profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange).opacity(0.15))
+                                .frame(width: 100, height: 100)
+                                .overlay(
+                                    Group {
+                                        if let emoji = profileEmoji {
+                                            Text(emoji)
+                                                .font(.system(size: 50))
+                                        } else {
+                                            Text(displayName.isEmpty ? "?" : String(displayName.prefix(2)).uppercased())
+                                                .font(.title)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange)
+                                        }
+                                    }
+                                )
+                        }
 
-                            Text(displayName.isEmpty ? "Your Name" : displayName)
+                        Text(displayName.isEmpty ? "Your Name" : displayName)
+                            .font(.title2)
+                            .fontWeight(.bold)
+
+                        Text("@\(username.isEmpty ? "username" : username)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 20)
+
+                    // Profile form (matching onboarding style)
+                    VStack(spacing: 24) {
+                        // Username field
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Username")
                                 .font(.headline)
-
-                            Text("@\(username.isEmpty ? "username" : username)")
-                                .font(.subheadline)
                                 .foregroundColor(.secondary)
 
-                            // Avatar Type Switcher
-                            Picker("Avatar Style", selection: $selectedAvatarType) {
-                                Label("Emoji", systemImage: "face.smiling").tag(AvatarType.emoji)
-                                Label("Photo", systemImage: "photo").tag(AvatarType.photo)
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .onChange(of: selectedAvatarType) { oldValue, newValue in
-                                if newValue == .photo {
-                                    profileEmoji = nil
-                                } else {
+                            TextField("username", text: $username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .textCase(.lowercase)
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+
+                            Text("3-20 characters, letters, numbers, and underscores only")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Display Name field
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Display Name")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            TextField("Your Name", text: $displayName)
+                                .textInputAutocapitalization(.words)
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+
+                            Text("This is how others will see you")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        // Avatar selection - capsule-style buttons matching onboarding
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Profile Avatar")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            // Horizontal button row for all avatar options
+                            HStack(spacing: 10) {
+                                // Emoji Avatar Button
+                                Button {
+                                    selectedAvatarType = .emoji
                                     profileImage = nil
+                                    showingAvatarPicker = true
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "face.smiling")
+                                        Text(profileEmoji != nil ? "Edit Emoji" : "Emoji")
+                                        if selectedAvatarType == .emoji {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption2)
+                                                .fontWeight(.bold)
+                                        }
+                                    }
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(selectedAvatarType == .emoji ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
+                                    .foregroundColor(selectedAvatarType == .emoji ? .cauldronOrange : .primary)
+                                    .clipShape(Capsule())
                                 }
+                                .buttonStyle(.plain)
+
+                                // Photo Library Button
+                                Button {
+                                    selectedAvatarType = .photo
+                                    imagePickerSourceType = .photoLibrary
+                                    showingImagePicker = true
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "photo.on.rectangle")
+                                        Text("Photos")
+                                        if selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption2)
+                                                .fontWeight(.bold)
+                                        }
+                                    }
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(selectedAvatarType == .photo ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
+                                    .foregroundColor(selectedAvatarType == .photo ? .cauldronOrange : .primary)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+
+                                // Camera Button
+                                Button {
+                                    selectedAvatarType = .photo
+                                    imagePickerSourceType = .camera
+                                    showingImagePicker = true
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "camera")
+                                        Text("Camera")
+                                    }
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(Color.cauldronSecondaryBackground)
+                                    .foregroundColor(.primary)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
 
-                            // Photo source picker (underneath avatar type picker)
-                            if selectedAvatarType == .photo {
-                                HStack(spacing: 8) {
-                                    Button {
-                                        imagePickerSourceType = .photoLibrary
-                                        showingImagePicker = true
-                                    } label: {
-                                        Label("Photo Library", systemImage: "photo.on.rectangle")
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(.bordered)
+                            // Show selected photo preview with remove option
+                            if let image = profileImage {
+                                HStack(spacing: 12) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 44, height: 44)
+                                        .clipShape(Circle())
 
-                                    Button {
-                                        imagePickerSourceType = .camera
-                                        showingImagePicker = true
-                                    } label: {
-                                        Label("Camera", systemImage: "camera")
-                                            .frame(maxWidth: .infinity)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Photo selected")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Tap × to remove")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .tint(.cauldronOrange)
-                                }
 
-                                if profileImage != nil || currentUser.profileImageURL != nil {
+                                    Spacer()
+
                                     Button {
                                         profileImage = nil
                                         selectedAvatarType = .emoji
                                     } label: {
-                                        Label("Remove Photo", systemImage: "trash")
-                                            .frame(maxWidth: .infinity)
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.title2)
+                                            .foregroundColor(.secondary)
                                     }
-                                    .buttonStyle(.bordered)
-                                    .tint(.red)
                                 }
+                                .padding(12)
+                                .background(Color.cauldronOrange.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
 
-                            // Edit emoji/color button
-                            if selectedAvatarType == .emoji {
-                                Button {
-                                    showingAvatarPicker = true
-                                } label: {
-                                    Label("Edit Emoji & Color", systemImage: "paintpalette")
-                                        .frame(maxWidth: .infinity)
+                            // Show selected emoji preview
+                            if let emoji = profileEmoji, selectedAvatarType == .emoji {
+                                HStack(spacing: 12) {
+                                    Text(emoji)
+                                        .font(.system(size: 32))
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Emoji avatar selected")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                        Text("Tap Edit Emoji to change")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
                                 }
-                                .buttonStyle(.bordered)
-                                .tint(.cauldronOrange)
+                                .padding(12)
+                                .background(Color.cauldronOrange.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
                         }
-                        Spacer()
-                    }
-                    .padding(.vertical, 12)
-                } header: {
-                    Text("Profile")
-                }
 
-                // Display Name
-                Section {
-                    TextField("Display Name", text: $displayName)
-                } header: {
-                    Text("Display Name")
-                } footer: {
-                    Text("Your name as it appears to others")
-                }
+                        // Delete Account Section
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Account")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
 
-                // Username
-                Section {
-                    TextField("Username", text: $username)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .textCase(.lowercase)
-                } header: {
-                    Text("Username")
-                } footer: {
-                    Text("Must be 3-20 characters, letters, numbers, and underscores only. Used for searching and @mentions.")
-                }
-
-                // Delete Account
-                Section {
-                    NavigationLink {
-                        DeleteAccountView(dependencies: dependencies)
-                    } label: {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text("Delete Account")
-                                .foregroundColor(.primary)
+                            NavigationLink {
+                                DeleteAccountView(dependencies: dependencies)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("Delete Account")
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                } header: {
-                    Text("Delete Account")
+                    .padding(.horizontal)
                 }
             }
             .navigationTitle("Edit Profile")

@@ -369,23 +369,23 @@ struct UserProfileView: View {
     }
 
     private var collectionsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             // Section header
             HStack {
-                Label("Collections", systemImage: "folder")
+                Image(systemName: "folder.fill")
+                    .foregroundColor(.purple)
+                Text("Collections")
                     .font(.title2)
                     .fontWeight(.bold)
 
                 Spacer()
 
-                if !viewModel.isLoadingCollections && !viewModel.userCollections.isEmpty {
-                    Text("\(viewModel.userCollections.count)")
+                if !viewModel.userCollections.isEmpty {
+                    Text("See All")
                         .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal)
 
             // Content
             if viewModel.isLoadingCollections {
@@ -398,73 +398,84 @@ struct UserProfileView: View {
             } else if viewModel.userCollections.isEmpty {
                 emptyCollectionsState
             } else {
-                collectionsScrollView
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(viewModel.userCollections.prefix(10), id: \.id) { collection in
+                            NavigationLink(destination: CollectionDetailView(
+                                collection: collection,
+                                dependencies: viewModel.dependencies
+                            )) {
+                                CollectionCardCompact(collection: collection)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
         }
     }
 
     private var emptyCollectionsState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "folder")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple.opacity(0.2), Color.purple.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
 
-            Text(viewModel.isCurrentUser ? "No collections to show" : "\(user.displayName) hasn't shared any collections yet")
+                Image(systemName: "folder")
+                    .font(.system(size: 28))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.purple, Color.purple.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+
+            Text(viewModel.isCurrentUser ? "No Collections Yet" : "No Shared Collections")
                 .font(.subheadline)
+                .fontWeight(.medium)
+
+            Text(viewModel.isCurrentUser ? "Create collections to organize recipes" : "\(user.displayName) hasn't shared any collections")
+                .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-    }
-
-    private var collectionsScrollView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(viewModel.userCollections, id: \.id) { collection in
-                    NavigationLink(destination: CollectionDetailView(
-                        collection: collection,
-                        dependencies: viewModel.dependencies
-                    )) {
-                        CollectionCardView(
-                            collection: collection,
-                            recipeImages: collectionImageCache[collection.id] ?? [],
-                            dependencies: viewModel.dependencies
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .task(id: collection.id) {
-                        // Load recipe images if not cached
-                        if collectionImageCache[collection.id] == nil {
-                            let images = await viewModel.getRecipeImages(for: collection)
-                            collectionImageCache[collection.id] = images
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal)
-        }
+        .padding(.vertical, 30)
     }
 
     private var recipesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             // Section header
             HStack {
-                Label("Recipes", systemImage: "book")
+                Image(systemName: "book.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text(viewModel.searchText.isEmpty ? "Recipes" : "Search Results")
                     .font(.title2)
                     .fontWeight(.bold)
 
                 Spacer()
 
-                // Show count when searching
-                if !viewModel.searchText.isEmpty && !viewModel.isLoadingRecipes {
-                    Text("\(viewModel.filteredRecipes.count)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                if !viewModel.filteredRecipes.isEmpty && viewModel.searchText.isEmpty {
+                    NavigationLink(destination: AllProfileRecipesListView(
+                        recipes: viewModel.filteredRecipes,
+                        user: user,
+                        dependencies: viewModel.dependencies
+                    )) {
+                        Text("See All")
+                            .font(.subheadline)
+                            .foregroundColor(.cauldronOrange)
+                    }
                 }
             }
-            .padding(.horizontal)
 
             // Content
             if viewModel.isLoadingRecipes {
@@ -477,24 +488,84 @@ struct UserProfileView: View {
             } else if viewModel.filteredRecipes.isEmpty {
                 emptyRecipesState
             } else {
-                recipesGrid
+                // Horizontal scroll for normal view, grid for search
+                if viewModel.searchText.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(viewModel.filteredRecipes.prefix(10), id: \.id) { sharedRecipe in
+                                NavigationLink(destination: RecipeDetailView(
+                                    recipe: sharedRecipe.recipe,
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: sharedRecipe.sharedBy,
+                                    sharedAt: sharedRecipe.sharedAt
+                                )) {
+                                    ProfileRecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    // Grid view for search results
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 16),
+                        GridItem(.flexible(), spacing: 16)
+                    ], spacing: 16) {
+                        ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
+                            NavigationLink(destination: RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: viewModel.dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )) {
+                                ProfileRecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
         }
     }
 
     private var emptyRecipesState: some View {
         VStack(spacing: 12) {
-            Image(systemName: viewModel.searchText.isEmpty ? "book.closed" : "magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.cauldronOrange.opacity(0.2), Color.cauldronOrange.opacity(0.05)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 60, height: 60)
+
+                Image(systemName: viewModel.searchText.isEmpty ? "book.closed" : "magnifyingglass")
+                    .font(.system(size: 28))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
 
             Text(emptyStateMessage)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .fontWeight(.medium)
                 .multilineTextAlignment(.center)
+
+            if viewModel.searchText.isEmpty && viewModel.connectionState != .connected {
+                Text("Connect with \(user.displayName) to see their recipes")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, 30)
     }
 
     private var emptyStateMessage: String {
@@ -503,40 +574,8 @@ struct UserProfileView: View {
         } else if viewModel.connectionState == .connected {
             return "\(user.displayName) hasn't shared any recipes yet"
         } else {
-            return "\(user.displayName) hasn't made any recipes public yet"
+            return "No Public Recipes"
         }
-    }
-
-    private var recipesGrid: some View {
-        LazyVGrid(columns: [
-            GridItem(.flexible(), spacing: 16),
-            GridItem(.flexible(), spacing: 16)
-        ], spacing: 16) {
-            ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
-                if sharedRecipe.recipe.isOwnedByCurrentUser() {
-                    // Own recipe - use RecipeDetailView for full editing capabilities
-                    NavigationLink(destination: RecipeDetailView(
-                        recipe: sharedRecipe.recipe,
-                        dependencies: viewModel.dependencies
-                    )) {
-                        RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    // Someone else's recipe - use RecipeDetailView (read-only)
-                    NavigationLink(destination: RecipeDetailView(
-                        recipe: sharedRecipe.recipe,
-                        dependencies: viewModel.dependencies,
-                        sharedBy: sharedRecipe.sharedBy,
-                        sharedAt: sharedRecipe.sharedAt
-                    )) {
-                        RecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.horizontal)
     }
 
     private func generateShareLink() async {
@@ -561,171 +600,119 @@ struct UserProfileView: View {
     }
 }
 
-// MARK: - Recipe Card
+// MARK: - Profile Recipe Card (horizontal scroll)
 
-struct RecipeCard: View {
+struct ProfileRecipeCard: View {
     let sharedRecipe: SharedRecipe
     let dependencies: DependencyContainer
 
-    @MainActor
-    private var isOwnRecipe: Bool {
-        sharedRecipe.recipe.isOwnedByCurrentUser()
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Image - using RecipeImageView with CloudKit fallback
-            // Fixed aspect ratio container to ensure consistent card sizes
-            GeometryReader { geometry in
-                RecipeImageView(
-                    imageURL: sharedRecipe.recipe.imageURL,
-                    size: .preview,
-                    showPlaceholderText: false,
-                    recipeImageService: dependencies.recipeImageService,
-                    recipeId: sharedRecipe.recipe.id,
-                    ownerId: sharedRecipe.recipe.ownerId
-                )
-                .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
-                .clipped()
-                .cornerRadius(12)
-            }
-            .aspectRatio(1.5, contentMode: .fit)
+            // Image
+            RecipeImageView(recipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
+                .frame(width: 240, height: 160)
 
             // Title
             Text(sharedRecipe.recipe.title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(2)
-                .foregroundColor(.primary)
-                .frame(height: 40, alignment: .top)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(width: 240, height: 20, alignment: .leading)
 
-            // Meta info
-            HStack(spacing: 8) {
+            // Time and visibility
+            HStack(spacing: 6) {
                 if let time = sharedRecipe.recipe.displayTime {
-                    Label(time, systemImage: "clock")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(time)
+                            .font(.caption)
+                    }
+                    .foregroundColor(.cauldronOrange)
                 }
 
                 Spacer()
 
-                // Show ownership or visibility indicator
-                if isOwnRecipe {
-                    // Own recipe - show visibility status
+                // Visibility indicator for own recipes
+                if sharedRecipe.recipe.isOwnedByCurrentUser() {
                     Image(systemName: sharedRecipe.recipe.visibility.icon)
                         .font(.caption2)
-                        .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .cauldronOrange)
-                } else {
-                    // Others' recipe - show shared indicator
-                    Image(systemName: "person.circle")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .secondary)
                 }
             }
-            
-            // Tags (always reserve space for consistent card height)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    if !sharedRecipe.recipe.tags.isEmpty {
-                        ForEach(sharedRecipe.recipe.tags.prefix(2)) { tag in
-                            TagView(tag)
-                                .scaleEffect(0.8) // Make them slightly smaller for the card
-                        }
-                    }
-                }
-            }
-            .frame(height: 24)
+            .frame(width: 240, height: 20)
         }
-        .padding(12)
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
-    }
-
-    private var placeholderImage: some View {
-        GeometryReader { geometry in
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color.cauldronOrange.opacity(0.08),
-                        Color.cauldronOrange.opacity(0.02)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                Image(systemName: "fork.knife")
-                    .font(.system(size: 36))
-                    .foregroundStyle(Color.cauldronOrange.opacity(0.3))
-            }
-            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .aspectRatio(1.5, contentMode: .fit)
+        .frame(width: 240)
     }
 }
 
-// MARK: - Profile Recipe Image
+// MARK: - Collection Card Compact
 
-/// Adaptive recipe image for profile grid that fills available width
-struct ProfileRecipeImage: View {
-    let imageURL: URL
-    let recipeImageService: RecipeImageService
-
-    @State private var loadedImage: UIImage?
-    @State private var imageOpacity: Double = 0
+struct CollectionCardCompact: View {
+    let collection: Collection
 
     var body: some View {
-        GeometryReader { geometry in
-            Group {
-                if let image = loadedImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .opacity(imageOpacity)
+        VStack(spacing: 8) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(selectedColor.opacity(0.15))
+                    .frame(width: 80, height: 80)
+
+                if let emoji = collection.emoji {
+                    Text(emoji)
+                        .font(.system(size: 40))
                 } else {
-                    placeholderView
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(selectedColor)
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.width / 1.5)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            // Collection name
+            Text(collection.name)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .frame(width: 100, alignment: .center)
+
+            // Recipe count
+            Text("\(collection.recipeCount) recipes")
+                .font(.caption2)
+                .foregroundColor(.secondary)
         }
-        .aspectRatio(1.5, contentMode: .fit)
-        .task {
-            await loadImage()
-        }
+        .frame(width: 100)
     }
 
-    private var placeholderView: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Image(systemName: "fork.knife")
-                .font(.system(size: 36))
-                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
+    private var selectedColor: Color {
+        if let colorHex = collection.color {
+            return Color(hex: colorHex) ?? .purple
         }
+        return .purple
     }
+}
 
-    private func loadImage() async {
-        let result = await recipeImageService.loadImage(from: imageURL)
+// MARK: - All Profile Recipes List View
 
-        switch result {
-        case .success(let image):
-            loadedImage = image
-            withAnimation(.easeOut(duration: 0.3)) {
-                imageOpacity = 1.0
+struct AllProfileRecipesListView: View {
+    let recipes: [SharedRecipe]
+    let user: User
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        List {
+            ForEach(recipes) { sharedRecipe in
+                NavigationLink(destination: RecipeDetailView(
+                    recipe: sharedRecipe.recipe,
+                    dependencies: dependencies,
+                    sharedBy: sharedRecipe.sharedBy,
+                    sharedAt: sharedRecipe.sharedAt
+                )) {
+                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                }
             }
-        case .failure:
-            break
         }
+        .navigationTitle("\(user.displayName)'s Recipes")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
