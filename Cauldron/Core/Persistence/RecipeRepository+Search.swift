@@ -61,10 +61,11 @@ extension RecipeRepository {
     func hasSimilarRecipe(title: String, ownerId: UUID, ingredientCount: Int) async throws -> Bool {
         let context = ModelContext(modelContainer)
 
-        // Fetch all recipes owned by this user
+        // Fetch all non-preview recipes owned by this user
+        // Preview recipes are temporary and shouldn't count as "saved" recipes
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { model in
-                model.ownerId == ownerId
+                model.ownerId == ownerId && model.isPreview == false
             }
         )
 
