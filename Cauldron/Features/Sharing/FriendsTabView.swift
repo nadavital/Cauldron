@@ -101,79 +101,187 @@ struct FriendsTabView: View {
                     sharedCollectionsSection
                 }
 
-                // Shared recipes section
-                VStack(spacing: 0) {
-                    SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
-
-                    if viewModel.isLoading {
-                        HStack {
-                            Spacer()
-                            ProgressView("Loading shared recipes...")
-                                .padding(.vertical, 40)
-                            Spacer()
-                        }
-                    } else if viewModel.sharedRecipes.isEmpty {
-                        VStack(spacing: 16) {
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [Color.cauldronOrange.opacity(0.2), Color.cauldronOrange.opacity(0.05)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .frame(width: 80, height: 80)
-
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 36))
-                                    .foregroundStyle(
-                                        LinearGradient(
-                                            colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.7)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                            }
-
-                            Text("No Friends' Recipes Yet")
-                                .font(.headline)
-
-                            Text("Add friends and their shared recipes\nwill appear here")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 50)
-                    } else {
-                        ForEach(viewModel.sharedRecipes) { sharedRecipe in
-                            NavigationLink(destination: RecipeDetailView(
-                                recipe: sharedRecipe.recipe,
-                                dependencies: dependencies,
-                                sharedBy: sharedRecipe.sharedBy,
-                                sharedAt: sharedRecipe.sharedAt
-                            )) {
-                                SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
-                                    .padding(.horizontal, 16)
-                            }
-                            .buttonStyle(.plain)
-
-                            if sharedRecipe.id != viewModel.sharedRecipes.last?.id {
-                                Divider()
-                                    .padding(.leading, 102)
-                            }
-                        }
-                        .padding(.vertical, 4)
+                if viewModel.isLoading {
+                    ProgressView("Loading recipes...")
+                        .padding(.vertical, 40)
+                } else if viewModel.sharedRecipes.isEmpty {
+                    emptyRecipesState
+                } else {
+                    // Recently Added Section
+                    if !viewModel.recentlyAdded.isEmpty {
+                        recentlyAddedSection
                     }
+
+                    // Tag-based sections
+                    ForEach(viewModel.tagSections, id: \.tag) { section in
+                        tagSectionView(tag: section.tag, recipes: section.recipes)
+                    }
+
+                    // All Friends' Recipes Section (horizontal scroll)
+                    allRecipesSection
                 }
-                .background(Color.cauldronSecondaryBackground)
-                .cornerRadius(16)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
             }
         }
         .background(Color.cauldronBackground.ignoresSafeArea())
+    }
+
+    private var emptyRecipesState: some View {
+        VStack(spacing: 0) {
+            SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.cauldronOrange.opacity(0.2), Color.cauldronOrange.opacity(0.05)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 80, height: 80)
+
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 36))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+
+                Text("No Friends' Recipes Yet")
+                    .font(.headline)
+
+                Text("Add friends and their shared recipes\nwill appear here")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 50)
+        }
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+        .padding(.horizontal, 16)
+    }
+
+    private var recentlyAddedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundColor(.cauldronOrange)
+                Text("Recently Added")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.recentlyAdded.prefix(10)) { sharedRecipe in
+                        NavigationLink(destination: RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: dependencies,
+                            sharedBy: sharedRecipe.sharedBy,
+                            sharedAt: sharedRecipe.sharedAt
+                        )) {
+                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private func tagSectionView(tag: String, recipes: [SharedRecipe]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "tag.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text(tag)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: AllFriendsRecipesListView(
+                    recipes: recipes,
+                    title: tag,
+                    dependencies: dependencies
+                )) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(recipes.prefix(10)) { sharedRecipe in
+                        NavigationLink(destination: RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: dependencies,
+                            sharedBy: sharedRecipe.sharedBy,
+                            sharedAt: sharedRecipe.sharedAt
+                        )) {
+                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private var allRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "book.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("All Friends' Recipes")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: AllFriendsRecipesListView(
+                    recipes: viewModel.sharedRecipes,
+                    title: "All Friends' Recipes",
+                    dependencies: dependencies
+                )) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.sharedRecipes.prefix(10)) { sharedRecipe in
+                        NavigationLink(destination: RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: dependencies,
+                            sharedBy: sharedRecipe.sharedBy,
+                            sharedAt: sharedRecipe.sharedAt
+                        )) {
+                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
     }
 
     private var sharedCollectionsSection: some View {
@@ -202,61 +310,9 @@ struct FriendsTabView: View {
         .cornerRadius(16)
         .padding(.horizontal, 16)
     }
-
-    private var recipesSection: some View {
-        Group {
-            if viewModel.isLoading {
-                ProgressView("Loading shared recipes...")
-            } else if viewModel.sharedRecipes.isEmpty {
-                emptyState
-            } else {
-                recipesList
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-            
-            Text("No Friends' Recipes")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Add friends to see their shared recipes here")
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-
-            #if DEBUG
-            Text("Tap the menu to create demo users for testing")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 8)
-            #endif
-        }
-        .padding()
-    }
-    
-    private var recipesList: some View {
-        List {
-            ForEach(viewModel.sharedRecipes) { sharedRecipe in
-                NavigationLink(destination: RecipeDetailView(
-                    recipe: sharedRecipe.recipe,
-                    dependencies: dependencies,
-                    sharedBy: sharedRecipe.sharedBy,
-                    sharedAt: sharedRecipe.sharedAt
-                )) {
-                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
-                }
-            }
-        }
-    }
 }
 
-/// Row view for a shared recipe with enhanced visuals
+/// Row view for a shared recipe with enhanced visuals (used in list view)
 struct SharedRecipeRowView: View {
     let sharedRecipe: SharedRecipe
     let dependencies: DependencyContainer
@@ -314,6 +370,63 @@ struct SharedRecipeRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Friend Recipe Card View
+
+/// Card view for friend's recipe in horizontal scrolling sections
+/// Similar to RecipeCardView but with friend attribution instead of tags
+struct FriendRecipeCardView: View {
+    let sharedRecipe: SharedRecipe
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Image with friend's profile picture badge
+            ZStack(alignment: .topTrailing) {
+                RecipeImageView(recipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
+
+                // Friend's profile picture in corner
+                ProfileAvatar(user: sharedRecipe.sharedBy, size: 36, dependencies: dependencies)
+                    .overlay(
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 2)
+                    )
+                    .padding(8)
+            }
+            .frame(width: 240, height: 160)
+
+            // Title - single line for clean look
+            Text(sharedRecipe.recipe.title)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(width: 240, height: 20, alignment: .leading)
+
+            // Friend attribution and time - fixed height for alignment
+            HStack(spacing: 6) {
+                // Friend's name
+                Text("by \(sharedRecipe.sharedBy.displayName)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Time - always reserve space
+                if let time = sharedRecipe.recipe.displayTime {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(time)
+                            .font(.caption)
+                    }
+                    .foregroundColor(.cauldronOrange)
+                }
+            }
+            .frame(width: 240, height: 20)
+        }
+        .frame(width: 240)
     }
 }
 
@@ -493,6 +606,32 @@ struct SharedCollectionCard: View {
             return Color(hex: colorHex) ?? .purple
         }
         return .purple
+    }
+}
+
+// MARK: - All Friends' Recipes List View
+
+/// Full list view for friends' recipes (accessed via "See All")
+struct AllFriendsRecipesListView: View {
+    let recipes: [SharedRecipe]
+    let title: String
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        List {
+            ForEach(recipes) { sharedRecipe in
+                NavigationLink(destination: RecipeDetailView(
+                    recipe: sharedRecipe.recipe,
+                    dependencies: dependencies,
+                    sharedBy: sharedRecipe.sharedBy,
+                    sharedAt: sharedRecipe.sharedAt
+                )) {
+                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                }
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

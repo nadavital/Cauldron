@@ -21,6 +21,10 @@ class FriendsTabViewModel: ObservableObject {
     @Published var showErrorAlert = false
     @Published var alertMessage = ""
 
+    // Organized sections for better UX
+    @Published var recentlyAdded: [SharedRecipe] = []
+    @Published var tagSections: [(tag: String, recipes: [SharedRecipe])] = []
+
     private(set) var dependencies: DependencyContainer?
     private var hasLoadedOnce = false
 
@@ -57,11 +61,37 @@ class FriendsTabViewModel: ObservableObject {
 
             // CRITICAL: Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
+
+            // Organize recipes into sections for better UX
+            organizeRecipesIntoSections()
         } catch {
             AppLogger.general.error("Failed to load shared recipes: \(error.localizedDescription)")
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
             showErrorAlert = true
         }
+    }
+
+    /// Organize shared recipes into curated sections
+    private func organizeRecipesIntoSections() {
+        // Recently Added - recipes shared in the last 7 days, sorted by date
+        let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        recentlyAdded = sharedRecipes
+            .filter { $0.sharedAt > sevenDaysAgo }
+            .sorted { $0.sharedAt > $1.sharedAt }
+
+        // Tag-based sections - group recipes by their tags
+        var tagGroups: [String: [SharedRecipe]] = [:]
+        for sharedRecipe in sharedRecipes {
+            for tag in sharedRecipe.recipe.tags {
+                tagGroups[tag.name, default: []].append(sharedRecipe)
+            }
+        }
+
+        // Only include tags with at least 3 recipes
+        tagSections = tagGroups
+            .filter { $0.value.count >= 3 }
+            .map { (tag: $0.key, recipes: $0.value.sorted { $0.sharedAt > $1.sharedAt }) }
+            .sorted { $0.recipes.count > $1.recipes.count } // Sort by number of recipes
     }
 
     /// Preload recipe images and profile avatars into memory cache
