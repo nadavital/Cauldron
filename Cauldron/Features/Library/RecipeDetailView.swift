@@ -2,131 +2,161 @@
 //  RecipeDetailView.swift
 //  Cauldron
 //
-//  Created by Nadav Avital on 10/2/25.
-//
 
 import SwiftUI
 import os
 
-/// Detailed view of a recipe
 struct RecipeDetailView: View {
     let initialRecipe: Recipe
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
-    @State private var recipe: Recipe
+    @State var recipe: Recipe
     @State private var showingEditSheet = false
-    @State private var showSessionConflictAlert = false
-    @State private var scaleFactor: Double = 1.0
-    @State private var localIsFavorite: Bool
-    @State private var scalingWarnings: [ScalingWarning] = []
-    @State private var showingToast = false
-    @State private var recipeWasDeleted = false
+    @State var showSessionConflictAlert = false
+    @State var scaleFactor: Double = 1.0
+    @State var localIsFavorite: Bool
+    @State var showingToast = false
+    @State var recipeWasDeleted = false
     @State private var showDeleteConfirmation = false
-    @State private var isConvertingToCopy = false
-    @State private var showConvertSuccess = false
-    @State private var recipeOwner: User?
-    @State private var isLoadingOwner = false
-    @State private var hasOwnedCopy = false
+    @State var recipeOwner: User?
+    @State var isLoadingOwner = false
+    @State var hasOwnedCopy = false
     @State private var showReferenceRemovedToast = false
-    @State private var showingVisibilityPicker = false
-    @State private var currentVisibility: RecipeVisibility
-    @State private var isChangingVisibility = false
+    @State var showingVisibilityPicker = false
+    @State var currentVisibility: RecipeVisibility
+    @State var isChangingVisibility = false
     @State private var showingCollectionPicker = false
-    @State private var isSavingRecipe = false
-    @State private var showSaveSuccessToast = false
-    @State private var isCheckingDuplicates = false
-    @State private var showSaveRelatedRecipesPrompt = false
-    @State private var relatedRecipesToSave: [Recipe] = []
-    @State private var originalCreator: User?
-    @State private var isLoadingCreator = false
-    @State private var relatedRecipes: [Recipe] = []
-    @State private var imageRefreshID = UUID() // Force image refresh
+    @State var isSavingRecipe = false
+    @State var showSaveSuccessToast = false
+    @State var isCheckingDuplicates = false
+    @State var showSaveRelatedRecipesPrompt = false
+    @State var relatedRecipesToSave: [Recipe] = []
+    @State var originalCreator: User?
+    @State var isLoadingCreator = false
+    @State var relatedRecipes: [Recipe] = []
+    @State var imageRefreshID = UUID()
 
-    // Recipe update sync state
-    @State private var originalRecipe: Recipe?
-    @State private var isCheckingForUpdates = false
-    @State private var hasUpdates = false
-    @State private var isUpdatingRecipe = false
-    @State private var showUpdateSuccessToast = false
+    @State var originalRecipe: Recipe?
+    @State var isCheckingForUpdates = false
+    @State var hasUpdates = false
+    @State var isUpdatingRecipe = false
+    @State var showUpdateSuccessToast = false
 
-    // Error handling
-    @State private var showErrorAlert = false
-    @State private var errorMessage: String?
+    @State var showErrorAlert = false
+    @State var errorMessage: String?
 
-    // External sharing
-    @State private var showShareSheet = false
-    @State private var shareLink: ShareableLink?
-    @State private var isGeneratingShareLink = false
+    @State var showShareSheet = false
+    @State var shareLink: ShareableLink?
+    @State var isGeneratingShareLink = false
 
-    // Shared context
     let sharedBy: User?
     let sharedAt: Date?
+    let explicitHighlightedStepIndex: Int?
 
-    init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil) {
+    init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil, highlightedStepIndex: Int? = nil) {
         self.initialRecipe = recipe
         self.dependencies = dependencies
         self.sharedBy = sharedBy
         self.sharedAt = sharedAt
+        self.explicitHighlightedStepIndex = highlightedStepIndex
         self._recipe = State(initialValue: recipe)
         self._localIsFavorite = State(initialValue: recipe.isFavorite)
         self._currentVisibility = State(initialValue: recipe.visibility)
     }
-    
-    private var scaledResult: ScaledRecipe {
+
+    private var highlightedStepIndex: Int? {
+        if let explicit = explicitHighlightedStepIndex {
+            return explicit
+        }
+        let coordinator = dependencies.cookModeCoordinator
+        if coordinator.isActive, coordinator.currentRecipe?.id == recipe.id {
+            return coordinator.currentStepIndex
+        }
+        return nil
+    }
+
+    var scaledResult: ScaledRecipe {
         RecipeScaler.scale(recipe, by: scaleFactor)
     }
-    
-    private var scaledRecipe: Recipe {
+
+    var scaledRecipe: Recipe {
         scaledResult.recipe
     }
-    
+
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Hero Image - Stretches to top
-                    if recipe.imageURL != nil || recipe.cloudImageRecordName != nil {
-                        HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-                            .ignoresSafeArea(edges: .top)
-                            .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)") // Force refresh when image URL or refresh ID changes
-                    }
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if recipe.imageURL != nil || recipe.cloudImageRecordName != nil {
+                            HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                                .ignoresSafeArea(edges: .top)
+                                .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
+                        }
 
-                    // Content sections
-                    VStack(alignment: .leading, spacing: 20) {
-                        // Header - overlaps the image with negative margin
-                        headerSection
+                        VStack(alignment: .leading, spacing: 20) {
+                            RecipeHeaderSection(
+                                recipe: recipe,
+                                scaledRecipe: scaledRecipe,
+                                scaledResult: scaledResult,
+                                scaleFactor: $scaleFactor,
+                                currentVisibility: $currentVisibility,
+                                localIsFavorite: $localIsFavorite,
+                                hasOwnedCopy: hasOwnedCopy,
+                                isSavingRecipe: isSavingRecipe,
+                                isCheckingDuplicates: isCheckingDuplicates,
+                                hasUpdates: hasUpdates,
+                                isUpdatingRecipe: isUpdatingRecipe,
+                                isLoadingCreator: isLoadingCreator,
+                                sharedBy: sharedBy,
+                                recipeOwner: recipeOwner,
+                                originalCreator: originalCreator,
+                                dependencies: dependencies,
+                                onToggleFavorite: toggleFavorite,
+                                onChangeVisibility: changeVisibility,
+                                onSaveRecipe: saveRecipeToLibrary,
+                                onUpdateRecipe: updateRecipeCopy
+                            )
                             .padding(.top, (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? -80 : 0)
 
-                        // Notes (right after header, before ingredients)
-                        if let notes = recipe.notes, !notes.isEmpty {
-                            notesSection(notes)
+                            if let notes = recipe.notes, !notes.isEmpty {
+                                RecipeNotesSection(notes: notes)
+                            }
+
+                            RecipeIngredientsSection(ingredients: scaledRecipe.ingredients)
+
+                            RecipeStepsSection(
+                                steps: scaledRecipe.steps,
+                                highlightedStepIndex: highlightedStepIndex,
+                                onTimerTap: startTimer
+                            )
+
+                            if let nutrition = recipe.nutrition, nutrition.hasData {
+                                RecipeNutritionSection(nutrition: nutrition)
+                            }
+
+                            if !relatedRecipes.isEmpty {
+                                RecipeRelatedSection(relatedRecipes: relatedRecipes, dependencies: dependencies)
+                            }
                         }
-
-                        // Ingredients
-                        ingredientsSection
-
-                        // Steps
-                        stepsSection
-
-                        // Nutrition
-                        if let nutrition = recipe.nutrition, nutrition.hasData {
-                            nutritionSection(nutrition)
-                        }
-
-                        // Related Recipes
-                        if !relatedRecipes.isEmpty {
-                            relatedRecipesSection
+                        .padding(.horizontal, 16)
+                        .padding(.top, recipe.imageURL != nil ? 0 : 20)
+                        .padding(.bottom, 100)
+                    }
+                }
+                .onAppear {
+                    if let stepIndex = highlightedStepIndex {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                scrollProxy.scrollTo("step-\(stepIndex)", anchor: .center)
+                            }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, recipe.imageURL != nil ? 0 : 20)
-                    .padding(.bottom, 100) // Add padding for the button
                 }
             }
             .ignoresSafeArea(edges: (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? .top : [])
 
-            // Liquid Glass Cook Button
             HStack {
                 Spacer()
 
@@ -134,8 +164,11 @@ struct RecipeDetailView: View {
                     handleCookButtonTap()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "flame.fill")
-                            .font(.body)
+                        Image("CauldronIconSmall")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 24, height: 24)
 
                         Text("Cook")
                             .font(.subheadline)
@@ -153,7 +186,6 @@ struct RecipeDetailView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            // Only check for updates if this is a copied recipe
             if recipe.originalRecipeId != nil {
                 await checkForRecipeUpdates()
             }
@@ -221,7 +253,6 @@ struct RecipeDetailView: View {
             )
         }
         .onChange(of: showingEditSheet) { _, isPresented in
-            // Refresh recipe data when edit sheet is dismissed
             if !isPresented {
                 Task {
                     await refreshRecipe()
@@ -249,8 +280,6 @@ struct RecipeDetailView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
-                // Explicitly wrap in LinkMetadataSource to ensure rich preview
-                // and avoid any potential type casting issues
                 ShareSheet(items: [LinkMetadataSource(link: link)])
             }
         }
@@ -259,8 +288,6 @@ struct RecipeDetailView: View {
         .toast(isShowing: $showSaveSuccessToast, icon: "checkmark.circle.fill", message: "Saved to your recipes")
         .toast(isShowing: $showUpdateSuccessToast, icon: "arrow.triangle.2.circlepath", message: "Recipe updated successfully")
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { notification in
-            // Refresh recipe when it's updated (e.g., CloudKit metadata added after image upload)
-            // Only refresh if this is the same recipe (or if no specific recipe ID was provided)
             if let updatedRecipeId = notification.object as? UUID {
                 if updatedRecipeId == recipe.id {
                     Task {
@@ -268,1355 +295,45 @@ struct RecipeDetailView: View {
                     }
                 }
             } else {
-                // No specific recipe ID - refresh anyway (for backwards compatibility)
                 Task {
                     await refreshRecipe()
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
-            // Check if a saved copy of this friend's recipe was deleted
-            // If so, reset hasOwnedCopy so the user can save it again
             if let deletedRecipeId = notification.object as? UUID {
-                // If we're viewing someone else's recipe and our saved copy was deleted
                 if !recipe.isOwnedByCurrentUser() {
                     Task {
-                        // Re-check if we still have an owned copy
                         await checkForOwnedCopy()
                     }
                 }
             }
         }
         .task {
-            // Save non-owned recipes as preview for offline access with images
             if !recipe.isOwnedByCurrentUser() && !recipe.isPreview {
                 await saveAsPreviewIfNeeded()
             }
 
-            // Check for duplicates when viewing someone else's recipe
             if !recipe.isOwnedByCurrentUser() {
                 await checkForOwnedCopy()
 
-                // Load owner info for proper attribution when saving
                 if let ownerId = recipe.ownerId {
                     await loadRecipeOwner(ownerId)
                 }
             }
 
-            // Load original creator for saved recipes to enable profile link
             if let creatorId = recipe.originalCreatorId {
                 await loadOriginalCreator(creatorId)
             }
 
-            // Check for updates if this is a copied recipe
             if recipe.originalRecipeId != nil {
                 await checkForRecipeUpdates()
             }
 
-            // Load related recipes
             if !recipe.relatedRecipeIds.isEmpty {
                 await loadRelatedRecipes()
             }
         }
-    }
-    
-    private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(recipe.title)
-                .font(.largeTitle.bold())
-                .fontDesign(.serif)
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            HStack(spacing: 16) {
-                if let time = recipe.displayTime {
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock")
-                            .foregroundColor(.cauldronOrange)
-                        Text(time)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Image(systemName: "person.2")
-                        .foregroundColor(.cauldronOrange)
-                    Text(scaledRecipe.yields)
-                }
-
-                Spacer()
-                
-                if recipe.isOwnedByCurrentUser() || hasOwnedCopy {
-                    Button {
-                        toggleFavorite()
-                    } label: {
-                        Image(systemName: localIsFavorite ? "star.fill" : "star")
-                            .foregroundStyle(localIsFavorite ? .yellow : .secondary)
-                            .font(.title3)
-                    }
-
-
-                }
-            }
-            .foregroundColor(.secondary)
-
-            if !recipe.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(recipe.tags) { tag in
-                            NavigationLink(destination: ExploreTagView(tag: tag, dependencies: dependencies)) {
-                                TagView(tag)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.trailing, 1)
-                }
-                .frame(height: 34)
-            }
-
-            // Shared By Banner
-            if let user = sharedBy {
-                NavigationLink {
-                    UserProfileView(user: user, dependencies: dependencies)
-                } label: {
-                    HStack {
-                        ProfileAvatar(user: user, size: 32, dependencies: dependencies)
-                        
-                        Text("Shared by \(user.displayName)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(Color(uiColor: .tertiaryLabel))
-                        
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            
-            // Owner Banner (if not shared and not owned)
-            else if let owner = recipeOwner, !recipe.isOwnedByCurrentUser() {
-                NavigationLink {
-                    UserProfileView(user: owner, dependencies: dependencies)
-                } label: {
-                    HStack {
-                        ProfileAvatar(user: owner, size: 32, dependencies: dependencies)
-                        
-                        Text("Recipe by \(owner.displayName)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(Color(uiColor: .tertiaryLabel))
-                        
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            // Attribution for saved recipes
-            if let creatorName = recipe.originalCreatorName {
-                Group {
-                    if let creator = originalCreator {
-                        NavigationLink {
-                            UserProfileView(user: creator, dependencies: dependencies)
-                        } label: {
-                            attributionContent(creatorName: creatorName, showChevron: true)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        attributionContent(creatorName: creatorName, showChevron: false)
-                    }
-                }
-            }
-
-            // Updates Available Banner
-            if hasUpdates {
-                Button {
-                    Task {
-                        await updateRecipeCopy()
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.title3)
-                            .foregroundColor(.blue)
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Update Available")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.primary)
-
-                            Text("The original recipe has been updated")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-
-                        if isUpdatingRecipe {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.blue.opacity(0.08))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(.plain)
-                .disabled(isUpdatingRecipe)
-            }
-
-            // Settings Row (Visibility & Scale)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 12) {
-                    // Visibility Picker (Only for owned recipes)
-                    if recipe.isOwnedByCurrentUser() {
-                        Menu {
-                            Picker("Visibility", selection: Binding(
-                                get: { currentVisibility },
-                                set: { newValue in
-                                    Task {
-                                        await changeVisibility(to: newValue)
-                                    }
-                                }
-                            )) {
-                                ForEach([RecipeVisibility.publicRecipe, RecipeVisibility.privateRecipe], id: \.self) { visibility in
-                                    Label(visibility.displayName, systemImage: visibility.icon)
-                                        .tag(visibility)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: currentVisibility.icon)
-                                Text(currentVisibility.displayName)
-                                Image(systemName: "chevron.down")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                            }
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.cauldronOrange.opacity(0.15))
-                            .foregroundColor(.cauldronOrange)
-                            .clipShape(Capsule())
-                        }
-                    }
-
-                    // Save Button (For non-owned recipes)
-                    if !recipe.isOwnedByCurrentUser() {
-                        Button {
-                            Task {
-                                await saveRecipeToLibrary()
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                if isSavingRecipe {
-                                    ProgressView()
-                                        .tint(.cauldronOrange)
-                                        .scaleEffect(0.7)
-                                        .frame(width: 12, height: 12)
-                                } else if hasOwnedCopy {
-                                    Image(systemName: "checkmark")
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                } else {
-                                    Image(systemName: "bookmark")
-                                        .font(.caption2)
-                                        .fontWeight(.bold)
-                                }
-                                
-                                Text(hasOwnedCopy ? "Saved" : "Save")
-                            }
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.cauldronOrange.opacity(0.15))
-                            .foregroundColor(.cauldronOrange)
-                            .clipShape(Capsule())
-                        }
-                        .disabled(isSavingRecipe || hasOwnedCopy || isCheckingDuplicates)
-                    }
-
-                    // Scale Picker
-                    Menu {
-                        Picker("Scale", selection: $scaleFactor) {
-                            Text("½×").tag(0.5)
-                            Text("1×").tag(1.0)
-                            Text("2×").tag(2.0)
-                            Text("3×").tag(3.0)
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            Text("\(scaleFactor.formatted())x")
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                        }
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.cauldronOrange.opacity(0.15))
-                        .foregroundColor(.cauldronOrange)
-                        .clipShape(Capsule())
-                    }
-                }
-                
-                // Scaling warnings
-                if !scaledResult.warnings.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(scaledResult.warnings) { warning in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: warning.icon)
-                                    .foregroundColor(warning.color)
-                                    .font(.caption)
-                                
-                                Text(warning.message)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(warning.color.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-            }
-        }
-        .padding()
-        .cardStyle()
-    }
-
-    @ViewBuilder
-    private func attributionContent(creatorName: String, showChevron: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "person.circle.fill")
-                .font(.title3)
-                .foregroundColor(.cauldronOrange)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Recipe by \(creatorName)")
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-
-                if let savedDate = recipe.savedAt {
-                    Text("Saved \(savedDate.formatted(.relative(presentation: .named)))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer()
-
-            // Show loading or chevron
-            if isLoadingCreator {
-                ProgressView()
-                    .scaleEffect(0.8)
-            } else if showChevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(12)
-        .background(Color.cauldronOrange.opacity(0.08))
-        .cornerRadius(10)
-    }
-
-    private var ingredientsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Ingredients", systemImage: "basket")
-                .font(.title2)
-                .fontWeight(.bold)
-
-            ForEach(sortedIngredientSections, id: \.self) { section in
-                VStack(alignment: .leading, spacing: 8) {
-                    if section != "Main" {
-                        Text(section)
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
-                    
-                    ForEach(groupedIngredients[section] ?? []) { ingredient in
-                        ingredientRow(ingredient)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .cardStyle()
-    }
-    
-    private func ingredientRow(_ ingredient: Ingredient) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundColor(.cauldronOrange)
-                .padding(.top, 6)
-                .fixedSize()
-
-            Text(ingredient.displayString)
-                .font(.body)
-                .lineLimit(nil)
-                .multilineTextAlignment(.leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 2)
-    }
-    
-    private var groupedIngredients: [String: [Ingredient]] {
-        Dictionary(grouping: scaledRecipe.ingredients) { $0.section ?? "Main" }
-    }
-    
-    private var sortedIngredientSections: [String] {
-        groupedIngredients.keys.sorted { section1, section2 in
-            if section1 == "Main" { return true }
-            if section2 == "Main" { return false }
-            
-            let index1 = scaledRecipe.ingredients.firstIndex { $0.section == section1 } ?? 0
-            let index2 = scaledRecipe.ingredients.firstIndex { $0.section == section2 } ?? 0
-            return index1 < index2
-        }
-    }
-    
-    private var stepsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Instructions", systemImage: "list.number")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            ForEach(sortedStepsSections, id: \.self) { section in
-                VStack(alignment: .leading, spacing: 8) {
-                    if section != "Main" {
-                        Text(section)
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
-                    
-                    ForEach(groupedSteps[section] ?? []) { step in
-                        stepRow(step)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .cardStyle()
-    }
-    
-    private func stepRow(_ step: CookStep) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(step.index + 1)")
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.cauldronOrange)
-                .clipShape(Circle())
-                .fixedSize()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(step.text.decodingHTMLEntities)
-                    .font(.body)
-                    .lineLimit(nil)
-                    .multilineTextAlignment(.leading)
-
-                if let timer = step.timers.first {
-                    Button {
-                        startTimer(timer)
-                    } label: {
-                        Label(timer.displayDuration, systemImage: "timer")
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.cauldronOrange.opacity(0.1))
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
-    }
-    
-    private var groupedSteps: [String: [CookStep]] {
-        Dictionary(grouping: scaledRecipe.steps) { $0.section ?? "Main" }
-    }
-    
-    private var sortedStepsSections: [String] {
-        groupedSteps.keys.sorted { section1, section2 in
-            if section1 == "Main" { return true }
-            if section2 == "Main" { return false }
-            
-            let index1 = scaledRecipe.steps.firstIndex { $0.section == section1 } ?? 0
-            let index2 = scaledRecipe.steps.firstIndex { $0.section == section2 } ?? 0
-            return index1 < index2
-        }
-    }
-
-    private var relatedRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Related Recipes", systemImage: "link")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            VStack(spacing: 0) {
-                ForEach(relatedRecipes) { relatedRecipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: relatedRecipe, dependencies: dependencies)) {
-                        RecipeRowView(recipe: relatedRecipe, dependencies: dependencies)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    
-                    if relatedRecipe.id != relatedRecipes.last?.id {
-                        Divider()
-                            .padding(.leading, 80)
-                    }
-                }
-            }
-        }
-        .padding()
-        .cardStyle()
-    }
-    
-    private func loadRelatedRecipes() async {
-        if recipe.relatedRecipeIds.isEmpty {
-            self.relatedRecipes = []
-            return
-        }
-
-        do {
-            // First, try to load from local database
-            let localRecipes = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-            var loadedRecipes = localRecipes
-
-            // If some related recipes are missing from local database, fetch from CloudKit
-            // This handles both viewing friend's recipes and saved recipes with unfetched related recipes
-            if localRecipes.count < recipe.relatedRecipeIds.count {
-                let localIds = Set(localRecipes.map { $0.id })
-                let missingIds = recipe.relatedRecipeIds.filter { !localIds.contains($0) }
-
-                AppLogger.general.info("📥 Fetching \(missingIds.count) missing related recipes from CloudKit")
-
-                // Fetch missing recipes from CloudKit in parallel and save as previews
-                await withTaskGroup(of: Recipe?.self) { group in
-                    for missingId in missingIds {
-                        group.addTask {
-                            try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
-                        }
-                    }
-
-                    for await fetchedRecipe in group {
-                        if let fetchedRecipe = fetchedRecipe {
-                            // Save as preview (isPreview = true) so it's available offline
-                            // but won't appear in user's library
-                            let previewRecipe = Recipe(
-                                id: fetchedRecipe.id,
-                                title: fetchedRecipe.title,
-                                ingredients: fetchedRecipe.ingredients,
-                                steps: fetchedRecipe.steps,
-                                yields: fetchedRecipe.yields,
-                                totalMinutes: fetchedRecipe.totalMinutes,
-                                tags: fetchedRecipe.tags,
-                                nutrition: fetchedRecipe.nutrition,
-                                sourceURL: fetchedRecipe.sourceURL,
-                                sourceTitle: fetchedRecipe.sourceTitle,
-                                notes: fetchedRecipe.notes,
-                                imageURL: nil, // Will be set after download
-                                isFavorite: false,
-                                visibility: fetchedRecipe.visibility,
-                                ownerId: fetchedRecipe.ownerId,
-                                cloudRecordName: fetchedRecipe.cloudRecordName,
-                                cloudImageRecordName: fetchedRecipe.cloudImageRecordName,
-                                imageModifiedAt: fetchedRecipe.imageModifiedAt,
-                                createdAt: fetchedRecipe.createdAt,
-                                updatedAt: fetchedRecipe.updatedAt,
-                                originalRecipeId: fetchedRecipe.originalRecipeId,
-                                originalCreatorId: fetchedRecipe.originalCreatorId,
-                                originalCreatorName: fetchedRecipe.originalCreatorName,
-                                savedAt: fetchedRecipe.savedAt,
-                                relatedRecipeIds: fetchedRecipe.relatedRecipeIds,
-                                isPreview: true  // Mark as preview
-                            )
-
-                            do {
-                                try await self.dependencies.recipeRepository.create(previewRecipe)
-                                AppLogger.general.info("📝 Saved related recipe as preview: \(fetchedRecipe.title)")
-
-                                // Download and save the image if it exists
-                                if fetchedRecipe.cloudImageRecordName != nil {
-                                    do {
-                                        let publicDB = try await self.dependencies.cloudKitService.getPublicDatabase()
-                                        if let filename = try await self.dependencies.imageManager.downloadImageFromCloud(
-                                            recipeId: previewRecipe.id,
-                                            database: publicDB
-                                        ) {
-                                            let imageURL = await self.dependencies.imageManager.imageURL(for: filename)
-                                            let updatedPreview = previewRecipe.withImageURL(imageURL)
-                                            try await self.dependencies.recipeRepository.update(updatedPreview)
-                                            AppLogger.general.info("✅ Downloaded image for preview recipe: \(fetchedRecipe.title)")
-                                            loadedRecipes.append(updatedPreview)
-                                        } else {
-                                            loadedRecipes.append(previewRecipe)
-                                        }
-                                    } catch {
-                                        AppLogger.general.warning("Failed to download image for preview recipe: \(error.localizedDescription)")
-                                        loadedRecipes.append(previewRecipe)
-                                    }
-                                } else {
-                                    loadedRecipes.append(previewRecipe)
-                                }
-                            } catch {
-                                AppLogger.general.warning("Failed to save preview recipe: \(error.localizedDescription)")
-                                // Still add to display even if save failed
-                                loadedRecipes.append(fetchedRecipe)
-                            }
-                        }
-                    }
-                }
-
-                AppLogger.general.info("✅ Loaded \(loadedRecipes.count) total related recipes (\(localRecipes.count) local, \(loadedRecipes.count - localRecipes.count) from CloudKit)")
-            }
-
-            self.relatedRecipes = loadedRecipes
-        } catch {
-            AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
-        }
-    }
-    
-    private func nutritionSection(_ nutrition: Nutrition) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Nutrition", systemImage: "chart.bar.fill")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                if let calories = nutrition.calories {
-                    nutritionItem(label: "Calories", value: "\(Int(calories))")
-                }
-                if let protein = nutrition.protein {
-                    nutritionItem(label: "Protein", value: "\(Int(protein))g")
-                }
-                if let carbs = nutrition.carbohydrates {
-                    nutritionItem(label: "Carbs", value: "\(Int(carbs))g")
-                }
-                if let fat = nutrition.fat {
-                    nutritionItem(label: "Fat", value: "\(Int(fat))g")
-                }
-            }
-        }
-        .padding()
-        .cardStyle()
-    }
-    
-    private func nutritionItem(label: String, value: String) -> some View {
-        VStack {
-            Text(value)
-                .font(.headline)
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(Color.cauldronOrange.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    private func notesSection(_ notes: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Notes", systemImage: "note.text")
-                .font(.title2)
-                .fontWeight(.bold)
-            
-            // Detect and make URLs clickable
-            if let attributedString = makeLinksClickable(notes) {
-                Text(attributedString)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .tint(.cauldronOrange)
-            } else {
-                Text(notes)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding()
-        .cardStyle()
-    }
-    
-    private func makeLinksClickable(_ text: String) -> AttributedString? {
-        var attributedString = AttributedString(text)
-        
-        // Regular expression to detect URLs
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-        let matches = detector?.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
-        
-        guard let matches = matches, !matches.isEmpty else {
-            return nil
-        }
-        
-        for match in matches.reversed() {
-            if let range = Range(match.range, in: text),
-               let url = match.url {
-                let startIndex = attributedString.characters.index(attributedString.startIndex, offsetBy: match.range.location)
-                let endIndex = attributedString.characters.index(startIndex, offsetBy: match.range.length)
-                let attributedRange = startIndex..<endIndex
-                
-                attributedString[attributedRange].link = url
-                attributedString[attributedRange].foregroundColor = .cauldronOrange
-                attributedString[attributedRange].underlineStyle = .single
-            }
-        }
-        
-        return attributedString
-    }
-    
-    private func handleCookButtonTap() {
-        // Check if different recipe is already cooking
-        if dependencies.cookModeCoordinator.isActive,
-           let currentRecipe = dependencies.cookModeCoordinator.currentRecipe,
-           currentRecipe.id != recipe.id {
-            // Show conflict alert
-            dependencies.cookModeCoordinator.pendingRecipe = recipe
-            showSessionConflictAlert = true
-        } else {
-            // Start cooking
-            Task {
-                await dependencies.cookModeCoordinator.startCooking(recipe)
-            }
-        }
-    }
-
-    private func addToGroceryList() async {
-        do {
-            // Convert ingredients to the format needed
-            let items: [(name: String, quantity: Quantity?)] = scaledRecipe.ingredients.map {
-                ($0.name, $0.quantity)
-            }
-
-            try await dependencies.groceryRepository.addItemsFromRecipe(
-                recipeID: recipe.id.uuidString,
-                recipeName: recipe.title,
-                items: items
-            )
-
-            AppLogger.general.info("Added \(items.count) ingredients to grocery list from '\(recipe.title)'")
-
-            // Show toast notification
-            withAnimation {
-                showingToast = true
-            }
-        } catch {
-            AppLogger.general.error("Failed to add ingredients to grocery list: \(error.localizedDescription)")
-        }
-    }
-    
-    
-    private func toggleFavorite() {
-        Task {
-            do {
-                try await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
-                localIsFavorite.toggle()
-            } catch {
-                AppLogger.general.error("Failed to toggle favorite: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func generateShareLink() async {
-        isGeneratingShareLink = true
-
-        do {
-            let link = try await dependencies.externalShareService.shareRecipe(recipe)
-            shareLink = link
-            showShareSheet = true
-        } catch {
-            errorMessage = "Failed to generate share link: \(error.localizedDescription)"
-            showErrorAlert = true
-            AppLogger.general.error("Failed to generate share link: \(error.localizedDescription)")
-        }
-
-        isGeneratingShareLink = false
-    }
-
-    private func refreshRecipe() async {
-        do {
-            // Fetch the latest version of the recipe from the database
-            if let updatedRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
-                recipe = updatedRecipe
-                localIsFavorite = updatedRecipe.isFavorite
-                currentVisibility = updatedRecipe.visibility
-
-                // Force image view to refresh by changing its ID
-                // This is necessary because the view is behind a sheet and might not detect URL changes
-                imageRefreshID = UUID()
-
-                AppLogger.general.info("✅ Refreshed recipe: \(updatedRecipe.title)")
-                
-                // Reload related recipes
-                await loadRelatedRecipes()
-            }
-        } catch {
-            AppLogger.general.error("Failed to refresh recipe: \(error.localizedDescription)")
-        }
-    }
-
-    private func deleteRecipe() async {
-        do {
-            try await dependencies.recipeRepository.delete(id: recipe.id)
-            AppLogger.general.info("Deleted recipe: \(recipe.title)")
-            recipeWasDeleted = true
-        } catch {
-            AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
-        }
-    }
-
-    private func loadRecipeOwner(_ ownerId: UUID) async {
-        isLoadingOwner = true
-        defer { isLoadingOwner = false }
-
-        do {
-            recipeOwner = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId)
-            AppLogger.general.info("Loaded recipe owner: \(recipeOwner?.displayName ?? "unknown")")
-        } catch {
-            AppLogger.general.warning("Failed to load recipe owner: \(error.localizedDescription)")
-            // Don't show error to user - just don't display the profile link
-        }
-    }
-
-    private func loadOriginalCreator(_ creatorId: UUID) async {
-        isLoadingCreator = true
-        defer { isLoadingCreator = false }
-
-        do {
-            originalCreator = try await dependencies.cloudKitService.fetchUser(byUserId: creatorId)
-            AppLogger.general.info("Loaded original creator: \(originalCreator?.displayName ?? "unknown")")
-        } catch {
-            AppLogger.general.warning("Failed to load original creator: \(error.localizedDescription)")
-            // Don't show error to user - attribution will still show name without profile link
-        }
-    }
-
-    private func saveRecipeToLibrary() async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            AppLogger.general.error("Cannot save recipe - no current user")
-            return
-        }
-
-        // Check if this recipe has related recipes that aren't in our library
-        if !recipe.relatedRecipeIds.isEmpty {
-            // Check which related recipes we don't already have
-            do {
-                let localRelated = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-                let missingIds = Set(recipe.relatedRecipeIds).subtracting(localRelated.map { $0.id })
-
-                if !missingIds.isEmpty {
-                    // Fetch the missing related recipes from CloudKit
-                    var fetchedRelated: [Recipe] = []
-                    await withTaskGroup(of: Recipe?.self) { group in
-                        for missingId in missingIds {
-                            group.addTask {
-                                try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
-                            }
-                        }
-
-                        for await recipe in group {
-                            if let recipe = recipe {
-                                fetchedRelated.append(recipe)
-                            }
-                        }
-                    }
-
-                    if !fetchedRelated.isEmpty {
-                        // Store the fetched recipes and show prompt
-                        relatedRecipesToSave = fetchedRelated
-                        showSaveRelatedRecipesPrompt = true
-                        return // Wait for user decision
-                    }
-                }
-            } catch {
-                AppLogger.general.warning("Failed to check for related recipes: \(error.localizedDescription)")
-                // Continue with saving anyway
-            }
-        }
-
-        // No related recipes to save, proceed with normal save
-        await performSaveRecipe(saveRelatedRecipes: false)
-    }
-
-    private func performSaveRecipe(saveRelatedRecipes: Bool) async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            AppLogger.general.error("Cannot save recipe - no current user")
-            return
-        }
-
-        isSavingRecipe = true
-        defer { isSavingRecipe = false }
-
-        do {
-            // Save related recipes first if requested
-            if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
-                AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
-
-                for relatedRecipe in relatedRecipesToSave {
-                    let copiedRelated = relatedRecipe.withOwner(
-                        userId,
-                        originalCreatorId: relatedRecipe.ownerId,
-                        originalCreatorName: nil // We don't have the creator name cached
-                    )
-                    try await dependencies.recipeRepository.create(copiedRelated)
-
-                    // Download and save the image if it exists
-                    if relatedRecipe.cloudImageRecordName != nil {
-                        do {
-                            let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                            // IMPORTANT: Download using ORIGINAL recipe ID (where image is stored in CloudKit)
-                            // Then save with NEW recipe ID (copiedRelated.id)
-                            if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
-                                recipeId: relatedRecipe.id,  // Original ID
-                                from: publicDB
-                            ), let image = UIImage(data: imageData) {
-                                // Save with new recipe ID
-                                let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
-                                let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                                let updatedRelated = copiedRelated.withImageURL(imageURL)
-                                try await dependencies.recipeRepository.update(updatedRelated)
-                                AppLogger.general.info("✅ Downloaded image for related recipe: \(relatedRecipe.title)")
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to download image for related recipe: \(error.localizedDescription)")
-                            // Don't fail the whole save if image download fails
-                        }
-                    }
-                }
-
-                AppLogger.general.info("✅ Saved \(relatedRecipesToSave.count) related recipes")
-            }
-
-            // Check if recipe already exists as a preview
-            let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id)
-
-            var copiedRecipe: Recipe
-            if let existingPreview = existingRecipe, existingPreview.isPreview {
-                // Convert preview to owned recipe
-                // IMPORTANT: Generate NEW recipe ID to avoid CloudKit conflicts with original owner's PUBLIC record
-                AppLogger.general.info("🔄 Converting preview to owned recipe: \(recipe.title)")
-
-                // First, delete the preview record
-                try await dependencies.recipeRepository.delete(id: existingPreview.id)
-
-                // Create a new recipe with a new ID but same content
-                // Store the original cloud image record name for downloading
-                let originalCloudImageRecordName = existingPreview.cloudImageRecordName
-                let originalRecipeId = existingPreview.originalRecipeId ?? existingPreview.id
-
-                copiedRecipe = Recipe(
-                    id: UUID(),  // NEW ID to avoid CloudKit conflicts
-                    title: existingPreview.title,
-                    ingredients: existingPreview.ingredients,
-                    steps: existingPreview.steps,
-                    yields: existingPreview.yields,
-                    totalMinutes: existingPreview.totalMinutes,
-                    tags: existingPreview.tags,
-                    nutrition: existingPreview.nutrition,
-                    sourceURL: existingPreview.sourceURL,
-                    sourceTitle: existingPreview.sourceTitle,
-                    notes: existingPreview.notes,
-                    imageURL: nil,  // Will be set after downloading
-                    isFavorite: false,
-                    visibility: .publicRecipe,  // Make public by default
-                    ownerId: userId,  // Change owner
-                    cloudRecordName: nil,  // Will be generated automatically
-                    cloudImageRecordName: nil,  // Will be generated when we upload OUR copy
-                    imageModifiedAt: nil,
-                    createdAt: Date(),  // New creation date
-                    updatedAt: Date(),
-                    originalRecipeId: originalRecipeId,  // Track the REAL original recipe
-                    originalCreatorId: existingPreview.originalCreatorId ?? existingPreview.ownerId,
-                    originalCreatorName: existingPreview.originalCreatorName ?? recipeOwner?.displayName,
-                    savedAt: Date(),
-                    relatedRecipeIds: existingPreview.relatedRecipeIds,
-                    isPreview: false  // No longer a preview
-                )
-
-                // Create the recipe first
-                try await dependencies.recipeRepository.create(copiedRecipe)
-
-                // Download the image from the original owner's PUBLIC database if it exists
-                if originalCloudImageRecordName != nil {
-                    do {
-                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
-                            recipeId: originalRecipeId,  // Use original recipe ID
-                            from: publicDB
-                        ), let image = UIImage(data: imageData) {
-                            // Save locally with NEW recipe ID
-                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-
-                            // Update the recipe with the image (skip image sync since we just downloaded it)
-                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
-
-                            AppLogger.general.info("✅ Downloaded and saved image for copied recipe")
-                            copiedRecipe = updatedRecipe
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to download image for copied recipe: \(error.localizedDescription)")
-                        // Continue without image
-                    }
-                }
-
-                AppLogger.general.info("✅ Converted preview to owned recipe: \(recipe.title)")
-            } else {
-                // Create new copy
-                copiedRecipe = recipe.withOwner(
-                    userId,
-                    originalCreatorId: recipe.ownerId,
-                    originalCreatorName: recipeOwner?.displayName
-                )
-
-                try await dependencies.recipeRepository.create(copiedRecipe)
-                AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
-
-                // Download and save the image if it exists in CloudKit
-                if recipe.cloudImageRecordName != nil && copiedRecipe.imageURL == nil {
-                    do {
-                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                        // IMPORTANT: Download using ORIGINAL recipe ID (where image is stored in CloudKit)
-                        // Then save with NEW recipe ID (copiedRecipe.id)
-                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
-                            recipeId: recipe.id,  // Original ID
-                            from: publicDB
-                        ), let image = UIImage(data: imageData) {
-                            // Save with new recipe ID
-                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe)
-                            AppLogger.general.info("✅ Downloaded and saved recipe image: \(filename)")
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to download recipe image: \(error.localizedDescription)")
-                        // Don't fail the whole save if image download fails
-                    }
-                }
-            }
-
-            // Notify other views
-            NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
-
-            // Update state and switch to the new recipe immediately
-            // This ensures the UI transitions from "Save" button to Visibility Picker
-            withAnimation {
-                recipe = copiedRecipe
-                currentVisibility = copiedRecipe.visibility
-                localIsFavorite = copiedRecipe.isFavorite
-                hasOwnedCopy = true
-                showSaveSuccessToast = true
-            }
-
-            // Clear the related recipes cache
-            relatedRecipesToSave = []
-        } catch {
-            AppLogger.general.error("❌ Failed to save recipe: \(error.localizedDescription)")
-            errorMessage = "Failed to save recipe: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-
-    /// Save recipe as preview for offline access with image
-    /// This is called when viewing a public/friend's recipe for the first time
-    private func saveAsPreviewIfNeeded() async {
-        do {
-            // Check if recipe already exists in database (as preview or owned)
-            if let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
-                // Recipe already exists - check if it needs image download
-                if existingRecipe.imageURL == nil && recipe.cloudImageRecordName != nil {
-                    AppLogger.general.info("📥 Downloading image for existing preview recipe: \(recipe.title)")
-                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                    if let filename = try await dependencies.imageManager.downloadImageFromCloud(
-                        recipeId: recipe.id,
-                        database: publicDB
-                    ) {
-                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                        let updatedRecipe = existingRecipe.withImageURL(imageURL)
-                        try await dependencies.recipeRepository.update(updatedRecipe)
-                        AppLogger.general.info("✅ Updated preview with image: \(recipe.title)")
-
-                        // Update local state to show image
-                        self.recipe = updatedRecipe
-                        imageRefreshID = UUID()
-                    }
-                }
-                return
-            }
-
-            // Recipe doesn't exist - save as preview
-            let previewRecipe = Recipe(
-                id: recipe.id,
-                title: recipe.title,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps,
-                yields: recipe.yields,
-                totalMinutes: recipe.totalMinutes,
-                tags: recipe.tags,
-                nutrition: recipe.nutrition,
-                sourceURL: recipe.sourceURL,
-                sourceTitle: recipe.sourceTitle,
-                notes: recipe.notes,
-                imageURL: nil, // Will be set after download
-                isFavorite: false,
-                visibility: recipe.visibility,
-                ownerId: recipe.ownerId,
-                cloudRecordName: recipe.cloudRecordName,
-                cloudImageRecordName: recipe.cloudImageRecordName,
-                imageModifiedAt: recipe.imageModifiedAt,
-                createdAt: recipe.createdAt,
-                updatedAt: recipe.updatedAt,
-                originalRecipeId: recipe.originalRecipeId,
-                originalCreatorId: recipe.originalCreatorId,
-                originalCreatorName: recipe.originalCreatorName,
-                savedAt: recipe.savedAt,
-                relatedRecipeIds: recipe.relatedRecipeIds,
-                isPreview: true
-            )
-
-            try await dependencies.recipeRepository.create(previewRecipe)
-            AppLogger.general.info("📝 Saved recipe as preview: \(recipe.title)")
-
-            // Download and save the image if it exists
-            if recipe.cloudImageRecordName != nil {
-                do {
-                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                    if let filename = try await dependencies.imageManager.downloadImageFromCloud(
-                        recipeId: previewRecipe.id,
-                        database: publicDB
-                    ) {
-                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                        let updatedPreview = previewRecipe.withImageURL(imageURL)
-                        try await dependencies.recipeRepository.update(updatedPreview)
-                        AppLogger.general.info("✅ Downloaded image for preview recipe: \(recipe.title)")
-
-                        // Update local state to show image
-                        self.recipe = updatedPreview
-                        imageRefreshID = UUID()
-                    }
-                } catch {
-                    AppLogger.general.warning("Failed to download image for preview: \(error.localizedDescription)")
-                }
-            }
-        } catch {
-            AppLogger.general.error("Failed to save preview recipe: \(error.localizedDescription)")
-        }
-    }
-
-    private func checkForOwnedCopy() async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            return
-        }
-
-        isCheckingDuplicates = true
-        defer { isCheckingDuplicates = false }
-
-        do {
-            hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
-                title: recipe.title,
-                ownerId: userId,
-                ingredientCount: recipe.ingredients.count
-            )
-            AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")
-        } catch {
-            AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")
-        }
-    }
-
-    private func changeVisibility(to newVisibility: RecipeVisibility) async {
-        isChangingVisibility = true
-        defer { isChangingVisibility = false }
-
-        do {
-            // Update the recipe's visibility in the repository
-            try await dependencies.recipeRepository.updateVisibility(
-                id: recipe.id,
-                visibility: newVisibility
-            )
-
-            // Update local state
-            currentVisibility = newVisibility
-            
-            // CRITICAL: Update the recipe object itself so the toolbar updates immediately
-            withAnimation {
-                recipe = Recipe(
-                    id: recipe.id,
-                    title: recipe.title,
-                    ingredients: recipe.ingredients,
-                    steps: recipe.steps,
-                    yields: recipe.yields,
-                    totalMinutes: recipe.totalMinutes,
-                    tags: recipe.tags,
-                    nutrition: recipe.nutrition,
-                    sourceURL: recipe.sourceURL,
-                    sourceTitle: recipe.sourceTitle,
-                    notes: recipe.notes,
-                    imageURL: recipe.imageURL,
-                    isFavorite: recipe.isFavorite,
-                    visibility: newVisibility, // Update visibility
-                    ownerId: recipe.ownerId,
-                    cloudRecordName: recipe.cloudRecordName,
-                    cloudImageRecordName: recipe.cloudImageRecordName,
-                    imageModifiedAt: recipe.imageModifiedAt,
-                    createdAt: recipe.createdAt,
-                    updatedAt: Date(), // Update timestamp
-                    originalRecipeId: recipe.originalRecipeId,
-                    originalCreatorId: recipe.originalCreatorId,
-                    originalCreatorName: recipe.originalCreatorName,
-                    savedAt: recipe.savedAt
-                )
-            }
-
-            AppLogger.general.info("Changed recipe '\(recipe.title)' visibility to \(newVisibility.displayName)")
-
-            // Dismiss the sheet
-            showingVisibilityPicker = false
-        } catch {
-            AppLogger.general.error("Failed to change visibility: \(error.localizedDescription)")
-            errorMessage = "Failed to change visibility: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-
-    // MARK: - Recipe Update Sync
-
-    /// Check if the original recipe has been updated since this copy was saved
-    private func checkForRecipeUpdates() async {
-        // Only check for updates if this is a copied recipe
-        guard let originalRecipeId = recipe.originalRecipeId,
-              let originalOwnerId = recipe.originalCreatorId else {
-            return
-        }
-
-        isCheckingForUpdates = true
-        defer { isCheckingForUpdates = false }
-
-        do {
-            // Fetch the original recipe from CloudKit public database
-            let original = try await dependencies.cloudKitService.fetchPublicRecipe(
-                recipeId: originalRecipeId,
-                ownerId: originalOwnerId
-            )
-
-            originalRecipe = original
-
-            // Check if the original has been updated after this copy was saved
-            if let savedAt = recipe.savedAt,
-               original.updatedAt > savedAt {
-                hasUpdates = true
-                AppLogger.general.info("🔄 Updates available for recipe '\(recipe.title)': original updated at \(original.updatedAt), saved at \(savedAt)")
-            } else {
-                hasUpdates = false
-                AppLogger.general.info("✅ Recipe '\(recipe.title)' is up to date")
-            }
-        } catch {
-            AppLogger.general.error("❌ Failed to check for recipe updates: \(error.localizedDescription)")
-            // Silently fail - user can manually refresh later
-            hasUpdates = false
-        }
-    }
-
-    /// Update the local copy with changes from the original recipe
-    private func updateRecipeCopy() async {
-        guard let original = originalRecipe else {
-            AppLogger.general.error("Cannot update recipe - original not loaded")
-            return
-        }
-
-        isUpdatingRecipe = true
-        defer { isUpdatingRecipe = false }
-
-        do {
-            // Create an updated copy preserving the local recipe's ID and attribution
-            let updatedRecipe = Recipe(
-                id: recipe.id, // Keep the same ID
-                title: original.title,
-                ingredients: original.ingredients,
-                steps: original.steps,
-                yields: original.yields,
-                totalMinutes: original.totalMinutes,
-                tags: original.tags,
-                nutrition: original.nutrition,
-                sourceURL: original.sourceURL,
-                sourceTitle: original.sourceTitle,
-                notes: original.notes,
-                imageURL: original.imageURL,
-                isFavorite: recipe.isFavorite, // Preserve local favorite status
-                visibility: recipe.visibility, // Preserve local visibility
-                ownerId: recipe.ownerId, // Keep current owner
-                cloudRecordName: recipe.cloudRecordName,
-                cloudImageRecordName: recipe.cloudImageRecordName,
-                imageModifiedAt: recipe.imageModifiedAt,
-                createdAt: recipe.createdAt, // Preserve original creation date
-                updatedAt: Date(), // Update timestamp
-                originalRecipeId: recipe.originalRecipeId, // Preserve link to original
-                originalCreatorId: recipe.originalCreatorId,
-                originalCreatorName: recipe.originalCreatorName,
-                savedAt: Date() // Update the "saved at" timestamp
-            )
-
-            // Save the updated recipe
-            try await dependencies.recipeRepository.update(updatedRecipe)
-
-            AppLogger.general.info("✅ Successfully updated recipe '\(recipe.title)' from original")
-
-            // Clear the update flag
-            hasUpdates = false
-
-            // Show success toast
-            withAnimation {
-                showUpdateSuccessToast = true
-            }
-
-            // Notify other views that the recipe was updated
-            NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: nil)
-        } catch {
-            AppLogger.general.error("❌ Failed to update recipe: \(error.localizedDescription)")
-            errorMessage = "Failed to update recipe: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
-    }
-    private func startTimer(_ timer: TimerSpec) {
-        // TODO: Implement timer starting logic, possibly via CookModeCoordinator
-        AppLogger.general.info("Timer tapped: \(timer.displayDuration)")
     }
 
     @ToolbarContentBuilder
@@ -1650,7 +367,6 @@ struct RecipeDetailView: View {
 
         ToolbarItem(placement: .navigationBarTrailing) {
             if recipe.isOwnedByCurrentUser() {
-                // Owned recipe menu
                 Menu {
                     Button {
                         showingEditSheet = true
@@ -1680,90 +396,6 @@ struct RecipeDetailView: View {
     }
 }
 
-// MARK: - Recipe Visibility Picker Sheet
-
-struct RecipeVisibilityPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var currentVisibility: RecipeVisibility
-    @Binding var isChanging: Bool
-    let onSave: (RecipeVisibility) async -> Void
-
-    @State private var selectedVisibility: RecipeVisibility
-
-    init(
-        currentVisibility: Binding<RecipeVisibility>,
-        isChanging: Binding<Bool>,
-        onSave: @escaping (RecipeVisibility) async -> Void
-    ) {
-        self._currentVisibility = currentVisibility
-        self._isChanging = isChanging
-        self.onSave = onSave
-        self._selectedVisibility = State(initialValue: currentVisibility.wrappedValue)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker("Visibility", selection: $selectedVisibility) {
-                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
-                            Label(visibility.displayName, systemImage: visibility.icon)
-                                .tag(visibility)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                } header: {
-                    VStack(spacing: 8) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 40))
-                            .foregroundColor(.cauldronOrange)
-
-                        Text("Choose who can see this recipe")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 12)
-                    .textCase(nil)
-                }
-
-                Section {
-                    Text(selectedVisibility.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } header: {
-                    Text("Description")
-                }
-            }
-            .navigationTitle("Recipe Visibility")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task {
-                            await onSave(selectedVisibility)
-                        }
-                    } label: {
-                        if isChanging {
-                            ProgressView()
-                        } else {
-                            Label("Save", systemImage: "checkmark")
-                        }
-                    }
-                    .disabled(isChanging || selectedVisibility == currentVisibility)
-                }
-            }
-        }
-    }
-}
-
 #Preview {
     NavigationStack {
         RecipeDetailView(
@@ -1782,4 +414,3 @@ struct RecipeVisibilityPickerSheet: View {
         )
     }
 }
-

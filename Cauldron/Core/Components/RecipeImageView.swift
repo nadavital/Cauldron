@@ -327,6 +327,7 @@ struct HeroRecipeImageView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(maxWidth: UIScreen.main.bounds.width)
                     .frame(height: imageHeight(for: image))
                     .clipped()
                     .overlay(alignment: .bottom) {
@@ -347,7 +348,6 @@ struct HeroRecipeImageView: View {
                 placeholderView
             }
         }
-
         .frame(maxWidth: .infinity)
         .task(id: recipeId) {
             await loadImage()

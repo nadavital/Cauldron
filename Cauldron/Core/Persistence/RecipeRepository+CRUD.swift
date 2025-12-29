@@ -14,9 +14,12 @@ import UIKit
 extension RecipeRepository {
     
     // MARK: - Create
-    
+
     /// Create a new recipe (optimistic - returns immediately)
-    func create(_ recipe: Recipe) async throws {
+    /// - Parameters:
+    ///   - recipe: The recipe to create
+    ///   - skipCloudSync: If true, only saves locally without triggering CloudKit sync (used when downloading from CloudKit)
+    func create(_ recipe: Recipe, skipCloudSync: Bool = false) async throws {
         // Assign cloud record name immediately if not present
         var recipeToSave = recipe
         if recipeToSave.cloudRecordName == nil {
@@ -56,6 +59,11 @@ extension RecipeRepository {
         // If this recipe was previously deleted, remove the tombstone
         try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
 
+        // Skip CloudKit sync if requested (e.g., when downloading from CloudKit)
+        if skipCloudSync {
+            return
+        }
+
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .create,
@@ -89,6 +97,42 @@ extension RecipeRepository {
         }
     }
     
+    /// Remove duplicate recipes from the local database
+    /// This can happen if recipes are synced multiple times due to race conditions
+    /// - Returns: The number of duplicates removed
+    @discardableResult
+    func removeDuplicateRecipes() async throws -> Int {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>()
+        let allRecipes = try context.fetch(descriptor)
+
+        // Group recipes by ID
+        var recipesByID: [UUID: [RecipeModel]] = [:]
+        for recipe in allRecipes {
+            recipesByID[recipe.id, default: []].append(recipe)
+        }
+
+        // Find and remove duplicates
+        var removedCount = 0
+        for (id, recipes) in recipesByID {
+            if recipes.count > 1 {
+                logger.warning("🔄 Found \(recipes.count) duplicates for recipe ID: \(id)")
+                // Keep the first one (most recent by insertion order), delete the rest
+                for recipe in recipes.dropFirst() {
+                    context.delete(recipe)
+                    removedCount += 1
+                }
+            }
+        }
+
+        if removedCount > 0 {
+            try context.save()
+            logger.info("✅ Removed \(removedCount) duplicate recipes")
+        }
+
+        return removedCount
+    }
+
     /// Save a public recipe with its image
     /// - Parameters:
     ///   - recipe: The public recipe to save

@@ -15,6 +15,7 @@ struct CookTabView: View {
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
+    @State private var showingCollectionForm = false
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
@@ -75,7 +76,8 @@ struct CookTabView: View {
                         dependencies: viewModel.dependencies,
                         showingEditor: $showingEditor,
                         showingAIGenerator: $showingAIGenerator,
-                        showingImporter: $showingImporter
+                        showingImporter: $showingImporter,
+                        showingCollectionForm: $showingCollectionForm
                     )
                 }
             }
@@ -102,6 +104,14 @@ struct CookTabView: View {
                 }
             }) {
                 AIRecipeGeneratorView(dependencies: viewModel.dependencies)
+            }
+            .sheet(isPresented: $showingCollectionForm, onDismiss: {
+                // Refresh data when collection form is dismissed
+                Task {
+                    await viewModel.loadData()
+                }
+            }) {
+                CollectionFormView()
             }
             .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
                 Button("Cancel", role: .cancel) {}

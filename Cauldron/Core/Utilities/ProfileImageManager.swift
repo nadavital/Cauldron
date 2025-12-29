@@ -19,7 +19,9 @@ actor ProfileImageManager {
     init(cloudKitService: CloudKitService) {
         self.cloudKitService = cloudKitService
 
-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to access documents directory")
+        }
         self.imageDirectoryURL = documentsURL.appendingPathComponent("ProfileImages", isDirectory: true)
 
         // Ensure directory exists

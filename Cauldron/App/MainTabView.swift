@@ -26,6 +26,10 @@ struct MainTabView: View {
 
     @State private var searchNavigationPath = NavigationPath()
 
+    private var isCookModeActive: Bool {
+        dependencies.cookModeCoordinator.isActive
+    }
+
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
         self.preloadedData = preloadedData
@@ -52,14 +56,12 @@ struct MainTabView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        .if(dependencies.cookModeCoordinator.isActive) { view in
-            view.tabViewBottomAccessory {
-                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        dependencies.cookModeCoordinator.expandToFullScreen()
-                    }
-            }
+        .tabViewBottomAccessory(isEnabled: isCookModeActive) {
+            CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dependencies.cookModeCoordinator.expandToFullScreen()
+                }
         }
         .sheet(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
@@ -105,6 +107,14 @@ struct MainTabView: View {
             AppLogger.general.info("📍 Switching to Search tab to find people")
             selectedTab = .search
         }
+        .toast(
+            isShowing: Binding(
+                get: { dependencies.cookModeCoordinator.showRecipeDeletedToast },
+                set: { dependencies.cookModeCoordinator.showRecipeDeletedToast = $0 }
+            ),
+            icon: "trash.fill",
+            message: "Recipe was deleted"
+        )
     }
 }
 

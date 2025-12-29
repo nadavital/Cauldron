@@ -58,9 +58,13 @@ struct CookModeView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    // Navigate to recipe detail
+                    // Navigate to recipe detail with current step highlighted
                     NavigationLink {
-                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                        RecipeDetailView(
+                            recipe: recipe,
+                            dependencies: dependencies,
+                            highlightedStepIndex: coordinator.currentStepIndex
+                        )
                     } label: {
                         Label("View Recipe", systemImage: "book.fill")
                     }

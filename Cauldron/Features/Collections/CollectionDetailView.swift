@@ -135,7 +135,6 @@ struct CollectionDetailView: View {
 
     @ViewBuilder
     private func sheetContent(for sheet: ActiveSheet) -> some View {
-        let _ = print("📋 Sheet presenting with activeSheet: \(sheet)")
         switch sheet {
         case .edit:
             CollectionFormView(collectionToEdit: collection)
@@ -369,7 +368,6 @@ struct CollectionDetailView: View {
 
     private var editCollectionButton: some View {
         Button(action: {
-            print("🔵 Edit Collection button tapped, setting activeSheet to .edit")
             activeSheet = .edit
         }) {
             HStack(spacing: 6) {
@@ -392,7 +390,6 @@ struct CollectionDetailView: View {
 
     private var addRecipesButton: some View {
         Button(action: {
-            print("🟢 Add Recipes button tapped, setting activeSheet to .addRecipes")
             activeSheet = .addRecipes
         }) {
             HStack(spacing: 6) {

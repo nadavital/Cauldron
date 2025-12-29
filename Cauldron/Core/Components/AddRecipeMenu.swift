@@ -14,6 +14,7 @@ struct AddRecipeMenu: View {
     @Binding var showingEditor: Bool
     @Binding var showingAIGenerator: Bool
     @Binding var showingImporter: Bool
+    @Binding var showingCollectionForm: Bool
 
     @State private var isAIAvailable = false
 
@@ -38,6 +39,14 @@ struct AddRecipeMenu: View {
                 showingImporter = true
             } label: {
                 Label("Import from URL or Text", systemImage: "arrow.down.doc")
+            }
+
+            Divider()
+
+            Button {
+                showingCollectionForm = true
+            } label: {
+                Label("Create Collection", systemImage: "folder.badge.plus")
             }
         } label: {
             Image(systemName: "plus")

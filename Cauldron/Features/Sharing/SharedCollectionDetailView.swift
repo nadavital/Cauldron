@@ -22,6 +22,7 @@ struct SharedCollectionDetailView: View {
     @State private var showError = false
     @State private var hiddenRecipeCount = 0
     @State private var isFriendWithOwner = false
+    @State private var collectionOwner: User?
     @Environment(\.dismiss) private var dismiss
 
     private var loader: SharedCollectionLoader {
@@ -86,6 +87,7 @@ struct SharedCollectionDetailView: View {
             }
         }
         .task {
+            await loadCollectionOwner()
             await checkFriendshipStatus()
             await loadRecipes()
             await checkForExistingReference()
@@ -320,6 +322,14 @@ struct SharedCollectionDetailView: View {
         }
     }
 
+    private func loadCollectionOwner() async {
+        do {
+            collectionOwner = try await dependencies.cloudKitService.fetchUser(byUserId: collection.userId)
+        } catch {
+            AppLogger.general.warning("Failed to fetch collection owner: \(error.localizedDescription)")
+        }
+    }
+
     private func checkForExistingReference() async {
         guard let userId = CurrentUserSession.shared.userId else {
             isCheckingReference = false
@@ -347,7 +357,7 @@ struct SharedCollectionDetailView: View {
             let copiedRecipe = recipe.withOwner(
                 userId,
                 originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipe.ownerId != nil ? "Collection Owner" : nil  // TODO: Fetch actual creator name
+                originalCreatorName: collectionOwner?.displayName
             )
             try await dependencies.recipeRepository.create(copiedRecipe)
 
@@ -359,13 +369,11 @@ struct SharedCollectionDetailView: View {
 
     // Helper to create SharedRecipe from Recipe
     private func createSharedRecipe(from recipe: Recipe) -> SharedRecipe? {
-        // We need to get user info for the owner
-        // For now, create a basic SharedRecipe with minimal owner info
-        // In a real app, you might want to fetch the owner's User object
-        let owner = User(
+        // Use the fetched collection owner, or create a minimal placeholder if not available
+        let owner = collectionOwner ?? User(
             id: collection.userId,
-            username: "user",  // We don't have this info readily available
-            displayName: "Collection Owner",
+            username: "user",
+            displayName: "Unknown",
             createdAt: Date(),
             profileEmoji: nil,
             profileColor: nil

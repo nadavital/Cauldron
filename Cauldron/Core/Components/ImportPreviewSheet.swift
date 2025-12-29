@@ -29,19 +29,15 @@ class ImportPreviewViewModel: ObservableObject {
     }
 
     func loadContent() async {
-        print("🔄 ImportPreviewViewModel: Starting loadContent for URL: \(url)")
         state = .loading
 
         do {
-            print("🔄 ImportPreviewViewModel: Calling importFromShareURL...")
             let importedContent = try await dependencies.externalShareService.importFromShareURL(url)
-            print("✅ ImportPreviewViewModel: Successfully imported content: \(importedContent)")
             await MainActor.run {
                 self.content = importedContent
                 self.state = .loaded
             }
         } catch {
-            print("❌ ImportPreviewViewModel: Failed to load content: \(error)")
             await MainActor.run {
                 self.state = .error(error.localizedDescription)
             }
@@ -63,18 +59,6 @@ class ImportPreviewViewModel: ObservableObject {
 
         try await dependencies.recipeRepository.create(importedRecipe)
     }
-
-    func followUser(_ user: User) async throws {
-        // TODO: Implement user following logic
-        // For now, just log it
-        print("Would follow user: \(user.username)")
-    }
-
-    func importCollection(_ collection: Collection, owner: User?) async throws {
-        // TODO: Implement collection import logic
-        // For now, just log it
-        print("Would import collection: \(collection.name)")
-    }
 }
 
 /// Sheet view for previewing and importing shared content
@@ -86,12 +70,10 @@ struct ImportPreviewSheet: View {
     @State private var showSuccess = false
 
     init(url: URL, dependencies: DependencyContainer) {
-        print("🏗️ ImportPreviewSheet: init with URL: \(url)")
         _viewModel = StateObject(wrappedValue: ImportPreviewViewModel(url: url, dependencies: dependencies))
     }
 
     var body: some View {
-        let _ = Self._printChanges()
         NavigationStack {
             Group {
                 switch viewModel.state {
@@ -118,11 +100,7 @@ struct ImportPreviewSheet: View {
             }
         }
         .task {
-            print("🚀 ImportPreviewSheet: .task modifier triggered")
             await viewModel.loadContent()
-        }
-        .onAppear {
-            print("👀 ImportPreviewSheet: onAppear triggered")
         }
         .alert("Recipe Added!", isPresented: $showSuccess) {
             Button("OK") {
@@ -248,7 +226,7 @@ struct ImportPreviewSheet: View {
                             try await viewModel.importRecipe(recipe, originalCreator: originalCreator)
                             showSuccess = true
                         } catch {
-                            print("Import error: \(error)")
+                            AppLogger.general.error("Import error: \(error.localizedDescription)")
                         }
                         isImporting = false
                     }
@@ -313,32 +291,21 @@ struct ImportPreviewSheet: View {
                     .foregroundColor(.secondary)
             }
 
-            // Follow button
+            // Close button
             Button(action: {
-                Task {
-                    isImporting = true
-                    try? await viewModel.followUser(user)
-                    isImporting = false
-                    dismiss()
-                }
+                dismiss()
             }) {
                 HStack {
-                    if isImporting {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
-                        Image(systemName: "person.badge.plus")
-                        Text("View Profile")
-                    }
+                    Image(systemName: "xmark")
+                    Text("Close")
                 }
                 .font(.headline)
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.orange)
+                .background(Color.secondary)
                 .cornerRadius(12)
             }
-            .disabled(isImporting)
             .padding(.horizontal)
 
             Spacer()
@@ -391,23 +358,13 @@ struct ImportPreviewSheet: View {
                 }
                 .padding(.horizontal)
 
-                // Import button
+                // Close button (collection import not supported)
                 Button(action: {
-                    Task {
-                        isImporting = true
-                        try? await viewModel.importCollection(collection, owner: owner)
-                        isImporting = false
-                        dismiss()
-                    }
+                    dismiss()
                 }) {
                     HStack {
-                        if isImporting {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Image(systemName: "square.and.arrow.down")
-                            Text("Save Collection")
-                        }
+                        Image(systemName: "xmark")
+                        Text("Close")
                     }
                     .font(.headline)
                     .foregroundColor(.white)

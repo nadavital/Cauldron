@@ -241,6 +241,16 @@ struct ContentView: View {
                 UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
             }
 
+            // Clean up any duplicate recipes that may have been created
+            do {
+                let removedCount = try await dependencies.recipeRepository.removeDuplicateRecipes()
+                if removedCount > 0 {
+                    AppLogger.general.info("🧹 Cleaned up \(removedCount) duplicate recipes")
+                }
+            } catch {
+                AppLogger.general.warning("Failed to remove duplicate recipes: \(error.localizedDescription)")
+            }
+
             // OPTIMIZATION: Parallelize independent data fetches using async let
             async let ownedRecipes = dependencies.recipeRepository.fetchAll()
             async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
