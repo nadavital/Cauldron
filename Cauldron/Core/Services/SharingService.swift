@@ -90,19 +90,6 @@ actor SharingService {
     
     // MARK: - Recipe Sharing
 
-    /// Share a recipe with another user via CloudKit
-    /// TODO: Implement new PUBLIC database sharing with visibility-based access
-    func shareRecipe(_ recipe: Recipe, with user: User, from currentUser: User) async throws {
-        logger.info("📤 Sharing recipe '\(recipe.title)' with user: \(user.username)")
-
-        // TODO: Implement new sharing logic:
-        // 1. Copy recipe to PUBLIC database if visibility != .private
-        // 2. No need for direct sharing - friends see via visibility queries
-
-        logger.warning("⚠️ Recipe sharing not yet implemented with new architecture")
-        throw NSError(domain: "SharingService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sharing not yet implemented"])
-    }
-    
     /// Get all recipes shared with the current user (from PUBLIC database)
     /// Fetches public recipes from friends
     ///
@@ -146,8 +133,13 @@ actor SharingService {
             )
             // Found public recipes (don't log routine operations)
 
+            // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
+            // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
+            let referencedIds = Set(friendsPublicRecipes.flatMap { $0.relatedRecipeIds })
+            let filteredRecipes = friendsPublicRecipes.filter { !referencedIds.contains($0.id) }
+
             // Convert to SharedRecipe objects
-            for recipe in friendsPublicRecipes {
+            for recipe in filteredRecipes {
                 // Skip if already added (shouldn't happen but be safe)
                 if allSharedRecipes.contains(where: { $0.recipe.id == recipe.id }) {
                     continue

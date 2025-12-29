@@ -20,6 +20,7 @@ struct AllRecipesListView: View {
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
+    @State private var showingCollectionForm = false
     @State private var selectedRecipe: Recipe?
     
     init(recipes: [Recipe], dependencies: DependencyContainer) {
@@ -85,172 +86,152 @@ struct AllRecipesListView: View {
     }
     
     var body: some View {
+        listContent
+            .navigationTitle("All Recipes")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $searchText, prompt: "Search recipes")
+            .onAppear { localRecipes = recipes }
+            .onChange(of: recipes) { localRecipes = $1 }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { handleRecipeDeleted($0) }
+            .sheet(isPresented: $showingImporter, onDismiss: refreshRecipes) { ImporterView(dependencies: dependencies) }
+            .sheet(isPresented: $showingEditor) { RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe) }
+            .sheet(isPresented: $showingAIGenerator) { AIRecipeGeneratorView(dependencies: dependencies) }
+            .sheet(isPresented: $showingCollectionForm, onDismiss: refreshRecipes) { CollectionFormView() }
+            .toolbar { toolbarContent }
+    }
+
+    private var listContent: some View {
         List {
-            // Active filters
-            if selectedTag != nil {
-                Section {
-                    HStack {
-                        Text("Tag: \(selectedTag!)")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.cauldronOrange.opacity(0.2))
-                            .cornerRadius(6)
-                        
-                        Spacer()
-                        
-                        Button("Clear") {
-                            selectedTag = nil
-                        }
+            activeFiltersSection
+            recipesForEach
+        }
+    }
+
+    @ViewBuilder
+    private var activeFiltersSection: some View {
+        if let tag = selectedTag {
+            Section {
+                HStack {
+                    Text("Tag: \(tag)")
                         .font(.caption)
-                    }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.cauldronOrange.opacity(0.2))
+                        .cornerRadius(6)
+                    Spacer()
+                    Button("Clear") { selectedTag = nil }
+                        .font(.caption)
                 }
             }
-            
-            ForEach(filteredAndSortedRecipes) { recipe in
-                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                    RecipeRowView(recipe: recipe, dependencies: dependencies)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        Task {
-                            await deleteRecipe(recipe)
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .tint(.red)
-                    
+        }
+    }
+
+    private var recipesForEach: some View {
+        ForEach(filteredAndSortedRecipes) { recipe in
+            recipeRow(for: recipe)
+        }
+    }
+
+    private func recipeRow(for recipe: Recipe) -> some View {
+        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+            RecipeRowView(recipe: recipe, dependencies: dependencies)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            deleteButton(for: recipe)
+            favoriteButton(for: recipe)
+        }
+    }
+
+    private func deleteButton(for recipe: Recipe) -> some View {
+        Button(role: .destructive) {
+            Task { await deleteRecipe(recipe) }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .tint(.red)
+    }
+
+    private func favoriteButton(for recipe: Recipe) -> some View {
+        Button {
+            Task { await toggleFavorite(recipe) }
+        } label: {
+            Label(recipe.isFavorite ? "Unfavorite" : "Favorite",
+                  systemImage: recipe.isFavorite ? "star.slash" : "star.fill")
+        }
+        .tint(.yellow)
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) { filterSortMenu }
+        ToolbarItem(placement: .navigationBarTrailing) { addRecipeMenu }
+    }
+
+    private func handleRecipeDeleted(_ notification: Notification) {
+        if let deletedRecipeId = notification.object as? UUID {
+            localRecipes.removeAll { $0.id == deletedRecipeId }
+        }
+    }
+
+    private var filterSortMenu: some View {
+        Menu {
+            Menu {
+                ForEach(SortOption.allCases, id: \.self) { option in
                     Button {
-                        Task {
-                            try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
-                            // Update the local recipe in the list
-                            if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
-                                var updatedRecipe = localRecipes[index]
-                                updatedRecipe = Recipe(
-                                    id: updatedRecipe.id,
-                                    title: updatedRecipe.title,
-                                    ingredients: updatedRecipe.ingredients,
-                                    steps: updatedRecipe.steps,
-                                    yields: updatedRecipe.yields,
-                                    totalMinutes: updatedRecipe.totalMinutes,
-                                    tags: updatedRecipe.tags,
-                                    nutrition: updatedRecipe.nutrition,
-                                    sourceURL: updatedRecipe.sourceURL,
-                                    sourceTitle: updatedRecipe.sourceTitle,
-                                    notes: updatedRecipe.notes,
-                                    imageURL: updatedRecipe.imageURL,
-                                    isFavorite: !updatedRecipe.isFavorite,
-                                    createdAt: updatedRecipe.createdAt,
-                                    updatedAt: updatedRecipe.updatedAt
-                                )
-                                localRecipes[index] = updatedRecipe
+                        sortOption = option
+                    } label: {
+                        HStack {
+                            Text(option.rawValue)
+                            if sortOption == option {
+                                Image(systemName: "checkmark")
                             }
                         }
-                    } label: {
-                        Label(recipe.isFavorite ? "Unfavorite" : "Favorite", systemImage: recipe.isFavorite ? "star.slash" : "star.fill")
                     }
-                    .tint(.yellow)
                 }
+            } label: {
+                Label("Sort By", systemImage: "arrow.up.arrow.down")
             }
-        }
-        .navigationTitle("All Recipes")
-        .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $searchText, prompt: "Search recipes")
-        .onAppear {
-            localRecipes = recipes
-        }
-        .onChange(of: recipes) { newRecipes in
-            localRecipes = newRecipes
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
-            if let deletedRecipeId = notification.object as? UUID {
-                localRecipes.removeAll { $0.id == deletedRecipeId }
-            }
-        }
-        .sheet(isPresented: $showingImporter, onDismiss: {
-            // Refresh recipes when importer is dismissed
-            Task {
-                do {
-                    localRecipes = try await dependencies.recipeRepository.fetchAll()
-                } catch {
-                    AppLogger.general.error("Failed to refresh recipes: \(error.localizedDescription)")
-                }
-            }
-        }) {
-            ImporterView(dependencies: dependencies)
-        }
-        .sheet(isPresented: $showingEditor) {
-            RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe)
-        }
-        .sheet(isPresented: $showingAIGenerator) {
-            AIRecipeGeneratorView(dependencies: dependencies)
-        }
-        .toolbar {
-            // Filter/Sort menu (left position for consistency)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    // Sort section
-                    Menu {
-                        ForEach(SortOption.allCases, id: \.self) { option in
-                            Button {
-                                sortOption = option
-                            } label: {
-                                HStack {
-                                    Text(option.rawValue)
-                                    if sortOption == option {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Sort By", systemImage: "arrow.up.arrow.down")
-                    }
 
-                    // Filter section
-                    Menu {
-                        Button {
-                            selectedTag = nil
-                        } label: {
-                            HStack {
-                                Text("All Tags")
-                                if selectedTag == nil {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-
-                        ForEach(allTags, id: \.self) { tag in
-                            Button {
-                                selectedTag = tag
-                            } label: {
-                                HStack {
-                                    Text(tag)
-                                    if selectedTag == tag {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Filter by Tag", systemImage: "tag")
-                    }
+            Menu {
+                Button {
+                    selectedTag = nil
                 } label: {
-                    Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                    HStack {
+                        Text("All Tags")
+                        if selectedTag == nil {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
-            }
 
-            // Add recipe menu (right position)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                AddRecipeMenu(
-                    dependencies: dependencies,
-                    showingEditor: $showingEditor,
-                    showingAIGenerator: $showingAIGenerator,
-                    showingImporter: $showingImporter
-                )
+                ForEach(allTags, id: \.self) { tag in
+                    Button {
+                        selectedTag = tag
+                    } label: {
+                        HStack {
+                            Text(tag)
+                            if selectedTag == tag {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Filter by Tag", systemImage: "tag")
             }
+        } label: {
+            Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
         }
+    }
+
+    private var addRecipeMenu: some View {
+        AddRecipeMenu(
+            dependencies: dependencies,
+            showingEditor: $showingEditor,
+            showingAIGenerator: $showingAIGenerator,
+            showingImporter: $showingImporter,
+            showingCollectionForm: $showingCollectionForm
+        )
     }
     
     private func deleteRecipe(_ recipe: Recipe) async {
@@ -259,6 +240,42 @@ struct AllRecipesListView: View {
             // UI update handled by RecipeDeleted notification listener
         } catch {
             AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
+        }
+    }
+
+    private func refreshRecipes() {
+        Task {
+            do {
+                localRecipes = try await dependencies.recipeRepository.fetchAll()
+            } catch {
+                AppLogger.general.error("Failed to refresh recipes: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func toggleFavorite(_ recipe: Recipe) async {
+        try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
+        // Update the local recipe in the list
+        if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
+            let current = localRecipes[index]
+            let toggled = Recipe(
+                id: current.id,
+                title: current.title,
+                ingredients: current.ingredients,
+                steps: current.steps,
+                yields: current.yields,
+                totalMinutes: current.totalMinutes,
+                tags: current.tags,
+                nutrition: current.nutrition,
+                sourceURL: current.sourceURL,
+                sourceTitle: current.sourceTitle,
+                notes: current.notes,
+                imageURL: current.imageURL,
+                isFavorite: !current.isFavorite,
+                createdAt: current.createdAt,
+                updatedAt: current.updatedAt
+            )
+            localRecipes[index] = toggled
         }
     }
 }

@@ -430,7 +430,6 @@ final class ExternalShareService: Sendable {
             updatedAt: Date()
         )
 
-        // TODO: Fetch original creator info if needed
         return .recipe(recipe, originalCreator: nil)
     }
 
@@ -482,7 +481,6 @@ final class ExternalShareService: Sendable {
             updatedAt: Date()
         )
 
-        // TODO: Fetch owner info if needed
         return .collection(collection, owner: nil)
     }
 }

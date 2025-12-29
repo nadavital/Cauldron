@@ -256,7 +256,7 @@ class UserProfileViewModel: ObservableObject {
             return []
         }
 
-        let recipes: [Recipe]
+        var recipes: [Recipe]
 
         // If viewing your own profile, fetch from local storage (same as Cook tab)
         if isCurrentUser {
@@ -271,8 +271,14 @@ class UserProfileViewModel: ObservableObject {
             AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
         }
 
+        // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
+        // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
+        let referencedIds = Set(recipes.flatMap { $0.relatedRecipeIds })
+        let filteredRecipes = recipes.filter { !referencedIds.contains($0.id) }
+        AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) recipes (removed \(referencedIds.count) referenced recipes)")
+
         // Convert to SharedRecipe
-        let sharedRecipes = recipes.map { recipe in
+        let sharedRecipes = filteredRecipes.map { recipe in
             SharedRecipe(
                 id: recipe.id,
                 recipe: recipe,

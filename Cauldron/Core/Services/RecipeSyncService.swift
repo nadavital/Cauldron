@@ -316,8 +316,8 @@ actor RecipeSyncService {
                 }
             } else {
                 // Recipe exists in cloud but not locally - create local
-                // Creating local recipe from cloud
-                try await recipeRepository.create(cloudRecipe)
+                // Creating local recipe from cloud (skip cloud sync since we're downloading FROM cloud)
+                try await recipeRepository.create(cloudRecipe, skipCloudSync: true)
 
                 // Download image if exists in cloud
                 await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)

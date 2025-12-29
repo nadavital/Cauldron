@@ -39,6 +39,9 @@ class CookModeCoordinator {
     var showSessionConflictAlert: Bool = false
     var pendingRecipe: Recipe?
 
+    /// Show toast when recipe is deleted during cooking
+    var showRecipeDeletedToast: Bool = false
+
     // MARK: - Dependencies
 
     private let dependencies: DependencyContainer
@@ -92,7 +95,8 @@ class CookModeCoordinator {
             // End the session
             endSession()
 
-            // TODO: Show user notification/toast that recipe was deleted
+            // Show toast notification to user
+            showRecipeDeletedToast = true
         }
     }
 
