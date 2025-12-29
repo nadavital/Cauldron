@@ -52,6 +52,9 @@ struct AIRecipeGeneratorView: View {
                     .padding(.bottom, 100) // Space for floating button
                     .animation(.spring(response: 0.5, dampingFraction: 0.8), value: viewModel.partialRecipe == nil)
                 }
+                .onTapGesture {
+                    isPromptFocused = false
+                }
                 
                 // Floating action button (generate/generating/regenerate)
                 if isAvailable && (viewModel.canGenerate || viewModel.isGenerating || viewModel.generatedRecipe != nil) {
@@ -60,6 +63,11 @@ struct AIRecipeGeneratorView: View {
                 }
             }
             .animation(.spring(), value: viewModel.canGenerate)
+            .animation(.spring(), value: viewModel.selectedCuisines.count)
+            .animation(.spring(), value: viewModel.selectedDiets.count)
+            .animation(.spring(), value: viewModel.selectedTimes.count)
+            .animation(.spring(), value: viewModel.selectedTypes.count)
+            .animation(.spring(), value: viewModel.prompt)
             .navigationTitle("Generate Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -132,7 +140,7 @@ struct AIRecipeGeneratorView: View {
                                 )
                             )
                             .frame(width: 44, height: 44)
-                            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 8, x: 0, y: 4)
 
                         Image(systemName: "apple.intelligence")
                             .font(.system(size: 20))
@@ -553,7 +561,7 @@ struct AIRecipeGeneratorView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
-            .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
+            .background(Color.orange, in: Capsule())
         }
         .padding(.bottom, 32)
     }
