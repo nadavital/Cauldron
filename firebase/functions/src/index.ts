@@ -458,7 +458,7 @@ export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async 
         const imageURL = data.imageURL || null;
         const description = `Check out this recipe on Cauldron!`;
         const appURL = `cauldron://import/recipe/${recipeId}`;
-        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
+        const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
@@ -496,7 +496,7 @@ export const previewProfile = onRequest({ cors: true, invoker: 'public' }, async
         const recipeCount = data.recipeCount || 0;
         const description = `Check out my Cauldron profile! ${recipeCount} recipes and counting 🍲`;
         const appURL = `cauldron://import/profile/${shareId}`;
-        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
+        const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
@@ -527,7 +527,7 @@ export const previewCollection = onRequest({ cors: true, invoker: 'public' }, as
         const recipeCount = data.recipeCount || 0;
         const description = `Check out my ${title} collection on Cauldron! ${recipeCount} recipes.`;
         const appURL = `cauldron://import/collection/${shareId}`;
-        const downloadURL = 'https://testflight.apple.com/join/Zk5WuCcE';
+        const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
