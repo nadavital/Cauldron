@@ -12,7 +12,9 @@ import Combine
 /// View for managing the unified grocery list
 struct GroceriesView: View {
     @StateObject private var viewModel: GroceriesViewModel
+    @StateObject private var currentUserSession = CurrentUserSession.shared
     @State private var showingAddItem = false
+    @State private var showingProfileSheet = false
     @State private var viewMode: GroceryGroupingType = .recipe  // Default to grouped by recipe
     @State private var collapsedGroups: Set<String> = []  // Track which groups are collapsed
     @State private var isAIAvailable = false
@@ -36,6 +38,16 @@ struct GroceriesView: View {
             }
             .navigationTitle("Groceries")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
+                        }
+                    }
+                }
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Picker("Sort By", selection: $viewMode) {
@@ -69,6 +81,18 @@ struct GroceriesView: View {
                         showingAddItem = true
                     } label: {
                         Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingProfileSheet) {
+                NavigationStack {
+                    if let user = currentUserSession.currentUser {
+                        UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { showingProfileSheet = false }
+                                }
+                            }
                     }
                 }
             }

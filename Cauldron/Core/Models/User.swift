@@ -14,6 +14,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     let displayName: String
     let email: String?
     let cloudRecordName: String?  // CloudKit record name
+    let referralCode: String?  // Unique referral code
     let createdAt: Date
     let profileEmoji: String?  // Emoji for profile avatar (mutually exclusive with profileImageURL)
     let profileColor: String?  // Hex color string for profile avatar
@@ -27,6 +28,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
         displayName: String,
         email: String? = nil,
         cloudRecordName: String? = nil,
+        referralCode: String? = nil,
         createdAt: Date = Date(),
         profileEmoji: String? = nil,
         profileColor: String? = nil,
@@ -39,6 +41,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
         self.displayName = displayName
         self.email = email
         self.cloudRecordName = cloudRecordName
+        self.referralCode = referralCode
         self.createdAt = createdAt
         self.profileEmoji = profileEmoji
         self.profileColor = profileColor
@@ -72,6 +75,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
             displayName: displayName,
             email: email,
             cloudRecordName: cloudRecordName,
+            referralCode: referralCode,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
             profileColor: profileColor,

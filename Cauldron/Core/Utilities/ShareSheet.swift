@@ -12,27 +12,31 @@ import LinkPresentation
 /// UIKit wrapper for UIActivityViewController
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
-    
+
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        // Process items to wrap URLs with metadata source for rich previews
-        let activityItems = items.map { item -> Any in
+        // Process items to create activity items
+        var activityItems: [Any] = []
+
+        for item in items {
             if let shareableLink = item as? ShareableLink {
-                return LinkMetadataSource(link: shareableLink)
+                // Share URL and text as separate items
+                // iOS will combine them appropriately for each share target
+                activityItems.append(shareableLink.url)
+                activityItems.append(shareableLink.previewText)
             } else if let url = item as? URL {
-                // If it's a raw URL, try to find a matching string/text in items to use as title
-                // But ideally, we should always pass ShareableLink
-                return url
+                activityItems.append(url)
+            } else {
+                activityItems.append(item)
             }
-            return item
         }
-        
+
         let controller = UIActivityViewController(
             activityItems: activityItems,
             applicationActivities: nil
         )
         return controller
     }
-    
+
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
         // No update needed
     }

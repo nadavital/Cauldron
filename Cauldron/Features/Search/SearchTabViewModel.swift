@@ -26,6 +26,7 @@ class SearchTabViewModel: ObservableObject {
     @Published var connectionError: ConnectionError?
     @Published var popularTags: [String] = []
     @Published var selectedCategories: Set<RecipeCategory> = []
+    @Published var ownerTiers: [UUID: UserTier] = [:] // Cached owner tiers for search boost
 
     let dependencies: DependencyContainer
     private var recipeSearchText: String = ""
@@ -249,22 +250,26 @@ class SearchTabViewModel: ObservableObject {
     
     private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
         isLoading = true
-        
+
         do {
             // Convert categories to string tags
             let categoryTags = categories.map { $0.tagValue }
-            
+
             // Perform server-side search
             let results = try await dependencies.cloudKitService.searchPublicRecipes(
                 query: query,
                 categories: categoryTags.isEmpty ? nil : categoryTags
             )
-            
+
             // Filter out own recipes (just in case)
-            var filteredResults = results.filter { $0.ownerId != currentUserId }
-            
+            let filteredResults = results.filter { $0.ownerId != currentUserId }
+
             if !Task.isCancelled {
                 publicRecipes = filteredResults
+
+                // Fetch owner tiers for search ranking boost
+                await fetchOwnerTiers(for: filteredResults)
+
                 // Re-merge with local results and process grouping
                 processSearchResults()
                 isLoading = false
@@ -272,7 +277,7 @@ class SearchTabViewModel: ObservableObject {
         } catch {
             if !Task.isCancelled {
                 AppLogger.general.error("Failed to search public recipes: \(error.localizedDescription)")
-                publicRecipes = [] 
+                publicRecipes = []
                 processSearchResults()
                 isLoading = false
             }
@@ -287,9 +292,39 @@ class SearchTabViewModel: ObservableObject {
             publicRecipes: publicRecipes,
             friends: friends,
             currentUserId: currentUserId,
+            ownerTiers: ownerTiers,
             filterText: recipeSearchText,
             selectedCategories: selectedCategories
         )
+    }
+
+    /// Fetch owner tiers for recipes based on their public recipe counts
+    /// This enables the tier-based search boost ranking
+    private func fetchOwnerTiers(for recipes: [Recipe]) async {
+        // Collect unique owner IDs
+        let ownerIds = Set(recipes.compactMap { $0.ownerId }).filter { $0 != currentUserId }
+
+        guard !ownerIds.isEmpty else { return }
+
+        do {
+            // Fetch recipe counts for each owner from CloudKit
+            // This is a simplified approach - we count their public recipes
+            for ownerId in ownerIds {
+                // Skip if we already have this owner's tier cached
+                guard ownerTiers[ownerId] == nil else { continue }
+
+                let ownerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                    ownerIds: [ownerId],
+                    visibility: .publicRecipe
+                )
+
+                let tier = UserTier.tier(for: ownerRecipes.count)
+                ownerTiers[ownerId] = tier
+            }
+        } catch {
+            AppLogger.general.error("Failed to fetch owner tiers: \(error.localizedDescription)")
+            // Continue with default tiers (apprentice)
+        }
     }
     
     func updatePeopleSearch(_ query: String) {

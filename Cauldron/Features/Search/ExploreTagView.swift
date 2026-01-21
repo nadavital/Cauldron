@@ -273,6 +273,7 @@ struct ExploreTagRecipeCard: View {
     let recipe: Recipe
     let dependencies: DependencyContainer
     var sharedBy: User? = nil
+    var ownerTier: UserTier? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -313,7 +314,7 @@ struct ExploreTagRecipeCard: View {
 
                 Spacer()
 
-                // Shared by indicator or tag
+                // Shared by indicator with tier badge, or tag
                 if let sharedBy = sharedBy {
                     HStack(spacing: 4) {
                         ProfileAvatar(user: sharedBy, size: 16, dependencies: dependencies)
@@ -321,8 +322,13 @@ struct ExploreTagRecipeCard: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+
+                        // Tier badge (compact)
+                        if let tier = ownerTier {
+                            TierBadgeView(tier: tier, style: .compact)
+                        }
                     }
-                    .frame(maxWidth: 120, alignment: .trailing)
+                    .frame(maxWidth: 140, alignment: .trailing)
                 } else if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
                     TagView(firstTag)
                         .scaleEffect(0.9)

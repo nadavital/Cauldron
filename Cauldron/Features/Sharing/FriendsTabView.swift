@@ -25,6 +25,8 @@ struct FriendsTabView: View {
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var selectedSection: FriendsTabSection = .recipes
+    @State private var showingProfileSheet = false
+    @State private var showingPeopleSearch = false
 
     let dependencies: DependencyContainer
 
@@ -37,13 +39,37 @@ struct FriendsTabView: View {
             combinedFeedSection
             .navigationTitle("Friends")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     if let user = userSession.currentUser {
-                        NavigationLink(destination: UserProfileView(user: user, dependencies: dependencies)) {
-                            Image(systemName: "person.fill")
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 32, dependencies: dependencies)
                         }
                     }
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingPeopleSearch = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingProfileSheet) {
+                NavigationStack {
+                    if let user = userSession.currentUser {
+                        UserProfileView(user: user, dependencies: dependencies)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { showingProfileSheet = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingPeopleSearch) {
+                PeopleSearchSheet(dependencies: dependencies)
             }
             .task {
                 // Configure dependencies if not already done
@@ -189,7 +215,11 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                            SocialRecipeCard(
+                                sharedRecipe: sharedRecipe,
+                                creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
+                                dependencies: dependencies
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -231,7 +261,11 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                            SocialRecipeCard(
+                                sharedRecipe: sharedRecipe,
+                                creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
+                                dependencies: dependencies
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -273,7 +307,11 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            FriendRecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                            SocialRecipeCard(
+                                sharedRecipe: sharedRecipe,
+                                creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
+                                dependencies: dependencies
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -316,6 +354,7 @@ struct FriendsTabView: View {
 struct SharedRecipeRowView: View {
     let sharedRecipe: SharedRecipe
     let dependencies: DependencyContainer
+    var ownerTier: UserTier? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -329,13 +368,18 @@ struct SharedRecipeRowView: View {
                     .lineLimit(2)
                     .truncationMode(.tail)
 
-                // Shared by info
+                // Shared by info with tier badge
                 HStack(spacing: 6) {
                     ProfileAvatar(user: sharedRecipe.sharedBy, size: 20, dependencies: dependencies)
 
                     Text(sharedRecipe.sharedBy.displayName)
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    // Tier badge (compact)
+                    if let tier = ownerTier {
+                        TierBadgeView(tier: tier, style: .compact)
+                    }
 
                     Text("•")
                         .font(.caption2)
@@ -373,62 +417,6 @@ struct SharedRecipeRowView: View {
     }
 }
 
-// MARK: - Friend Recipe Card View
-
-/// Card view for friend's recipe in horizontal scrolling sections
-/// Similar to RecipeCardView but with friend attribution instead of tags
-struct FriendRecipeCardView: View {
-    let sharedRecipe: SharedRecipe
-    let dependencies: DependencyContainer
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Image with friend's profile picture badge
-            ZStack(alignment: .topTrailing) {
-                RecipeImageView(recipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
-
-                // Friend's profile picture in corner
-                ProfileAvatar(user: sharedRecipe.sharedBy, size: 36, dependencies: dependencies)
-                    .overlay(
-                        Circle()
-                            .stroke(Color(.systemBackground), lineWidth: 2)
-                    )
-                    .padding(8)
-            }
-            .frame(width: 240, height: 160)
-
-            // Title - single line for clean look
-            Text(sharedRecipe.recipe.title)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
-
-            // Friend attribution and time - fixed height for alignment
-            HStack(spacing: 6) {
-                // Friend's name
-                Text("by \(sharedRecipe.sharedBy.displayName)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                // Time - always reserve space
-                if let time = sharedRecipe.recipe.displayTime {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.caption2)
-                        Text(time)
-                            .font(.caption)
-                    }
-                    .foregroundColor(.cauldronOrange)
-                }
-            }
-            .frame(width: 240, height: 20)
-        }
-        .frame(width: 240)
-    }
-}
 
 // MARK: - Section Header
 

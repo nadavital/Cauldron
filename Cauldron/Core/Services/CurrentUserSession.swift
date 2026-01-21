@@ -26,6 +26,7 @@ class CurrentUserSession: ObservableObject {
     private let displayNameKey = "currentDisplayName"
     private let profileEmojiKey = "currentProfileEmoji"
     private let profileColorKey = "currentProfileColor"
+    private let referralCodeKey = "currentReferralCode"
     private let hasCompletedLocalOnboardingKey = "hasCompletedLocalOnboarding"
     private let logger = Logger(subsystem: "com.cauldron", category: "UserSession")
 
@@ -81,6 +82,8 @@ class CurrentUserSession: ObservableObject {
 
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
+        ReferralManager.shared.configure(with: dependencies.cloudKitService)
+
         // Step 1: Check iCloud account status
         let accountStatus = await dependencies.cloudKitService.checkAccountStatus()
         cloudKitAccountStatus = accountStatus
@@ -98,6 +101,8 @@ class CurrentUserSession: ObservableObject {
                 // Set up push notification subscription for connection requests
                 await setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
 
+                await syncReferralCountIfNeeded(for: cloudUser, dependencies: dependencies)
+
                 isInitialized = true
                 needsOnboarding = false
                 needsiCloudSignIn = false
@@ -114,12 +119,14 @@ class CurrentUserSession: ObservableObject {
             // Retrieve optional profile emoji and color
             let profileEmoji = UserDefaults.standard.string(forKey: profileEmojiKey)
             let profileColor = UserDefaults.standard.string(forKey: profileColorKey)
+            let referralCode = UserDefaults.standard.string(forKey: referralCodeKey)
 
             // Recreate user object from local storage
             currentUser = User(
                 id: userId,
                 username: username,
                 displayName: displayName,
+                referralCode: referralCode,
                 profileEmoji: profileEmoji,
                 profileColor: profileColor
             )
@@ -147,6 +154,10 @@ class CurrentUserSession: ObservableObject {
                     logger.warning("CloudKit sync failed: \(error.localizedDescription)")
                     // Continue with local user
                 }
+            }
+
+            if let currentUser = currentUser {
+                await syncReferralCountIfNeeded(for: currentUser, dependencies: dependencies)
             }
 
             isInitialized = true
@@ -177,6 +188,19 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.set(user.displayName, forKey: displayNameKey)
         UserDefaults.standard.set(user.profileEmoji, forKey: profileEmojiKey)
         UserDefaults.standard.set(user.profileColor, forKey: profileColorKey)
+        UserDefaults.standard.set(user.referralCode, forKey: referralCodeKey)
+    }
+
+    /// Sync referral count from CloudKit for the current user when available
+    private func syncReferralCountIfNeeded(for user: User, dependencies: DependencyContainer) async {
+        guard cloudKitAccountStatus?.isAvailable == true else { return }
+
+        do {
+            let count = try await dependencies.cloudKitService.fetchReferralCount(for: user.id)
+            ReferralManager.shared.syncFromCloudKit(referralCount: count)
+        } catch {
+            logger.warning("Failed to sync referral count: \(error.localizedDescription)")
+        }
     }
 
     /// Download profile image from CloudKit if it exists in cloud but not locally
@@ -326,6 +350,7 @@ class CurrentUserSession: ObservableObject {
             displayName: displayName,
             email: currentUser.email,
             cloudRecordName: currentUser.cloudRecordName,
+            referralCode: currentUser.referralCode,
             createdAt: currentUser.createdAt,
             profileEmoji: profileEmoji,
             profileColor: profileColor
@@ -374,6 +399,7 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.removeObject(forKey: displayNameKey)
         UserDefaults.standard.removeObject(forKey: profileEmojiKey)
         UserDefaults.standard.removeObject(forKey: profileColorKey)
+        UserDefaults.standard.removeObject(forKey: referralCodeKey)
 
         currentUser = nil
         needsOnboarding = true

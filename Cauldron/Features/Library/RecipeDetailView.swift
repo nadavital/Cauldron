@@ -164,7 +164,7 @@ struct RecipeDetailView: View {
                     handleCookButtonTap()
                 } label: {
                     HStack(spacing: 8) {
-                        Image("CauldronIconSmall")
+                        Image("BrandMarks/CauldronIconSmall")
                             .renderingMode(.template)
                             .resizable()
                             .scaledToFit()

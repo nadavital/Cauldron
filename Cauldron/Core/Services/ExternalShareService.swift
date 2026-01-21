@@ -205,7 +205,7 @@ final class ExternalShareService: Sendable {
             link.image = try? await loadImage(from: imageURL)
         }
         if link.image == nil {
-            link.image = UIImage(named: "CauldronIcon")
+            link.image = UIImage(named: "BrandMarks/CauldronIcon")
         }
         
         return link
@@ -280,7 +280,7 @@ final class ExternalShareService: Sendable {
             link.image = try? await loadImage(from: imageURL)
         }
         if link.image == nil {
-            link.image = UIImage(named: "CauldronIcon")
+            link.image = UIImage(named: "BrandMarks/CauldronIcon")
         }
 
         return link

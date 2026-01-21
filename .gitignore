@@ -131,3 +131,5 @@ Temporary Items
 !*.xcworkspace/xcshareddata/
 /*.gcno
 **/xcshareddata/WorkspaceSettings.xcsettings
+
+appstorescreenshots/

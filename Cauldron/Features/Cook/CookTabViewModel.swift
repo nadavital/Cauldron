@@ -21,6 +21,11 @@ class CookTabViewModel: ObservableObject {
     @Published var forgottenFavorites: [Recipe] = []
     @Published var tagRows: [(tag: String, recipes: [Recipe])] = []
     @Published var collections: [Collection] = []
+    @Published var friendsRecipes: [SharedRecipe] = []
+    @Published var popularRecipes: [Recipe] = []
+    @Published var popularRecipeTiers: [UUID: UserTier] = [:]  // Cached owner tiers for sorting
+    @Published var popularRecipeOwners: [UUID: User] = [:]  // Cached owner User objects for display
+    @Published var friendsRecipeTiers: [UUID: UserTier] = [:]  // Cached tiers for friends' recipes
     @Published var isLoading = false
 
     let dependencies: DependencyContainer
@@ -55,6 +60,9 @@ class CookTabViewModel: ObservableObject {
                 // Load smart recommendations
                 self.updateSmartRecommendations()
 
+                // Load friends' recipes and popular recipes in background
+                await self.loadSocialRecipes()
+
                 // Cook tab initialized with preloaded data (don't log routine operations)
             }
         } else {
@@ -85,6 +93,9 @@ class CookTabViewModel: ObservableObject {
             
             // Load smart recommendations
             updateSmartRecommendations()
+
+            // Load friends' recipes and popular recipes in background
+            await loadSocialRecipes()
 
             hasLoadedInitially = true
         } catch {
@@ -136,9 +147,127 @@ class CookTabViewModel: ObservableObject {
             // Load smart recommendations
             updateSmartRecommendations()
 
+            // Load friends' recipes and popular recipes in background
+            await loadSocialRecipes()
+
             hasLoadedInitially = true
         } catch {
             AppLogger.general.error("Failed to load cook tab data: \(error.localizedDescription)")
+        }
+    }
+
+    /// Load friends' recipes and popular recipes for the social sections
+    private func loadSocialRecipes() async {
+        // Load friends' recipes
+        do {
+            let sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
+            // Sort by most recent and limit to 15
+            friendsRecipes = sharedRecipes.sorted { $0.sharedAt > $1.sharedAt }
+                .prefix(15)
+                .map { $0 }
+
+            // Fetch tiers for friends who shared recipes
+            await fetchFriendsRecipeTiers(for: friendsRecipes)
+        } catch {
+            AppLogger.general.warning("Failed to load friends' recipes: \(error.localizedDescription)")
+        }
+
+        // Load popular public recipes
+        do {
+            let popular = try await dependencies.cloudKitService.fetchPopularPublicRecipes(limit: 20)
+
+            // Get current user ID to exclude own recipes
+            let currentUserId = CurrentUserSession.shared.userId
+
+            // Filter out own recipes
+            var filteredRecipes = popular.filter { recipe in
+                if let ownerId = recipe.ownerId, let currentUserId = currentUserId {
+                    return ownerId != currentUserId
+                }
+                return true
+            }
+
+            // Fetch owner tiers and user objects for display
+            await fetchOwnerTiersAndUsers(for: filteredRecipes)
+
+            // Sort by tier boost (higher tier users' recipes appear first)
+            filteredRecipes = filteredRecipes.sorted { recipe1, recipe2 in
+                let tier1 = recipe1.ownerId.flatMap { popularRecipeTiers[$0] } ?? .apprentice
+                let tier2 = recipe2.ownerId.flatMap { popularRecipeTiers[$0] } ?? .apprentice
+
+                // Higher boost first, then by updatedAt for recipes with same tier
+                if tier1.searchBoost != tier2.searchBoost {
+                    return tier1.searchBoost > tier2.searchBoost
+                }
+                return recipe1.updatedAt > recipe2.updatedAt
+            }
+
+            popularRecipes = Array(filteredRecipes.prefix(15))
+        } catch {
+            AppLogger.general.warning("Failed to load popular recipes: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetch owner tiers and User objects for popular recipes
+    private func fetchOwnerTiersAndUsers(for recipes: [Recipe]) async {
+        // Collect unique owner IDs
+        let ownerIds = Set(recipes.compactMap { $0.ownerId })
+
+        guard !ownerIds.isEmpty else { return }
+
+        do {
+            // Fetch user profiles and recipe counts for each owner
+            for ownerId in ownerIds {
+                // Skip if we already have this owner's data cached
+                guard popularRecipeTiers[ownerId] == nil || popularRecipeOwners[ownerId] == nil else { continue }
+
+                // Fetch user profile
+                if popularRecipeOwners[ownerId] == nil {
+                    if let user = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId) {
+                        popularRecipeOwners[ownerId] = user
+                    }
+                }
+
+                // Fetch recipe count for tier calculation
+                if popularRecipeTiers[ownerId] == nil {
+                    let ownerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                        ownerIds: [ownerId],
+                        visibility: .publicRecipe
+                    )
+
+                    let tier = UserTier.tier(for: ownerRecipes.count)
+                    popularRecipeTiers[ownerId] = tier
+                }
+            }
+        } catch {
+            AppLogger.general.error("Failed to fetch owner tiers/users: \(error.localizedDescription)")
+            // Continue with default tiers (apprentice)
+        }
+    }
+
+    /// Fetch tiers for friends who shared recipes
+    private func fetchFriendsRecipeTiers(for sharedRecipes: [SharedRecipe]) async {
+        // Collect unique sharer user IDs
+        let sharerIds = Set(sharedRecipes.map { $0.sharedBy.id })
+
+        guard !sharerIds.isEmpty else { return }
+
+        do {
+            for sharerId in sharerIds {
+                // Skip if already cached
+                guard friendsRecipeTiers[sharerId] == nil else { continue }
+
+                // Fetch public recipe count for tier calculation
+                let sharerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                    ownerIds: [sharerId],
+                    visibility: .publicRecipe
+                )
+
+                let tier = UserTier.tier(for: sharerRecipes.count)
+                friendsRecipeTiers[sharerId] = tier
+            }
+        } catch {
+            AppLogger.general.error("Failed to fetch friends' tiers: \(error.localizedDescription)")
         }
     }
 

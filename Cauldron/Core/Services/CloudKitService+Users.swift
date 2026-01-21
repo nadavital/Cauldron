@@ -43,8 +43,9 @@ extension CloudKitService {
             let record = try await db.record(for: customRecordID)
             if record["userId"] != nil {
                 let user = try userFromRecord(record)
-                logger.info("✅ Found user profile in CloudKit PUBLIC database: \(user.username)")
-                return user
+                let updatedUser = try await ensureReferralCodeIfNeeded(for: user)
+                logger.info("✅ Found user profile in CloudKit PUBLIC database: \(updatedUser.username)")
+                return updatedUser
             }
         } catch let error as CKError where error.code == .unknownItem {
             // Not found in public DB, try migration
@@ -62,8 +63,9 @@ extension CloudKitService {
             // Check if this record has valid User fields
             if record["userId"] != nil {
                 let user = try userFromRecord(record)
+                let updatedUser = try await ensureReferralCodeIfNeeded(for: user)
                 logger.info("✅ Found user profile (legacy) in CloudKit PUBLIC database")
-                return user
+                return updatedUser
             }
         } catch let error as CKError where error.code == .unknownItem {
             // Not found
@@ -95,11 +97,12 @@ extension CloudKitService {
                 logger.info("Found user in PRIVATE database via custom ID. Migrating to PUBLIC...")
                 
                 // Save to PUBLIC
-                try await saveUser(user)
+                let updatedUser = try await ensureReferralCodeIfNeeded(for: user)
+                try await saveUser(updatedUser)
                 logger.info("✅ Migration complete for \(user.username)")
                 
                 // Optionally delete from private, but keeping as backup is safer for now
-                return user
+                return updatedUser
             }
         } catch let error as CKError where error.code == .unknownItem {
             // Not found with custom name, try system ID
@@ -112,9 +115,10 @@ extension CloudKitService {
                 logger.info("Found user in PRIVATE database via system ID. Migrating to PUBLIC...")
                 
                 // Save to PUBLIC
-                try await saveUser(user)
+                let updatedUser = try await ensureReferralCodeIfNeeded(for: user)
+                try await saveUser(updatedUser)
                 logger.info("✅ Migration complete for \(user.username)")
-                return user
+                return updatedUser
             }
         } catch let error as CKError where error.code == .unknownItem {
             // Not found in private database
@@ -150,10 +154,20 @@ extension CloudKitService {
         let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
         let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
 
+        let provisionalUser = User(
+            username: normalizedUsername,
+            displayName: normalizedDisplayName,
+            cloudRecordName: customRecordName,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor
+        )
+        let referralCode = try await generateUniqueReferralCode(preferred: legacyReferralCode(for: provisionalUser))
+
         let user = User(
             username: normalizedUsername,
             displayName: normalizedDisplayName,
             cloudRecordName: customRecordName,
+            referralCode: referralCode,
             profileEmoji: profileEmoji,
             profileColor: profileColor
         )
@@ -202,6 +216,9 @@ extension CloudKitService {
         record["userId"] = user.id.uuidString as CKRecordValue
         record["username"] = normalizedUsername as CKRecordValue
         record["displayName"] = normalizedDisplayName as CKRecordValue
+        if let referralCode = user.referralCode, !referralCode.isEmpty {
+            record["referralCode"] = normalizeReferralCode(referralCode) as CKRecordValue
+        }
         if let email = user.email {
             record["email"] = email as CKRecordValue
         }
@@ -366,6 +383,7 @@ extension CloudKitService {
 
         let email = record["email"] as? String
         let createdAt = record["createdAt"] as? Date ?? Date()
+        let referralCode = record["referralCode"] as? String
         let profileEmoji = record["profileEmoji"] as? String
         let profileColor = record["profileColor"] as? String
         let cloudProfileImageRecordName = record["cloudProfileImageRecordName"] as? String
@@ -377,6 +395,7 @@ extension CloudKitService {
             displayName: displayName,
             email: email,
             cloudRecordName: record.recordID.recordName,
+            referralCode: referralCode,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
             profileColor: profileColor,
@@ -539,5 +558,249 @@ extension CloudKitService {
             logger.error("Failed to delete user profile: \(error.localizedDescription)")
             throw error
         }
+    }
+
+    // MARK: - Referral System
+
+    /// Look up a user by their referral code
+    func lookupUserByReferralCode(_ code: String) async throws -> User? {
+        let normalizedCode = code.uppercased().trimmingCharacters(in: .whitespaces)
+        guard normalizedCode.count == 6 else {
+            logger.warning("Invalid referral code format: \(code)")
+            return nil
+        }
+
+        let db = try getPublicDatabase()
+
+        // Try to query by referralCode field first
+        do {
+            let predicate = NSPredicate(format: "referralCode == %@", normalizedCode)
+            let query = CKQuery(recordType: userRecordType, predicate: predicate)
+            let results = try await db.records(matching: query, resultsLimit: 1)
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get() {
+                    let user = try userFromRecord(record)
+                    logger.info("Found user for referral code: \(user.displayName)")
+                    return user
+                }
+            }
+        } catch {
+            // If referralCode field doesn't exist yet, skip this query
+            if error.localizedDescription.contains("Unknown field") {
+                logger.info("referralCode field not in schema yet - trying legacy lookup")
+            } else {
+                throw error
+            }
+        }
+
+        // Fall back to legacy referral code lookup (derives code from record name)
+        if let legacyUser = try await lookupUserByLegacyReferralCode(normalizedCode) {
+            return legacyUser
+        }
+
+        logger.info("No user found for referral code: \(normalizedCode)")
+        return nil
+    }
+
+    /// Generate a legacy referral code from the user's record name
+    private func legacyReferralCode(for user: User) -> String {
+        let baseId: String
+        if let cloudRecordName = user.cloudRecordName {
+            baseId = cloudRecordName.replacingOccurrences(of: "user_", with: "")
+        } else {
+            baseId = user.id.uuidString
+        }
+
+        let cleanId = baseId.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
+        let prefix = String(cleanId.prefix(6)).uppercased()
+        return prefix.padding(toLength: 6, withPad: "X", startingAt: 0)
+    }
+
+    private func lookupUserByLegacyReferralCode(_ code: String) async throws -> User? {
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(value: true)
+        let query = CKQuery(recordType: userRecordType, predicate: predicate)
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            var results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor = cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let user = try? userFromRecord(record) else {
+                    continue
+                }
+
+                let legacyCode = legacyReferralCode(for: user)
+                if legacyCode == code {
+                    let updatedUser = try await ensureReferralCodeIfNeeded(for: user)
+                    logger.info("Found user for legacy referral code: \(updatedUser.displayName)")
+                    return updatedUser
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return nil
+    }
+
+    private func normalizeReferralCode(_ code: String) -> String {
+        code.uppercased().trimmingCharacters(in: .whitespaces)
+    }
+
+    private func isReferralCodeAvailable(_ code: String) async throws -> Bool {
+        let normalizedCode = normalizeReferralCode(code)
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(format: "referralCode == %@", normalizedCode)
+        let query = CKQuery(recordType: userRecordType, predicate: predicate)
+
+        do {
+            let results = try await db.records(matching: query, resultsLimit: 1)
+            return results.matchResults.isEmpty
+        } catch {
+            // If the field doesn't exist yet in the schema, assume the code is available
+            // The field will be auto-created when the first user record with referralCode is saved
+            if error.localizedDescription.contains("Unknown field") {
+                logger.info("referralCode field not in schema yet - assuming code is available")
+                return true
+            }
+            throw error
+        }
+    }
+
+    private func generateUniqueReferralCode(preferred: String? = nil) async throws -> String {
+        if let preferred = preferred {
+            let normalizedPreferred = normalizeReferralCode(preferred)
+            if normalizedPreferred.count == 6, try await isReferralCodeAvailable(normalizedPreferred) {
+                return normalizedPreferred
+            }
+        }
+
+        let characters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        for _ in 0..<32 {
+            let code = String((0..<6).compactMap { _ in characters.randomElement() })
+            if try await isReferralCodeAvailable(code) {
+                return code
+            }
+        }
+
+        let fallback = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(6).uppercased()
+        return String(fallback)
+    }
+
+    private func ensureReferralCodeIfNeeded(for user: User) async throws -> User {
+        if let referralCode = user.referralCode,
+           !referralCode.isEmpty,
+           normalizeReferralCode(referralCode).count == 6 {
+            return user
+        }
+
+        let preferred = legacyReferralCode(for: user)
+        let uniqueCode = try await generateUniqueReferralCode(preferred: preferred)
+        let updatedUser = User(
+            id: user.id,
+            username: user.username,
+            displayName: user.displayName,
+            email: user.email,
+            cloudRecordName: user.cloudRecordName,
+            referralCode: uniqueCode,
+            createdAt: user.createdAt,
+            profileEmoji: user.profileEmoji,
+            profileColor: user.profileColor,
+            profileImageURL: user.profileImageURL,
+            cloudProfileImageRecordName: user.cloudProfileImageRecordName,
+            profileImageModifiedAt: user.profileImageModifiedAt
+        )
+
+        try await saveUser(updatedUser)
+        return updatedUser
+    }
+
+    /// Increment a user's referral count in CloudKit
+    func incrementReferralCount(for userId: UUID) async throws {
+        let db = try getPublicDatabase()
+
+        // Find the user's record
+        let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
+        let query = CKQuery(recordType: userRecordType, predicate: predicate)
+        let results = try await db.records(matching: query, resultsLimit: 1)
+
+        guard let (recordID, result) = results.matchResults.first,
+              let record = try? result.get() else {
+            logger.warning("Could not find user record for referral count increment: \(userId)")
+            return
+        }
+
+        // Increment the referral count
+        let currentCount = record["referralCount"] as? Int ?? 0
+        record["referralCount"] = (currentCount + 1) as CKRecordValue
+
+        // Save the updated record
+        _ = try await db.save(record)
+        logger.info("✅ Incremented referral count for user: \(userId) (now \(currentCount + 1))")
+    }
+
+    /// Fetch a user's referral count from CloudKit
+    func fetchReferralCount(for userId: UUID) async throws -> Int {
+        let db = try getPublicDatabase()
+
+        let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
+        let query = CKQuery(recordType: userRecordType, predicate: predicate)
+        let results = try await db.records(matching: query, resultsLimit: 1)
+
+        guard let (_, result) = results.matchResults.first,
+              let record = try? result.get() else {
+            return 0
+        }
+
+        return record["referralCount"] as? Int ?? 0
+    }
+
+    /// Create an auto-accepted friend connection between two users
+    /// Used when someone uses a referral code
+    func createAutoFriendConnection(referrerId: UUID, newUserId: UUID, referrerDisplayName: String?, newUserDisplayName: String?) async throws {
+        guard referrerId != newUserId else {
+            logger.warning("Skipping auto-friend connection for self referral: \(referrerId)")
+            return
+        }
+
+        if try await connectionExists(between: referrerId, and: newUserId) {
+            logger.info("Connection already exists between \(referrerId) and \(newUserId); skipping auto-friend connection")
+            return
+        }
+
+        let db = try getPublicDatabase()
+
+        // Create a new connection that's already accepted
+        let connectionId = UUID()
+        let recordID = CKRecord.ID(recordName: connectionId.uuidString)
+        let record = CKRecord(recordType: connectionRecordType, recordID: recordID)
+
+        // Set connection fields
+        record["connectionId"] = connectionId.uuidString as CKRecordValue
+        record["fromUserId"] = referrerId.uuidString as CKRecordValue
+        record["toUserId"] = newUserId.uuidString as CKRecordValue
+        record["status"] = ConnectionStatus.accepted.rawValue as CKRecordValue
+        record["createdAt"] = Date() as CKRecordValue
+        record["updatedAt"] = Date() as CKRecordValue
+
+        // Optional display names for notifications
+        if let referrerName = referrerDisplayName {
+            record["fromDisplayName"] = referrerName as CKRecordValue
+        }
+        if let newUserName = newUserDisplayName {
+            record["toDisplayName"] = newUserName as CKRecordValue
+        }
+
+        // Save the connection
+        _ = try await db.save(record)
+        logger.info("✅ Created auto-friend connection between referrer \(referrerId) and new user \(newUserId)")
     }
 }

@@ -317,6 +317,45 @@ struct ProfileEditView: View {
                             }
                         }
 
+                        // App Icon Section
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Appearance")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            NavigationLink {
+                                AppIconPickerView()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image("BrandMarks/CauldronIcon")
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 44, height: 44)
+                                        .cornerRadius(10)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("App Icon")
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+                                        Text(AppIconManager.shared.currentTheme.name)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         // Delete Account Section
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Account")

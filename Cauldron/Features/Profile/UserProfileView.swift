@@ -18,9 +18,20 @@ struct UserProfileView: View {
     @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
     
     // External sharing
-    @State private var showShareSheet = false
     @State private var shareLink: ShareableLink?
     @State private var isGeneratingShareLink = false
+
+    // Tier & icons
+    @State private var showTierRoadmap = false
+    @State private var showAppIconPicker = false
+    @StateObject private var appIconManager = AppIconManager.shared
+
+    // Referral
+    @StateObject private var referralManager = ReferralManager.shared
+    @State private var codeCopied = false
+    @State private var redeemCode = ""
+    @State private var redeemMessage: String?
+    @State private var isRedeemingCode = false
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -41,13 +52,19 @@ struct UserProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 // Profile Header
                 profileHeader
 
-                // Friend View Indicator (only for current user)
+                if viewModel.isCurrentUser,
+                   referralManager.getUsedReferralCode() == nil,
+                   isReferralTestingEnabled {
+                    redeemSection
+                }
+
+                // Rewards & Progress Section (only for current user)
                 if viewModel.isCurrentUser {
-                    friendViewIndicator
+                    rewardsSection
                 }
 
                 // Connection Management Section
@@ -101,271 +118,524 @@ struct UserProfileView: View {
         .sheet(isPresented: $showingEditProfile) {
             ProfileEditView(dependencies: viewModel.dependencies)
         }
-        .sheet(isPresented: $showShareSheet) {
-            if let link = shareLink {
-                ShareSheet(items: [link])
-            }
+        .sheet(item: $shareLink) { link in
+            ShareSheet(items: [link])
+        }
+        .sheet(isPresented: $showTierRoadmap) {
+            TierRoadmapView(currentTier: viewModel.userTier, recipeCount: viewModel.userRecipeCount, dependencies: viewModel.dependencies)
+        }
+        .sheet(isPresented: $showAppIconPicker) {
+            AppIconPickerView()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Only allow sharing if it's the current user's profile
                 if viewModel.isCurrentUser {
                     Button {
-                        Task {
-                            await generateShareLink()
-                        }
+                        shareWithFriends()
                     } label: {
-                        if isGeneratingShareLink {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "square.and.arrow.up")
-                        }
+                        Image(systemName: "gift")
+                            .foregroundColor(.cauldronOrange)
                     }
-                    .disabled(isGeneratingShareLink)
                 }
             }
         }
     }
 
     private var profileHeader: some View {
-        VStack(spacing: 16) {
+        HStack(alignment: .top, spacing: 16) {
             // Avatar
-            ProfileAvatar(user: displayUser, size: 100, dependencies: viewModel.dependencies)
+            ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
 
-            // Display Name
-            Text(displayUser.displayName)
-                .font(.title2)
-                .fontWeight(.bold)
+            // Info column
+            VStack(alignment: .leading, spacing: 6) {
+                // Name row with edit button
+                HStack {
+                    Text(displayUser.displayName)
+                        .font(.title3)
+                        .fontWeight(.bold)
 
-            // Username, Friends Count, and Connection Status Badge
-            VStack(spacing: 8) {
+                    Spacer()
+
+                    if viewModel.isCurrentUser {
+                        Button {
+                            showingEditProfile = true
+                        } label: {
+                            Image(systemName: "pencil.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.cauldronOrange)
+                        }
+                    }
+                }
+
+                // Username
                 Text("@\(displayUser.username)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                // Friends count for current user
-                if viewModel.isCurrentUser {
-                    NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
-                        HStack(spacing: 4) {
-                            Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
+                // Tier badge and friends/connection row
+                HStack(spacing: 12) {
+                    // Tier badge - clickable for own profile to see roadmap
+                    if viewModel.isCurrentUser {
+                        Button {
+                            showTierRoadmap = true
+                        } label: {
+                            TierBadgeView(tier: viewModel.userTier, style: .standard)
                         }
-                        .foregroundColor(.cauldronOrange)
+                    } else {
+                        TierBadgeView(tier: viewModel.userTier, style: .standard)
                     }
-                } else if !viewModel.isCurrentUser {
-                    connectionStatusBadge
+
+                    if viewModel.isCurrentUser {
+                        NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
+                            HStack(spacing: 4) {
+                                Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                            }
+                            .font(.caption)
+                            .foregroundColor(.cauldronOrange)
+                        }
+                    } else {
+                        connectionActionBadge
+                    }
+                }
+
+                if viewModel.isCurrentUser {
+                    referralQuickSection
                 }
             }
+        }
+        .padding()
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+    }
 
-            // Edit Profile button for current user
-            if viewModel.isCurrentUser {
+    // MARK: - App Icons Section
+
+    private var rewardsSection: some View {
+        VStack(spacing: 16) {
+            // Header
+            HStack {
+                Text("App Icons")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Spacer()
+
                 Button {
-                    showingEditProfile = true
+                    showAppIconPicker = true
                 } label: {
-                    Label("Edit Profile", systemImage: "pencil")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                    HStack(spacing: 4) {
+                        Text("\(appIconManager.unlockedIcons.count)/\(appIconManager.availableIcons.count)")
+                            .font(.caption)
+                        Text("View All")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.cauldronOrange)
                 }
-                .buttonStyle(.bordered)
-                .tint(.cauldronOrange)
+            }
+
+            // Horizontal scrolling icons with progress
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(appIconManager.availableIcons) { theme in
+                        iconCellWithProgress(theme: theme)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
             }
         }
-        .padding(.top)
+        .padding()
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
     }
 
-    private var friendViewIndicator: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "eye")
-                .font(.caption)
-            Text("This is how your profile appears to friends")
-                .font(.caption)
+    private func iconCellWithProgress(theme: AppIconTheme) -> some View {
+        let isSelected = appIconManager.currentTheme.id == theme.id
+        let isUnlocked = appIconManager.isUnlocked(theme)
+        let progress = iconUnlockProgress(for: theme)
+
+        return Button {
+            showAppIconPicker = true
+        } label: {
+            VStack(spacing: 6) {
+                // Icon with overlay
+                ZStack {
+                    Image(iconPreviewAssetName(for: theme))
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 56, height: 56)
+                        .cornerRadius(12)
+                        .blur(radius: isUnlocked ? 0 : 3)
+                        .opacity(isUnlocked ? 1.0 : 0.5)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected ? Color.cauldronOrange : Color.clear, lineWidth: 2)
+                        )
+
+                    // Checkmark for selected
+                    if isSelected {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.cauldronOrange)
+                                    .background(Circle().fill(Color(.systemBackground)).padding(1))
+                                    .offset(x: 4, y: 4)
+                            }
+                        }
+                        .frame(width: 56, height: 56)
+                    }
+                }
+
+                // Progress bar for locked icons
+                if !isUnlocked {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 4)
+
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.cauldronOrange)
+                                .frame(width: geo.size.width * progress, height: 4)
+                        }
+                    }
+                    .frame(width: 56, height: 4)
+                } else {
+                    // Spacer for consistent height
+                    Color.clear.frame(width: 56, height: 4)
+                }
+            }
         }
-        .foregroundColor(.secondary)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(8)
+        .buttonStyle(.plain)
     }
+
+    /// Calculate progress towards unlocking an icon (0.0 to 1.0)
+    private func iconUnlockProgress(for theme: AppIconTheme) -> Double {
+        guard let unlock = IconUnlock.unlock(for: theme.id) else { return 1.0 }
+
+        let required = unlock.requiredReferrals
+        if required == 0 { return 1.0 }
+
+        let current = referralManager.referralCount
+        return min(1.0, Double(current) / Double(required))
+    }
+
+    private func shareWithFriends() {
+        guard let user = currentUserSession.currentUser else { return }
+        let shareURL = referralManager.getShareURL(for: user)
+        let shareText = referralManager.getShareText(for: user)
+        // Setting shareLink triggers the sheet via .sheet(item:)
+        shareLink = ShareableLink(
+            url: shareURL,
+            previewText: shareText
+        )
+    }
+
+    private var referralQuickSection: some View {
+        Group {
+            if let user = currentUserSession.currentUser {
+                let code = referralManager.generateReferralCode(for: user)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Referral code")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text(code)
+                            .font(.system(.caption, design: .monospaced))
+                            .fontWeight(.semibold)
+                            .foregroundColor(.cauldronOrange)
+
+                        Spacer()
+
+                        Button {
+                            UIPasteboard.general.string = code
+                            withAnimation {
+                                codeCopied = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                withAnimation {
+                                    codeCopied = false
+                                }
+                            }
+                        } label: {
+                            Image(systemName: codeCopied ? "checkmark" : "doc.on.doc")
+                                .font(.caption)
+                                .foregroundColor(codeCopied ? .green : .cauldronOrange)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if codeCopied {
+                        Text("Copied!")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                    }
+
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private var redeemSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "tag.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("Redeem a Code")
+                    .font(.headline)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Enter code", text: $redeemCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .textFieldStyle(.roundedBorder)
+
+                Button {
+                    Task { await redeemReferralCode() }
+                } label: {
+                    if isRedeemingCode {
+                        ProgressView()
+                    } else {
+                        Text("Apply")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                }
+                .disabled(isRedeemingCode || redeemCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let redeemMessage = redeemMessage {
+                Text(redeemMessage)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+    }
+
+    private func iconPreviewAssetName(for theme: AppIconTheme) -> String {
+        switch theme.id {
+        case "default":
+            return "BrandMarks/CauldronIcon"
+        case "wicked":
+            return "IconPreviews/IconPreviewWicked"
+        case "goodwitch":
+            return "IconPreviews/IconPreviewGoodWitch"
+        case "maleficent":
+            return "IconPreviews/IconPreviewMaleficent"
+        case "ursula":
+            return "IconPreviews/IconPreviewUrsula"
+        case "agatha":
+            return "IconPreviews/IconPreviewAgatha"
+        case "scarletwitch":
+            return "IconPreviews/IconPreviewScarletWitch"
+        case "lion":
+            return "IconPreviews/IconPreviewLion"
+        case "serpent":
+            return "IconPreviews/IconPreviewSerpent"
+        case "badger":
+            return "IconPreviews/IconPreviewBadger"
+        case "eagle":
+            return "IconPreviews/IconPreviewEagle"
+        default:
+            return "BrandMarks/CauldronIcon"
+        }
+    }
+
+    private var isReferralTestingEnabled: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "ReferralTestingEnabled") as? Bool == true
+    }
+
+    @MainActor
+    private func redeemReferralCode() async {
+        guard let user = currentUserSession.currentUser else { return }
+
+        let trimmedCode = redeemCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCode.isEmpty else { return }
+
+        ReferralManager.shared.configure(with: viewModel.dependencies.cloudKitService)
+        isRedeemingCode = true
+        redeemMessage = nil
+
+        let referrer = await referralManager.redeemReferralCode(
+            trimmedCode,
+            currentUser: user,
+            displayName: user.displayName
+        )
+
+        if referrer != nil {
+            redeemCode = ""
+            redeemMessage = "Referral code applied."
+        } else {
+            redeemMessage = "Could not apply that code."
+        }
+
+        isRedeemingCode = false
+    }
+
+    // MARK: - Connection Action Badge (interactive)
 
     @ViewBuilder
-    private var connectionStatusBadge: some View {
-        switch viewModel.connectionState {
-        case .connected:
-            HStack(spacing: 4) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                Text("Friends")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .foregroundColor(.green)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.green.opacity(0.15))
-            .cornerRadius(8)
+    private var connectionActionBadge: some View {
+        if viewModel.isProcessing {
+            ProgressView()
+                .scaleEffect(0.8)
+        } else {
+            switch viewModel.connectionState {
+            case .connected:
+                // Friends badge - tap to show menu with remove option
+                Menu {
+                    Button(role: .destructive) {
+                        Task {
+                            await viewModel.removeConnection()
+                        }
+                    } label: {
+                        Label("Remove Friend", systemImage: "person.badge.minus")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                        Text("Friends")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.15))
+                    .cornerRadius(8)
+                }
 
-        case .pendingSent:
-            HStack(spacing: 4) {
-                Image(systemName: "clock.fill")
-                    .font(.caption)
-                Text("Pending")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .foregroundColor(.orange)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.orange.opacity(0.15))
-            .cornerRadius(8)
+            case .pendingSent:
+                // Pending badge - tap to cancel
+                Menu {
+                    Button(role: .destructive) {
+                        Task {
+                            await viewModel.cancelConnectionRequest()
+                        }
+                    } label: {
+                        Label("Cancel Request", systemImage: "xmark.circle")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .font(.caption)
+                        Text("Pending")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.15))
+                    .cornerRadius(8)
+                }
 
-        case .pendingReceived:
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.caption)
-                Text("Wants to be Friends")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .foregroundColor(.blue)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.15))
-            .cornerRadius(8)
+            case .pendingReceived:
+                // Request received badge - shown in header, actions below
+                HStack(spacing: 4) {
+                    Image(systemName: "person.badge.clock")
+                        .font(.caption)
+                    Text("Respond")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(.blue)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.15))
+                .cornerRadius(8)
 
-        case .notConnected, .loading:
-            EmptyView()
+            case .notConnected:
+                // Add Friend badge - tap to send request
+                Button {
+                    Task {
+                        await viewModel.sendConnectionRequest()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.badge.plus")
+                            .font(.caption)
+                        Text("Add Friend")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.cauldronOrange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.cauldronOrange.opacity(0.15))
+                    .cornerRadius(8)
+                }
+
+            case .loading:
+                ProgressView()
+                    .scaleEffect(0.8)
+            }
         }
     }
+
+    // MARK: - Connection Section (only for pending received - needs Accept/Reject buttons)
 
     @ViewBuilder
     private var connectionSection: some View {
-        VStack(spacing: 12) {
-            if viewModel.isProcessing {
-                ProgressView()
-                    .padding()
-            } else {
-                switch viewModel.connectionState {
-                case .notConnected:
-                    connectButton
-                case .pendingSent:
-                    pendingText
-                case .pendingReceived:
-                    pendingReceivedButtons
-                case .connected:
-                    connectedSection
-                case .loading:
-                    ProgressView()
-                }
-            }
-        }
-        .padding(.horizontal)
-    }
-
-    private var connectButton: some View {
-        Button {
-            Task {
-                await viewModel.sendConnectionRequest()
-            }
-        } label: {
-            Label("Add Friend", systemImage: "person.badge.plus")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.cauldronOrange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-        }
-        .disabled(viewModel.isProcessing)
-    }
-
-    private var pendingReceivedButtons: some View {
-        VStack(spacing: 12) {
-            Text("Friend Request")
-                .font(.headline)
-                .padding(.bottom, 4)
-
-            HStack(spacing: 12) {
-                Button {
-                    Task {
-                        await viewModel.acceptConnection()
-                    }
-                } label: {
-                    Label("Accept", systemImage: "checkmark.circle.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-                .disabled(viewModel.isProcessing)
-
-                Button {
-                    Task {
-                        await viewModel.rejectConnection()
-                    }
-                } label: {
-                    Label("Reject", systemImage: "xmark.circle.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-                .disabled(viewModel.isProcessing)
-            }
-        }
-    }
-
-    private var connectedSection: some View {
-        Button(role: .destructive) {
-            Task {
-                await viewModel.removeConnection()
-            }
-        } label: {
-            Label("Remove Friend", systemImage: "person.badge.minus")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.red.opacity(0.1))
-                .foregroundColor(.red)
-                .cornerRadius(12)
-        }
-        .disabled(viewModel.isProcessing)
-    }
-
-    private var pendingText: some View {
-        VStack(spacing: 12) {
-            Label("Request Sent", systemImage: "clock")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            Text("Waiting for \(user.displayName) to respond")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 4)
-
-            Button(role: .destructive) {
-                Task {
-                    await viewModel.cancelConnectionRequest()
-                }
-            } label: {
-                Label("Cancel Request", systemImage: "xmark.circle")
+        if viewModel.connectionState == .pendingReceived && !viewModel.isProcessing {
+            VStack(spacing: 12) {
+                Text("\(user.displayName) wants to be friends")
                     .font(.subheadline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 16)
-                    .background(Color.red.opacity(0.1))
-                    .foregroundColor(.red)
-                    .cornerRadius(8)
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 12) {
+                    Button {
+                        Task {
+                            await viewModel.acceptConnection()
+                        }
+                    } label: {
+                        Label("Accept", systemImage: "checkmark")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.green)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+
+                    Button {
+                        Task {
+                            await viewModel.rejectConnection()
+                        }
+                    } label: {
+                        Label("Decline", systemImage: "xmark")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.secondary.opacity(0.2))
+                            .foregroundColor(.primary)
+                            .cornerRadius(10)
+                    }
+                }
             }
-            .disabled(viewModel.isProcessing)
+            .padding()
+            .background(Color.cauldronSecondaryBackground)
+            .cornerRadius(16)
         }
-        .padding()
     }
 
     private var collectionsSection: some View {
@@ -506,11 +776,8 @@ struct UserProfileView: View {
                         }
                     }
                 } else {
-                    // Grid view for search results
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 16),
-                        GridItem(.flexible(), spacing: 16)
-                    ], spacing: 16) {
+                    // List view for search results (matches Search tab style)
+                    VStack(spacing: 12) {
                         ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
                             NavigationLink(destination: RecipeDetailView(
                                 recipe: sharedRecipe.recipe,
@@ -518,7 +785,7 @@ struct UserProfileView: View {
                                 sharedBy: sharedRecipe.sharedBy,
                                 sharedAt: sharedRecipe.sharedAt
                             )) {
-                                ProfileRecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                                RecipeRowView(recipe: sharedRecipe.recipe, dependencies: viewModel.dependencies)
                             }
                             .buttonStyle(.plain)
                         }
@@ -591,7 +858,6 @@ struct UserProfileView: View {
                 recipeCount: publicRecipeCount
             )
             shareLink = link
-            showShareSheet = true
         } catch {
             AppLogger.general.error("Failed to generate profile share link: \(error.localizedDescription)")
             viewModel.errorMessage = "Failed to generate share link: \(error.localizedDescription)"
@@ -618,7 +884,7 @@ struct ProfileRecipeCard: View {
                 .lineLimit(1)
                 .frame(width: 240, height: 20, alignment: .leading)
 
-            // Time and visibility
+            // Time
             HStack(spacing: 6) {
                 if let time = sharedRecipe.recipe.displayTime {
                     HStack(spacing: 4) {
@@ -631,13 +897,6 @@ struct ProfileRecipeCard: View {
                 }
 
                 Spacer()
-
-                // Visibility indicator for own recipes
-                if sharedRecipe.recipe.isOwnedByCurrentUser() {
-                    Image(systemName: sharedRecipe.recipe.visibility.icon)
-                        .font(.caption2)
-                        .foregroundColor(sharedRecipe.recipe.visibility == .publicRecipe ? .green : .secondary)
-                }
             }
             .frame(width: 240, height: 20)
         }
