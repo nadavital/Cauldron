@@ -32,6 +32,8 @@ struct ContentView: View {
     @State private var isLoadingShare = false
     @State private var showShareError = false
     @State private var shareErrorMessage = ""
+    @AppStorage("whatsNewLastSeenVersion") private var whatsNewLastSeenVersion = ""
+    @State private var showWhatsNew = false
 
     struct SharedContentWrapper: Identifiable {
         let id = UUID()
@@ -107,6 +109,12 @@ struct ContentView: View {
             } message: {
                 Text(shareErrorMessage)
             }
+            .sheet(isPresented: $showWhatsNew) {
+                WhatsNewView {
+                    whatsNewLastSeenVersion = currentAppVersion
+                    showWhatsNew = false
+                }
+            }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
         .animation(.easeInOut(duration: 0.2), value: isLoadingShare)
         .onReceive(NotificationCenter.default.publisher(for: .openExternalShare)) { notification in
@@ -146,7 +154,41 @@ struct ContentView: View {
                     await loadSharedContent(url: pendingURL)
                 }
             }
+
+            maybeShowWhatsNew()
         }
+        .onChange(of: userSession.isInitialized) { _ in
+            maybeShowWhatsNew()
+        }
+        .onChange(of: userSession.needsOnboarding) { _ in
+            maybeShowWhatsNew()
+        }
+        .onChange(of: userSession.needsiCloudSignIn) { _ in
+            maybeShowWhatsNew()
+        }
+        .onChange(of: isDataReady) { _ in
+            maybeShowWhatsNew()
+        }
+    }
+
+    private var currentAppVersion: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        return "\(shortVersion) (\(buildVersion))"
+    }
+
+    private func maybeShowWhatsNew() {
+        guard userSession.isInitialized,
+              isDataReady,
+              !userSession.needsOnboarding,
+              !userSession.needsiCloudSignIn,
+              !showWhatsNew else {
+            return
+        }
+
+        let forceShow = Bundle.main.object(forInfoDictionaryKey: "WhatsNewForceShow") as? Bool == true
+        guard forceShow || whatsNewLastSeenVersion != currentAppVersion else { return }
+        showWhatsNew = true
     }
 
     private func loadSharedContent(url: URL) async {

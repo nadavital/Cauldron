@@ -25,6 +25,8 @@ class UserProfileViewModel: ObservableObject {
     @Published var isLoadingConnections = false
     @Published var usersMap: [UUID: User] = [:]
     @Published var searchText = ""
+    @Published var userTier: UserTier = .apprentice
+    @Published var userRecipeCount: Int = 0
 
     let user: User
     let dependencies: DependencyContainer
@@ -224,6 +226,7 @@ class UserProfileViewModel: ObservableObject {
                connectionState: connectionState
            ) {
             userRecipes = cachedRecipes
+            updateTierFromRecipes()
             return
         }
 
@@ -240,6 +243,9 @@ class UserProfileViewModel: ObservableObject {
                 connectionState: connectionState
             )
 
+            // Update tier based on recipe count
+            updateTierFromRecipes()
+
             AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
@@ -248,6 +254,12 @@ class UserProfileViewModel: ObservableObject {
         }
 
         isLoadingRecipes = false
+    }
+
+    /// Update the user's tier based on their recipe count
+    private func updateTierFromRecipes() {
+        userRecipeCount = userRecipes.count
+        userTier = UserTier.tier(for: userRecipeCount)
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {

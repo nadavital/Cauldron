@@ -22,6 +22,7 @@ struct OnboardingView: View {
     @State private var showingAvatarCustomization = false
     @State private var showingImagePicker = false
     @State private var imagePickerSourceType: UIImagePickerController.SourceType = .photoLibrary
+    @State private var referralCode = ""
 
     // Track if user has selected a photo (to show different preview)
     private var hasPhoto: Bool { profileImage != nil }
@@ -42,7 +43,7 @@ struct OnboardingView: View {
                     // Welcome illustration
                     VStack(spacing: 16) {
                         // App logo instead of profile preview
-                        Image("CauldronIcon")
+                        Image("BrandMarks/CauldronIcon")
                             .resizable()
                             .scaledToFit()
                             .frame(width: 100, height: 100)
@@ -208,7 +209,7 @@ struct OnboardingView: View {
                                 HStack(spacing: 12) {
                                     Text(emoji)
                                         .font(.system(size: 32))
-                                    
+
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Emoji avatar selected")
                                             .font(.subheadline)
@@ -217,13 +218,35 @@ struct OnboardingView: View {
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
-                                    
+
                                     Spacer()
                                 }
                                 .padding(12)
                                 .background(Color.cauldronOrange.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
+                        }
+
+                        // Referral code section (always visible)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "gift.fill")
+                                    .foregroundColor(.cauldronOrange)
+                                Text("Referral Code")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            TextField("Enter friend's code (optional)", text: $referralCode)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                                .padding()
+                                .background(Color.cauldronSecondaryBackground)
+                                .cornerRadius(12)
+
+                            Text("Got a code from a friend? Enter it to unlock an exclusive icon and connect instantly!")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
 
                         if let error = errorMessage {
@@ -303,11 +326,35 @@ struct OnboardingView: View {
                 profileImage: profileImage,
                 dependencies: dependencies
             )
+
+            // Process referral code if provided
+            let trimmedCode = referralCode.trimmingCharacters(in: .whitespaces)
+            if !trimmedCode.isEmpty {
+                await processReferralCode(trimmedCode, displayName: normalizedDisplayName)
+            }
+
             onComplete()
         } catch {
             errorMessage = error.localizedDescription
             isCreating = false
         }
+    }
+
+    /// Process a referral code: look up referrer, create auto-friend connection, increment count
+    @MainActor
+    private func processReferralCode(_ code: String, displayName: String) async {
+        ReferralManager.shared.configure(with: dependencies.cloudKitService)
+
+        guard let currentUser = CurrentUserSession.shared.currentUser else {
+            AppLogger.general.warning("No current user available for referral processing")
+            return
+        }
+
+        _ = await ReferralManager.shared.redeemReferralCode(
+            code,
+            currentUser: currentUser,
+            displayName: displayName
+        )
     }
 }
 

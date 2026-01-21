@@ -25,6 +25,9 @@ class FriendsTabViewModel: ObservableObject {
     @Published var recentlyAdded: [SharedRecipe] = []
     @Published var tagSections: [(tag: String, recipes: [SharedRecipe])] = []
 
+    // Tier information for shared recipe creators
+    @Published var sharerTiers: [UUID: UserTier] = [:]
+
     private(set) var dependencies: DependencyContainer?
     private var hasLoadedOnce = false
 
@@ -58,6 +61,9 @@ class FriendsTabViewModel: ObservableObject {
 
             // Load shared collections from friends
             await loadSharedCollections()
+
+            // Fetch tier information for sharers
+            await fetchSharerTiers()
 
             // CRITICAL: Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
@@ -218,6 +224,32 @@ class FriendsTabViewModel: ObservableObject {
             showErrorAlert = true
         }
     }
-    
 
+    /// Fetch tier information for users who shared recipes
+    private func fetchSharerTiers() async {
+        guard let dependencies = dependencies else { return }
+
+        // Collect unique sharer user IDs
+        let sharerIds = Set(sharedRecipes.map { $0.sharedBy.id })
+
+        guard !sharerIds.isEmpty else { return }
+
+        do {
+            for sharerId in sharerIds {
+                // Skip if already cached
+                guard sharerTiers[sharerId] == nil else { continue }
+
+                // Fetch public recipe count for tier calculation
+                let sharerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                    ownerIds: [sharerId],
+                    visibility: .publicRecipe
+                )
+
+                let tier = UserTier.tier(for: sharerRecipes.count)
+                sharerTiers[sharerId] = tier
+            }
+        } catch {
+            AppLogger.general.error("Failed to fetch sharer tiers: \(error.localizedDescription)")
+        }
+    }
 }

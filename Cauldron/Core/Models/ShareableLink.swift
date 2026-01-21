@@ -9,7 +9,8 @@ import Foundation
 import UIKit
 
 /// A shareable link with preview information
-struct ShareableLink {
+struct ShareableLink: Identifiable {
+    let id = UUID()
     let url: URL
     let previewText: String
     var image: UIImage?

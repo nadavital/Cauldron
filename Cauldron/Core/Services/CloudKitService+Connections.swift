@@ -155,6 +155,28 @@ extension CloudKitService {
         return cleanedConnections
     }
 
+    /// Check if a connection already exists between two users (any direction)
+    func connectionExists(between userA: UUID, and userB: UUID) async throws -> Bool {
+        let db = try getPublicDatabase()
+        let predicate = NSPredicate(
+            format: "(fromUserId == %@ AND toUserId == %@) OR (fromUserId == %@ AND toUserId == %@)",
+            userA.uuidString,
+            userB.uuidString,
+            userB.uuidString,
+            userA.uuidString
+        )
+        let query = CKQuery(recordType: connectionRecordType, predicate: predicate)
+        let results = try await db.records(matching: query, resultsLimit: 1)
+
+        for (_, result) in results.matchResults {
+            if (try? result.get()) != nil {
+                return true
+            }
+        }
+
+        return false
+    }
+
     /// Fetch connections for multiple users (batch fetch)
     /// Used for finding friends-of-friends
     func fetchConnections(forUserIds userIds: [UUID]) async throws -> [Connection] {

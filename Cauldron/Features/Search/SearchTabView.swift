@@ -11,16 +11,18 @@ import os
 /// Search tab - search across all recipes and browse by category
 struct SearchTabView: View {
     @StateObject private var viewModel: SearchTabViewModel
+    @StateObject private var currentUserSession = CurrentUserSession.shared
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
+    @State private var showingProfileSheet = false
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
         case people = "People"
     }
-    
+
     @Binding var navigationPath: NavigationPath
-    
+
     init(dependencies: DependencyContainer, navigationPath: Binding<NavigationPath>) {
         _viewModel = StateObject(wrappedValue: SearchTabViewModel(dependencies: dependencies))
         _navigationPath = navigationPath
@@ -58,6 +60,29 @@ struct SearchTabView: View {
                 }
             }
             .navigationTitle("Search")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingProfileSheet) {
+                NavigationStack {
+                    if let user = currentUserSession.currentUser {
+                        UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { showingProfileSheet = false }
+                                }
+                            }
+                    }
+                }
+            }
             .task {
                 await viewModel.loadData()
             }

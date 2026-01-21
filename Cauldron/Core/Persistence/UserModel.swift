@@ -16,6 +16,7 @@ final class UserModel {
     var displayName: String = ""
     var email: String? = nil
     var cloudRecordName: String? = nil
+    var referralCode: String? = nil
     var createdAt: Date = Date()
     var profileEmoji: String? = nil
     var profileColor: String? = nil
@@ -23,12 +24,13 @@ final class UserModel {
     var cloudProfileImageRecordName: String? = nil
     var profileImageModifiedAt: Date? = nil
 
-    init(id: UUID, username: String, displayName: String, email: String? = nil, cloudRecordName: String? = nil, createdAt: Date, profileEmoji: String? = nil, profileColor: String? = nil, profileImagePath: String? = nil, cloudProfileImageRecordName: String? = nil, profileImageModifiedAt: Date? = nil) {
+    init(id: UUID, username: String, displayName: String, email: String? = nil, cloudRecordName: String? = nil, referralCode: String? = nil, createdAt: Date, profileEmoji: String? = nil, profileColor: String? = nil, profileImagePath: String? = nil, cloudProfileImageRecordName: String? = nil, profileImageModifiedAt: Date? = nil) {
         self.id = id
         self.username = username
         self.displayName = displayName
         self.email = email
         self.cloudRecordName = cloudRecordName
+        self.referralCode = referralCode
         self.createdAt = createdAt
         self.profileEmoji = profileEmoji
         self.profileColor = profileColor
@@ -45,6 +47,7 @@ final class UserModel {
             displayName: displayName,
             email: email,
             cloudRecordName: cloudRecordName,
+            referralCode: referralCode,
             createdAt: createdAt,
             profileEmoji: profileEmoji,
             profileColor: profileColor,
@@ -62,6 +65,7 @@ final class UserModel {
             displayName: user.displayName,
             email: user.email,
             cloudRecordName: user.cloudRecordName,
+            referralCode: user.referralCode,
             createdAt: user.createdAt,
             profileEmoji: user.profileEmoji,
             profileColor: user.profileColor,

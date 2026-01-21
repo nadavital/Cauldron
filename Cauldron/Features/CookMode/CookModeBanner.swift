@@ -57,7 +57,7 @@ struct CookModeBanner: View {
 
     @ViewBuilder
     private var recipeIcon: some View {
-        Image("CauldronIconTiny")
+        Image("BrandMarks/CauldronIconTiny")
             .resizable()
             .aspectRatio(contentMode: .fit)
     }

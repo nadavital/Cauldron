@@ -461,8 +461,10 @@
 		50F5BA8B2E937E2D00E4A5C4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "CauldronIconWicked CauldronIconGoodWitch CauldronIconMaleficent CauldronIconUrsula CauldronIconAgatha CauldronIconScarletWitch CauldronIconLion CauldronIconSerpent CauldronIconBadger CauldronIconEagle";
 				ASSETCATALOG_COMPILER_APPICON_NAME = CauldronDevIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = Cauldron/Cauldron.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -485,7 +487,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Nadav.Cauldron.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -503,8 +505,10 @@
 		50F5BA8C2E937E2D00E4A5C4 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "CauldronIconWicked CauldronIconGoodWitch CauldronIconMaleficent CauldronIconUrsula CauldronIconAgatha CauldronIconScarletWitch CauldronIconLion CauldronIconSerpent CauldronIconBadger CauldronIconEagle";
 				ASSETCATALOG_COMPILER_APPICON_NAME = CauldronIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Cauldron/Cauldron.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -526,7 +530,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = Nadav.Cauldron;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

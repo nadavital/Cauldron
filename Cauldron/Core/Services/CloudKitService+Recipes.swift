@@ -790,4 +790,32 @@ extension CloudKitService {
             throw error
         }
     }
+
+    // MARK: - Popular Recipes
+
+    /// Fetch popular public recipes (for discovery)
+    /// - Parameter limit: Maximum number of recipes to return
+    /// - Returns: Array of popular public recipes sorted by saveCount
+    func fetchPopularPublicRecipes(limit: Int = 20) async throws -> [Recipe] {
+        let db = try getPublicDatabase()
+
+        // Query all public recipes
+        let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
+        let query = CKQuery(recordType: sharedRecipeRecordType, predicate: predicate)
+        // Sort by updatedAt as a fallback (saveCount index may not exist)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        let results = try await db.records(matching: query, resultsLimit: limit * 2) // Fetch more to account for filtering
+
+        var recipes: [Recipe] = []
+        for (_, result) in results.matchResults {
+            if let record = try? result.get(),
+               let recipe = try? recipeFromRecord(record) {
+                recipes.append(recipe)
+            }
+        }
+
+        // Return the recipes (limit applied later after tier boost sorting)
+        return Array(recipes.prefix(limit))
+    }
 }

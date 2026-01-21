@@ -11,11 +11,13 @@ import os
 /// Main Cook tab - central hub for recipe discovery and cooking
 struct CookTabView: View {
     @StateObject private var viewModel: CookTabViewModel
+    @StateObject private var currentUserSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
     @State private var showingCollectionForm = false
+    @State private var showingProfileSheet = false
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
@@ -31,46 +33,83 @@ struct CookTabView: View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    // Dynamic Tag Rows (Promoted & Standard)
-                    ForEach(viewModel.tagRows, id: \.tag) { tagRow in
-                        tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
-                    }
-                    
-                    // Quick & Easy
-                    if !viewModel.quickRecipes.isEmpty {
-                        quickRecipesSection
-                    }
-                    
-                    // On Rotation
-                    if !viewModel.onRotationRecipes.isEmpty {
-                        onRotationSection
-                    }
-                    
-                    // Rediscover Favorites
-                    if !viewModel.forgottenFavorites.isEmpty {
-                        forgottenFavoritesSection
-                    }
-                    
-                    // My Collections
-                    collectionsSection
+                    // New User CTA (if no own recipes) - show social content for new users
+                    if viewModel.allRecipes.isEmpty {
+                        newUserCTA
 
-                    // Recently Cooked
-                    if !viewModel.recentlyCookedRecipes.isEmpty {
-                        recentlyCookedSection
-                    }
+                        // From Friends (show early for new users)
+                        if !viewModel.friendsRecipes.isEmpty {
+                            friendsRecipesSection
+                        }
 
-                    // Favorites
-                    if !viewModel.favoriteRecipes.isEmpty {
-                        favoritesSection
-                    }
+                        // Popular in Cauldron (show early for new users)
+                        if !viewModel.popularRecipes.isEmpty {
+                            popularRecipesSection
+                        }
+                    } else {
+                        // User has recipes - show their content first
 
-                    // All Recipes
-                    allRecipesSection
+                        // Dynamic Tag Rows (Promoted & Standard)
+                        ForEach(viewModel.tagRows, id: \.tag) { tagRow in
+                            tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
+                        }
+
+                        // Quick & Easy
+                        if !viewModel.quickRecipes.isEmpty {
+                            quickRecipesSection
+                        }
+
+                        // On Rotation
+                        if !viewModel.onRotationRecipes.isEmpty {
+                            onRotationSection
+                        }
+
+                        // Rediscover Favorites
+                        if !viewModel.forgottenFavorites.isEmpty {
+                            forgottenFavoritesSection
+                        }
+
+                        // My Collections
+                        collectionsSection
+
+                        // Recently Cooked
+                        if !viewModel.recentlyCookedRecipes.isEmpty {
+                            recentlyCookedSection
+                        }
+
+                        // Favorites
+                        if !viewModel.favoriteRecipes.isEmpty {
+                            favoritesSection
+                        }
+
+                        // All Recipes
+                        allRecipesSection
+
+                        // Social content at bottom for users with recipes
+                        // From Friends (inspiration section)
+                        if !viewModel.friendsRecipes.isEmpty {
+                            friendsRecipesSection
+                        }
+
+                        // Popular in Cauldron (discovery section)
+                        if !viewModel.popularRecipes.isEmpty {
+                            popularRecipesSection
+                        }
+                    }
                 }
                 .padding()
             }
             .navigationTitle("Cook")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
                         dependencies: viewModel.dependencies,
@@ -112,6 +151,18 @@ struct CookTabView: View {
                 }
             }) {
                 CollectionFormView()
+            }
+            .sheet(isPresented: $showingProfileSheet) {
+                NavigationStack {
+                    if let user = currentUserSession.currentUser {
+                        UserProfileView(user: user, dependencies: viewModel.dependencies)
+                            .toolbar {
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button("Done") { showingProfileSheet = false }
+                                }
+                            }
+                    }
+                }
             }
             .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
                 Button("Cancel", role: .cancel) {}
@@ -529,6 +580,152 @@ struct CookTabView: View {
         }
         .padding(.vertical, 40)
     }
+
+    // MARK: - New User CTA
+
+    private var newUserCTA: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "plus.rectangle.on.folder")
+                .font(.system(size: 48))
+                .foregroundColor(.cauldronOrange)
+
+            Text("Start Your Recipe Collection")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Import from web, YouTube, TikTok, or create your own")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 12) {
+                Button {
+                    showingImporter = true
+                } label: {
+                    Label("Import", systemImage: "arrow.down.doc")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cauldronOrange)
+
+                Button {
+                    showingEditor = true
+                } label: {
+                    Label("Create", systemImage: "square.and.pencil")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            // AI Generation button (if available)
+            if isAIAvailable {
+                Button {
+                    showingAIGenerator = true
+                } label: {
+                    HStack {
+                        Image(systemName: "apple.intelligence")
+                        Text("Generate with AI")
+                    }
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(16)
+    }
+
+    // MARK: - Friends' Recipes Section
+
+    private var friendsRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "person.2.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("From Friends")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.friendsRecipes.prefix(10), id: \.id) { sharedRecipe in
+                        NavigationLink(destination: RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: viewModel.dependencies,
+                            sharedBy: sharedRecipe.sharedBy,
+                            sharedAt: sharedRecipe.sharedAt
+                        )) {
+                            SocialRecipeCard(
+                                sharedRecipe: sharedRecipe,
+                                creatorTier: viewModel.friendsRecipeTiers[sharedRecipe.sharedBy.id],
+                                dependencies: viewModel.dependencies
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    // MARK: - Popular Recipes Section
+
+    private var popularRecipesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "flame.fill")
+                    .foregroundColor(.cauldronOrange)
+                Text("Popular in Cauldron")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+            }
+
+            Text("Discover recipes from the Cauldron community")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.popularRecipes.prefix(10)) { recipe in
+                        // Get owner info if available
+                        if let ownerId = recipe.ownerId,
+                           let owner = viewModel.popularRecipeOwners[ownerId] {
+                            NavigationLink(destination: RecipeDetailView(
+                                recipe: recipe,
+                                dependencies: viewModel.dependencies,
+                                sharedBy: owner
+                            )) {
+                                SocialRecipeCard(
+                                    recipe: recipe,
+                                    creator: owner,
+                                    creatorTier: viewModel.popularRecipeTiers[ownerId],
+                                    dependencies: viewModel.dependencies
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            // Fallback for recipes without owner info
+                            NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                                PopularRecipeCardSimple(recipe: recipe, dependencies: viewModel.dependencies)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
     
     
     @ViewBuilder
@@ -741,6 +938,66 @@ struct RecipeCardView: View {
         .frame(width: 240)
     }
 
+}
+
+// MARK: - Popular Recipe Card (Simple - for community recipes without creator info)
+
+struct PopularRecipeCardSimple: View {
+    let recipe: Recipe
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Image with "Community" badge
+            ZStack(alignment: .topLeading) {
+                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                    .frame(width: 240, height: 160)
+
+                // Community badge
+                HStack(spacing: 4) {
+                    Image(systemName: "globe")
+                        .font(.caption2)
+                    Text("Community")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(8)
+            }
+
+            // Title
+            Text(recipe.title)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(width: 240, height: 20, alignment: .leading)
+
+            // Time and tag
+            HStack(spacing: 4) {
+                if let time = recipe.displayTime {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                        Text(time)
+                            .font(.caption)
+                    }
+                    .foregroundColor(.cauldronOrange)
+                }
+
+                Spacer()
+
+                // Show first tag if available
+                if let firstTag = recipe.tags.first {
+                    TagView(firstTag)
+                        .scaleEffect(0.85)
+                        .frame(maxWidth: 100, alignment: .trailing)
+                }
+            }
+            .frame(width: 240, height: 20)
+        }
+        .frame(width: 240)
+    }
 }
 
 #Preview {
