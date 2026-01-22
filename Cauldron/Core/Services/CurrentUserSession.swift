@@ -328,6 +328,14 @@ class CurrentUserSession: ObservableObject {
             logger.warning("Failed to set up connection acceptance notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
         }
+
+        // Subscribe to referral signups (when someone uses your referral code)
+        do {
+            try await dependencies.cloudKitService.subscribeToReferralSignups(forUserId: userId)
+        } catch {
+            logger.warning("Failed to set up referral signup notifications: \(error.localizedDescription)")
+            // Don't block user flow if subscription fails
+        }
     }
     
     /// Update user profile

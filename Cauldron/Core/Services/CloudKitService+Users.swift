@@ -734,8 +734,8 @@ extension CloudKitService {
 
         guard let (recordID, result) = results.matchResults.first,
               let record = try? result.get() else {
-            logger.warning("Could not find user record for referral count increment: \(userId)")
-            return
+            logger.error("Could not find user record for referral count increment: \(userId)")
+            throw CloudKitError.userNotFound
         }
 
         // Increment the referral count
@@ -798,6 +798,9 @@ extension CloudKitService {
         if let newUserName = newUserDisplayName {
             record["toDisplayName"] = newUserName as CKRecordValue
         }
+
+        // Mark as referral connection for notification targeting
+        record["isReferral"] = 1 as CKRecordValue
 
         // Save the connection
         _ = try await db.save(record)

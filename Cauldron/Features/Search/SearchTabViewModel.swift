@@ -34,9 +34,9 @@ class SearchTabViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var searchTask: Task<Void, Never>?
 
-    // Caching
-    private var cachedPublicRecipes: [Recipe] = []
-    private var publicRecipesCacheTimestamp: Date?
+    // Search results caching
+    private var cachedSearchResults: [String: [Recipe]] = [:] // Key: query+categories hash
+    private var searchResultsTimestamps: [String: Date] = [:]
     private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
 
     // Debouncing
@@ -249,17 +249,36 @@ class SearchTabViewModel: ObservableObject {
     }
     
     private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
+        // Generate cache key from query and categories
+        let categoryTags = categories.map { $0.tagValue }.sorted()
+        let cacheKey = "\(query.lowercased())|\(categoryTags.joined(separator: ","))"
+
+        // Check if we have valid cached results
+        if let cachedResults = cachedSearchResults[cacheKey],
+           let timestamp = searchResultsTimestamps[cacheKey],
+           Date().timeIntervalSince(timestamp) < cacheValidityDuration {
+            // Use cached results
+            let filteredResults = cachedResults.filter { $0.ownerId != currentUserId }
+            if !Task.isCancelled {
+                publicRecipes = filteredResults
+                await fetchOwnerTiers(for: filteredResults)
+                processSearchResults()
+            }
+            return
+        }
+
         isLoading = true
 
         do {
-            // Convert categories to string tags
-            let categoryTags = categories.map { $0.tagValue }
-
             // Perform server-side search
             let results = try await dependencies.cloudKitService.searchPublicRecipes(
                 query: query,
                 categories: categoryTags.isEmpty ? nil : categoryTags
             )
+
+            // Cache the results
+            cachedSearchResults[cacheKey] = results
+            searchResultsTimestamps[cacheKey] = Date()
 
             // Filter out own recipes (just in case)
             let filteredResults = results.filter { $0.ownerId != currentUserId }
@@ -301,25 +320,21 @@ class SearchTabViewModel: ObservableObject {
     /// Fetch owner tiers for recipes based on their public recipe counts
     /// This enables the tier-based search boost ranking
     private func fetchOwnerTiers(for recipes: [Recipe]) async {
-        // Collect unique owner IDs
-        let ownerIds = Set(recipes.compactMap { $0.ownerId }).filter { $0 != currentUserId }
+        // Collect unique owner IDs that we don't already have cached
+        let ownerIds = Set(recipes.compactMap { $0.ownerId })
+            .filter { $0 != currentUserId && ownerTiers[$0] == nil }
 
         guard !ownerIds.isEmpty else { return }
 
         do {
-            // Fetch recipe counts for each owner from CloudKit
-            // This is a simplified approach - we count their public recipes
-            for ownerId in ownerIds {
-                // Skip if we already have this owner's tier cached
-                guard ownerTiers[ownerId] == nil else { continue }
+            // Batch fetch recipe counts for all owners at once (avoids N+1 queries)
+            let counts = try await dependencies.cloudKitService.batchFetchPublicRecipeCounts(
+                forOwnerIds: Array(ownerIds)
+            )
 
-                let ownerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
-                    ownerIds: [ownerId],
-                    visibility: .publicRecipe
-                )
-
-                let tier = UserTier.tier(for: ownerRecipes.count)
-                ownerTiers[ownerId] = tier
+            // Convert counts to tiers
+            for (ownerId, count) in counts {
+                ownerTiers[ownerId] = UserTier.tier(for: count)
             }
         } catch {
             AppLogger.general.error("Failed to fetch owner tiers: \(error.localizedDescription)")

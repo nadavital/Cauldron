@@ -245,6 +245,7 @@ enum CloudKitError: LocalizedError {
     case assetNotFound
     case assetTooLarge
     case compressionFailed
+    case userNotFound
 
     var errorDescription: String? {
         switch self {
@@ -279,6 +280,8 @@ enum CloudKitError: LocalizedError {
             return "Image is too large to upload (max 10MB)"
         case .compressionFailed:
             return "Failed to compress image for upload"
+        case .userNotFound:
+            return "User not found in CloudKit"
         }
     }
 
