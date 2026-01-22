@@ -369,49 +369,63 @@ class ExploreTagViewModel: ObservableObject {
     func loadRecipes() async {
         isLoading = true
         defer { isLoading = false }
-        
+
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
-            // Load all recipes with this tag (user's own recipes)
-            let allUserRecipes = try await dependencies.recipeRepository.fetchAll()
+            // Parallelize independent fetches for better performance
+            async let localRecipesTask = dependencies.recipeRepository.fetchAll()
+            async let sharedRecipesTask = dependencies.sharingService.getSharedRecipes()
+            async let publicRecipesTask = dependencies.cloudKitService.querySharedRecipes(
+                ownerIds: nil,
+                visibility: .publicRecipe
+            )
+
+            // Fetch connections in parallel too (if we have a user)
+            let connectionsFuture: Task<[Connection], Error>?
+            if let userId = currentUserId {
+                connectionsFuture = Task {
+                    try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
+                }
+            } else {
+                connectionsFuture = nil
+            }
+
+            // Await all parallel fetches
+            let (allUserRecipes, allSharedRecipes, publicRecipesList) = try await (
+                localRecipesTask,
+                sharedRecipesTask,
+                publicRecipesTask
+            )
+
+            // Process local recipes (filter by tag)
             allRecipes = allUserRecipes.filter { recipe in
                 recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
             }
             AppLogger.general.info("✅ Found \(allRecipes.count) own recipes")
 
-            // Load friend recipes with this tag
-            // Use SharingService to get all shared recipes (same logic as Friends tab)
-            let allSharedRecipes = try await dependencies.sharingService.getSharedRecipes()
-            
+            // Process friend recipes (filter by tag)
             friendRecipes = allSharedRecipes
                 .filter { sharedRecipe in
                     sharedRecipe.recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
                 }
                 .sorted { $0.sharedAt > $1.sharedAt }
-            
             AppLogger.general.info("✅ Loaded \(friendRecipes.count) friend recipes via SharingService")
 
-            // Load public recipes from CloudKit
-            let publicRecipesList = try await dependencies.cloudKitService.querySharedRecipes(
-                ownerIds: nil,
-                visibility: .publicRecipe
-            )
-            
             // Collect owner IDs from public recipes
             let ownerIds = Set(publicRecipesList.map { $0.ownerId }.compactMap { $0 })
-            
+
             // Fetch owners in batch
             let owners = try await dependencies.cloudKitService.fetchUsers(byUserIds: Array(ownerIds))
             let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
-            
-            // Get friend IDs for filtering (if we have connections)
+
+            // Get friend IDs for filtering
             var friendIds: Set<UUID> = []
-            if let userId = currentUserId {
-                let connections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
+            if let connectionsFuture = connectionsFuture {
+                let connections = try await connectionsFuture.value
                 let acceptedConnections = connections.filter { $0.isAccepted }
-                friendIds = Set(acceptedConnections.map { 
-                    $0.fromUserId == userId ? $0.toUserId : $0.fromUserId 
+                friendIds = Set(acceptedConnections.map {
+                    $0.fromUserId == currentUserId ? $0.toUserId : $0.fromUserId
                 })
             }
 
@@ -421,18 +435,18 @@ class ExploreTagViewModel: ObservableObject {
                 guard recipe.tags.contains(where: { $0.name.lowercased() == tag.name.lowercased() }) else {
                     return nil
                 }
-                
+
                 guard let ownerId = recipe.ownerId else { return nil }
-                
+
                 // Exclude own recipes
                 if let currentUserId = currentUserId, ownerId == currentUserId { return nil }
-                
+
                 // Exclude friend recipes (using friendIds from connections)
                 if friendIds.contains(ownerId) { return nil }
-                
+
                 // Get owner
                 guard let owner = ownersMap[ownerId] else { return nil }
-                
+
                 return SharedRecipe(
                     recipe: recipe,
                     sharedBy: owner,

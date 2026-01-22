@@ -106,11 +106,20 @@ extension CloudKitService {
         var connections: [Connection] = []
         var connectionIds = Set<UUID>() // Track IDs to avoid duplicates
 
-        // Query 1: Connections where user is the sender (fromUserId)
+        // Run both queries in parallel for better performance
         let fromPredicate = NSPredicate(format: "fromUserId == %@", userId.uuidString)
         let fromQuery = CKQuery(recordType: connectionRecordType, predicate: fromPredicate)
-        let fromResults = try await db.records(matching: fromQuery)
 
+        let toPredicate = NSPredicate(format: "toUserId == %@", userId.uuidString)
+        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
+
+        // Execute both queries concurrently
+        async let fromResultsTask = db.records(matching: fromQuery)
+        async let toResultsTask = db.records(matching: toQuery)
+
+        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
+
+        // Process results from both queries
         for (_, result) in fromResults.matchResults {
             if let record = try? result.get() {
                 do {
@@ -125,11 +134,6 @@ extension CloudKitService {
                 }
             }
         }
-
-        // Query 2: Connections where user is the receiver (toUserId)
-        let toPredicate = NSPredicate(format: "toUserId == %@", userId.uuidString)
-        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
-        let toResults = try await db.records(matching: toQuery)
 
         for (_, result) in toResults.matchResults {
             if let record = try? result.get() {
@@ -181,19 +185,28 @@ extension CloudKitService {
     /// Used for finding friends-of-friends
     func fetchConnections(forUserIds userIds: [UUID]) async throws -> [Connection] {
         guard !userIds.isEmpty else { return [] }
-        
+
         let db = try getPublicDatabase()
         var connections: [Connection] = []
         var connectionIds = Set<UUID>() // Track IDs to avoid duplicates
-        
+
         // Convert UUIDs to Strings
         let userIdStrings = userIds.map { $0.uuidString }
-        
-        // Query 1: Connections where any of the users is the sender
+
+        // Run both queries in parallel for better performance
         let fromPredicate = NSPredicate(format: "fromUserId IN %@", userIdStrings)
         let fromQuery = CKQuery(recordType: connectionRecordType, predicate: fromPredicate)
-        let fromResults = try await db.records(matching: fromQuery, resultsLimit: 200) // Limit to avoid massive queries
-        
+
+        let toPredicate = NSPredicate(format: "toUserId IN %@", userIdStrings)
+        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
+
+        // Execute both queries concurrently
+        async let fromResultsTask = db.records(matching: fromQuery, resultsLimit: 200)
+        async let toResultsTask = db.records(matching: toQuery, resultsLimit: 200)
+
+        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
+
+        // Process results from both queries
         for (_, result) in fromResults.matchResults {
             if let record = try? result.get() {
                 do {
@@ -207,12 +220,7 @@ extension CloudKitService {
                 }
             }
         }
-        
-        // Query 2: Connections where any of the users is the receiver
-        let toPredicate = NSPredicate(format: "toUserId IN %@", userIdStrings)
-        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
-        let toResults = try await db.records(matching: toQuery, resultsLimit: 200)
-        
+
         for (_, result) in toResults.matchResults {
             if let record = try? result.get() {
                 do {
@@ -226,7 +234,7 @@ extension CloudKitService {
                 }
             }
         }
-        
+
         // Return raw connections (duplicate Logic is handled by caller if needed for specific pairs, here we just want the graph)
         return connections
     }

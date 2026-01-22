@@ -141,4 +141,69 @@ extension CloudKitService {
             logger.warning("Failed to unsubscribe from acceptances: \(error.localizedDescription)")
         }
     }
+
+    /// Subscribe to referral signup notifications
+    /// This sets up a CloudKit subscription so the user gets notified when someone uses their referral code
+    func subscribeToReferralSignups(forUserId userId: UUID) async throws {
+        let subscriptionID = "referral-signups-\(userId.uuidString)"
+
+        // Delete existing subscription first (if any) to ensure we use the latest notification format
+        let db = try getPublicDatabase()
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+        } catch {
+            // Subscription doesn't exist yet, that's fine (routine)
+        }
+
+        // Create predicate: fromUserId == current user (referrer) AND isReferral == 1
+        let predicate = NSPredicate(format: "fromUserId == %@ AND isReferral == %d", userId.uuidString, 1)
+
+        // Create query subscription
+        let subscription = CKQuerySubscription(
+            recordType: connectionRecordType,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordCreation]
+        )
+
+        // Configure notification with personalized message
+        let notification = CKSubscription.NotificationInfo()
+
+        // Use localization with field substitution to show new user's display name
+        notification.alertLocalizationKey = "REFERRAL_SIGNUP_ALERT"
+        notification.alertLocalizationArgs = ["toDisplayName"]
+
+        // Fallback message if localization fails
+        notification.alertBody = "Someone joined Cauldron using your referral code! You're now friends."
+
+        notification.soundName = "default"
+        notification.shouldBadge = false
+        notification.shouldSendContentAvailable = true
+
+        // Include connection data in userInfo
+        notification.desiredKeys = ["connectionId", "toUserId", "toDisplayName"]
+
+        subscription.notificationInfo = notification
+
+        // Save subscription
+        do {
+            _ = try await db.save(subscription)
+        } catch {
+            logger.error("Failed to save referral signup subscription: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    /// Unsubscribe from referral signup notifications
+    func unsubscribeFromReferralSignups(forUserId userId: UUID) async throws {
+        let subscriptionID = "referral-signups-\(userId.uuidString)"
+        let db = try getPublicDatabase()
+
+        do {
+            try await db.deleteSubscription(withID: subscriptionID)
+            logger.info("Unsubscribed from referral signups")
+        } catch {
+            logger.warning("Failed to unsubscribe from referral signups: \(error.localizedDescription)")
+        }
+    }
 }

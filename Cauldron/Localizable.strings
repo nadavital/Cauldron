@@ -3,3 +3,6 @@
 
 /* Friend request accepted notification */
 "CONNECTION_ACCEPTED_ALERT" = "%@ accepted your friend request";
+
+/* Referral signup notification */
+"REFERRAL_SIGNUP_ALERT" = "%@ joined Cauldron using your referral code! You're now friends.";

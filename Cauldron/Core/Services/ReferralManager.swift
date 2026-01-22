@@ -48,9 +48,6 @@ final class ReferralManager: ObservableObject {
     private let referralCountKey = "cauldron_referral_count"
     private let referralCodeKey = "cauldron_referral_code"
     private let usedReferralCodeKey = "cauldron_used_referral_code"
-    private let referralTestingEnabledKey = "ReferralTestingEnabled"
-    private let referralTestCodeKey = "ReferralTestCode"
-    private let referralTestTargetKey = "ReferralTestTargetCode"
 
     // CloudKit service reference (set during app initialization)
     private var cloudKitService: CloudKitService?
@@ -193,48 +190,30 @@ final class ReferralManager: ObservableObject {
 
         let normalizedCode = code.uppercased().trimmingCharacters(in: .whitespaces)
         let currentUserCode = generateReferralCode(for: currentUser)
-        let testConfig = referralTestConfig()
-        let fallbackTestCode = "CAULDRONMASTERCODE"
-        let isTestCode = normalizedCode == fallbackTestCode
-            || (testConfig.enabled && !testConfig.code.isEmpty && normalizedCode == testConfig.code)
-        let resolvedCode = isTestCode
-            ? (testConfig.targetCode.isEmpty ? currentUserCode : testConfig.targetCode)
-            : normalizedCode
 
-        if isTestCode && testConfig.targetCode.isEmpty {
-            do {
-                try await cloudKitService.incrementReferralCount(for: currentUser.id)
-                incrementReferralCount()
-                return currentUser
-            } catch {
-                AppLogger.general.error("Failed to increment test referral count: \(error.localizedDescription)")
-                return nil
-            }
-        }
-
-        if resolvedCode.isEmpty || !isReferralCodeFormatValid(resolvedCode) {
-            AppLogger.general.warning("Invalid referral code submitted (format): \(normalizedCode), resolved: \(resolvedCode)")
+        if normalizedCode.isEmpty || !isReferralCodeFormatValid(normalizedCode) {
+            AppLogger.general.warning("Invalid referral code submitted (format): \(normalizedCode)")
             return nil
         }
 
-        if !isTestCode, let usedCode = getUsedReferralCode() {
+        if let usedCode = getUsedReferralCode() {
             AppLogger.general.info("Referral already used: \(usedCode)")
             return nil
         }
 
-        if !isTestCode, !isValidReferralCode(resolvedCode, currentUserCode: currentUserCode) {
-            AppLogger.general.warning("Invalid referral code submitted (self/format): \(normalizedCode), resolved: \(resolvedCode)")
+        if !isValidReferralCode(normalizedCode, currentUserCode: currentUserCode) {
+            AppLogger.general.warning("Invalid referral code submitted (self/format): \(normalizedCode)")
             return nil
         }
 
         // Look up the referrer by code
-        let referrer = try? await cloudKitService.lookupUserByReferralCode(resolvedCode)
+        let referrer = try? await cloudKitService.lookupUserByReferralCode(normalizedCode)
         guard let referrer = referrer else {
             AppLogger.general.warning("Referral code not found: \(normalizedCode)")
             return nil
         }
 
-        if referrer.id == currentUser.id, !isTestCode {
+        if referrer.id == currentUser.id {
             AppLogger.general.warning("User attempted to use their own referral code")
             return nil
         }
@@ -249,6 +228,10 @@ final class ReferralManager: ObservableObject {
                         referrerDisplayName: referrer.displayName,
                         newUserDisplayName: displayName
                     )
+
+                    // Trigger connection refresh so the new user sees the connection immediately
+                    NotificationCenter.default.post(name: .refreshConnections, object: nil)
+                    AppLogger.general.info("🔄 Posted connection refresh notification after auto-friend creation")
                 } catch {
                     AppLogger.general.error("Failed to create auto-friend connection: \(error.localizedDescription)")
                     return nil
@@ -276,9 +259,7 @@ final class ReferralManager: ObservableObject {
 
         // Bonus: grant the new user one referral credit locally after CloudKit succeeds
         incrementReferralCount()
-        if !isTestCode {
-            recordUsedReferralCode(resolvedCode)
-        }
+        recordUsedReferralCode(normalizedCode)
 
         AppLogger.general.info("Referral processed for \(referrer.displayName)")
         return referrer
@@ -319,23 +300,6 @@ final class ReferralManager: ObservableObject {
         let regex = try? NSRegularExpression(pattern: "^[A-Z0-9]{6}$")
         let range = NSRange(normalizedCode.startIndex..., in: normalizedCode)
         return regex?.firstMatch(in: normalizedCode, range: range) != nil
-    }
-
-    private func referralTestConfig() -> (enabled: Bool, code: String, targetCode: String) {
-        let enabled = Bundle.main.object(forInfoDictionaryKey: referralTestingEnabledKey) as? Bool == true
-        guard enabled else {
-            return (false, "", "")
-        }
-
-        let code = (Bundle.main.object(forInfoDictionaryKey: referralTestCodeKey) as? String ?? "")
-            .uppercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let target = (Bundle.main.object(forInfoDictionaryKey: referralTestTargetKey) as? String ?? "")
-            .uppercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let resolvedCode = code.isEmpty ? "CAULDRONMASTERCODE" : code
-        return (enabled, resolvedCode, target)
     }
 
     /// Reset for testing

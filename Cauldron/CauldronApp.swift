@@ -252,7 +252,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 )
             }
 
-            // Update badge count asynchronously
+            // Update badge count and sync referral count asynchronously
             Task { @MainActor in
                 // Access the default dependencies to get connection manager
                 let dependencies = try? DependencyContainer.persistent()
@@ -260,6 +260,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                    let userId = CurrentUserSession.shared.userId {
                     await dependencies.connectionManager.loadConnections(forUserId: userId)
                     // Badge will be updated automatically in loadConnections
+
+                    // Sync referral count from CloudKit (referrer may have gotten a new referral)
+                    if let count = try? await dependencies.cloudKitService.fetchReferralCount(for: userId) {
+                        ReferralManager.shared.syncFromCloudKit(referralCount: count)
+                        AppLogger.general.info("📊 Synced referral count from notification: \(count)")
+                    }
                 }
             }
         }

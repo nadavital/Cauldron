@@ -138,7 +138,12 @@ actor SharingService {
             let referencedIds = Set(friendsPublicRecipes.flatMap { $0.relatedRecipeIds })
             let filteredRecipes = friendsPublicRecipes.filter { !referencedIds.contains($0.id) }
 
-            // Convert to SharedRecipe objects
+            // Batch fetch all owners at once to avoid N+1 queries
+            let ownerIds = Set(filteredRecipes.compactMap { $0.ownerId })
+            let owners = try await cloudKitService.fetchUsers(byUserIds: Array(ownerIds))
+            let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
+
+            // Convert to SharedRecipe objects using the pre-fetched owners
             for recipe in filteredRecipes {
                 // Skip if already added (shouldn't happen but be safe)
                 if allSharedRecipes.contains(where: { $0.recipe.id == recipe.id }) {
@@ -146,7 +151,7 @@ actor SharingService {
                 }
 
                 if let ownerId = recipe.ownerId,
-                   let owner = try? await cloudKitService.fetchUser(byUserId: ownerId) {
+                   let owner = ownersMap[ownerId] {
                     let sharedRecipe = SharedRecipe(
                         id: UUID(),
                         recipe: recipe,

@@ -15,12 +15,6 @@
 	</array>
 	<key>CKSharingSupported</key>
 	<true/>
-	<key>ReferralTestingEnabled</key>
-	<false/>
-	<key>ReferralTestCode</key>
-	<string>cauldronmastercode</string>
-	<key>ReferralTestTargetCode</key>
-	<string></string>
 	<key>WhatsNewForceShow</key>
 	<false/>
 	<key>UIBackgroundModes</key>

@@ -791,6 +791,51 @@ extension CloudKitService {
         }
     }
 
+    // MARK: - Batch Operations
+
+    /// Batch fetch public recipe counts for multiple owner IDs
+    /// Returns a dictionary mapping owner IDs to their public recipe counts
+    /// This is used for tier calculation and avoids N+1 queries
+    ///
+    /// - Note: Limited to 500 total records per query. For users with many public recipes,
+    ///   counts may be underreported. This is acceptable for tier calculation since
+    ///   any user with 500+ recipes would already be at the highest tier.
+    /// - Parameter ownerIds: Array of user IDs to fetch counts for
+    /// - Returns: Dictionary mapping each owner ID to their public recipe count
+    func batchFetchPublicRecipeCounts(forOwnerIds ownerIds: [UUID]) async throws -> [UUID: Int] {
+        guard !ownerIds.isEmpty else { return [:] }
+
+        let db = try getPublicDatabase()
+        let ownerIdStrings = ownerIds.map { $0.uuidString }
+
+        // Query all public recipes for the given owners in one query
+        let predicate = NSPredicate(
+            format: "ownerId IN %@ AND visibility == %@",
+            ownerIdStrings,
+            RecipeVisibility.publicRecipe.rawValue
+        )
+        let query = CKQuery(recordType: sharedRecipeRecordType, predicate: predicate)
+
+        let results = try await db.records(matching: query, resultsLimit: 500)
+
+        // Count recipes per owner
+        var counts: [UUID: Int] = [:]
+        // Initialize all requested owners with 0 count
+        for ownerId in ownerIds {
+            counts[ownerId] = 0
+        }
+
+        for (_, result) in results.matchResults {
+            if let record = try? result.get(),
+               let ownerIdString = record["ownerId"] as? String,
+               let ownerId = UUID(uuidString: ownerIdString) {
+                counts[ownerId, default: 0] += 1
+            }
+        }
+
+        return counts
+    }
+
     // MARK: - Popular Recipes
 
     /// Fetch popular public recipes (for discovery)

@@ -81,7 +81,7 @@ struct FriendsTabView: View {
                 await viewModel.loadSharedRecipes()
 
                 // Also refresh friends list by posting notification
-                NotificationCenter.default.post(name: NSNotification.Name("RefreshConnectionsList"), object: nil)
+                NotificationCenter.default.post(name: .refreshConnections, object: nil)
             }
             .alert("Success", isPresented: $viewModel.showSuccessAlert) {
                 Button("OK") { }
@@ -542,7 +542,7 @@ struct ConnectionsInlineView: View {
         .task {
             await viewModel.loadConnections()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshConnectionsList"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .refreshConnections)) { _ in
             Task {
                 await viewModel.loadConnections(forceRefresh: true)
             }
