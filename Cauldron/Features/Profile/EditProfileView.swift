@@ -11,6 +11,7 @@ struct ProfileEditView: View {
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var userSession = CurrentUserSession.shared
     @State private var username: String
     @State private var displayName: String
     @State private var profileEmoji: String?
@@ -25,34 +26,32 @@ struct ProfileEditView: View {
     @State private var errorMessage = ""
     @State private var showError = false
 
-    private let currentUser: User
+    private let initialUser: User?
 
     init(dependencies: DependencyContainer, previewUser: User? = nil) {
         self.dependencies = dependencies
 
-        // Use preview user for SwiftUI previews, otherwise require current user
-        let user: User
-        if let previewUser = previewUser {
-            user = previewUser
-        } else if let currentUser = CurrentUserSession.shared.currentUser {
-            user = currentUser
-        } else {
-            fatalError("EditProfileView requires a current user")
-        }
-        self.currentUser = user
+        // Use preview user for SwiftUI previews, otherwise use current user (may be nil after account deletion)
+        let user: User? = previewUser ?? CurrentUserSession.shared.currentUser
+        self.initialUser = user
 
-        // Initialize state from current user
-        _username = State(initialValue: user.username)
-        _displayName = State(initialValue: user.displayName)
-        _profileEmoji = State(initialValue: user.profileEmoji)
-        _profileColor = State(initialValue: user.profileColor)
+        // Initialize state from current user (use defaults if nil)
+        _username = State(initialValue: user?.username ?? "")
+        _displayName = State(initialValue: user?.displayName ?? "")
+        _profileEmoji = State(initialValue: user?.profileEmoji)
+        _profileColor = State(initialValue: user?.profileColor)
 
         // Determine avatar type
-        if user.profileImageURL != nil {
+        if user?.profileImageURL != nil {
             _selectedAvatarType = State(initialValue: .photo)
         } else {
             _selectedAvatarType = State(initialValue: .emoji)
         }
+    }
+
+    /// The current user, preferring the live session value over the initial snapshot
+    private var currentUser: User? {
+        userSession.currentUser ?? initialUser
     }
 
     var isValid: Bool {
@@ -62,7 +61,8 @@ struct ProfileEditView: View {
     }
 
     var hasChanges: Bool {
-        username != currentUser.username ||
+        guard let currentUser = currentUser else { return false }
+        return username != currentUser.username ||
         displayName != currentUser.displayName ||
         profileEmoji != currentUser.profileEmoji ||
         profileColor != currentUser.profileColor ||
@@ -70,6 +70,19 @@ struct ProfileEditView: View {
     }
 
     var body: some View {
+        // If user is nil (e.g., after account deletion), show nothing - view will be dismissed
+        if currentUser == nil {
+            Color.clear
+                .onAppear { dismiss() }
+        } else {
+            mainContent
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        // Guard is safe here since we check for nil in body
+        let currentUser = self.currentUser!
         NavigationStack {
             ScrollView {
                 VStack(spacing: 32) {
@@ -427,12 +440,24 @@ struct ProfileEditView: View {
                     profileImage = await dependencies.profileImageManager.loadImage(userId: currentUser.id)
                 }
             }
+            .onChange(of: userSession.currentUser) { _, newUser in
+                // Dismiss if user signs out (e.g., account deleted)
+                if newUser == nil {
+                    dismiss()
+                }
+            }
         }
     }
 
     // MARK: - Actions
 
     private func saveProfile() async {
+        guard let currentUser = currentUser else {
+            // User signed out (e.g., account deleted), dismiss
+            dismiss()
+            return
+        }
+
         isSaving = true
         defer { isSaving = false }
 

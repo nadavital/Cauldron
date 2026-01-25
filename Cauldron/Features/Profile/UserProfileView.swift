@@ -824,7 +824,7 @@ struct UserProfileView: View {
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
 
-            if viewModel.searchText.isEmpty && viewModel.connectionState != .connected {
+            if viewModel.searchText.isEmpty && !viewModel.isCurrentUser && viewModel.connectionState != .connected {
                 Text("Connect with \(user.displayName) to see their recipes")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -838,6 +838,8 @@ struct UserProfileView: View {
     private var emptyStateMessage: String {
         if !viewModel.searchText.isEmpty {
             return "No recipes match '\(viewModel.searchText)'"
+        } else if viewModel.isCurrentUser {
+            return "You haven't saved any recipes yet"
         } else if viewModel.connectionState == .connected {
             return "\(user.displayName) hasn't shared any recipes yet"
         } else {

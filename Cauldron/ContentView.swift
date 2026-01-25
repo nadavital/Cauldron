@@ -24,6 +24,13 @@ struct ImportContext: Identifiable {
 }
 
 struct ContentView: View {
+    // MARK: - What's New Content Versioning
+    // Only update this when you have NEW FEATURES to announce.
+    // This is separate from the build number - the app can have multiple builds without triggering What's New.
+    // When you ship a feature update, set this to match that version (e.g., "1.1.2").
+    // When you ship a bug fix, leave this unchanged so no splash appears.
+    private static let whatsNewContentVersion = "1.1.2"
+
     @Environment(\.dependencies) private var dependencies
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var isDataReady = false
@@ -32,8 +39,12 @@ struct ContentView: View {
     @State private var isLoadingShare = false
     @State private var showShareError = false
     @State private var shareErrorMessage = ""
-    @AppStorage("whatsNewLastSeenVersion") private var whatsNewLastSeenVersion = ""
+
+    // Splash screen state
+    @AppStorage("whatsNewLastSeenContentVersion") private var whatsNewLastSeenContentVersion = ""
+    @AppStorage("hasSeenWelcomeScreen") private var hasSeenWelcomeScreen = false
     @State private var showWhatsNew = false
+    @State private var showWelcome = false
 
     struct SharedContentWrapper: Identifiable {
         let id = UUID()
@@ -111,8 +122,14 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showWhatsNew) {
                 WhatsNewView {
-                    whatsNewLastSeenVersion = currentAppVersion
+                    whatsNewLastSeenContentVersion = Self.whatsNewContentVersion
                     showWhatsNew = false
+                }
+            }
+            .sheet(isPresented: $showWelcome) {
+                WelcomeView {
+                    hasSeenWelcomeScreen = true
+                    showWelcome = false
                 }
             }
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
@@ -155,40 +172,52 @@ struct ContentView: View {
                 }
             }
 
-            maybeShowWhatsNew()
+            maybeShowSplashScreen()
         }
         .onChange(of: userSession.isInitialized) { _ in
-            maybeShowWhatsNew()
+            maybeShowSplashScreen()
         }
         .onChange(of: userSession.needsOnboarding) { _ in
-            maybeShowWhatsNew()
+            maybeShowSplashScreen()
         }
         .onChange(of: userSession.needsiCloudSignIn) { _ in
-            maybeShowWhatsNew()
+            maybeShowSplashScreen()
         }
         .onChange(of: isDataReady) { _ in
-            maybeShowWhatsNew()
+            maybeShowSplashScreen()
         }
     }
 
-    private var currentAppVersion: String {
-        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        return "\(shortVersion) (\(buildVersion))"
-    }
-
-    private func maybeShowWhatsNew() {
+    private func maybeShowSplashScreen() {
+        // Don't show any splash if not ready or already showing one
         guard userSession.isInitialized,
               isDataReady,
               !userSession.needsOnboarding,
               !userSession.needsiCloudSignIn,
-              !showWhatsNew else {
+              !showWhatsNew,
+              !showWelcome else {
             return
         }
 
+        // Migration: Existing users (hasLaunchedBefore = true) should NOT see the Welcome screen.
+        // If they haven't seen any splash under the new system, mark Welcome as seen.
+        let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        if hasLaunchedBefore && !hasSeenWelcomeScreen {
+            // Existing user upgrading - skip Welcome screen, mark it as seen
+            hasSeenWelcomeScreen = true
+        }
+
+        // Priority 1: Welcome screen for brand new users who haven't seen it yet
+        if !hasSeenWelcomeScreen {
+            showWelcome = true
+            return
+        }
+
+        // Priority 2: What's New for existing users when content version changes
         let forceShow = Bundle.main.object(forInfoDictionaryKey: "WhatsNewForceShow") as? Bool == true
-        guard forceShow || whatsNewLastSeenVersion != currentAppVersion else { return }
-        showWhatsNew = true
+        if forceShow || whatsNewLastSeenContentVersion != Self.whatsNewContentVersion {
+            showWhatsNew = true
+        }
     }
 
     private func loadSharedContent(url: URL) async {

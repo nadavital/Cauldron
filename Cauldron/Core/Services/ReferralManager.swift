@@ -241,23 +241,17 @@ final class ReferralManager: ObservableObject {
             }
         }
 
+        // Record the referral signup in CloudKit
+        // The new user creates this record (so they have permission)
+        // The referrer's count is computed by counting these records
         do {
-            try await cloudKitService.incrementReferralCount(for: referrer.id)
+            try await cloudKitService.recordReferralSignup(referrerId: referrer.id, newUserId: currentUser.id)
         } catch {
-            AppLogger.general.error("Failed to increment referrer count: \(error.localizedDescription)")
+            AppLogger.general.error("Failed to record referral signup: \(error.localizedDescription)")
             return nil
         }
 
-        if referrer.id != currentUser.id {
-            do {
-                try await cloudKitService.incrementReferralCount(for: currentUser.id)
-            } catch {
-                AppLogger.general.error("Failed to increment new user referral count: \(error.localizedDescription)")
-                return nil
-            }
-        }
-
-        // Bonus: grant the new user one referral credit locally after CloudKit succeeds
+        // Grant the new user one referral credit locally
         incrementReferralCount()
         recordUsedReferralCode(normalizedCode)
 

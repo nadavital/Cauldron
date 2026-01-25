@@ -123,14 +123,21 @@ struct DeleteAccountView: View {
             try await dependencies.collectionRepository.deleteAllUserCollections(userId: userId)
             AppLogger.general.info("✅ All collections deleted")
 
-            // Step 3: Delete user profile from CloudKit
+            // Step 3: Delete all connections involving this user
+            AppLogger.general.info("Deleting all user connections...")
+            try await dependencies.connectionRepository.deleteAllConnectionsForUser(userId: userId)
+            try await dependencies.cloudKitService.deleteAllConnectionsForUser(userId: userId)
+            AppLogger.general.info("✅ All connections deleted")
+
+            // Step 4: Delete user profile from CloudKit
             AppLogger.general.info("Deleting user profile from CloudKit...")
             try await dependencies.cloudKitService.deleteUserProfile(userId: userId)
             AppLogger.general.info("✅ User profile deleted from CloudKit")
 
-            // Step 4: Clear local user data and sign out
+            // Step 5: Clear local user data and sign out
             AppLogger.general.info("Clearing local data and signing out...")
             await MainActor.run {
+                ReferralManager.shared.reset()
                 CurrentUserSession.shared.signOut()
             }
 
