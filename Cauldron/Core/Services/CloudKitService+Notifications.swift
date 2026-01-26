@@ -155,8 +155,9 @@ extension CloudKitService {
             // Subscription doesn't exist yet, that's fine (routine)
         }
 
-        // Create predicate: fromUserId == current user (referrer) AND isReferral == 1
-        let predicate = NSPredicate(format: "fromUserId == %@ AND isReferral == %d", userId.uuidString, 1)
+        // Create predicate: fromUserId == current user (referrer)
+        // Note: We can't filter by isReferral field as it may not exist in schema yet
+        let predicate = NSPredicate(format: "fromUserId == %@", userId.uuidString)
 
         // Create query subscription
         let subscription = CKQuerySubscription(
@@ -166,22 +167,17 @@ extension CloudKitService {
             options: [.firesOnRecordCreation]
         )
 
-        // Configure notification with personalized message
+        // Configure notification
         let notification = CKSubscription.NotificationInfo()
 
-        // Use localization with field substitution to show new user's display name
-        notification.alertLocalizationKey = "REFERRAL_SIGNUP_ALERT"
-        notification.alertLocalizationArgs = ["toDisplayName"]
-
-        // Fallback message if localization fails
-        notification.alertBody = "Someone joined Cauldron using your referral code! You're now friends."
+        notification.alertBody = "Someone joined Cauldron using your referral code! You're now friends. 🎉"
 
         notification.soundName = "default"
         notification.shouldBadge = false
         notification.shouldSendContentAvailable = true
 
-        // Include connection data in userInfo
-        notification.desiredKeys = ["connectionId", "toUserId", "toDisplayName"]
+        // Include connection data in userInfo (only fields guaranteed to exist)
+        notification.desiredKeys = ["connectionId", "toUserId"]
 
         subscription.notificationInfo = notification
 

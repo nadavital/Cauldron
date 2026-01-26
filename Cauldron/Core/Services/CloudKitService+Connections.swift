@@ -162,23 +162,23 @@ extension CloudKitService {
     /// Check if a connection already exists between two users (any direction)
     func connectionExists(between userA: UUID, and userB: UUID) async throws -> Bool {
         let db = try getPublicDatabase()
-        let predicate = NSPredicate(
-            format: "(fromUserId == %@ AND toUserId == %@) OR (fromUserId == %@ AND toUserId == %@)",
-            userA.uuidString,
-            userB.uuidString,
-            userB.uuidString,
-            userA.uuidString
-        )
-        let query = CKQuery(recordType: connectionRecordType, predicate: predicate)
-        let results = try await db.records(matching: query, resultsLimit: 1)
 
-        for (_, result) in results.matchResults {
-            if (try? result.get()) != nil {
-                return true
-            }
+        // CloudKit doesn't support OR predicates, so check both directions separately
+        // Direction 1: userA -> userB
+        let predicate1 = NSPredicate(format: "fromUserId == %@ AND toUserId == %@", userA.uuidString, userB.uuidString)
+        let query1 = CKQuery(recordType: connectionRecordType, predicate: predicate1)
+        let results1 = try await db.records(matching: query1, resultsLimit: 1)
+
+        if results1.matchResults.contains(where: { (try? $0.1.get()) != nil }) {
+            return true
         }
 
-        return false
+        // Direction 2: userB -> userA
+        let predicate2 = NSPredicate(format: "fromUserId == %@ AND toUserId == %@", userB.uuidString, userA.uuidString)
+        let query2 = CKQuery(recordType: connectionRecordType, predicate: predicate2)
+        let results2 = try await db.records(matching: query2, resultsLimit: 1)
+
+        return results2.matchResults.contains(where: { (try? $0.1.get()) != nil })
     }
 
     /// Fetch connections for multiple users (batch fetch)
@@ -293,6 +293,66 @@ extension CloudKitService {
 
         try await db.deleteRecord(withID: recordID)
         logger.info("Deleted connection from PUBLIC database: \(connection.id)")
+    }
+
+    /// Delete all connections involving a user from CloudKit PUBLIC database
+    /// Used during account deletion to clean up friend relationships
+    func deleteAllConnectionsForUser(userId: UUID) async throws {
+        logger.info("🗑️ Deleting all connections for user: \(userId)")
+        let db = try getPublicDatabase()
+
+        // Query connections where user is the sender (fromUserId)
+        let fromPredicate = NSPredicate(format: "fromUserId == %@", userId.uuidString)
+        let fromQuery = CKQuery(recordType: connectionRecordType, predicate: fromPredicate)
+
+        // Query connections where user is the receiver (toUserId)
+        let toPredicate = NSPredicate(format: "toUserId == %@", userId.uuidString)
+        let toQuery = CKQuery(recordType: connectionRecordType, predicate: toPredicate)
+
+        // Execute both queries concurrently
+        async let fromResultsTask = db.records(matching: fromQuery)
+        async let toResultsTask = db.records(matching: toQuery)
+
+        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
+
+        // Collect all record IDs to delete
+        var recordIDs: [CKRecord.ID] = []
+
+        for (recordID, result) in fromResults.matchResults {
+            if (try? result.get()) != nil {
+                recordIDs.append(recordID)
+            }
+        }
+
+        for (recordID, result) in toResults.matchResults {
+            if (try? result.get()) != nil {
+                recordIDs.append(recordID)
+            }
+        }
+
+        guard !recordIDs.isEmpty else {
+            logger.info("No connections found to delete for user: \(userId)")
+            return
+        }
+
+        logger.info("Found \(recordIDs.count) connections to delete for user: \(userId)")
+
+        // Batch delete using modifyRecords
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
+            operation.modifyRecordsResultBlock = { result in
+                switch result {
+                case .success:
+                    self.logger.info("✅ Successfully deleted \(recordIDs.count) connections for user: \(userId)")
+                    continuation.resume()
+                case .failure(let error):
+                    self.logger.error("❌ Failed to delete connections: \(error.localizedDescription)")
+                    continuation.resume(throwing: error)
+                }
+            }
+            operation.database = db
+            operation.start()
+        }
     }
 
     func connectionFromRecord(_ record: CKRecord) throws -> Connection {

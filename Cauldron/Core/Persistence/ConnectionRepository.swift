@@ -101,11 +101,40 @@ actor ConnectionRepository {
             predicate: #Predicate { $0.id == connection.id }
         )
         let models = try context.fetch(descriptor)
-        
+
         if let model = models.first {
             context.delete(model)
             try context.save()
             logger.info("Deleted connection: \(connection.id)")
         }
+    }
+
+    /// Delete all connections involving a user
+    /// Used during account deletion to clean up local connection cache
+    func deleteAllConnectionsForUser(userId: UUID) async throws {
+        let context = ModelContext(modelContainer)
+
+        // Fetch all connections (following the pattern used elsewhere in this file)
+        let descriptor = FetchDescriptor<ConnectionModel>()
+        let allConnections = try context.fetch(descriptor)
+
+        // Filter to connections involving this user
+        let connections = allConnections.filter {
+            $0.fromUserId == userId || $0.toUserId == userId
+        }
+
+        guard !connections.isEmpty else {
+            logger.info("No local connections found to delete for user: \(userId)")
+            return
+        }
+
+        logger.info("Deleting \(connections.count) local connections for user: \(userId)")
+
+        for connection in connections {
+            context.delete(connection)
+        }
+
+        try context.save()
+        logger.info("✅ Deleted all local connections for user: \(userId)")
     }
 }

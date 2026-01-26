@@ -204,6 +204,135 @@ final class TimerExtractorTests: XCTestCase {
         let timers = TimerExtractor.extractTimers(from: "Bake for 30 minutes")
 
         XCTAssertEqual(timers.count, 1)
-        XCTAssertEqual(timers[0].label, "Cook")
+        XCTAssertEqual(timers[0].label, "Bake")
+    }
+
+    // MARK: - Enhanced Multiple Timer Tests
+
+    func testExtractTimers_MultipleMinutes() {
+        let timers = TimerExtractor.extractTimers(from: "Cook for 5 minutes, then rest for 10 minutes")
+
+        XCTAssertEqual(timers.count, 2)
+        XCTAssertEqual(timers[0].seconds, 5 * 60)
+        XCTAssertEqual(timers[1].seconds, 10 * 60)
+    }
+
+    func testExtractTimers_AllMatchesExtracted() {
+        let timers = TimerExtractor.extractTimers(from: "Boil for 2 minutes, simmer for 20 minutes, rest for 5 minutes")
+
+        XCTAssertEqual(timers.count, 3)
+        XCTAssertEqual(timers[0].seconds, 2 * 60)
+        XCTAssertEqual(timers[1].seconds, 20 * 60)
+        XCTAssertEqual(timers[2].seconds, 5 * 60)
+    }
+
+    // MARK: - Smart Label Inference Tests
+
+    func testExtractTimers_RestLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Let the dough rest for 30 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Rest")
+    }
+
+    func testExtractTimers_ChillLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Refrigerate for 2 hours")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Chill")
+    }
+
+    func testExtractTimers_RiseLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Let rise in a warm place for 1 hour")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Rise")
+    }
+
+    func testExtractTimers_MarinateLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Marinate the chicken for 4 hours")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Marinate")
+    }
+
+    func testExtractTimers_SimmerLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Reduce heat and simmer for 45 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Simmer")
+    }
+
+    func testExtractTimers_BoilLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Bring to a boil and cook for 10 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Boil")
+    }
+
+    func testExtractTimers_BakeLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Bake at 350°F for 25 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Bake")
+    }
+
+    func testExtractTimers_RoastLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Roast the vegetables for 40 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Roast")
+    }
+
+    func testExtractTimers_SteamLabel() {
+        let timers = TimerExtractor.extractTimers(from: "Steam the broccoli for 5 minutes")
+
+        XCTAssertEqual(timers.count, 1)
+        XCTAssertEqual(timers[0].label, "Steam")
+    }
+
+    func testExtractTimers_MultipleTimersWithDifferentLabels() {
+        let timers = TimerExtractor.extractTimers(from: "Bake for 30 minutes, then let rest for 10 minutes")
+
+        XCTAssertEqual(timers.count, 2)
+        XCTAssertEqual(timers[0].label, "Bake")
+        XCTAssertEqual(timers[1].label, "Rest")
+    }
+
+    func testExtractTimers_CookingAndResting() {
+        let timers = TimerExtractor.extractTimers(from: "Simmer for 20 minutes, then chill for 1 hour before serving")
+
+        XCTAssertEqual(timers.count, 2)
+        XCTAssertEqual(timers[0].label, "Simmer")
+        XCTAssertEqual(timers[1].label, "Chill")
+    }
+
+    // MARK: - Order Preservation
+
+    func testExtractTimers_PreservesOrder() {
+        let timers = TimerExtractor.extractTimers(from: "First cook for 5 minutes, then bake for 30 minutes, finally rest for 10 minutes")
+
+        XCTAssertEqual(timers.count, 3)
+        XCTAssertEqual(timers[0].seconds, 5 * 60)  // First
+        XCTAssertEqual(timers[1].seconds, 30 * 60) // Second
+        XCTAssertEqual(timers[2].seconds, 10 * 60) // Third
+    }
+
+    // MARK: - Complex Real-World Examples
+
+    func testExtractTimers_ComplexBakingStep() {
+        let timers = TimerExtractor.extractTimers(from: "Bake for 25 minutes, rotate pan, and bake for another 20 minutes until golden")
+
+        XCTAssertGreaterThanOrEqual(timers.count, 2)
+    }
+
+    func testExtractTimers_BreadMakingProcess() {
+        let timers = TimerExtractor.extractTimers(from: "Let rise for 1 hour, punch down, then rise again for 45 minutes")
+
+        XCTAssertEqual(timers.count, 2)
+        XCTAssertEqual(timers[0].seconds, 60 * 60)
+        XCTAssertEqual(timers[1].seconds, 45 * 60)
+        XCTAssertEqual(timers[0].label, "Rise")
+        XCTAssertEqual(timers[1].label, "Rise")
     }
 }
