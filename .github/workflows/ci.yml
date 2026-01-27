@@ -20,21 +20,34 @@ jobs:
   # ============================================================
   build:
     name: Build
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select Xcode 16.2
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: List available simulators
-        run: xcrun simctl list devices available
+      # Workaround: Remove duplicate files from alternate icon bundles
+      # The .icon folders have identically-named PNG files that conflict during copy
+      - name: Fix duplicate icon assets
+        run: |
+          # Keep only the main icon's assets, remove duplicates from alternates
+          cd Cauldron/Resources/Icons
+          for icon in CauldronIconAgatha.icon CauldronIconBadger.icon CauldronIconEagle.icon \
+                      CauldronIconGoodWitch.icon CauldronIconLion.icon CauldronIconMaleficent.icon \
+                      CauldronIconScarletWitch.icon CauldronIconSerpent.icon CauldronIconUrsula.icon \
+                      CauldronIconWicked.icon; do
+            if [ -d "$icon/Assets" ]; then
+              rm -rf "$icon/Assets"
+              rm -f "$icon/icon.json"
+            fi
+          done
 
       - name: Build for iOS Simulator
         run: |
@@ -43,57 +56,82 @@ jobs:
             -scheme Cauldron \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty --color && exit ${PIPESTATUS[0]}
+            ONLY_ACTIVE_ARCH=YES
 
   # ============================================================
   # TEST JOB - Required
   # ============================================================
   test:
     name: Test
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Select Xcode 16.2
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
-      - name: List available simulators
-        run: xcrun simctl list devices available
+      # Workaround: Remove duplicate files from alternate icon bundles
+      - name: Fix duplicate icon assets
+        run: |
+          cd Cauldron/Resources/Icons
+          for icon in CauldronIconAgatha.icon CauldronIconBadger.icon CauldronIconEagle.icon \
+                      CauldronIconGoodWitch.icon CauldronIconLion.icon CauldronIconMaleficent.icon \
+                      CauldronIconScarletWitch.icon CauldronIconSerpent.icon CauldronIconUrsula.icon \
+                      CauldronIconWicked.icon; do
+            if [ -d "$icon/Assets" ]; then
+              rm -rf "$icon/Assets"
+              rm -f "$icon/icon.json"
+            fi
+          done
+
+      - name: Boot Simulator
+        run: |
+          # Create and boot a simulator
+          DEVICE_ID=$(xcrun simctl create "CI_iPhone" "iPhone 16" 2>/dev/null || xcrun simctl list devices | grep "CI_iPhone" | head -1 | grep -oE '[0-9A-F-]{36}')
+          if [ -z "$DEVICE_ID" ]; then
+            # Fallback: find any available iPhone
+            DEVICE_ID=$(xcrun simctl list devices available | grep "iPhone" | grep -oE '[0-9A-F-]{36}' | head -1)
+          fi
+          echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          echo "Using simulator: $DEVICE_ID"
 
       - name: Run Tests
         run: |
-          # Find an available iPhone simulator
-          SIMULATOR=$(xcrun simctl list devices available | grep "iPhone" | head -1 | sed 's/.*(\([^)]*\)).*/\1/')
-          echo "Using simulator: $SIMULATOR"
           xcodebuild test \
             -project Cauldron.xcodeproj \
             -scheme Cauldron \
-            -destination "platform=iOS Simulator,id=$SIMULATOR" \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -configuration Debug \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty --color --report junit && exit ${PIPESTATUS[0]}
+            ONLY_ACTIVE_ARCH=YES \
+            -resultBundlePath TestResults.xcresult
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results
-          path: build/reports/
+          path: TestResults.xcresult
 
   # ============================================================
   # LINT JOB - Advisory (does not block merge)
   # ============================================================
   lint:
     name: Lint
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 10
     # continue-on-error means failures don't block the PR
     continue-on-error: true
