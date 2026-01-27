@@ -14,9 +14,9 @@ import os
 /// Manages collection cover image storage and retrieval
 actor CollectionImageManager {
     private let imageDirectoryURL: URL
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
 
-    init(cloudKitService: CloudKitService) {
+    init(cloudKitService: CloudKitServiceFacade) {
         self.cloudKitService = cloudKitService
 
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {

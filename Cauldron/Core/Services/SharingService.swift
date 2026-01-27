@@ -12,10 +12,10 @@ import os
 actor SharingService {
     private let sharingRepository: SharingRepository
     private let recipeRepository: RecipeRepository
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
     private let logger = Logger(subsystem: "com.cauldron", category: "SharingService")
 
-    init(sharingRepository: SharingRepository, recipeRepository: RecipeRepository, cloudKitService: CloudKitService) {
+    init(sharingRepository: SharingRepository, recipeRepository: RecipeRepository, cloudKitService: CloudKitServiceFacade) {
         self.sharingRepository = sharingRepository
         self.recipeRepository = recipeRepository
         self.cloudKitService = cloudKitService

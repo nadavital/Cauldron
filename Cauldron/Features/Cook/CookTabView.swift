@@ -308,7 +308,7 @@ struct CookTabView: View {
             HStack {
                 Image(systemName: "folder.fill")
                     .foregroundColor(.cauldronOrange)
-                Text("My Collections")
+                Text("Collections")
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()

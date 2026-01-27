@@ -22,7 +22,7 @@ extension Notification.Name {
 /// Thread-safe repository for Collection operations
 actor CollectionRepository {
     private let modelContainer: ModelContainer
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
     private let operationQueueService: OperationQueueService
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
@@ -32,7 +32,7 @@ actor CollectionRepository {
 
     init(
         modelContainer: ModelContainer,
-        cloudKitService: CloudKitService,
+        cloudKitService: CloudKitServiceFacade,
         operationQueueService: OperationQueueService
     ) {
         self.modelContainer = modelContainer

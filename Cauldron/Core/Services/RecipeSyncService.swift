@@ -26,7 +26,7 @@ enum RecipeSyncStatus {
 
 /// Service to coordinate recipe syncing between local storage and CloudKit
 actor RecipeSyncService {
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
     private let recipeRepository: RecipeRepository
     private let deletedRecipeRepository: DeletedRecipeRepository
     private let imageManager: ImageManager
@@ -37,7 +37,7 @@ actor RecipeSyncService {
     private var autoSyncTask: Task<Void, Never>?
 
     init(
-        cloudKitService: CloudKitService,
+        cloudKitService: CloudKitServiceFacade,
         recipeRepository: RecipeRepository,
         deletedRecipeRepository: DeletedRecipeRepository,
         imageManager: ImageManager

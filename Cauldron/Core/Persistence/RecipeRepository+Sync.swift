@@ -18,7 +18,7 @@ extension RecipeRepository {
     /// Sync a recipe to CloudKit with proper error tracking
     /// Note: ALL recipes are synced to iCloud (including private ones) for backup/sync across devices.
     /// Visibility only controls who else can see the recipe, not whether it syncs.
-    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
         // Only sync if we have an owner ID and CloudKit is available
         guard let ownerId = recipe.ownerId else {
             logger.info("Skipping CloudKit sync - no owner ID for recipe: \(recipe.title)")
@@ -51,7 +51,7 @@ extension RecipeRepository {
     }
     
     /// Delete a recipe from CloudKit with proper error handling
-    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {
@@ -72,7 +72,7 @@ extension RecipeRepository {
     // MARK: - Public Database Sync
     
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
-    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
         // Don't sync preview recipes to PUBLIC database - they're local-only copies
         guard !recipe.isPreview else {
             logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
@@ -122,7 +122,7 @@ extension RecipeRepository {
     }
     
     /// Delete recipe from PUBLIC database
-    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitService) async {
+    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitService.isAvailable()
         guard isAvailable else {

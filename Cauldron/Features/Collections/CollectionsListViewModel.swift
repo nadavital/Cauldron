@@ -13,7 +13,6 @@ import os
 @MainActor
 class CollectionsListViewModel: ObservableObject {
     @Published var ownedCollections: [Collection] = []
-    @Published var referencedCollections: [CollectionReference] = []
     @Published var isLoading = false
     @Published var searchText = ""
     @Published var showingCreateSheet = false
@@ -46,83 +45,18 @@ class CollectionsListViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    /// Load all collections (owned + referenced)
+    /// Load all collections
     func loadCollections() async {
         isLoading = true
         defer { isLoading = false }
 
         do {
-            // Load owned collections
             ownedCollections = try await dependencies.collectionRepository.fetchAll()
-            AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) owned collections")
-
-            // Load referenced collections if user is logged in
-            if let userId = CurrentUserSession.shared.userId {
-                referencedCollections = try await dependencies.cloudKitService.fetchCollectionReferences(forUserId: userId)
-                AppLogger.general.info("✅ Loaded \(self.referencedCollections.count) referenced collections")
-
-                // Validate stale references in background
-                await validateStaleReferences()
-            }
+            AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) collections")
         } catch {
             AppLogger.general.error("❌ Failed to load collections: \(error.localizedDescription)")
             errorMessage = "Failed to load collections: \(error.localizedDescription)"
             showError = true
-        }
-    }
-
-    /// Validate collection references that are older than 24 hours
-    private func validateStaleReferences() async {
-        let staleReferences = referencedCollections.filter { $0.needsValidation }
-
-        guard !staleReferences.isEmpty else {
-            AppLogger.general.info("No stale references to validate")
-            return
-        }
-
-        AppLogger.general.info("Validating \(staleReferences.count) stale collection references")
-
-        for reference in staleReferences {
-            await validateReference(reference)
-        }
-    }
-
-    /// Validate a single collection reference
-    private func validateReference(_ reference: CollectionReference) async {
-        do {
-            // Try to fetch the original collection
-            let sharedCollections = try await dependencies.cloudKitService.fetchSharedCollections(
-                friendIds: [reference.originalOwnerId]
-            )
-
-            if let currentCollection = sharedCollections.first(where: { $0.id == reference.originalCollectionId }) {
-                // Collection still exists - update metadata if changed
-                let hasChanged = currentCollection.name != reference.collectionName ||
-                                currentCollection.recipeCount != reference.recipeCount ||
-                                currentCollection.visibility.rawValue != reference.cachedVisibility
-
-                if hasChanged {
-                    AppLogger.general.info("Collection '\(reference.collectionName)' has changed - updating reference")
-                    let updatedReference = reference.withUpdatedMetadata(from: currentCollection)
-                    try await dependencies.cloudKitService.saveCollectionReference(updatedReference)
-
-                    // Reload to show updated data
-                    if let userId = CurrentUserSession.shared.userId {
-                        referencedCollections = try await dependencies.cloudKitService.fetchCollectionReferences(forUserId: userId)
-                    }
-                } else {
-                    // Just update validation timestamp
-                    let updated = reference.withUpdatedValidation()
-                    try await dependencies.cloudKitService.saveCollectionReference(updated)
-                }
-            } else {
-                // Collection no longer exists or is now private
-                AppLogger.general.warning("Collection '\(reference.collectionName)' is no longer available")
-                // We'll keep the reference but it will show an error when opened
-                // User can manually remove it
-            }
-        } catch {
-            AppLogger.general.error("Failed to validate reference '\(reference.collectionName)': \(error.localizedDescription)")
         }
     }
 
@@ -133,16 +67,6 @@ class CollectionsListViewModel: ObservableObject {
         }
         return ownedCollections.filter { collection in
             collection.name.localizedCaseInsensitiveContains(searchText)
-        }
-    }
-
-    /// Filtered referenced collections based on search text
-    var filteredReferencedCollections: [CollectionReference] {
-        if searchText.isEmpty {
-            return referencedCollections
-        }
-        return referencedCollections.filter { reference in
-            reference.collectionName.localizedCaseInsensitiveContains(searchText)
         }
     }
 
@@ -181,19 +105,6 @@ class CollectionsListViewModel: ObservableObject {
         } catch {
             AppLogger.general.error("❌ Failed to delete collection: \(error.localizedDescription)")
             errorMessage = "Failed to delete collection: \(error.localizedDescription)"
-            showError = true
-        }
-    }
-
-    /// Delete a collection reference
-    func deleteCollectionReference(_ reference: CollectionReference) async {
-        do {
-            try await dependencies.cloudKitService.deleteCollectionReference(reference.id)
-            await loadCollections()
-            AppLogger.general.info("✅ Removed collection reference: \(reference.collectionName)")
-        } catch {
-            AppLogger.general.error("❌ Failed to remove collection reference: \(error.localizedDescription)")
-            errorMessage = "Failed to remove collection reference: \(error.localizedDescription)"
             showError = true
         }
     }

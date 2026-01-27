@@ -13,7 +13,7 @@ import CloudKit
 actor CloudImageMigration {
     private let recipeRepository: RecipeRepository
     private let imageManager: ImageManager
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
     private let imageSyncManager: ImageSyncManager
     private let logger = Logger(subsystem: "com.cauldron", category: "CloudImageMigration")
 
@@ -37,7 +37,7 @@ actor CloudImageMigration {
     init(
         recipeRepository: RecipeRepository,
         imageManager: ImageManager,
-        cloudKitService: CloudKitService,
+        cloudKitService: CloudKitServiceFacade,
         imageSyncManager: ImageSyncManager
     ) {
         self.recipeRepository = recipeRepository

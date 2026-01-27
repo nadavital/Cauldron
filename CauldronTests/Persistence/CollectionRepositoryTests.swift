@@ -13,7 +13,7 @@ import SwiftData
 final class CollectionRepositoryTests: XCTestCase {
 
     var repository: CollectionRepository!
-    var cloudKitService: CloudKitService!
+    var cloudKitService: CloudKitServiceFacade!
     var modelContainer: ModelContainer!
     var testUserId: UUID!
 
@@ -30,7 +30,7 @@ final class CollectionRepositoryTests: XCTestCase {
 
         // Create CloudKit service (will use real service)
         // Note: CloudKit operations will fail in tests, but that's okay for local operations
-        cloudKitService = CloudKitService()
+        cloudKitService = CloudKitServiceFacade()
 
         // Initialize repository
         repository = CollectionRepository(

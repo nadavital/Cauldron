@@ -13,9 +13,9 @@ import CloudKit
 /// Manages recipe image storage and retrieval
 actor ImageManager {
     private let imageDirectoryURL: URL
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
 
-    init(cloudKitService: CloudKitService) {
+    init(cloudKitService: CloudKitServiceFacade) {
         self.cloudKitService = cloudKitService
 
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {

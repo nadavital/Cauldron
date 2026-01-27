@@ -142,8 +142,11 @@ struct ProfileAvatar: View {
         // This handles the case where app was reinstalled or local storage was cleared
         if let dependencies = dependencies,
            user.cloudProfileImageRecordName != nil,
-           user.profileImageURL == nil {
-            AppLogger.general.info("Local profile image missing, attempting download from CloudKit for user \(user.username)")
+           user.profileImageURL == nil,
+           !isLoadingImage {
+            // Mark as loading to prevent duplicate downloads from this view instance
+            isLoadingImage = true
+            defer { isLoadingImage = false }
 
             do {
                 if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
