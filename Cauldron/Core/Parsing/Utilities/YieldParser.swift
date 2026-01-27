@@ -25,8 +25,9 @@ struct YieldParser {
         (#"(?i)\bservings?\s*:?\s*(\d+(?:\s*[-–to]+\s*\d+)?)\b"#, "{number} servings"),
         (#"(?i)(\d+(?:\s*[-–to]+\s*\d+)?)\s+servings?\b"#, "{number} servings"),
 
-        // "Makes 12 cookies" or "Makes about 24 muffins"
-        (#"(?i)\bmakes?\s+(?:about\s+)?(\d+(?:\s*[-–to]+\s*\d+)?)\s+(\w+)"#, "{number} {unit}"),
+        // "Makes 12 cookies" or "Makes about 24 muffins" or "Makes 24 standard cupcakes"
+        // Skip common adjectives (standard, small, large, medium, mini, regular, jumbo) to capture the noun
+        (#"(?i)\bmakes?\s+(?:about\s+)?(\d+(?:\s*[-–to]+\s*\d+)?)\s+(?:(?:standard|small|medium|large|mini|regular|jumbo|big|little)\s+)?(\w+)"#, "{number} {unit}"),
 
         // "Yields 6" or "Yield: 6"
         (#"(?i)\byields?\s*:?\s*(\d+(?:\s*[-–to]+\s*\d+)?)\s*(\w*)"#, "{number} {unit}"),
@@ -34,8 +35,9 @@ struct YieldParser {
         // "Recipe for 8" or "For 4 people"
         (#"(?i)\b(?:recipe\s+)?for\s+(\d+(?:\s*[-–to]+\s*\d+)?)\s*(?:people|persons?)?\b"#, "{number} servings"),
 
-        // "Portions: 6"
+        // "Portions: 6" or "4 portions"
         (#"(?i)\bportions?\s*:?\s*(\d+(?:\s*[-–to]+\s*\d+)?)\b"#, "{number} portions"),
+        (#"(?i)(\d+(?:\s*[-–to]+\s*\d+)?)\s+portions?\b"#, "{number} portions"),
 
         // "1 loaf", "2 dozen", "3 batches" (standalone yield descriptions)
         (#"(?i)^(\d+(?:\s*[-–to]+\s*\d+)?)\s+(loaf|loaves|dozen|batch|batches|cups?|pounds?|lbs?)\b"#, "{number} {unit}")

@@ -6,13 +6,13 @@
 //
 
 import SwiftUI
-import Combine
 
 /// View model for import preview sheet
 @MainActor
-class ImportPreviewViewModel: ObservableObject {
-    @Published var state: LoadingState = .loading
-    @Published var content: ImportedContent?
+@Observable
+final class ImportPreviewViewModel {
+    var state: LoadingState = .loading
+    var content: ImportedContent?
 
     enum LoadingState {
         case loading
@@ -28,19 +28,18 @@ class ImportPreviewViewModel: ObservableObject {
         self.dependencies = dependencies
     }
 
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     func loadContent() async {
         state = .loading
 
         do {
             let importedContent = try await dependencies.externalShareService.importFromShareURL(url)
-            await MainActor.run {
-                self.content = importedContent
-                self.state = .loaded
-            }
+            self.content = importedContent
+            self.state = .loaded
         } catch {
-            await MainActor.run {
-                self.state = .error(error.localizedDescription)
-            }
+            self.state = .error(error.localizedDescription)
         }
     }
 
@@ -63,14 +62,14 @@ class ImportPreviewViewModel: ObservableObject {
 
 /// Sheet view for previewing and importing shared content
 struct ImportPreviewSheet: View {
-    @StateObject private var viewModel: ImportPreviewViewModel
+    @State private var viewModel: ImportPreviewViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var isImporting = false
     @State private var showSuccess = false
 
     init(url: URL, dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: ImportPreviewViewModel(url: url, dependencies: dependencies))
+        _viewModel = State(initialValue: ImportPreviewViewModel(url: url, dependencies: dependencies))
     }
 
     var body: some View {

@@ -357,7 +357,8 @@ final class RecipeScalerTests: XCTestCase {
 
         // Then
         XCTAssertEqual(scaled.recipe.tags.count, 2)
-        XCTAssertEqual(scaled.recipe.tags[0].name, "dessert")
+        // Note: Tag initializer normalizes names - "dessert" becomes "Dessert"
+        XCTAssertEqual(scaled.recipe.tags[0].name, "Dessert")
     }
 
     func testScale_UpdatesUpdatedAt() {

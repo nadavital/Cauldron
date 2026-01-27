@@ -7,32 +7,37 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 @MainActor
-class FriendsTabViewModel: ObservableObject {
+@Observable
+final class FriendsTabViewModel {
     static let shared = FriendsTabViewModel()
 
-    @Published var sharedRecipes: [SharedRecipe] = []
-    @Published var isLoading = false
-    @Published var showSuccessAlert = false
-    @Published var showErrorAlert = false
-    @Published var alertMessage = ""
+    var sharedRecipes: [SharedRecipe] = []
+    var isLoading = false
+    var showSuccessAlert = false
+    var showErrorAlert = false
+    var alertMessage = ""
 
     // Organized sections for better UX
-    @Published var recentlyAdded: [SharedRecipe] = []
-    @Published var tagSections: [(tag: String, recipes: [SharedRecipe])] = []
+    var recentlyAdded: [SharedRecipe] = []
+    var tagSections: [(tag: String, recipes: [SharedRecipe])] = []
 
     // Tier information for shared recipe creators
-    @Published var sharerTiers: [UUID: UserTier] = [:]
+    var sharerTiers: [UUID: UserTier] = [:]
 
+    @ObservationIgnored
     private(set) var dependencies: DependencyContainer?
+    @ObservationIgnored
     private var hasLoadedOnce = false
 
     private init() {
         // Private init for singleton
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     func configure(dependencies: DependencyContainer) {
         self.dependencies = dependencies
@@ -204,7 +209,7 @@ class FriendsTabViewModel: ObservableObject {
                 guard sharerTiers[sharerId] == nil else { continue }
 
                 // Fetch public recipe count for tier calculation
-                let sharerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                let sharerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
                     ownerIds: [sharerId],
                     visibility: .publicRecipe
                 )

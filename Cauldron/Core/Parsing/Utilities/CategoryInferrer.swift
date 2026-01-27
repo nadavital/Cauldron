@@ -179,6 +179,9 @@ struct CategoryInferrer {
 
     /// Infer dietary categories from ingredients
     private static func inferDietaryFromIngredients(_ ingredients: [Ingredient]) -> [RecipeCategory] {
+        // Can't infer dietary info without ingredients
+        guard !ingredients.isEmpty else { return [] }
+
         var categories: [RecipeCategory] = []
 
         let ingredientNames = ingredients.map { $0.name.lowercased() }

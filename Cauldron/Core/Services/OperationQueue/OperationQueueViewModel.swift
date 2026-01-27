@@ -7,23 +7,25 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 /// MainActor view model that exposes operation queue state to the UI
 @MainActor
-class OperationQueueViewModel: ObservableObject {
-    // MARK: - Published Properties
-
-    @Published private(set) var pendingOperations: [SyncOperation] = []
-    @Published private(set) var pendingRecipeCount: Int = 0
-    @Published private(set) var pendingCollectionCount: Int = 0
-    @Published private(set) var totalPendingCount: Int = 0
-    @Published private(set) var hasFailedOperations: Bool = false
-
+@Observable
+final class OperationQueueViewModel {
     // MARK: - Properties
 
+    private(set) var pendingOperations: [SyncOperation] = []
+    private(set) var pendingRecipeCount: Int = 0
+    private(set) var pendingCollectionCount: Int = 0
+    private(set) var totalPendingCount: Int = 0
+    private(set) var hasFailedOperations: Bool = false
+
+    // MARK: - Private Properties
+
+    @ObservationIgnored
     private let service: OperationQueueService
+    @ObservationIgnored
     private var eventTask: Task<Void, Never>?
 
     // MARK: - Initialization
@@ -39,6 +41,9 @@ class OperationQueueViewModel: ObservableObject {
             await loadState()
         }
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     // MARK: - Public API
 
@@ -178,10 +183,6 @@ class OperationQueueViewModel: ObservableObject {
             AppLogger.general.info("📭 Operation queue is now empty")
             await loadState()
         }
-    }
-
-    deinit {
-        eventTask?.cancel()
     }
 }
 

@@ -253,7 +253,7 @@ struct SharedCollectionDetailView: View {
 
     private func loadCollectionOwner() async {
         do {
-            collectionOwner = try await dependencies.cloudKitService.fetchUser(byUserId: collection.userId)
+            collectionOwner = try await dependencies.userCloudService.fetchUser(byUserId: collection.userId)
         } catch {
             AppLogger.general.warning("Failed to fetch collection owner: \(error.localizedDescription)")
         }

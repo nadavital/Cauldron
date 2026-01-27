@@ -9,31 +9,24 @@ import XCTest
 import SwiftData
 @testable import Cauldron
 
+/// Tests for ImporterViewModel
+/// Note: ViewModels are created as local variables to avoid @Observable + @MainActor
+/// deinitialization issues during test teardown (Swift issue #85221)
 @MainActor
 final class ImporterViewModelTests: XCTestCase {
 
-    var viewModel: ImporterViewModel!
-    var dependencies: DependencyContainer!
-
-    // MARK: - Setup
-
-    override func setUp() async throws {
-        try await super.setUp()
-
-        // Use the preview container (in-memory)
-        dependencies = DependencyContainer.preview()
-        viewModel = ImporterViewModel(dependencies: dependencies)
-    }
-
-    override func tearDown() async throws {
-        viewModel = nil
-        dependencies = nil
-        try await super.tearDown()
+    // Helper to create fresh ViewModel for each test
+    private func makeViewModel() -> (ImporterViewModel, DependencyContainer) {
+        let dependencies = DependencyContainer.preview()
+        let viewModel = ImporterViewModel(dependencies: dependencies)
+        return (viewModel, dependencies)
     }
 
     // MARK: - Initial State Tests
 
-    func testInitialState_URLMode() {
+    func testInitialState_URLMode() async {
+        let (viewModel, _) = makeViewModel()
+
         // Then
         XCTAssertEqual(viewModel.importType, .url)
         XCTAssertEqual(viewModel.urlString, "")
@@ -45,7 +38,9 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.sourceInfo)
     }
 
-    func testCanImport_URL_EmptyString_ReturnsFalse() {
+    func testCanImport_URL_EmptyString_ReturnsFalse() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given
         viewModel.importType = .url
         viewModel.urlString = ""
@@ -54,7 +49,9 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.canImport)
     }
 
-    func testCanImport_URL_WhitespaceOnly_ReturnsFalse() {
+    func testCanImport_URL_WhitespaceOnly_ReturnsFalse() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given
         viewModel.importType = .url
         viewModel.urlString = "   "
@@ -63,7 +60,9 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.canImport)
     }
 
-    func testCanImport_URL_ValidString_ReturnsTrue() {
+    func testCanImport_URL_ValidString_ReturnsTrue() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given
         viewModel.importType = .url
         viewModel.urlString = "https://youtube.com/watch?v=abc123"
@@ -72,7 +71,9 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
-    func testCanImport_Text_EmptyString_ReturnsFalse() {
+    func testCanImport_Text_EmptyString_ReturnsFalse() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given
         viewModel.importType = .text
         viewModel.textInput = ""
@@ -81,7 +82,9 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.canImport)
     }
 
-    func testCanImport_Text_ValidString_ReturnsTrue() {
+    func testCanImport_Text_ValidString_ReturnsTrue() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given
         viewModel.importType = .text
         viewModel.textInput = "Chocolate chip cookies recipe"
@@ -90,40 +93,44 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
-    // MARK: - URL Import Tests - Unsupported Platforms
+    // MARK: - URL Import Tests - Invalid URLs
 
-    func testImportRecipe_TikTok_ReturnsError() async {
-        // Given
+    func testImportRecipe_TikTok_InvalidURL_ReturnsError() async {
+        let (viewModel, _) = makeViewModel()
+
+        // Given - Invalid TikTok URL (fake video ID)
         viewModel.importType = .url
         viewModel.urlString = "https://tiktok.com/@user/video/123456"
 
         // When
         await viewModel.importRecipe()
 
-        // Then
+        // Then - Should fail (no recipe at fake URL)
         XCTAssertFalse(viewModel.isSuccess)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNotNil(viewModel.errorMessage)
-        XCTAssertTrue(viewModel.errorMessage?.contains("TikTok") ?? false)
     }
 
-    func testImportRecipe_Instagram_ReturnsError() async {
-        // Given
+    func testImportRecipe_Instagram_InvalidURL_ReturnsError() async {
+        let (viewModel, _) = makeViewModel()
+
+        // Given - Invalid Instagram URL (fake post ID)
         viewModel.importType = .url
         viewModel.urlString = "https://instagram.com/p/abc123"
 
         // When
         await viewModel.importRecipe()
 
-        // Then
+        // Then - Should fail (no recipe at fake URL)
         XCTAssertFalse(viewModel.isSuccess)
         XCTAssertNotNil(viewModel.errorMessage)
-        XCTAssertTrue(viewModel.errorMessage?.contains("Instagram") ?? false)
     }
 
     // MARK: - State Management Tests
 
     func testImportRecipe_ResetsStateBeforeImport() async {
+        let (viewModel, _) = makeViewModel()
+
         // Given - Set some existing state
         viewModel.importType = .url
         viewModel.urlString = "https://instagram.com/p/abc123"

@@ -26,23 +26,30 @@ enum RecipeSyncStatus {
 
 /// Service to coordinate recipe syncing between local storage and CloudKit
 actor RecipeSyncService {
-    private let cloudKitService: CloudKitServiceFacade
+    private let cloudKitCore: CloudKitCore
+    private let recipeCloudService: RecipeCloudService
     private let recipeRepository: RecipeRepository
     private let deletedRecipeRepository: DeletedRecipeRepository
-    private let imageManager: ImageManager
+    private let imageManager: RecipeImageManager
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeSyncService")
 
     private var lastSyncDate: Date?
     private let lastSyncKey = "lastRecipeSyncDate"
     private var autoSyncTask: Task<Void, Never>?
 
+    /// Tracks consecutive sync failures to detect persistent issues
+    private var consecutiveSyncFailures = 0
+    private let maxConsecutiveFailuresBeforeNotification = 3
+
     init(
-        cloudKitService: CloudKitServiceFacade,
+        cloudKitCore: CloudKitCore,
+        recipeCloudService: RecipeCloudService,
         recipeRepository: RecipeRepository,
         deletedRecipeRepository: DeletedRecipeRepository,
-        imageManager: ImageManager
+        imageManager: RecipeImageManager
     ) {
-        self.cloudKitService = cloudKitService
+        self.cloudKitCore = cloudKitCore
+        self.recipeCloudService = recipeCloudService
         self.recipeRepository = recipeRepository
         self.deletedRecipeRepository = deletedRecipeRepository
         self.imageManager = imageManager
@@ -77,9 +84,24 @@ actor RecipeSyncService {
                     if let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) {
                         do {
                             try await performFullSync(for: userId)
-                            // Automatic periodic sync completed
+                            // Reset failure counter on success
+                            consecutiveSyncFailures = 0
                         } catch {
-                            logger.warning("Automatic periodic sync failed: \(error.localizedDescription)")
+                            consecutiveSyncFailures += 1
+                            let failureCount = consecutiveSyncFailures
+                            let errorMessage = error.localizedDescription
+                            logger.warning("Automatic periodic sync failed (\(failureCount)/\(maxConsecutiveFailuresBeforeNotification)): \(errorMessage)")
+
+                            // Notify user after multiple consecutive failures
+                            if failureCount >= maxConsecutiveFailuresBeforeNotification {
+                                await MainActor.run {
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("SyncHealthDegraded"),
+                                        object: nil,
+                                        userInfo: ["error": errorMessage, "failureCount": failureCount]
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -92,14 +114,14 @@ actor RecipeSyncService {
     /// Perform full bidirectional sync
     func performFullSync(for userId: UUID) async throws {
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - skipping sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
         }
 
         // Fetch recipes from CloudKit
-        let cloudRecipes = try await cloudKitService.syncUserRecipes(ownerId: userId)
+        let cloudRecipes = try await recipeCloudService.syncUserRecipes(ownerId: userId)
 
         // Fetch local recipes
         let localRecipes = try await recipeRepository.fetchAll()
@@ -126,7 +148,7 @@ actor RecipeSyncService {
         }
 
         // Syncing recipe to CloudKit
-        try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
+        try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
         // Recipe synced successfully
     }
 
@@ -136,7 +158,7 @@ actor RecipeSyncService {
         // Force syncing all local recipes to CloudKit
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot force sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
@@ -157,7 +179,7 @@ actor RecipeSyncService {
 
             // Sync ALL recipes to iCloud (visibility controls social sharing, not cloud backup)
             do {
-                try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
+                try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
                 syncedCount += 1
                 // Synced recipe
             } catch {
@@ -172,7 +194,7 @@ actor RecipeSyncService {
     /// Delete recipe from CloudKit
     func deleteRecipeFromCloud(_ recipe: Recipe) async throws {
         // Deleting recipe from CloudKit
-        try await cloudKitService.deleteRecipe(recipe)
+        try await recipeCloudService.deleteRecipe(recipe)
     }
 
     // MARK: - Merge Logic
@@ -271,7 +293,7 @@ actor RecipeSyncService {
                             updatedAt: localRecipe.updatedAt,
                             relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
-                        try await cloudKitService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
+                        try await recipeCloudService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
 
                         // Update local to preserve cloud record name (don't update timestamp - this is just metadata sync)
                         try await recipeRepository.update(cloudSyncRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
@@ -333,7 +355,7 @@ actor RecipeSyncService {
                 if let ownerId = localRecipe.ownerId, ownerId == userId {
                     // Push ALL recipes to cloud (visibility controls social sharing, not cloud backup)
                     // Pushing local recipe to cloud
-                    try await cloudKitService.saveRecipe(localRecipe, ownerId: ownerId)
+                    try await recipeCloudService.saveRecipe(localRecipe, ownerId: ownerId)
                     pushedToCloud += 1
                 }
             }
@@ -370,6 +392,16 @@ actor RecipeSyncService {
         autoSyncTask = nil
     }
 
+    /// Returns the number of consecutive sync failures (0 = healthy)
+    func getSyncHealthStatus() -> Int {
+        return consecutiveSyncFailures
+    }
+
+    /// Reset the sync failure counter (call after user manually triggers successful sync)
+    func resetSyncHealth() {
+        consecutiveSyncFailures = 0
+    }
+
     // MARK: - Image Sync Helpers
 
     /// Download recipe image from CloudKit if needed
@@ -401,14 +433,11 @@ actor RecipeSyncService {
 
         // Determine which database to use based on recipe ownership
         let isOwnRecipe = recipe.ownerId == userId
+        let fromPublic = !isOwnRecipe
 
         // Download image from CloudKit
         do {
-            let database = isOwnRecipe ?
-                try await cloudKitService.getPrivateDatabase() :
-                try await cloudKitService.getPublicDatabase()
-
-            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, database: database) {
+            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, fromPublic: fromPublic) {
 
                 // IMPORTANT: Update recipe's imageURL to point to the local file
                 // Build the proper local URL (not the CloudKit temporary path)

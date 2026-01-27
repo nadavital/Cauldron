@@ -13,7 +13,8 @@ import SwiftData
 final class CollectionRepositoryTests: XCTestCase {
 
     var repository: CollectionRepository!
-    var cloudKitService: CloudKitServiceFacade!
+    var cloudKitCore: CloudKitCore!
+    var collectionCloudService: CollectionCloudService!
     var modelContainer: ModelContainer!
     var testUserId: UUID!
 
@@ -24,18 +25,19 @@ final class CollectionRepositoryTests: XCTestCase {
 
         // Create in-memory model container for testing
         modelContainer = try TestModelContainer.create(with: [
-            CollectionModel.self,
-            CollectionReferenceModel.self
+            CollectionModel.self
         ])
 
-        // Create CloudKit service (will use real service)
+        // Create CloudKit services (will use real services)
         // Note: CloudKit operations will fail in tests, but that's okay for local operations
-        cloudKitService = CloudKitServiceFacade()
+        cloudKitCore = CloudKitCore()
+        collectionCloudService = CollectionCloudService(core: cloudKitCore)
 
         // Initialize repository
         repository = CollectionRepository(
             modelContainer: modelContainer,
-            cloudKitService: cloudKitService,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
             operationQueueService: OperationQueueService()
         )
 
@@ -45,7 +47,8 @@ final class CollectionRepositoryTests: XCTestCase {
 
     override func tearDown() async throws {
         repository = nil
-        cloudKitService = nil
+        cloudKitCore = nil
+        collectionCloudService = nil
         modelContainer = nil
         testUserId = nil
         try await super.tearDown()

@@ -6,18 +6,17 @@
 //
 
 import SwiftUI
-import Combine
 
 struct ExploreTagView: View {
     let tag: Tag
     let dependencies: DependencyContainer
 
-    @StateObject private var viewModel: ExploreTagViewModel
+    @State private var viewModel: ExploreTagViewModel
 
     init(tag: Tag, dependencies: DependencyContainer) {
         self.tag = tag
         self.dependencies = dependencies
-        _viewModel = StateObject(wrappedValue: ExploreTagViewModel(tag: tag, dependencies: dependencies))
+        _viewModel = State(initialValue: ExploreTagViewModel(tag: tag, dependencies: dependencies))
     }
 
     // Resolve category for styling
@@ -348,14 +347,15 @@ struct ExploreTagRecipeCard: View {
 // MARK: - ViewModel
 
 @MainActor
-class ExploreTagViewModel: ObservableObject {
+@Observable
+final class ExploreTagViewModel {
     let tag: Tag
     let dependencies: DependencyContainer
 
-    @Published var allRecipes: [Recipe] = []
-    @Published var friendRecipes: [SharedRecipe] = []
-    @Published var publicRecipes: [SharedRecipe] = []
-    @Published var isLoading = false
+    var allRecipes: [Recipe] = []
+    var friendRecipes: [SharedRecipe] = []
+    var publicRecipes: [SharedRecipe] = []
+    var isLoading = false
 
     private var currentUserId: UUID? {
         CurrentUserSession.shared.userId
@@ -365,6 +365,9 @@ class ExploreTagViewModel: ObservableObject {
         self.tag = tag
         self.dependencies = dependencies
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     func loadRecipes() async {
         isLoading = true
@@ -376,7 +379,7 @@ class ExploreTagViewModel: ObservableObject {
             // Parallelize independent fetches for better performance
             async let localRecipesTask = dependencies.recipeRepository.fetchAll()
             async let sharedRecipesTask = dependencies.sharingService.getSharedRecipes()
-            async let publicRecipesTask = dependencies.cloudKitService.querySharedRecipes(
+            async let publicRecipesTask = dependencies.recipeCloudService.querySharedRecipes(
                 ownerIds: nil,
                 visibility: .publicRecipe
             )
@@ -416,7 +419,7 @@ class ExploreTagViewModel: ObservableObject {
             let ownerIds = Set(publicRecipesList.map { $0.ownerId }.compactMap { $0 })
 
             // Fetch owners in batch
-            let owners = try await dependencies.cloudKitService.fetchUsers(byUserIds: Array(ownerIds))
+            let owners = try await dependencies.userCloudService.fetchUsers(byUserIds: Array(ownerIds))
             let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
 
             // Get friend IDs for filtering

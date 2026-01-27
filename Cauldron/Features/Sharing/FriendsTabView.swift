@@ -21,8 +21,8 @@ enum FriendsTabSection: String, CaseIterable {
 
 /// Friends tab - showing shared recipes and connections
 struct FriendsTabView: View {
-    @ObservedObject private var viewModel = FriendsTabViewModel.shared
-    @StateObject private var userSession = CurrentUserSession.shared
+    @Bindable private var viewModel = FriendsTabViewModel.shared
+    @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var selectedSection: FriendsTabSection = .recipes
     @State private var showingProfileSheet = false
@@ -415,12 +415,12 @@ struct SectionHeader: View {
 // MARK: - Inline Connections View
 
 struct ConnectionsInlineView: View {
-    @StateObject private var viewModel: ConnectionsViewModel
+    @State private var viewModel: ConnectionsViewModel
     let dependencies: DependencyContainer
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
-        _viewModel = StateObject(wrappedValue: ConnectionsViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: ConnectionsViewModel(dependencies: dependencies))
     }
 
     var body: some View {

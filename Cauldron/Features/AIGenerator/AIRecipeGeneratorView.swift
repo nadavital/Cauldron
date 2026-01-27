@@ -11,13 +11,13 @@ import FoundationModels
 /// View for generating recipes using Apple Intelligence
 struct AIRecipeGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel: AIRecipeGeneratorViewModel
+    @State private var viewModel: AIRecipeGeneratorViewModel
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
     @State private var isInputExpanded: Bool = true
 
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: AIRecipeGeneratorViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: AIRecipeGeneratorViewModel(dependencies: dependencies))
     }
 
     var body: some View {

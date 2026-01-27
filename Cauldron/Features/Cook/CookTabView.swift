@@ -10,7 +10,7 @@ import os
 
 /// Main Cook tab - central hub for recipe discovery and cooking
 struct CookTabView: View {
-    @StateObject private var viewModel: CookTabViewModel
+    @State private var viewModel: CookTabViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var showingImporter = false
@@ -26,7 +26,7 @@ struct CookTabView: View {
     @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
-        _viewModel = StateObject(wrappedValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
+        _viewModel = State(initialValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
     }
 
     var body: some View {

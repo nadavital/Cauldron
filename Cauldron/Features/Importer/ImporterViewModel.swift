@@ -11,22 +11,25 @@ import SwiftUI
 import os
 
 @MainActor
-class ImporterViewModel: ObservableObject {
-    @Published var importType: ImportType = .url
-    @Published var urlString = ""
-    @Published var textInput = ""
-    @Published var isLoading = false
-    @Published var isSuccess = false
-    @Published var errorMessage: String?
-    @Published var importedRecipe: Recipe?
-    @Published var sourceInfo: String?
-    
+@Observable final class ImporterViewModel {
+    var importType: ImportType = .url
+    var urlString = ""
+    var textInput = ""
+    var isLoading = false
+    var isSuccess = false
+    var errorMessage: String?
+    var importedRecipe: Recipe?
+    var sourceInfo: String?
+
     let dependencies: DependencyContainer
     
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
-    
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     var canImport: Bool {
         switch importType {
         case .url:

@@ -8,28 +8,25 @@
 import XCTest
 @testable import Cauldron
 
+/// Tests for ConnectionManager
+/// Note: Dependencies are created as local variables to avoid @MainActor
+/// deinitialization issues during test teardown (Swift issue #85221)
 @MainActor
 final class ConnectionManagerTests: XCTestCase {
-    var dependencies: DependencyContainer!
-    var connectionManager: ConnectionManager!
-    var testUserId: UUID!
 
-    override func setUp() async throws {
-        try await super.setUp()
-        dependencies = DependencyContainer.preview()
-        connectionManager = ConnectionManager(dependencies: dependencies)
-        testUserId = UUID()
-    }
-
-    override func tearDown() async throws {
-        connectionManager = nil
-        dependencies = nil
-        try await super.tearDown()
+    // Helper to create fresh dependencies and connection manager
+    private func makeConnectionManager() -> (ConnectionManager, DependencyContainer, UUID) {
+        let dependencies = DependencyContainer.preview()
+        let connectionManager = ConnectionManager(dependencies: dependencies)
+        let testUserId = UUID()
+        return (connectionManager, dependencies, testUserId)
     }
 
     // MARK: - Cache Tests
 
     func testCacheValidityDuration() async throws {
+        let (connectionManager, _, testUserId) = makeConnectionManager()
+
         // Given: Empty connections
         XCTAssertTrue(connectionManager.connections.isEmpty)
 
@@ -47,9 +44,10 @@ final class ConnectionManagerTests: XCTestCase {
     }
 
     func testForceRefreshBypassesCache() async throws {
+        let (connectionManager, _, testUserId) = makeConnectionManager()
+
         // Given: Connections loaded once
         await connectionManager.loadConnections(forUserId: testUserId)
-        let initialCount = connectionManager.connections.count
 
         // When: Force refresh immediately
         await connectionManager.loadConnections(forUserId: testUserId, forceRefresh: true)
@@ -62,6 +60,8 @@ final class ConnectionManagerTests: XCTestCase {
     // MARK: - Connection State Tests
 
     func testAcceptConnectionCreatesOptimisticUpdate() async throws {
+        let (connectionManager, dependencies, _) = makeConnectionManager()
+
         // Given: A pending connection request
         let connectionId = UUID()
         let fromUserId = UUID()
@@ -89,6 +89,8 @@ final class ConnectionManagerTests: XCTestCase {
     }
 
     func testSendConnectionRequestCreatesOptimisticState() async throws {
+        let (connectionManager, _, _) = makeConnectionManager()
+
         // Given: A new user to connect with
         let targetUserId = UUID()
         let targetUser = User(
@@ -112,6 +114,8 @@ final class ConnectionManagerTests: XCTestCase {
     // MARK: - Sync State Tests
 
     func testSyncStateTransitions() async throws {
+        let testUserId = UUID()
+
         // This test verifies the sync state lifecycle:
         // pending -> syncing -> synced (on success)
         // pending -> syncing -> pendingSync (on failure with retry)
@@ -145,6 +149,8 @@ final class ConnectionManagerTests: XCTestCase {
     // MARK: - Badge Count Tests
 
     func testBadgeCountReflectsPendingRequests() async throws {
+        let (connectionManager, _, testUserId) = makeConnectionManager()
+
         // Given: Load connections
         await connectionManager.loadConnections(forUserId: testUserId)
 
@@ -154,7 +160,7 @@ final class ConnectionManagerTests: XCTestCase {
 
     // MARK: - Error Handling Tests
 
-    func testConnectionErrorDescriptions() {
+    func testConnectionErrorDescriptions() async {
         // Test all error cases have descriptions
         let errors: [ConnectionError] = [
             .notFound,
@@ -169,7 +175,7 @@ final class ConnectionManagerTests: XCTestCase {
         }
     }
 
-    func testSyncStateEquality() {
+    func testSyncStateEquality() async {
         // Test sync state equality
         let synced1 = ConnectionSyncState.synced
         let synced2 = ConnectionSyncState.synced
@@ -187,6 +193,8 @@ final class ConnectionManagerTests: XCTestCase {
     // MARK: - Integration Tests
 
     func testLoadConnectionsFromEmptyState() async throws {
+        let (connectionManager, _, testUserId) = makeConnectionManager()
+
         // Given: Fresh connection manager
         XCTAssertTrue(connectionManager.connections.isEmpty)
 
@@ -199,12 +207,14 @@ final class ConnectionManagerTests: XCTestCase {
     }
 
     func testRejectConnectionRequest() async throws {
+        let (connectionManager, dependencies, _) = makeConnectionManager()
+
         // Given: A pending connection
         let connectionId = UUID()
         let connection = Connection(
             id: connectionId,
             fromUserId: UUID(),
-            toUserId: testUserId,
+            toUserId: connectionManager.currentUserId,
             status: .pending,
             createdAt: Date(),
             updatedAt: Date()
@@ -221,6 +231,8 @@ final class ConnectionManagerTests: XCTestCase {
     }
 
     func testMultipleConcurrentAccepts() async throws {
+        let (connectionManager, dependencies, testUserId) = makeConnectionManager()
+
         // Given: Multiple pending connections
         let connection1 = Connection(
             id: UUID(),
@@ -246,10 +258,10 @@ final class ConnectionManagerTests: XCTestCase {
         // When: Accept both concurrently
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                try? await self.connectionManager.acceptConnection(connection1)
+                try? await connectionManager.acceptConnection(connection1)
             }
             group.addTask {
-                try? await self.connectionManager.acceptConnection(connection2)
+                try? await connectionManager.acceptConnection(connection2)
             }
         }
 

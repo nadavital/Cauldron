@@ -7,30 +7,29 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 @MainActor
-class CookTabViewModel: ObservableObject {
-    @Published var allRecipes: [Recipe] = []
-    @Published var recentlyCookedRecipes: [Recipe] = []
-    @Published var favoriteRecipes: [Recipe] = []
-    @Published var timeOfDayRecipes: [Recipe] = []
-    @Published var quickRecipes: [Recipe] = []
-    @Published var onRotationRecipes: [Recipe] = []
-    @Published var forgottenFavorites: [Recipe] = []
-    @Published var tagRows: [(tag: String, recipes: [Recipe])] = []
-    @Published var collections: [Collection] = []
-    @Published var friendsRecipes: [SharedRecipe] = []
-    @Published var popularRecipes: [Recipe] = []
-    @Published var popularRecipeTiers: [UUID: UserTier] = [:]  // Cached owner tiers for sorting
-    @Published var popularRecipeOwners: [UUID: User] = [:]  // Cached owner User objects for display
-    @Published var friendsRecipeTiers: [UUID: UserTier] = [:]  // Cached tiers for friends' recipes
-    @Published var isLoading = false
+@Observable final class CookTabViewModel {
+    var allRecipes: [Recipe] = []
+    var recentlyCookedRecipes: [Recipe] = []
+    var favoriteRecipes: [Recipe] = []
+    var timeOfDayRecipes: [Recipe] = []
+    var quickRecipes: [Recipe] = []
+    var onRotationRecipes: [Recipe] = []
+    var forgottenFavorites: [Recipe] = []
+    var tagRows: [(tag: String, recipes: [Recipe])] = []
+    var collections: [Collection] = []
+    var friendsRecipes: [SharedRecipe] = []
+    var popularRecipes: [Recipe] = []
+    var popularRecipeTiers: [UUID: UserTier] = [:]  // Cached owner tiers for sorting
+    var popularRecipeOwners: [UUID: User] = [:]  // Cached owner User objects for display
+    var friendsRecipeTiers: [UUID: UserTier] = [:]  // Cached tiers for friends' recipes
+    var isLoading = false
 
     let dependencies: DependencyContainer
     private var hasLoadedInitially = false
-    private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
@@ -57,7 +56,7 @@ class CookTabViewModel: ObservableObject {
 
                 // Load favorites (simple filter, very fast)
                 self.favoriteRecipes = preloadedData.allRecipes.filter { $0.isFavorite }
-                
+
                 // Load smart recommendations
                 self.updateSmartRecommendations()
 
@@ -73,6 +72,12 @@ class CookTabViewModel: ObservableObject {
                 await loadDataSilently()
             }
         }
+    }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {
+        // Note: Cannot access notificationObserver here as it's isolated
+        // NotificationCenter observer cleanup happens automatically
     }
 
     /// Load data without showing loading state changes (for initial load)
@@ -106,14 +111,17 @@ class CookTabViewModel: ObservableObject {
 
     /// Setup observer for collection metadata changes to update UI immediately
     private func setupCollectionNotificationObserver() {
-        NotificationCenter.default.publisher(for: .collectionMetadataChanged)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let self = self,
-                      let collectionId = notification.userInfo?["collectionId"] as? UUID,
-                      let updatedCollection = notification.userInfo?["collection"] as? Collection else {
-                    return
-                }
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .collectionMetadataChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let collectionId = notification.userInfo?["collectionId"] as? UUID,
+                  let updatedCollection = notification.userInfo?["collection"] as? Collection else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 // Update the collection in our local array for immediate UI refresh
                 if let index = self.collections.firstIndex(where: { $0.id == collectionId }) {
                     self.collections[index] = updatedCollection
@@ -121,7 +129,7 @@ class CookTabViewModel: ObservableObject {
                     self.collections.sort { $0.updatedAt > $1.updatedAt }
                 }
             }
-            .store(in: &cancellables)
+        }
     }
 
     /// Fetch all recipes (owned recipes only - references have been deprecated)
@@ -195,7 +203,7 @@ class CookTabViewModel: ObservableObject {
 
         // Load popular public recipes
         do {
-            let popular = try await dependencies.cloudKitService.fetchPopularPublicRecipes(limit: 20)
+            let popular = try await dependencies.recipeCloudService.fetchPopularPublicRecipes(limit: 20)
 
             // Get current user ID to exclude own recipes
             let currentUserId = CurrentUserSession.shared.userId
@@ -244,14 +252,14 @@ class CookTabViewModel: ObservableObject {
 
                 // Fetch user profile
                 if popularRecipeOwners[ownerId] == nil {
-                    if let user = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId) {
+                    if let user = try await dependencies.userCloudService.fetchUser(byUserId: ownerId) {
                         popularRecipeOwners[ownerId] = user
                     }
                 }
 
                 // Fetch recipe count for tier calculation
                 if popularRecipeTiers[ownerId] == nil {
-                    let ownerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                    let ownerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
                         ownerIds: [ownerId],
                         visibility: .publicRecipe
                     )
@@ -279,7 +287,7 @@ class CookTabViewModel: ObservableObject {
                 guard friendsRecipeTiers[sharerId] == nil else { continue }
 
                 // Fetch public recipe count for tier calculation
-                let sharerRecipes = try await dependencies.cloudKitService.querySharedRecipes(
+                let sharerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
                     ownerIds: [sharerId],
                     visibility: .publicRecipe
                 )

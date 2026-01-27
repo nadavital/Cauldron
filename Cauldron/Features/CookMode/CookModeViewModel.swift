@@ -7,13 +7,13 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
 @MainActor
-class CookModeViewModel: ObservableObject {
-    @Published var currentStepIndex = 0
-    @Published var progress: Double = 0.0
-    
+@Observable
+final class CookModeViewModel {
+    var currentStepIndex = 0
+    var progress: Double = 0.0
+
     let recipe: Recipe
     let dependencies: DependencyContainer
     
@@ -34,7 +34,10 @@ class CookModeViewModel: ObservableObject {
         self.dependencies = dependencies
         updateProgress()
     }
-    
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     func startSession() async {
         await dependencies.cookSessionManager.startSession(recipe: recipe)
         // Record in cooking history

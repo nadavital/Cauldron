@@ -7,30 +7,28 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 /// View model for user profile view - handles connection management and user info
 @MainActor
-class UserProfileViewModel: ObservableObject {
-    @Published var connectionState: ConnectionState = .loading
-    @Published var showError = false
-    @Published var errorMessage = ""
-    @Published var isProcessing = false
-    @Published var userRecipes: [SharedRecipe] = []
-    @Published var isLoadingRecipes = false
-    @Published var userCollections: [Collection] = []
-    @Published var isLoadingCollections = false
-    @Published var connections: [ManagedConnection] = []
-    @Published var isLoadingConnections = false
-    @Published var usersMap: [UUID: User] = [:]
-    @Published var searchText = ""
-    @Published var userTier: UserTier = .apprentice
-    @Published var userRecipeCount: Int = 0
+@Observable final class UserProfileViewModel {
+    var connectionState: ConnectionState = .loading
+    var showError = false
+    var errorMessage = ""
+    var isProcessing = false
+    var userRecipes: [SharedRecipe] = []
+    var isLoadingRecipes = false
+    var userCollections: [Collection] = []
+    var isLoadingCollections = false
+    var connections: [ManagedConnection] = []
+    var isLoadingConnections = false
+    var usersMap: [UUID: User] = [:]
+    var searchText = ""
+    var userTier: UserTier = .apprentice
+    var userRecipeCount: Int = 0
 
     let user: User
     let dependencies: DependencyContainer
-    private var cancellables = Set<AnyCancellable>()
 
     enum ConnectionState: Equatable {
         case notConnected
@@ -51,21 +49,10 @@ class UserProfileViewModel: ObservableObject {
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
         self.dependencies = dependencies
-
-        // Subscribe to connection manager updates for real-time state changes
-        dependencies.connectionManager.$connections
-            .sink { [weak self] connections in
-                guard let self = self else { return }
-                Task { @MainActor in
-                    await self.updateConnectionState()
-                    // Update connections list if viewing current user
-                    if self.isCurrentUser {
-                        self.connections = connections.values.filter { $0.connection.isAccepted }
-                    }
-                }
-            }
-            .store(in: &cancellables)
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     func loadConnectionStatus() async {
         await updateConnectionState()
@@ -85,7 +72,7 @@ class UserProfileViewModel: ObservableObject {
         for managedConnection in connections {
             if let otherUserId = managedConnection.connection.otherUserId(currentUserId: currentUserId) {
                 do {
-                    let user = try await dependencies.cloudKitService.fetchUser(byUserId: otherUserId)
+                    let user = try await dependencies.userCloudService.fetchUser(byUserId: otherUserId)
                     usersMap[otherUserId] = user
                 } catch {
                     AppLogger.general.error("Failed to load user \(otherUserId): \(error.localizedDescription)")
@@ -276,7 +263,7 @@ class UserProfileViewModel: ObservableObject {
             AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
         } else {
             // If viewing someone else's profile, fetch their public recipes from CloudKit
-            recipes = try await dependencies.cloudKitService.querySharedRecipes(
+            recipes = try await dependencies.recipeCloudService.querySharedRecipes(
                 ownerIds: [user.id],
                 visibility: .publicRecipe
             )
@@ -371,7 +358,7 @@ class UserProfileViewModel: ObservableObject {
         if CurrentUserSession.shared.isCloudSyncAvailable {
             do {
                 // Fetch public collections
-                let publicCollections = try await dependencies.cloudKitService.queryCollections(
+                let publicCollections = try await dependencies.collectionCloudService.queryCollections(
                     ownerIds: [user.id],
                     visibility: .publicRecipe
                 )

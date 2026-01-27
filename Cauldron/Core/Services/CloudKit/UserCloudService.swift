@@ -316,7 +316,7 @@ actor UserCloudService {
             }
         }
 
-        logger.warning("No user found with userId: \(userId)")
+        logger.debug("No user found with userId: \(userId)")
         return nil
     }
 

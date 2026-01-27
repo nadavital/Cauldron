@@ -18,7 +18,7 @@ extension RecipeRepository {
     /// Sync a recipe to CloudKit with proper error tracking
     /// Note: ALL recipes are synced to iCloud (including private ones) for backup/sync across devices.
     /// Visibility only controls who else can see the recipe, not whether it syncs.
-    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
+    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
         // Only sync if we have an owner ID and CloudKit is available
         guard let ownerId = recipe.ownerId else {
             logger.info("Skipping CloudKit sync - no owner ID for recipe: \(recipe.title)")
@@ -26,7 +26,7 @@ extension RecipeRepository {
         }
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - recipe will sync later: \(recipe.title)")
             pendingSyncRecipes.insert(recipe.id)
@@ -37,7 +37,7 @@ extension RecipeRepository {
         // Visibility only controls social sharing, not cloud backup
         do {
             logger.info("Syncing recipe to CloudKit: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
-            try await cloudKitService.saveRecipe(recipe, ownerId: ownerId)
+            try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
             logger.info("✅ Successfully synced recipe to CloudKit: \(recipe.title)")
 
             // Remove from pending if it was there
@@ -51,9 +51,9 @@ extension RecipeRepository {
     }
     
     /// Delete a recipe from CloudKit with proper error handling
-    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
+    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
         // Only try to delete if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete recipe from cloud: \(recipe.title)")
             return
@@ -61,7 +61,7 @@ extension RecipeRepository {
 
         do {
             logger.info("Deleting recipe from CloudKit: \(recipe.title)")
-            try await cloudKitService.deleteRecipe(recipe)
+            try await recipeCloudService.deleteRecipe(recipe)
             logger.info("✅ Successfully deleted recipe from CloudKit: \(recipe.title)")
         } catch {
             logger.error("❌ CloudKit deletion failed for recipe '\(recipe.title)': \(error.localizedDescription)")
@@ -72,7 +72,7 @@ extension RecipeRepository {
     // MARK: - Public Database Sync
     
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
-    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
+    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
         // Don't sync preview recipes to PUBLIC database - they're local-only copies
         guard !recipe.isPreview else {
             logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
@@ -82,7 +82,7 @@ extension RecipeRepository {
         // Only sync if visibility is public
         guard recipe.visibility != .privateRecipe else {
             // If recipe was made private, delete from PUBLIC database (including image)
-            await deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
+            await deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
             // Delete image from public database
             if recipe.imageURL != nil {
                 await deleteRecipeImageFromPublic(recipe)
@@ -91,7 +91,7 @@ extension RecipeRepository {
         }
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - recipe PUBLIC sync will happen later: \(recipe.title)")
             return
@@ -99,7 +99,7 @@ extension RecipeRepository {
 
         do {
             logger.info("Syncing recipe to PUBLIC database for sharing: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
-            try await cloudKitService.copyRecipeToPublic(recipe)
+            try await recipeCloudService.copyRecipeToPublic(recipe)
             logger.info("✅ Successfully synced recipe to PUBLIC database")
 
             // Update share metadata for persistent links
@@ -122,9 +122,9 @@ extension RecipeRepository {
     }
     
     /// Delete recipe from PUBLIC database
-    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitService: CloudKitServiceFacade) async {
+    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
         // Only try to delete if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete recipe from PUBLIC database: \(recipe.title)")
             return
@@ -137,7 +137,7 @@ extension RecipeRepository {
 
         do {
             logger.info("Deleting recipe from PUBLIC database: \(recipe.title)")
-            try await cloudKitService.deletePublicRecipe(recipeId: recipe.id, ownerId: ownerId)
+            try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
             logger.info("✅ Successfully deleted recipe from PUBLIC database")
         } catch {
             logger.error("❌ PUBLIC database deletion failed for recipe '\(recipe.title)': \(error.localizedDescription)")
@@ -171,7 +171,7 @@ extension RecipeRepository {
                 guard recipe.ownerId != nil else { continue }
                 
                 // Trigger sync to public DB
-                await syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+                await syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
                 successCount += 1
                 
                 // Small delay to avoid rate limiting
@@ -211,7 +211,7 @@ extension RecipeRepository {
         logger.info("Retrying sync for \(self.pendingSyncRecipes.count) pending recipes")
 
         // Check if CloudKit is available first
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.info("CloudKit still not available - will retry later")
             return
@@ -232,7 +232,7 @@ extension RecipeRepository {
                 }
 
                 // Try to sync again
-                await self.syncRecipeToCloudKit(recipe, cloudKitService: self.cloudKitService)
+                await self.syncRecipeToCloudKit(recipe, cloudKitCore: self.cloudKitCore, recipeCloudService: self.recipeCloudService)
             } catch {
                 logger.error("Error fetching recipe for retry sync: \(error.localizedDescription)")
             }

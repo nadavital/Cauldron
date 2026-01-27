@@ -9,12 +9,12 @@ import SwiftUI
 
 struct CollectionsListView: View {
     @Environment(\.dependencies) private var dependencies
-    @StateObject private var viewModel: CollectionsListViewModel
+    @State private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
     @State private var recipeImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: CollectionsListViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: CollectionsListViewModel(dependencies: dependencies))
     }
 
     var body: some View {

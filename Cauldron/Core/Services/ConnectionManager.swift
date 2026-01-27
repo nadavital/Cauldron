@@ -116,8 +116,11 @@ class ConnectionManager: ObservableObject {
     private var lastSyncTime: Date?
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
 
+    // Fallback UUID for when CurrentUserSession has no user (e.g., in tests)
+    private lazy var fallbackUserId: UUID = UUID()
+
     var currentUserId: UUID {
-        CurrentUserSession.shared.userId ?? UUID()
+        CurrentUserSession.shared.userId ?? fallbackUserId
     }
 
     init(dependencies: DependencyContainer) {
@@ -209,7 +212,7 @@ class ConnectionManager: ObservableObject {
 
         // Delete from CloudKit (rejection = deletion for cleaner UX)
         do {
-            try await dependencies.cloudKitService.rejectConnectionRequest(connection)
+            try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
             // Connection rejected successfully (don't log routine operations)
 
             // Update badge count (one less pending request)
@@ -332,7 +335,7 @@ class ConnectionManager: ObservableObject {
 
         // Delete from CloudKit
         do {
-            try await dependencies.cloudKitService.deleteConnection(connection)
+            try await dependencies.connectionCloudService.deleteConnection(connection)
             // Connection deleted successfully
         } catch {
             logger.error("❌ Failed to delete connection from CloudKit: \(error.localizedDescription)")
@@ -371,7 +374,7 @@ class ConnectionManager: ObservableObject {
     /// Sync connections from CloudKit
     private func syncFromCloudKit(userId: UUID) async {
         do {
-            let cloudConnections = try await dependencies.cloudKitService.fetchConnections(forUserId: userId)
+            let cloudConnections = try await dependencies.connectionCloudService.fetchConnections(forUserId: userId)
 
             // Track cloud connection IDs
             let cloudConnectionIds = Set(cloudConnections.map { $0.id })
@@ -456,10 +459,10 @@ class ConnectionManager: ObservableObject {
             // Perform CloudKit operation
             switch operation.type {
             case .accept(let connection):
-                try await dependencies.cloudKitService.acceptConnectionRequest(connection)
+                try await dependencies.connectionCloudService.acceptConnectionRequest(connection)
 
             case .create(let connection):
-                try await dependencies.cloudKitService.saveConnection(connection)
+                try await dependencies.connectionCloudService.saveConnection(connection)
             }
 
             // Success! Remove from queue and mark as synced

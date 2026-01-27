@@ -14,10 +14,11 @@ import UIKit
 /// Thread-safe repository for Recipe operations
 actor RecipeRepository {
     internal let modelContainer: ModelContainer
-    internal let cloudKitService: CloudKitServiceFacade
+    internal let cloudKitCore: CloudKitCore
+    internal let recipeCloudService: RecipeCloudService
     internal let deletedRecipeRepository: DeletedRecipeRepository
     internal let collectionRepository: CollectionRepository?
-    internal let imageManager: ImageManager
+    internal let imageManager: RecipeImageManager
     internal let imageSyncManager: ImageSyncManager
     internal let operationQueueService: OperationQueueService
     internal let externalShareService: ExternalShareService
@@ -33,16 +34,18 @@ actor RecipeRepository {
 
     init(
         modelContainer: ModelContainer,
-        cloudKitService: CloudKitServiceFacade,
+        cloudKitCore: CloudKitCore,
+        recipeCloudService: RecipeCloudService,
         deletedRecipeRepository: DeletedRecipeRepository,
         collectionRepository: CollectionRepository? = nil,
-        imageManager: ImageManager,
+        imageManager: RecipeImageManager,
         imageSyncManager: ImageSyncManager,
         operationQueueService: OperationQueueService,
         externalShareService: ExternalShareService
     ) {
         self.modelContainer = modelContainer
-        self.cloudKitService = cloudKitService
+        self.cloudKitCore = cloudKitCore
+        self.recipeCloudService = recipeCloudService
         self.deletedRecipeRepository = deletedRecipeRepository
         self.collectionRepository = collectionRepository
         self.imageManager = imageManager

@@ -50,15 +50,13 @@ final class ExternalShareService: Sendable {
     private let baseURL = "https://us-central1-cauldron-f900a.cloudfunctions.net"
 
     private let session: URLSession
-    private let imageManager: ImageManager
-    private let cloudKitService: CloudKitServiceFacade
+    private let imageManager: RecipeImageManager
 
-    init(imageManager: ImageManager, cloudKitService: CloudKitServiceFacade) {
+    init(imageManager: RecipeImageManager) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
         self.imageManager = imageManager
-        self.cloudKitService = cloudKitService
     }
 
     // MARK: - Share Link Generation
@@ -87,27 +85,25 @@ final class ExternalShareService: Sendable {
         
         // Construct permanent URL
         // Format: https://cauldron-f900a.web.app/u/{username}/{recipeId}
-        let permanentURLString = "https://cauldron-f900a.web.app/u/\(username)/\(recipe.id.uuidString)"
-        
+        // URL-encode username to handle special characters safely
+        let encodedUsername = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        let permanentURLString = "https://cauldron-f900a.web.app/u/\(encodedUsername)/\(recipe.id.uuidString)"
+
         // Create preview text
         let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
 
-        // Load image for iOS share sheet preview
-        // Note: usage of local file path or cache would be ideal here if available synchronously,
-        // but Since we are in an async function (or can be), we can keep it async or make this sync.
-        // For now, keeping the return type sync for the URL, but the image loading might need to be async or passed in.
-        // However, to keep this fast, we return the link object. The caller can load the image if needed for the UI,
-        // or we can keep this async just for the image loading if we want 'perfect' previews.
-        // Given the requirement for "instant", we should avoid network calls here.
-        
-        // Note: We need a way to get the local image without network.
-        // ImageManager provides async access.
-        // For the purpose of Generating the link string, we don't strictly need the UIImage *right now*
-        // but share sheets *do* look better with it.
-        // Let's keep this method async ONLY for local image loading, but NO network calls.
-        
+        // Safely construct URL, falling back to ID-based URL if username encoding fails
+        let url: URL
+        if let constructedURL = URL(string: permanentURLString) {
+            url = constructedURL
+        } else {
+            // Fallback to ID-based URL if username causes invalid URL
+            let fallbackURLString = "https://cauldron-f900a.web.app/recipe/\(recipe.id.uuidString)"
+            url = URL(string: fallbackURLString)!
+        }
+
         return ShareableLink(
-            url: URL(string: permanentURLString)!,
+            url: url,
             previewText: previewText,
             image: nil // Caller can attach image if they have it, or we can load it if we make this async
         )
@@ -160,12 +156,23 @@ final class ExternalShareService: Sendable {
 
     /// Generate a shareable link for a profile (Local only)
     func generateProfileLink(for user: User, recipeCount: Int) -> ShareableLink {
-        let permanentURLString = "https://cauldron-f900a.web.app/u/\(user.username)"
+        // URL-encode username to handle special characters safely
+        let encodedUsername = user.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? user.username
+        let permanentURLString = "https://cauldron-f900a.web.app/u/\(encodedUsername)"
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
-        
+
+        // Safely construct URL, falling back to ID-based URL if username encoding fails
+        let url: URL
+        if let constructedURL = URL(string: permanentURLString) {
+            url = constructedURL
+        } else {
+            let fallbackURLString = "https://cauldron-f900a.web.app/profile/\(user.id.uuidString)"
+            url = URL(string: fallbackURLString)!
+        }
+
         return ShareableLink(
-            url: URL(string: permanentURLString)!,
+            url: url,
             previewText: previewText,
             image: nil
         )
@@ -221,15 +228,24 @@ final class ExternalShareService: Sendable {
         // If the web app supports /c/{collectionId}, we can use that.
         // Assuming /collection/{id} or similar.
         
-        // Construct URL - using valid web app structure
-        // If the web app expects /collection/ID, use that.
+        // Construct URL - using valid web app structure (collection IDs are UUIDs, safe for URLs)
         let urlString = "https://cauldron-f900a.web.app/collection/\(collection.id.uuidString)"
-        
+
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my \(collection.name) collection on Cauldron! \(recipeText)"
-        
+
+        // UUID strings are always URL-safe, but guard against unexpected failures
+        guard let url = URL(string: urlString) else {
+            logger.error("Failed to construct collection URL - this should never happen with UUID")
+            return ShareableLink(
+                url: URL(string: "https://cauldron-f900a.web.app")!,
+                previewText: previewText,
+                image: nil
+            )
+        }
+
         return ShareableLink(
-            url: URL(string: urlString)!,
+            url: url,
             previewText: previewText,
             image: nil
         )

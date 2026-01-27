@@ -11,7 +11,7 @@ import os
 /// Manual recipe editor for creating/editing recipes
 struct RecipeEditorView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel: RecipeEditorViewModel
+    @State private var viewModel: RecipeEditorViewModel
     @State private var showingImageOptions = false
     @State private var showingImagePicker = false
     @State private var imagePickerSourceType: UIImagePickerController.SourceType = .camera
@@ -21,7 +21,7 @@ struct RecipeEditorView: View {
     let onSaveAndDismiss: (() -> Void)?
 
     init(dependencies: DependencyContainer, recipe: Recipe? = nil, onDelete: (() -> Void)? = nil, onSaveAndDismiss: (() -> Void)? = nil, isImporting: Bool = false) {
-        _viewModel = StateObject(wrappedValue: RecipeEditorViewModel(dependencies: dependencies, existingRecipe: recipe, isImporting: isImporting))
+        _viewModel = State(initialValue: RecipeEditorViewModel(dependencies: dependencies, existingRecipe: recipe, isImporting: isImporting))
         self.onDelete = onDelete
         self.onSaveAndDismiss = onSaveAndDismiss
     }

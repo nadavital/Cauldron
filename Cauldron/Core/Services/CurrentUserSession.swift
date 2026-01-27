@@ -50,7 +50,7 @@ class CurrentUserSession: ObservableObject {
                 if attempt > 1 {
                     logger.info("Retrying CloudKit user profile fetch (attempt \(attempt)/\(maxAttempts))")
                 }
-                let user = try await dependencies.cloudKitService.fetchCurrentUserProfile()
+                let user = try await dependencies.userCloudService.fetchCurrentUserProfile()
                 return user
             } catch {
                 lastError = error
@@ -82,10 +82,10 @@ class CurrentUserSession: ObservableObject {
 
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
-        ReferralManager.shared.configure(with: dependencies.cloudKitService)
+        ReferralManager.shared.configure(userCloudService: dependencies.userCloudService, connectionCloudService: dependencies.connectionCloudService)
 
         // Step 1: Check iCloud account status
-        let accountStatus = await dependencies.cloudKitService.checkAccountStatus()
+        let accountStatus = await dependencies.cloudKitCore.checkAccountStatus()
         cloudKitAccountStatus = accountStatus
 
         // Step 2: Try to fetch existing user from CloudKit if available (with retries)
@@ -134,7 +134,7 @@ class CurrentUserSession: ObservableObject {
             // If iCloud is available, try to sync
             if accountStatus.isAvailable {
                 do {
-                    let cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
+                    let cloudUser = try await dependencies.userCloudService.fetchOrCreateCurrentUser(
                         username: username,
                         displayName: displayName,
                         profileEmoji: profileEmoji,
@@ -196,7 +196,7 @@ class CurrentUserSession: ObservableObject {
         guard cloudKitAccountStatus?.isAvailable == true else { return }
 
         do {
-            let count = try await dependencies.cloudKitService.fetchReferralCount(for: user.id)
+            let count = try await dependencies.userCloudService.fetchReferralCount(for: user.id)
             ReferralManager.shared.syncFromCloudKit(referralCount: count)
         } catch {
             logger.warning("Failed to sync referral count: \(error.localizedDescription)")
@@ -265,7 +265,7 @@ class CurrentUserSession: ObservableObject {
         // Try to create in CloudKit first
         var cloudUser: User?
         do {
-            cloudUser = try await dependencies.cloudKitService.fetchOrCreateCurrentUser(
+            cloudUser = try await dependencies.userCloudService.fetchOrCreateCurrentUser(
                 username: username,
                 displayName: displayName,
                 profileEmoji: profileImage == nil ? profileEmoji : nil,  // Clear emoji if using photo
@@ -315,7 +315,7 @@ class CurrentUserSession: ObservableObject {
     private func setupNotificationSubscription(for userId: UUID, dependencies: DependencyContainer) async {
         // Subscribe to connection requests
         do {
-            try await dependencies.cloudKitService.subscribeToConnectionRequests(forUserId: userId)
+            try await dependencies.connectionCloudService.subscribeToConnectionRequests(forUserId: userId)
         } catch {
             logger.warning("Failed to set up connection request notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
@@ -323,7 +323,7 @@ class CurrentUserSession: ObservableObject {
 
         // Subscribe to connection acceptances
         do {
-            try await dependencies.cloudKitService.subscribeToConnectionAcceptances(forUserId: userId)
+            try await dependencies.connectionCloudService.subscribeToConnectionAcceptances(forUserId: userId)
         } catch {
             logger.warning("Failed to set up connection acceptance notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
@@ -331,7 +331,7 @@ class CurrentUserSession: ObservableObject {
 
         // Subscribe to referral signups (when someone uses your referral code)
         do {
-            try await dependencies.cloudKitService.subscribeToReferralSignups(forUserId: userId)
+            try await dependencies.connectionCloudService.subscribeToReferralSignups(forUserId: userId)
         } catch {
             logger.warning("Failed to set up referral signup notifications: \(error.localizedDescription)")
             // Don't block user flow if subscription fails
@@ -366,7 +366,7 @@ class CurrentUserSession: ObservableObject {
 
         // Try to update in CloudKit
         do {
-            try await dependencies.cloudKitService.saveUser(updatedUser)
+            try await dependencies.userCloudService.saveUser(updatedUser)
             logger.info("User updated in CloudKit")
         } catch {
             logger.warning("CloudKit update failed (ok if not enabled): \(error.localizedDescription)")
