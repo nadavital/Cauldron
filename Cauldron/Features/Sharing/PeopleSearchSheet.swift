@@ -6,16 +6,15 @@
 //
 
 import SwiftUI
-import Combine
 
 struct PeopleSearchSheet: View {
     let dependencies: DependencyContainer
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel: PeopleSearchViewModel
+    @State private var viewModel: PeopleSearchViewModel
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
-        _viewModel = StateObject(wrappedValue: PeopleSearchViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: PeopleSearchViewModel(dependencies: dependencies))
     }
 
     var body: some View {
@@ -309,8 +308,9 @@ enum PeopleSearchConnectionState {
 // MARK: - View Model
 
 @MainActor
-class PeopleSearchViewModel: ObservableObject {
-    @Published var searchText = "" {
+@Observable
+final class PeopleSearchViewModel {
+    var searchText = "" {
         didSet {
             searchDebounceTask?.cancel()
             let queryText = searchText
@@ -321,14 +321,14 @@ class PeopleSearchViewModel: ObservableObject {
             }
         }
     }
-    @Published var searchResults: [User] = []
-    @Published var recommendedUsers: [User] = []
-    @Published var receivedRequests: [Connection] = []
-    @Published var sentRequests: [Connection] = []
-    @Published var usersMap: [UUID: User] = [:]
-    @Published var isLoading = false
-    @Published var showErrorAlert = false
-    @Published var alertMessage = ""
+    var searchResults: [User] = []
+    var recommendedUsers: [User] = []
+    var receivedRequests: [Connection] = []
+    var sentRequests: [Connection] = []
+    var usersMap: [UUID: User] = [:]
+    var isLoading = false
+    var showErrorAlert = false
+    var alertMessage = ""
 
     let dependencies: DependencyContainer
     private var searchDebounceTask: Task<Void, Never>?
@@ -341,6 +341,9 @@ class PeopleSearchViewModel: ObservableObject {
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     func loadData() async {
         isLoading = true
@@ -372,7 +375,7 @@ class PeopleSearchViewModel: ObservableObject {
 
         for userId in userIds {
             if usersMap[userId] == nil {
-                if let user = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
+                if let user = try? await dependencies.userCloudService.fetchUser(byUserId: userId) {
                     usersMap[userId] = user
                 }
             }
@@ -400,7 +403,7 @@ class PeopleSearchViewModel: ObservableObject {
             }
 
             // Fetch users and filter to only show strangers
-            let allUsers = try await dependencies.cloudKitService.searchUsers(query: "")
+            let allUsers = try await dependencies.userCloudService.searchUsers(query: "")
             recommendedUsers = allUsers
                 .filter { $0.id != currentUserId && !excludedUserIds.contains($0.id) }
                 .prefix(5)
@@ -425,7 +428,7 @@ class PeopleSearchViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let users = try await dependencies.cloudKitService.searchUsers(query: query)
+            let users = try await dependencies.userCloudService.searchUsers(query: query)
 
             // Only apply results if this is still the current search
             guard currentSearchId == searchId else { return }

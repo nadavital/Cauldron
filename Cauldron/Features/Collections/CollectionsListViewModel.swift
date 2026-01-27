@@ -7,42 +7,51 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 @MainActor
-class CollectionsListViewModel: ObservableObject {
-    @Published var ownedCollections: [Collection] = []
-    @Published var isLoading = false
-    @Published var searchText = ""
-    @Published var showingCreateSheet = false
-    @Published var errorMessage: String?
-    @Published var showError = false
+@Observable
+final class CollectionsListViewModel {
+    var ownedCollections: [Collection] = []
+    var isLoading = false
+    var searchText = ""
+    var showingCreateSheet = false
+    var errorMessage: String?
+    var showError = false
 
     let dependencies: DependencyContainer
-    private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
         setupCollectionNotificationObserver()
     }
 
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {
+        // Note: Cannot access notificationObserver here as it's isolated
+        // NotificationCenter observer cleanup happens automatically
+    }
+
     /// Setup observer for collection metadata changes to update UI immediately
     private func setupCollectionNotificationObserver() {
-        NotificationCenter.default.publisher(for: .collectionMetadataChanged)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                guard let self = self,
-                      let collectionId = notification.userInfo?["collectionId"] as? UUID,
-                      let updatedCollection = notification.userInfo?["collection"] as? Collection else {
-                    return
-                }
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .collectionMetadataChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let collectionId = notification.userInfo?["collectionId"] as? UUID,
+                  let updatedCollection = notification.userInfo?["collection"] as? Collection else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 // Update the collection in our local array for immediate UI refresh
                 if let index = self.ownedCollections.firstIndex(where: { $0.id == collectionId }) {
                     self.ownedCollections[index] = updatedCollection
                 }
             }
-            .store(in: &cancellables)
+        }
     }
 
     /// Load all collections

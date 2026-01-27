@@ -18,15 +18,15 @@ class RecipeImageService {
     // Maximum cache size (50 images)
     private let maxCacheCount = 50
 
-    // CloudKit service for fallback loading
-    private let cloudKitService: CloudKitServiceFacade
-    private let imageManager: ImageManager
+    private let imageManager: RecipeImageManager
 
-    init(cloudKitService: CloudKitServiceFacade, imageManager: ImageManager) {
-        self.cloudKitService = cloudKitService
+    init(imageManager: RecipeImageManager) {
         self.imageManager = imageManager
         cache.countLimit = maxCacheCount
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     /// Load an image from a URL (local or remote) with caching
     /// - Parameter url: The URL of the image to load
@@ -154,13 +154,11 @@ class RecipeImageService {
             let currentUserId = await CurrentUserSession.shared.currentUser?.id
             let isOwnRecipe = (ownerId == currentUserId) || (ownerId == nil)
 
-            // Try public database first for shared recipes, private first for own recipes
-            let databases = isOwnRecipe
-                ? [try await cloudKitService.getPrivateDatabase(), try await cloudKitService.getPublicDatabase()]
-                : [try await cloudKitService.getPublicDatabase(), try await cloudKitService.getPrivateDatabase()]
+            // Try private database first for own recipes, public first for shared recipes
+            let tryOrder: [Bool] = isOwnRecipe ? [false, true] : [true, false]  // fromPublic values
 
-            for database in databases {
-                if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, database: database) {
+            for fromPublic in tryOrder {
+                if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, fromPublic: fromPublic) {
                     // Image downloaded successfully, load it
                     let fileManager = FileManager.default
                     guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {

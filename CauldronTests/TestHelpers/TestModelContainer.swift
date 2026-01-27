@@ -18,7 +18,6 @@ struct TestModelContainer {
         let schema = Schema([
             RecipeModel.self,
             CollectionModel.self,
-            CollectionReferenceModel.self,
             DeletedRecipeModel.self,
             ConnectionModel.self,
             UserModel.self,

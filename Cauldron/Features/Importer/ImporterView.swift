@@ -10,11 +10,11 @@ import SwiftUI
 /// View for importing recipes
 struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel: ImporterViewModel
+    @State private var viewModel: ImporterViewModel
     @State private var showingPreview = false
-    
+
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: ImporterViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: ImporterViewModel(dependencies: dependencies))
     }
     
     var body: some View {

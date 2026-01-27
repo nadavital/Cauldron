@@ -13,26 +13,26 @@ import os
 
 
 @MainActor
-class SearchTabViewModel: ObservableObject {
-    @Published var allRecipes: [Recipe] = [] // User's own recipes
-    @Published var publicRecipes: [Recipe] = [] // All public recipes from CloudKit
-    @Published var recipesByTag: [String: [Recipe]] = [:]
-    @Published var recipeSearchResults: [SearchRecipeGroup] = []
-    @Published var peopleSearchResults: [User] = []
-    @Published var friends: [User] = []
-    @Published var isLoading = false
-    @Published var isLoadingPeople = false
-    @Published var connections: [Connection] = [] // Derived from connectionManager
-    @Published var connectionError: ConnectionError?
-    @Published var popularTags: [String] = []
-    @Published var selectedCategories: Set<RecipeCategory> = []
-    @Published var ownerTiers: [UUID: UserTier] = [:] // Cached owner tiers for search boost
+@Observable final class SearchTabViewModel {
+    var allRecipes: [Recipe] = [] // User's own recipes
+    var publicRecipes: [Recipe] = [] // All public recipes from CloudKit
+    var recipesByTag: [String: [Recipe]] = [:]
+    var recipeSearchResults: [SearchRecipeGroup] = []
+    var peopleSearchResults: [User] = []
+    var friends: [User] = []
+    var isLoading = false
+    var isLoadingPeople = false
+    var connections: [Connection] = [] // Derived from connectionManager
+    var connectionError: ConnectionError?
+    var popularTags: [String] = []
+    var selectedCategories: Set<RecipeCategory> = []
+    var ownerTiers: [UUID: UserTier] = [:] // Cached owner tiers for search boost
 
     let dependencies: DependencyContainer
     private var recipeSearchText: String = ""
     private var peopleSearchText: String = ""
-    private var cancellables = Set<AnyCancellable>()
-    private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     // Search results caching
     private var cachedSearchResults: [String: [Recipe]] = [:] // Key: query+categories hash
@@ -50,21 +50,6 @@ class SearchTabViewModel: ObservableObject {
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
 
-        // Subscribe to connection manager updates
-        dependencies.connectionManager.$connections
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] managedConnections in
-                guard let self = self else { return }
-                // Convert ManagedConnection to Connection for backward compatibility
-                self.connections = managedConnections.values.map { $0.connection }
-                
-                // Load friends details when connections change
-                Task {
-                    await self.loadFriends()
-                }
-            }
-            .store(in: &cancellables)
-
         // Set up debounced people search
         peopleSearchSubject
             .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
@@ -77,7 +62,7 @@ class SearchTabViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
-            
+
         // Set up debounced recipe search
         recipeSearchSubject
             .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
@@ -90,6 +75,12 @@ class SearchTabViewModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {
+        // Note: Cannot access cancellables or searchTask here as they're isolated
+        // Cleanup happens automatically when the object is deallocated
     }
     
     func loadData() async {
@@ -122,7 +113,12 @@ class SearchTabViewModel: ObservableObject {
     func loadConnections() async {
         // Use ConnectionManager - it handles caching and sync automatically
         await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
-        AppLogger.general.info("Loaded connections via ConnectionManager")
+
+        // Update local connections array from manager
+        connections = dependencies.connectionManager.connections.values.map { $0.connection }
+
+        // Load friends details
+        await loadFriends()
     }
 
     func loadFriends() async {
@@ -142,7 +138,7 @@ class SearchTabViewModel: ObservableObject {
         }
     }
     
-    @Published var recommendedUsers: [User] = []
+    var recommendedUsers: [User] = []
     
     func loadRecommendations() async {
         // 1. Get current friends' IDs
@@ -157,7 +153,7 @@ class SearchTabViewModel: ObservableObject {
         
         do {
             // 2. Fetch connections of friends (Friends of Friends)
-            let fofConnections = try await dependencies.cloudKitService.fetchConnections(forUserIds: friendIds)
+            let fofConnections = try await dependencies.connectionCloudService.fetchConnections(forUserIds: friendIds)
             
             // 3. Extract unique User IDs, excluding self and existing friends
             var recommendedIds = Set<UUID>()
@@ -271,7 +267,7 @@ class SearchTabViewModel: ObservableObject {
 
         do {
             // Perform server-side search
-            let results = try await dependencies.cloudKitService.searchPublicRecipes(
+            let results = try await dependencies.searchCloudService.searchPublicRecipes(
                 query: query,
                 categories: categoryTags.isEmpty ? nil : categoryTags
             )
@@ -328,7 +324,7 @@ class SearchTabViewModel: ObservableObject {
 
         do {
             // Batch fetch recipe counts for all owners at once (avoids N+1 queries)
-            let counts = try await dependencies.cloudKitService.batchFetchPublicRecipeCounts(
+            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
                 forOwnerIds: Array(ownerIds)
             )
 

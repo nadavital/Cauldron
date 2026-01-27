@@ -245,7 +245,7 @@ struct ContentView: View {
 
                 // 2. If not found locally, fetch from CloudKit public database
                 AppLogger.general.info("🌐 ContentView: Fetching full recipe details from CloudKit")
-                if let fullRecipe = try await dependencies.cloudKitService.fetchPublicRecipe(id: partialRecipe.id) {
+                if let fullRecipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: partialRecipe.id) {
                     AppLogger.general.info("✅ ContentView: Successfully fetched full recipe")
                     await MainActor.run {
                         // Post notification to navigate to the recipe in the Search tab
@@ -390,16 +390,17 @@ struct ContentView: View {
                     // Build a map of users for profile image preloading
                     var usersMap: [UUID: User] = [:]
 
-                    // Fetch and cache all user details
+                    // Load from local cache first (instant)
                     for userId in userIds {
-                        // Try local cache first
                         if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
                             usersMap[userId] = cachedUser
                         }
+                    }
 
-                        // Then fetch from CloudKit to get latest data
-                        if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
-                            usersMap[userId] = cloudUser
+                    // Batch fetch from CloudKit to get latest data (single query instead of N queries)
+                    if let cloudUsers = try? await dependencies.userCloudService.fetchUsers(byUserIds: Array(userIds)) {
+                        for cloudUser in cloudUsers {
+                            usersMap[cloudUser.id] = cloudUser
                             try? await dependencies.sharingRepository.save(cloudUser)
                         }
                     }

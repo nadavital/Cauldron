@@ -10,7 +10,7 @@ import SwiftUI
 /// User profile view - displays user information and manages connections
 struct UserProfileView: View {
     let user: User
-    @StateObject private var viewModel: UserProfileViewModel
+    @State private var viewModel: UserProfileViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
@@ -35,7 +35,7 @@ struct UserProfileView: View {
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
-        _viewModel = StateObject(wrappedValue: UserProfileViewModel(
+        _viewModel = State(initialValue: UserProfileViewModel(
             user: user,
             dependencies: dependencies
         ))
@@ -468,7 +468,7 @@ struct UserProfileView: View {
         let trimmedCode = redeemCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { return }
 
-        ReferralManager.shared.configure(with: viewModel.dependencies.cloudKitService)
+        ReferralManager.shared.configure(userCloudService: viewModel.dependencies.userCloudService, connectionCloudService: viewModel.dependencies.connectionCloudService)
         isRedeemingCode = true
         redeemMessage = nil
 

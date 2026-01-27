@@ -12,13 +12,23 @@ import os
 actor SharingService {
     private let sharingRepository: SharingRepository
     private let recipeRepository: RecipeRepository
-    private let cloudKitService: CloudKitServiceFacade
+    private let userCloudService: UserCloudService
+    private let connectionCloudService: ConnectionCloudService
+    private let recipeCloudService: RecipeCloudService
     private let logger = Logger(subsystem: "com.cauldron", category: "SharingService")
 
-    init(sharingRepository: SharingRepository, recipeRepository: RecipeRepository, cloudKitService: CloudKitServiceFacade) {
+    init(
+        sharingRepository: SharingRepository,
+        recipeRepository: RecipeRepository,
+        userCloudService: UserCloudService,
+        connectionCloudService: ConnectionCloudService,
+        recipeCloudService: RecipeCloudService
+    ) {
         self.sharingRepository = sharingRepository
         self.recipeRepository = recipeRepository
-        self.cloudKitService = cloudKitService
+        self.userCloudService = userCloudService
+        self.connectionCloudService = connectionCloudService
+        self.recipeCloudService = recipeCloudService
     }
     
     // MARK: - User Management
@@ -27,7 +37,7 @@ actor SharingService {
     func getAllUsers() async throws -> [User] {
         // Fetch from CloudKit PUBLIC database to get latest users
         do {
-            let cloudUsers = try await cloudKitService.fetchAllUsers()
+            let cloudUsers = try await userCloudService.fetchAllUsers()
 
             // Cache users locally for offline access
             for user in cloudUsers {
@@ -50,7 +60,7 @@ actor SharingService {
         }
 
         // Search CloudKit PUBLIC database for users
-        let users = try await cloudKitService.searchUsers(query: query)
+        let users = try await userCloudService.searchUsers(query: query)
         logger.info("Found \(users.count) users matching '\(query)' in CloudKit")
         return users
     }
@@ -66,7 +76,7 @@ actor SharingService {
         
         // Try to fetch from CloudKit
         do {
-            let users = try await cloudKitService.fetchUsers(byUserIds: userIds)
+            let users = try await userCloudService.fetchUsers(byUserIds: userIds)
             
             // Cache fetched users
             for user in users {
@@ -106,7 +116,7 @@ actor SharingService {
         }
 
         // Get connected friends from CloudKit
-        let connections = try await cloudKitService.fetchConnections(forUserId: currentUser.id)
+        let connections = try await connectionCloudService.fetchConnections(forUserId: currentUser.id)
         let acceptedConnections = connections.filter { $0.isAccepted }
 
         // Get friend user IDs (both from and to, excluding self)
@@ -127,7 +137,7 @@ actor SharingService {
 
         // Fetch public recipes from friends
         if !friendIds.isEmpty {
-            let friendsPublicRecipes = try await cloudKitService.querySharedRecipes(
+            let friendsPublicRecipes = try await recipeCloudService.querySharedRecipes(
                 ownerIds: friendIds,
                 visibility: .publicRecipe
             )
@@ -140,7 +150,7 @@ actor SharingService {
 
             // Batch fetch all owners at once to avoid N+1 queries
             let ownerIds = Set(filteredRecipes.compactMap { $0.ownerId })
-            let owners = try await cloudKitService.fetchUsers(byUserIds: Array(ownerIds))
+            let owners = try await userCloudService.fetchUsers(byUserIds: Array(ownerIds))
             let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
 
             // Convert to SharedRecipe objects using the pre-fetched owners

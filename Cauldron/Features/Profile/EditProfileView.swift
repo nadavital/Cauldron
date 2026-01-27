@@ -511,7 +511,7 @@ struct ProfileEditView: View {
                                 profileImageModifiedAt: profileImageModifiedAt
                             )
 
-                            try await dependencies.cloudKitService.saveUser(finalUser)
+                            try await dependencies.userCloudService.saveUser(finalUser)
 
                             // Update session with cloud-synced version
                             await MainActor.run {
@@ -520,7 +520,7 @@ struct ProfileEditView: View {
                             }
                         } else {
                             // Still save user record to CloudKit even if image didn't need upload
-                            try await dependencies.cloudKitService.saveUser(optimisticUser)
+                            try await dependencies.userCloudService.saveUser(optimisticUser)
                             AppLogger.general.info("☁️ Synced user profile to CloudKit (image already up-to-date)")
                         }
                     } catch {
@@ -566,7 +566,7 @@ struct ProfileEditView: View {
                         }
 
                         // Save updated user to CloudKit
-                        try await dependencies.cloudKitService.saveUser(updatedUser)
+                        try await dependencies.userCloudService.saveUser(updatedUser)
                         AppLogger.general.info("☁️ Synced emoji profile to CloudKit in background")
                     } catch {
                         AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
@@ -598,7 +598,7 @@ struct ProfileEditView: View {
                 // Background sync
                 Task.detached { [dependencies] in
                     do {
-                        try await dependencies.cloudKitService.saveUser(updatedUser)
+                        try await dependencies.userCloudService.saveUser(updatedUser)
                         AppLogger.general.info("☁️ Synced basic profile to CloudKit in background")
                     } catch {
                         AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")

@@ -12,8 +12,9 @@ import CloudKit
 /// Service to migrate existing local images to CloudKit
 actor CloudImageMigration {
     private let recipeRepository: RecipeRepository
-    private let imageManager: ImageManager
-    private let cloudKitService: CloudKitServiceFacade
+    private let imageManager: RecipeImageManager
+    private let cloudKitCore: CloudKitCore
+    private let recipeCloudService: RecipeCloudService
     private let imageSyncManager: ImageSyncManager
     private let logger = Logger(subsystem: "com.cauldron", category: "CloudImageMigration")
 
@@ -36,13 +37,15 @@ actor CloudImageMigration {
 
     init(
         recipeRepository: RecipeRepository,
-        imageManager: ImageManager,
-        cloudKitService: CloudKitServiceFacade,
+        imageManager: RecipeImageManager,
+        cloudKitCore: CloudKitCore,
+        recipeCloudService: RecipeCloudService,
         imageSyncManager: ImageSyncManager
     ) {
         self.recipeRepository = recipeRepository
         self.imageManager = imageManager
-        self.cloudKitService = cloudKitService
+        self.cloudKitCore = cloudKitCore
+        self.recipeCloudService = recipeCloudService
         self.imageSyncManager = imageSyncManager
 
         // Load migration status from UserDefaults
@@ -85,7 +88,7 @@ actor CloudImageMigration {
         logger.info("🔄 Starting cloud image migration...")
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - migration postponed")
             migrationStatus = .failed("CloudKit not available")
@@ -132,15 +135,14 @@ actor CloudImageMigration {
 
                 // Upload to Private database
                 do {
-                    let privateDB = try await cloudKitService.getPrivateDatabase()
                     let imageData = try await getImageData(recipeId: recipe.id)
 
                     logger.info("📤 Migrating image for: \(recipe.title)")
 
-                    let recordName = try await cloudKitService.uploadImageAsset(
+                    let recordName = try await recipeCloudService.uploadImageAsset(
                         recipeId: recipe.id,
                         imageData: imageData,
-                        to: privateDB
+                        toPublic: false
                     )
 
                     // Update recipe with cloud metadata (migration - don't update timestamp, skip image sync since we just uploaded)
@@ -154,11 +156,10 @@ actor CloudImageMigration {
 
                     // If recipe is public, also upload to Public database
                     if recipe.visibility == .publicRecipe {
-                        let publicDB = try await cloudKitService.getPublicDatabase()
-                        _ = try? await cloudKitService.uploadImageAsset(
+                        _ = try? await recipeCloudService.uploadImageAsset(
                             recipeId: recipe.id,
                             imageData: imageData,
-                            to: publicDB
+                            toPublic: true
                         )
                     }
 
@@ -244,7 +245,7 @@ actor CloudImageMigration {
         logger.info("🔄 Force re-uploading ALL images to CloudKit...")
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot force re-upload")
             return
@@ -275,15 +276,14 @@ actor CloudImageMigration {
 
                 // Upload to Private database (ALWAYS - for owner's backup/reinstall recovery)
                 do {
-                    let privateDB = try await cloudKitService.getPrivateDatabase()
                     let imageData = try await getImageData(recipeId: recipe.id)
 
                     logger.info("📤 Force uploading image for: \(recipe.title) to PRIVATE DB")
 
-                    let recordName = try await cloudKitService.uploadImageAsset(
+                    let recordName = try await recipeCloudService.uploadImageAsset(
                         recipeId: recipe.id,
                         imageData: imageData,
-                        to: privateDB
+                        toPublic: false
                     )
 
                     // Update recipe with cloud metadata
@@ -298,11 +298,10 @@ actor CloudImageMigration {
                     // If recipe is public, ALSO upload to Public database (for discovery/sharing)
                     if recipe.visibility == .publicRecipe {
                         logger.info("📤 Force uploading image for: \(recipe.title) to PUBLIC DB")
-                        let publicDB = try await cloudKitService.getPublicDatabase()
-                        _ = try? await cloudKitService.uploadImageAsset(
+                        _ = try? await recipeCloudService.uploadImageAsset(
                             recipeId: recipe.id,
                             imageData: imageData,
-                            to: publicDB
+                            toPublic: true
                         )
                     }
 

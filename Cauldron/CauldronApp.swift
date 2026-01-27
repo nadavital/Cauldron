@@ -262,7 +262,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     // Badge will be updated automatically in loadConnections
 
                     // Sync referral count from CloudKit (referrer may have gotten a new referral)
-                    if let count = try? await dependencies.cloudKitService.fetchReferralCount(for: userId) {
+                    if let count = try? await dependencies.userCloudService.fetchReferralCount(for: userId) {
                         ReferralManager.shared.syncFromCloudKit(referralCount: count)
                         AppLogger.general.info("📊 Synced referral count from notification: \(count)")
                     }

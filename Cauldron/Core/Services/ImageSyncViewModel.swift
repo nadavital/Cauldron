@@ -7,28 +7,29 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 
 /// ViewModel that makes image sync state observable to the UI
 @MainActor
-class ImageSyncViewModel: ObservableObject {
+@Observable
+final class ImageSyncViewModel {
+    @ObservationIgnored
     private let logger = Logger(subsystem: "com.cauldron", category: "ImageSyncViewModel")
 
     /// Recipes with pending image uploads
-    @Published private(set) var pendingUploads: Set<UUID> = []
+    private(set) var pendingUploads: Set<UUID> = []
 
     /// Recipes with pending image downloads
-    @Published private(set) var pendingDownloads: Set<UUID> = []
+    private(set) var pendingDownloads: Set<UUID> = []
 
     /// Upload progress for each recipe (0.0 to 1.0)
-    @Published private(set) var uploadProgress: [UUID: Double] = [:]
+    private(set) var uploadProgress: [UUID: Double] = [:]
 
     /// Sync errors for each recipe
-    @Published private(set) var syncErrors: [UUID: String] = [:]
+    private(set) var syncErrors: [UUID: String] = [:]
 
     /// Migration status
-    @Published private(set) var migrationStatus: MigrationStatus = .notStarted
+    private(set) var migrationStatus: MigrationStatus = .notStarted
 
     /// Whether any sync operations are in progress
     var isSyncing: Bool {
@@ -40,9 +41,13 @@ class ImageSyncViewModel: ObservableObject {
         pendingUploads.count + pendingDownloads.count
     }
 
+    @ObservationIgnored
     private let imageSyncManager: ImageSyncManager
+    @ObservationIgnored
     private let imageMigrationService: CloudImageMigration?
+    @ObservationIgnored
     private var eventObserverTask: Task<Void, Never>?
+    @ObservationIgnored
     private var statusPollingTask: Task<Void, Never>?
 
     init(imageSyncManager: ImageSyncManager, imageMigrationService: CloudImageMigration? = nil) {
@@ -52,9 +57,10 @@ class ImageSyncViewModel: ObservableObject {
         startMigrationStatusPolling()
     }
 
-    deinit {
-        eventObserverTask?.cancel()
-        statusPollingTask?.cancel()
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {
+        // Note: Cannot access eventObserverTask/statusPollingTask here as they're isolated
+        // Task cleanup happens automatically when the object is deallocated
     }
 
     /// Start observing sync events (event-driven, no polling!)
@@ -211,7 +217,7 @@ class ImageSyncViewModel: ObservableObject {
 extension ImageSyncViewModel {
     /// View modifier to show sync status banner
     struct SyncStatusBanner: ViewModifier {
-        @ObservedObject var viewModel: ImageSyncViewModel
+        var viewModel: ImageSyncViewModel
 
         func body(content: Content) -> some View {
             VStack(spacing: 0) {

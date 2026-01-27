@@ -83,6 +83,9 @@ class CookModeCoordinator {
         }
     }
 
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     /// Handle recipe deletion - check if current recipe was deleted
     private func handleRecipeDeletion(deletedRecipeId: UUID) async {
         guard isActive, let currentRecipeId = currentRecipe?.id else { return }

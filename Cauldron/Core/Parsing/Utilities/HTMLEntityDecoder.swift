@@ -91,8 +91,8 @@ struct HTMLEntityDecoder {
         // Remove leading bullet points and list markers
         result = result.replacingOccurrences(of: "^[•●○◦▪▫-]\\s*", with: "", options: .regularExpression)
 
-        // Clean whitespace
-        result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        // Clean horizontal whitespace only (preserve newlines)
+        result = result.replacingOccurrences(of: "[^\\S\\n]+", with: " ", options: .regularExpression)
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
 
         return result

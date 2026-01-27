@@ -8,29 +8,24 @@
 import XCTest
 @testable import Cauldron
 
+/// Tests for CookTabViewModel
+/// Note: ViewModels are created as local variables to avoid @Observable + @MainActor
+/// deinitialization issues during test teardown (Swift issue #85221)
 @MainActor
 final class CookTabViewModelTests: XCTestCase {
-    var dependencies: DependencyContainer!
-    var viewModel: CookTabViewModel!
-    var testUserId: UUID!
 
-    override func setUp() async throws {
-        try await super.setUp()
-        dependencies = DependencyContainer.preview()
-        testUserId = UUID()
-    }
-
-    override func tearDown() async throws {
-        viewModel = nil
-        dependencies = nil
-        try await super.tearDown()
+    // Helper to create fresh dependencies
+    private func makeDependencies() -> DependencyContainer {
+        DependencyContainer.preview()
     }
 
     // MARK: - Initialization Tests
 
     func testInitWithoutPreloadedData() async throws {
+        let dependencies = makeDependencies()
+
         // When: Initialize without preloaded data
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: nil)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: nil)
 
         // Give it time to load
         try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
@@ -40,6 +35,8 @@ final class CookTabViewModelTests: XCTestCase {
     }
 
     func testInitWithPreloadedData() async throws {
+        let dependencies = makeDependencies()
+
         // Given: Preloaded recipe data
         let recipe1 = Recipe(
             id: UUID(),
@@ -70,7 +67,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize with preloaded data
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         // Then: Should immediately have recipes
         XCTAssertEqual(viewModel.allRecipes.count, 2)
@@ -86,6 +83,8 @@ final class CookTabViewModelTests: XCTestCase {
     // MARK: - Favorites Filtering Tests
 
     func testFavoritesFilterOnlyShowsFavorites() async throws {
+        let dependencies = makeDependencies()
+
         // Given: Mix of favorite and non-favorite recipes
         let favoriteRecipe1 = Recipe(
             id: UUID(),
@@ -121,7 +120,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize with preloaded data
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         // Give favorites time to populate
         try await Task.sleep(nanoseconds: 100_000_000)
@@ -135,6 +134,8 @@ final class CookTabViewModelTests: XCTestCase {
     }
 
     func testEmptyFavoritesWhenNoFavorites() async throws {
+        let dependencies = makeDependencies()
+
         // Given: No favorite recipes
         let recipe1 = Recipe(
             id: UUID(),
@@ -161,7 +162,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
@@ -170,6 +171,8 @@ final class CookTabViewModelTests: XCTestCase {
     }
 
     func testAllRecipesAreFavorites() async throws {
+        let dependencies = makeDependencies()
+
         // Given: All recipes are favorites
         let recipe1 = Recipe(
             id: UUID(),
@@ -196,7 +199,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
@@ -208,6 +211,8 @@ final class CookTabViewModelTests: XCTestCase {
     // MARK: - Recently Cooked Tests
 
     func testRecentlyCookedFilteredCorrectly() async throws {
+        let dependencies = makeDependencies()
+
         // Given: Some recipes, some recently cooked
         let recentRecipe = Recipe(
             id: UUID(),
@@ -232,7 +237,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
@@ -244,6 +249,9 @@ final class CookTabViewModelTests: XCTestCase {
     // MARK: - Collections Tests
 
     func testCollectionsSortedByUpdatedAt() async throws {
+        let dependencies = makeDependencies()
+        let testUserId = UUID()
+
         // Given: Collections with different update times
         let oldCollection = Collection(
             id: UUID(),
@@ -270,7 +278,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         // Then: Collections should be sorted by updatedAt (newest first)
         XCTAssertEqual(viewModel.collections.count, 2)
@@ -281,6 +289,8 @@ final class CookTabViewModelTests: XCTestCase {
     // MARK: - Edge Cases
 
     func testEmptyPreloadedData() async throws {
+        let dependencies = makeDependencies()
+
         // Given: Empty preloaded data
         let preloadedData = PreloadedRecipeData(
             allRecipes: [],
@@ -289,7 +299,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
@@ -301,6 +311,9 @@ final class CookTabViewModelTests: XCTestCase {
     }
 
     func testLargeNumberOfRecipes() async throws {
+        let dependencies = makeDependencies()
+        let testUserId = UUID()
+
         // Given: Many recipes with mix of favorites
         var recipes: [Recipe] = []
         for i in 0..<100 {
@@ -322,7 +335,7 @@ final class CookTabViewModelTests: XCTestCase {
         )
 
         // When: Initialize
-        viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
 
         try await Task.sleep(nanoseconds: 200_000_000) // Give more time for large data
 

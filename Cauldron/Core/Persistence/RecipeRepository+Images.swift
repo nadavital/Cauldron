@@ -29,7 +29,7 @@ extension RecipeRepository {
         guard recipe.imageURL != nil else { return }
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - image will sync later")
             await imageSyncManager.addPendingUpload(recipe.id)
@@ -37,11 +37,8 @@ extension RecipeRepository {
         }
 
         do {
-            let database = databaseType == .private ?
-                try await cloudKitService.getPrivateDatabase() :
-                try await cloudKitService.getPublicDatabase()
-
-            let recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, database: database)
+            let toPublic = databaseType == .public
+            let recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, toPublic: toPublic)
 
             // Update recipe with cloud metadata
             let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
@@ -77,16 +74,15 @@ extension RecipeRepository {
     /// Delete recipe image from Private database
     /// - Parameter recipe: The recipe whose image to delete
     internal func deleteRecipeImageFromPrivate(_ recipe: Recipe) async {
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete image from PRIVATE database")
             return
         }
 
         do {
-            let database = try await cloudKitService.getPrivateDatabase()
             logger.info("🗑️ Deleting image from PRIVATE database for recipe: \(recipe.title)")
-            try await cloudKitService.deleteImageAsset(recipeId: recipe.id, from: database)
+            try await recipeCloudService.deleteImageAsset(recipeId: recipe.id, fromPublic: false)
             logger.info("✅ Image deleted from PRIVATE database")
         } catch {
             logger.error("❌ Failed to delete image from PRIVATE database: \(error.localizedDescription)")
@@ -96,16 +92,15 @@ extension RecipeRepository {
     /// Delete recipe image from Public database
     /// - Parameter recipe: The recipe whose image to delete
     internal func deleteRecipeImageFromPublic(_ recipe: Recipe) async {
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete image from PUBLIC database")
             return
         }
 
         do {
-            let database = try await cloudKitService.getPublicDatabase()
             logger.info("🗑️ Deleting image from PUBLIC database for recipe: \(recipe.title)")
-            try await cloudKitService.deleteImageAsset(recipeId: recipe.id, from: database)
+            try await recipeCloudService.deleteImageAsset(recipeId: recipe.id, fromPublic: true)
             logger.info("✅ Image deleted from PUBLIC database")
         } catch {
             logger.error("❌ Failed to delete image from PUBLIC database: \(error.localizedDescription)")
@@ -223,7 +218,9 @@ extension RecipeRepository {
 
         do {
             // Fetch the recipe from PUBLIC database to check if image already exists
-            let publicRecipe = try await cloudKitService.fetchPublicRecipe(recipeId: recipe.id, ownerId: ownerId)
+            guard let publicRecipe = try await recipeCloudService.fetchPublicRecipe(id: recipe.id) else {
+                return true  // Recipe doesn't exist in public DB - needs upload
+            }
 
             // If PUBLIC recipe has an image record name, image already exists
             if publicRecipe.cloudImageRecordName != nil {
@@ -288,7 +285,7 @@ extension RecipeRepository {
         logger.info("Retrying image upload for \(pendingUploads.count) recipes")
 
         // Check if CloudKit is available first
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.info("CloudKit still not available - will retry image uploads later")
             return false

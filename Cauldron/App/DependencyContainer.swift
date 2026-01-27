@@ -45,9 +45,6 @@ class DependencyContainer: ObservableObject {
     /// Search cloud operations
     let searchCloudService: SearchCloudService
 
-    /// Facade for backwards compatibility (wraps all domain services)
-    /// NOTE: Prefer using domain-specific services directly in new code
-    let cloudKitService: CloudKitServiceFacade
 
     // MARK: - Layer 3: Local Persistence (Repositories)
 
@@ -75,9 +72,12 @@ class DependencyContainer: ObservableObject {
 
     // MARK: - Layer 5: Feature Services
 
-    let imageManager: ImageManager
-    let profileImageManager: ProfileImageManager
-    let collectionImageManager: CollectionImageManager
+    /// Recipe image manager (unified implementation)
+    let imageManager: RecipeImageManager
+    /// Profile image manager (unified implementation)
+    let profileImageManager: ProfileImageManagerV2
+    /// Collection image manager (unified implementation)
+    let collectionImageManager: CollectionImageManagerV2
     let recipeImageService: RecipeImageService
 
     // UI Services (MainActor)
@@ -100,6 +100,9 @@ class DependencyContainer: ObservableObject {
     let instagramParser: InstagramRecipeParser
     let tiktokParser: TikTokRecipeParser
 
+    // Background task for image migration (retained to prevent premature cancellation)
+    private var migrationTask: Task<Void, Never>?
+
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
 
@@ -117,14 +120,11 @@ class DependencyContainer: ObservableObject {
         self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
         self.searchCloudService = SearchCloudService(core: cloudKitCore)
 
-        // Facade for backwards compatibility
-        self.cloudKitService = CloudKitServiceFacade()
 
-        // Image managers (still using old CloudKitService for now)
-        // TODO: Migrate to use domain-specific cloud services
-        self.imageManager = ImageManager(cloudKitService: cloudKitService)
-        self.profileImageManager = ProfileImageManager(cloudKitService: cloudKitService)
-        self.collectionImageManager = CollectionImageManager(cloudKitService: cloudKitService)
+        // Image managers using unified EntityImageManager with domain-specific services
+        self.imageManager = createRecipeImageManager(recipeService: recipeCloudService)
+        self.profileImageManager = createProfileImageManager(userService: userCloudService)
+        self.collectionImageManager = createCollectionImageManager(collectionService: collectionCloudService)
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
 
@@ -133,25 +133,23 @@ class DependencyContainer: ObservableObject {
         // ============================================================
 
         // Temporary references for MainActor-isolated services
-        let tempCloudKitService = cloudKitService
         let tempImageManager = imageManager
 
         self.externalShareService = MainActor.assumeIsolated {
-            ExternalShareService(
-                imageManager: tempImageManager,
-                cloudKitService: tempCloudKitService
-            )
+            ExternalShareService(imageManager: tempImageManager)
         }
 
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
         self.collectionRepository = CollectionRepository(
             modelContainer: modelContainer,
-            cloudKitService: cloudKitService,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
             operationQueueService: operationQueueService
         )
         self.recipeRepository = RecipeRepository(
             modelContainer: modelContainer,
-            cloudKitService: cloudKitService,
+            cloudKitCore: cloudKitCore,
+            recipeCloudService: recipeCloudService,
             deletedRecipeRepository: deletedRecipeRepository,
             collectionRepository: collectionRepository,
             imageManager: imageManager,
@@ -181,11 +179,14 @@ class DependencyContainer: ObservableObject {
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
             recipeRepository: recipeRepository,
-            cloudKitService: cloudKitService
+            userCloudService: userCloudService,
+            connectionCloudService: connectionCloudService,
+            recipeCloudService: recipeCloudService
         )
 
         self.recipeSyncService = RecipeSyncService(
-            cloudKitService: cloudKitService,
+            cloudKitCore: cloudKitCore,
+            recipeCloudService: recipeCloudService,
             recipeRepository: recipeRepository,
             deletedRecipeRepository: deletedRecipeRepository,
             imageManager: imageManager
@@ -194,7 +195,8 @@ class DependencyContainer: ObservableObject {
         self.imageMigrationService = CloudImageMigration(
             recipeRepository: recipeRepository,
             imageManager: imageManager,
-            cloudKitService: cloudKitService,
+            cloudKitCore: cloudKitCore,
+            recipeCloudService: recipeCloudService,
             imageSyncManager: imageSyncManager
         )
 
@@ -210,10 +212,7 @@ class DependencyContainer: ObservableObject {
         self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)
 
         self.recipeImageService = MainActor.assumeIsolated {
-            RecipeImageService(
-                cloudKitService: tempCloudKitService,
-                imageManager: tempImageManager
-            )
+            RecipeImageService(imageManager: tempImageManager)
         }
 
         // Note: lazy properties (imageSyncViewModel, operationQueueViewModel,
@@ -223,13 +222,22 @@ class DependencyContainer: ObservableObject {
         self.recipeSyncService.startPeriodicSync()
 
         // Start background image migration after a delay (runs only once)
-        Task {
+        // Store the task to prevent premature cancellation.
+        // Note: This Task intentionally captures `imageMigrationService` directly (not `self`)
+        // to keep the service alive during migration without creating a reference cycle.
+        // The Task is stored in `migrationTask` and cancelled in deinit for clean shutdown.
+        self.migrationTask = Task { [imageMigrationService] in
             // Wait 10 seconds after app launch to avoid impacting startup
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             await imageMigrationService.startMigration()
         }
     }
-    
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {
+        migrationTask?.cancel()
+    }
+
     /// Create container with in-memory storage (for previews/testing)
     nonisolated static func preview() -> DependencyContainer {
         let schema = Schema([
@@ -245,8 +253,10 @@ class DependencyContainer: ObservableObject {
         ])
 
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try! ModelContainer(for: schema, configurations: [config])
-        
+        guard let container = try? ModelContainer(for: schema, configurations: [config]) else {
+            fatalError("Failed to create preview ModelContainer - this indicates a schema configuration error")
+        }
+
         return DependencyContainer(modelContainer: container)
     }
     

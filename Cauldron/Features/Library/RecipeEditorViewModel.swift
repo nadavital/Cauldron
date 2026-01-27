@@ -117,24 +117,24 @@ struct NutritionInput {
 // MARK: - ViewModel
 
 @MainActor
-class RecipeEditorViewModel: ObservableObject {
-    @Published var title: String = ""
-    @Published var yields: String = "4 servings"
-    @Published var totalMinutes: Int? = nil
-    @Published var selectedTags: Set<RecipeCategory> = []
-    @Published var notes: String = ""
-    
+@Observable final class RecipeEditorViewModel {
+    var title: String = ""
+    var yields: String = "4 servings"
+    var totalMinutes: Int? = nil
+    var selectedTags: Set<RecipeCategory> = []
+    var notes: String = ""
+
     // Grouped Sections
-    @Published var ingredientSections: [IngredientSectionInput] = [IngredientSectionInput(name: "", ingredients: [IngredientInput()])]
-    @Published var stepSections: [StepSectionInput] = [StepSectionInput(name: "", steps: [StepInput()])]
-    
-    @Published var nutrition: NutritionInput = NutritionInput()
-    @Published var errorMessage: String?
-    @Published var isSaving: Bool = false
-    @Published var selectedImage: UIImage?
-    @Published var imageFilename: String?
-    @Published var visibility: RecipeVisibility = .publicRecipe
-    
+    var ingredientSections: [IngredientSectionInput] = [IngredientSectionInput(name: "", ingredients: [IngredientInput()])]
+    var stepSections: [StepSectionInput] = [StepSectionInput(name: "", steps: [StepInput()])]
+
+    var nutrition: NutritionInput = NutritionInput()
+    var errorMessage: String?
+    var isSaving: Bool = false
+    var selectedImage: UIImage?
+    var imageFilename: String?
+    var visibility: RecipeVisibility = .publicRecipe
+
     let dependencies: DependencyContainer
     let existingRecipe: Recipe?
     let isImporting: Bool  // True when editing during import flow
@@ -159,9 +159,9 @@ class RecipeEditorViewModel: ObservableObject {
         }
     }
     
-    @Published var relatedRecipes: [Recipe] = []
-    @Published var availableRecipes: [Recipe] = []
-    @Published var isRelatedRecipesPickerPresented: Bool = false
+    var relatedRecipes: [Recipe] = []
+    var availableRecipes: [Recipe] = []
+    var isRelatedRecipesPickerPresented: Bool = false
     
     func loadAvailableRecipes() async {
         do {
@@ -192,7 +192,10 @@ class RecipeEditorViewModel: ObservableObject {
             loadFromRecipe(recipe)
         }
     }
-    
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     private func loadFromRecipe(_ recipe: Recipe) {
         title = recipe.title
         yields = recipe.yields

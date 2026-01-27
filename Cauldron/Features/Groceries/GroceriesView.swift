@@ -7,12 +7,11 @@
 
 import SwiftUI
 import os
-import Combine
 
 /// View for managing the unified grocery list
 struct GroceriesView: View {
-    @StateObject private var viewModel: GroceriesViewModel
-    @StateObject private var currentUserSession = CurrentUserSession.shared
+    @State private var viewModel: GroceriesViewModel
+    @ObservedObject private var currentUserSession = CurrentUserSession.shared
     @State private var showingAddItem = false
     @State private var showingProfileSheet = false
     @State private var viewMode: GroceryGroupingType = .recipe  // Default to grouped by recipe
@@ -20,7 +19,7 @@ struct GroceriesView: View {
     @State private var isAIAvailable = false
 
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: GroceriesViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: GroceriesViewModel(dependencies: dependencies))
     }
 
     var body: some View {
@@ -343,10 +342,11 @@ struct AddGroceryItemView: View {
 // MARK: - View Model
 
 @MainActor
-class GroceriesViewModel: ObservableObject {
-    @Published var items: [GroceryItemDisplay] = []
-    @Published var groups: [GroceryGroup] = []
-    @Published var sortedItems: [GroceryItemDisplay] = []
+@Observable
+final class GroceriesViewModel {
+    var items: [GroceryItemDisplay] = []
+    var groups: [GroceryGroup] = []
+    var sortedItems: [GroceryItemDisplay] = []
 
     let dependencies: DependencyContainer
     private var currentViewMode: GroceryGroupingType = .recipe
@@ -358,6 +358,9 @@ class GroceriesViewModel: ObservableObject {
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
     }
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     func loadItems(viewMode: GroceryGroupingType? = nil, animated: Bool = false) async {
         if let viewMode = viewMode {

@@ -49,8 +49,9 @@ final class ReferralManager: ObservableObject {
     private let referralCodeKey = "cauldron_referral_code"
     private let usedReferralCodeKey = "cauldron_used_referral_code"
 
-    // CloudKit service reference (set during app initialization)
-    private var cloudKitService: CloudKitServiceFacade?
+    // CloudKit service references (set during app initialization)
+    private var userCloudService: UserCloudService?
+    private var connectionCloudService: ConnectionCloudService?
 
     /// Number of unlocked icons
     var unlockedIconCount: Int {
@@ -77,9 +78,10 @@ final class ReferralManager: ObservableObject {
         loadFromDefaults()
     }
 
-    /// Configure the CloudKit service (called during app initialization)
-    func configure(with cloudKitService: CloudKitServiceFacade) {
-        self.cloudKitService = cloudKitService
+    /// Configure the CloudKit services (called during app initialization)
+    func configure(userCloudService: UserCloudService, connectionCloudService: ConnectionCloudService) {
+        self.userCloudService = userCloudService
+        self.connectionCloudService = connectionCloudService
     }
 
     /// Generate or retrieve the user's referral code
@@ -180,8 +182,9 @@ final class ReferralManager: ObservableObject {
     /// Redeem a referral code and apply CloudKit updates.
     /// Returns the referrer if the code is successfully applied, nil otherwise.
     func redeemReferralCode(_ code: String, currentUser: User, displayName: String) async -> User? {
-        guard let cloudKitService = cloudKitService else {
-            AppLogger.general.warning("CloudKit service not configured for referral processing")
+        guard let userCloudService = userCloudService,
+              let connectionCloudService = connectionCloudService else {
+            AppLogger.general.warning("CloudKit services not configured for referral processing")
             return nil
         }
 
@@ -207,7 +210,7 @@ final class ReferralManager: ObservableObject {
         }
 
         // Look up the referrer by code
-        let referrer = try? await cloudKitService.lookupUserByReferralCode(normalizedCode)
+        let referrer = try? await userCloudService.lookupUserByReferralCode(normalizedCode)
         guard let referrer = referrer else {
             AppLogger.general.warning("Referral code not found: \(normalizedCode)")
             return nil
@@ -219,10 +222,10 @@ final class ReferralManager: ObservableObject {
         }
 
         if referrer.id != currentUser.id {
-            let connectionExists = (try? await cloudKitService.connectionExists(between: referrer.id, and: currentUser.id)) ?? false
+            let connectionExists = (try? await connectionCloudService.connectionExists(between: referrer.id, and: currentUser.id)) ?? false
             if !connectionExists {
                 do {
-                    try await cloudKitService.createAutoFriendConnection(
+                    try await connectionCloudService.createAutoFriendConnection(
                         referrerId: referrer.id,
                         newUserId: currentUser.id,
                         referrerDisplayName: referrer.displayName,
@@ -245,7 +248,7 @@ final class ReferralManager: ObservableObject {
         // The new user creates this record (so they have permission)
         // The referrer's count is computed by counting these records
         do {
-            try await cloudKitService.recordReferralSignup(referrerId: referrer.id, newUserId: currentUser.id)
+            try await userCloudService.recordReferralSignup(referrerId: referrer.id, newUserId: currentUser.id)
         } catch {
             AppLogger.general.error("Failed to record referral signup: \(error.localizedDescription)")
             return nil

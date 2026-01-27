@@ -22,7 +22,8 @@ extension Notification.Name {
 /// Thread-safe repository for Collection operations
 actor CollectionRepository {
     private let modelContainer: ModelContainer
-    private let cloudKitService: CloudKitServiceFacade
+    private let cloudKitCore: CloudKitCore
+    private let collectionCloudService: CollectionCloudService
     private let operationQueueService: OperationQueueService
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
@@ -32,11 +33,13 @@ actor CollectionRepository {
 
     init(
         modelContainer: ModelContainer,
-        cloudKitService: CloudKitServiceFacade,
+        cloudKitCore: CloudKitCore,
+        collectionCloudService: CollectionCloudService,
         operationQueueService: OperationQueueService
     ) {
         self.modelContainer = modelContainer
-        self.cloudKitService = cloudKitService
+        self.cloudKitCore = cloudKitCore
+        self.collectionCloudService = collectionCloudService
         self.operationQueueService = operationQueueService
 
         // Start retry mechanism for failed syncs
@@ -328,7 +331,7 @@ actor CollectionRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, id, cloudKitService] in
+        Task.detached { [weak self, id, collectionCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
@@ -336,7 +339,7 @@ actor CollectionRepository {
 
             // Delete from CloudKit
             do {
-                try await cloudKitService.deleteCollection(id)
+                try await collectionCloudService.deleteCollection(id)
                 // Deleted collection from CloudKit
 
                 // Mark operation as completed
@@ -376,7 +379,7 @@ actor CollectionRepository {
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
         // Attempting to sync collection to CloudKit
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
 
         guard isAvailable else {
             logger.warning("⚠️ CloudKit not available - collection will sync later: \(collection.name)")
@@ -386,7 +389,7 @@ actor CollectionRepository {
 
         do {
             // Syncing collection to CloudKit
-            try await cloudKitService.saveCollection(collection)
+            try await collectionCloudService.saveCollection(collection)
             // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
@@ -419,7 +422,7 @@ actor CollectionRepository {
         guard !self.pendingSyncCollections.isEmpty else { return }
 
         // Retrying sync for pending collections
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             // CloudKit still not available - will retry later
             return
@@ -437,7 +440,7 @@ actor CollectionRepository {
                     continue
                 }
 
-                try await cloudKitService.saveCollection(collection)
+                try await collectionCloudService.saveCollection(collection)
                 self.pendingSyncCollections.remove(collectionId)
                 // Retry successful for collection
             } catch {
@@ -488,14 +491,14 @@ actor CollectionRepository {
 
     /// Fetch collections from CloudKit and sync to local database
     func syncFromCloudKit(userId: UUID) async throws {
-        let isAvailable = await cloudKitService.isAvailable()
+        let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             // CloudKit not available - skipping sync
             return
         }
 
         do {
-            let cloudCollections = try await cloudKitService.fetchCollections(forUserId: userId)
+            let cloudCollections = try await collectionCloudService.fetchCollections(forUserId: userId)
             // Fetched collections from CloudKit
 
             // Merge with local collections

@@ -54,10 +54,11 @@ class SharedCollectionLoader {
         for recipeId in collection.recipeIds {
             do {
                 // Fetch recipe from CloudKit PUBLIC database
-                let recipe = try await dependencies.cloudKitService.fetchPublicRecipe(
-                    recipeId: recipeId,
-                    ownerId: collection.userId
-                )
+                guard let recipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId) else {
+                    skippedCount += 1
+                    logger.warning("Recipe not found in public database: \(recipeId)")
+                    continue
+                }
 
                 // Check if the viewer can access this recipe
                 if recipe.isAccessible(to: viewerId, isFriend: isFriend) {

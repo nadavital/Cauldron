@@ -243,7 +243,7 @@ struct CollectionDetailView: View {
                     for recipeId in collection.recipeIds {
                         group.addTask {
                             do {
-                                return try await dependencies.cloudKitService.fetchPublicRecipe(id: recipeId)
+                                return try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId)
                             } catch {
                                 AppLogger.general.warning("Failed to fetch recipe \(recipeId) from CloudKit: \(error.localizedDescription)")
                                 return nil
@@ -900,7 +900,7 @@ struct CollectionRecipeSelectorSheet: View {
                     recipeOwner = cachedOwner
                 } else {
                     do {
-                        recipeOwner = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId)
+                        recipeOwner = try await dependencies.userCloudService.fetchUser(byUserId: ownerId)
                         if let owner = recipeOwner {
                             recipeOwnerCache[ownerId] = owner
                         }

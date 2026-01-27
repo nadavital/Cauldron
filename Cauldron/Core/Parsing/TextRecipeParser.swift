@@ -26,11 +26,12 @@ actor TextRecipeParser: RecipeParser {
         var ingredients: [Ingredient] = []
         var steps: [CookStep] = []
         var currentSection: Section = .unknown
-        
+        var foundExplicitSection = false  // Track if we found any explicit section header
+
         enum Section {
             case unknown, ingredients, steps
         }
-        
+
         var currentIngredientSection: String? = nil
         var currentStepSection: String? = nil
         
@@ -41,36 +42,35 @@ actor TextRecipeParser: RecipeParser {
             // Detect section headers
             if lowercased.contains("ingredient") {
                 currentSection = .ingredients
+                foundExplicitSection = true
                 continue
             } else if lowercased.contains("instruction") || lowercased.contains("step") || lowercased.contains("direction") {
                 currentSection = .steps
+                foundExplicitSection = true
                 continue
             }
             
-            // Detect Ingredient/Step Section Headers (e.g. "For the Dough:", "Filling:", "Prep:")
-            // Heuristic: Ends with colon, or is short and doesn't look like an ingredient/step
+            // Detect Ingredient/Step Subsection Headers (e.g. "For the Dough:", "Filling:")
+            // Only treat as subsection header if:
+            // - Line is short (1-4 words) AND ends with colon
+            // - Doesn't contain numbers (which would indicate a quantity)
+            // - Doesn't match patterns like "Step 1:" or "Note:"
             if trimmedLine.hasSuffix(":") {
                 let potentialSection = String(trimmedLine.dropLast()).trimmingCharacters(in: .whitespaces)
-                
-                if currentSection == .ingredients || currentSection == .unknown {
-                     // If we were in ingredients, or unknown, this could be a new ingredient section
-                     // But if we've already seen steps, or if the header looks like "Instructions:", switch context
-                     if lowercased.contains("instruction") || lowercased.contains("step") {
-                         // It's a header for the WHOLE steps block, not a subsection
-                         currentSection = .steps
-                         currentIngredientSection = nil // Reset ingredient section
-                         currentStepSection = nil
-                         continue
-                     }
-                     
-                     // It's likely an ingredient subsection
-                     currentIngredientSection = potentialSection
-                     currentSection = .ingredients
-                     continue
-                } else if currentSection == .steps {
-                    // We are in steps, so this is likely a step subsection (e.g. "To Assemble:")
-                    currentStepSection = potentialSection
-                    continue
+                let wordCount = potentialSection.components(separatedBy: .whitespaces).count
+                let hasNumbers = potentialSection.contains(where: { $0.isNumber })
+                let isNoteOrStep = lowercased.hasPrefix("step") || lowercased.hasPrefix("note")
+
+                // Only treat as subsection if short, no numbers, and not "Step X:" or "Note:"
+                if wordCount <= 4 && !hasNumbers && !isNoteOrStep {
+                    if currentSection == .ingredients || currentSection == .unknown {
+                        currentIngredientSection = potentialSection
+                        currentSection = .ingredients
+                        continue
+                    } else if currentSection == .steps {
+                        currentStepSection = potentialSection
+                        continue
+                    }
                 }
             }
             
@@ -80,43 +80,33 @@ actor TextRecipeParser: RecipeParser {
                 ingredients.append(parseIngredient(line, section: currentIngredientSection))
                 
             case .steps:
-                let timers = TimerExtractor.extractTimers(from: line)
+                let cleanedStep = cleanListMarkers(line)
+                let timers = TimerExtractor.extractTimers(from: cleanedStep)
                 steps.append(CookStep(
                     index: steps.count,
-                    text: line,
+                    text: cleanedStep,
                     timers: timers,
                     section: currentStepSection
                 ))
                 
             case .unknown:
-                // Try to infer section from content
-                if line.first?.isNumber == true || line.hasPrefix("•") || line.hasPrefix("-") {
-                    // Looks like a list item
-                    if ingredients.isEmpty {
-                        currentSection = .ingredients
-                        ingredients.append(parseIngredient(line))
-                    } else {
-                        currentSection = .steps
-                        let timers = TimerExtractor.extractTimers(from: line)
-                        steps.append(CookStep(
-                            index: steps.count,
-                            text: line,
-                            timers: timers
-                        ))
-                    }
-                }
+                // Without explicit section headers, don't try to guess
+                // Let the heuristic parser handle it after the loop
+                break
             }
         }
         
-        // If we still don't have a clear split, try heuristic
-        if ingredients.isEmpty || steps.isEmpty {
+        // If we didn't find explicit sections and don't have a clear split, try heuristic
+        // But if we DID find explicit sections (like "Instructions:"), respect that and throw
+        // appropriate errors rather than falling back to heuristic
+        if !foundExplicitSection && (ingredients.isEmpty || steps.isEmpty) {
             return try parseHeuristic(lines)
         }
-        
+
         guard !ingredients.isEmpty else {
             throw ParsingError.noIngredientsFound
         }
-        
+
         guard !steps.isEmpty else {
             throw ParsingError.noStepsFound
         }
@@ -128,12 +118,18 @@ actor TextRecipeParser: RecipeParser {
         )
     }
     
+    /// Remove bullet points, numbers, and other list markers from text
+    private func cleanListMarkers(_ line: String) -> String {
+        line
+            .replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^[•●○◦▪▫\-]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^Step\s*\d*[:\.]?\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     private func parseIngredient(_ line: String, section: String? = nil) -> Ingredient {
         // Remove bullet points and numbering
-        var cleaned = line
-            .replacingOccurrences(of: #"^\d+\.\s*"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"^[•\-]\s*"#, with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
+        let cleaned = cleanListMarkers(line)
         
         // Try to parse quantity if present
         if let quantity = QuantityParser.parse(cleaned) {
@@ -209,10 +205,11 @@ actor TextRecipeParser: RecipeParser {
                 ingredients.append(parseIngredient(line))
             } else {
                 // Likely a step
-                let timers = TimerExtractor.extractTimers(from: line)
+                let cleanedStep = cleanListMarkers(line)
+                let timers = TimerExtractor.extractTimers(from: cleanedStep)
                 steps.append(CookStep(
                     index: steps.count,
-                    text: line,
+                    text: cleanedStep,
                     timers: timers
                 ))
             }

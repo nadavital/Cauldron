@@ -343,7 +343,7 @@ struct OnboardingView: View {
     /// Process a referral code: look up referrer, create auto-friend connection, increment count
     @MainActor
     private func processReferralCode(_ code: String, displayName: String) async {
-        ReferralManager.shared.configure(with: dependencies.cloudKitService)
+        ReferralManager.shared.configure(userCloudService: dependencies.userCloudService, connectionCloudService: dependencies.connectionCloudService)
 
         guard let currentUser = CurrentUserSession.shared.currentUser else {
             AppLogger.general.warning("No current user available for referral processing")

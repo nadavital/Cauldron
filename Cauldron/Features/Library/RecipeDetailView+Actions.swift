@@ -39,7 +39,7 @@ extension RecipeDetailView {
                 await withTaskGroup(of: Recipe?.self) { group in
                     for missingId in missingIds {
                         group.addTask {
-                            try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
+                            try? await self.dependencies.recipeCloudService.fetchPublicRecipe(id: missingId)
                         }
                     }
 
@@ -80,10 +80,9 @@ extension RecipeDetailView {
 
                                 if fetchedRecipe.cloudImageRecordName != nil {
                                     do {
-                                        let publicDB = try await self.dependencies.cloudKitService.getPublicDatabase()
                                         if let filename = try await self.dependencies.imageManager.downloadImageFromCloud(
                                             recipeId: previewRecipe.id,
-                                            database: publicDB
+                                            fromPublic: true
                                         ) {
                                             let imageURL = await self.dependencies.imageManager.imageURL(for: filename)
                                             let updatedPreview = previewRecipe.withImageURL(imageURL)
@@ -210,7 +209,7 @@ extension RecipeDetailView {
         defer { isLoadingOwner = false }
 
         do {
-            recipeOwner = try await dependencies.cloudKitService.fetchUser(byUserId: ownerId)
+            recipeOwner = try await dependencies.userCloudService.fetchUser(byUserId: ownerId)
             AppLogger.general.info("Loaded recipe owner: \(recipeOwner?.displayName ?? "unknown")")
         } catch {
             AppLogger.general.warning("Failed to load recipe owner: \(error.localizedDescription)")
@@ -222,7 +221,7 @@ extension RecipeDetailView {
         defer { isLoadingCreator = false }
 
         do {
-            originalCreator = try await dependencies.cloudKitService.fetchUser(byUserId: creatorId)
+            originalCreator = try await dependencies.userCloudService.fetchUser(byUserId: creatorId)
             AppLogger.general.info("Loaded original creator: \(originalCreator?.displayName ?? "unknown")")
         } catch {
             AppLogger.general.warning("Failed to load original creator: \(error.localizedDescription)")
@@ -245,7 +244,7 @@ extension RecipeDetailView {
                     await withTaskGroup(of: Recipe?.self) { group in
                         for missingId in missingIds {
                             group.addTask {
-                                try? await self.dependencies.cloudKitService.fetchPublicRecipe(id: missingId)
+                                try? await self.dependencies.recipeCloudService.fetchPublicRecipe(id: missingId)
                             }
                         }
 
@@ -296,10 +295,9 @@ extension RecipeDetailView {
 
                     if relatedRecipe.cloudImageRecordName != nil {
                         do {
-                            let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                            if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                            if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
                                 recipeId: relatedRecipe.id,
-                                from: publicDB
+                                fromPublic: true
                             ), let image = UIImage(data: imageData) {
                                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
                                 let imageURL = await dependencies.imageManager.imageURL(for: filename)
@@ -364,10 +362,9 @@ extension RecipeDetailView {
 
                 if originalCloudImageRecordName != nil {
                     do {
-                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                        if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
                             recipeId: originalRecipeId,
-                            from: publicDB
+                            fromPublic: true
                         ), let image = UIImage(data: imageData) {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
                             let imageURL = await dependencies.imageManager.imageURL(for: filename)
@@ -431,10 +428,9 @@ extension RecipeDetailView {
 
                 if recipe.cloudImageRecordName != nil && copiedRecipe.imageURL == nil {
                     do {
-                        let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
-                        if let imageData = try await dependencies.cloudKitService.downloadImageAsset(
+                        if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
                             recipeId: recipe.id,
-                            from: publicDB
+                            fromPublic: true
                         ), let image = UIImage(data: imageData) {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
                             let imageURL = await dependencies.imageManager.imageURL(for: filename)
@@ -483,10 +479,9 @@ extension RecipeDetailView {
                 // Only download image if this is a preview recipe (not user's own recipe)
                 if existingRecipe.isPreview && existingRecipe.imageURL == nil && recipe.cloudImageRecordName != nil {
                     AppLogger.general.info("📥 Downloading image for existing preview recipe: \(recipe.title)")
-                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
                     if let filename = try await dependencies.imageManager.downloadImageFromCloud(
                         recipeId: recipe.id,
-                        database: publicDB
+                        fromPublic: true
                     ) {
                         let imageURL = await dependencies.imageManager.imageURL(for: filename)
                         let updatedRecipe = existingRecipe.withImageURL(imageURL)
@@ -534,10 +529,9 @@ extension RecipeDetailView {
 
             if recipe.cloudImageRecordName != nil {
                 do {
-                    let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
                     if let filename = try await dependencies.imageManager.downloadImageFromCloud(
                         recipeId: previewRecipe.id,
-                        database: publicDB
+                        fromPublic: true
                     ) {
                         let imageURL = await dependencies.imageManager.imageURL(for: filename)
                         let updatedPreview = previewRecipe.withImageURL(imageURL)
@@ -637,10 +631,10 @@ extension RecipeDetailView {
         defer { isCheckingForUpdates = false }
 
         do {
-            let original = try await dependencies.cloudKitService.fetchPublicRecipe(
-                recipeId: originalRecipeId,
-                ownerId: originalOwnerId
-            )
+            guard let original = try await dependencies.recipeCloudService.fetchPublicRecipe(id: originalRecipeId) else {
+                AppLogger.general.warning("Original recipe not found: \(originalRecipeId)")
+                return
+            }
 
             originalRecipe = original
 

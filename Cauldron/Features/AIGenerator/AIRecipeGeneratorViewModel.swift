@@ -7,28 +7,31 @@
 
 import Foundation
 import SwiftUI
-import Combine
 import os
 import FoundationModels
 
 @MainActor
-class AIRecipeGeneratorViewModel: ObservableObject {
-    @Published var prompt: String = ""
-    @Published var selectedCuisines: Set<RecipeCategory> = []
-    @Published var selectedDiets: Set<RecipeCategory> = []
-    @Published var selectedTimes: Set<RecipeCategory> = []
-    @Published var selectedTypes: Set<RecipeCategory> = []
-    @Published var additionalNotes: String = ""
-    @Published var useCategoryMode: Bool = true
-    @Published var isGenerating: Bool = false
-    @Published var isSaving: Bool = false
-    @Published var partialRecipe: GeneratedRecipe.PartiallyGenerated?
-    @Published var generatedRecipe: Recipe?
-    @Published var errorMessage: String?
-    @Published var generationProgress: GenerationProgress = .idle
+@Observable
+final class AIRecipeGeneratorViewModel {
+    var prompt: String = ""
+    var selectedCuisines: Set<RecipeCategory> = []
+    var selectedDiets: Set<RecipeCategory> = []
+    var selectedTimes: Set<RecipeCategory> = []
+    var selectedTypes: Set<RecipeCategory> = []
+    var additionalNotes: String = ""
+    var useCategoryMode: Bool = true
+    var isGenerating: Bool = false
+    var isSaving: Bool = false
+    var partialRecipe: GeneratedRecipe.PartiallyGenerated?
+    var generatedRecipe: Recipe?
+    var errorMessage: String?
+    var generationProgress: GenerationProgress = .idle
 
     let dependencies: DependencyContainer
     private var generationTask: Task<Void, Never>?
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
 
     enum GenerationProgress {
         case idle

@@ -7,14 +7,13 @@
 
 import SwiftUI
 import os
-import Combine
 
 /// View for managing connections/friends
 struct ConnectionsView: View {
-    @StateObject private var viewModel: ConnectionsViewModel
-    
+    @State private var viewModel: ConnectionsViewModel
+
     init(dependencies: DependencyContainer) {
-        _viewModel = StateObject(wrappedValue: ConnectionsViewModel(dependencies: dependencies))
+        _viewModel = State(initialValue: ConnectionsViewModel(dependencies: dependencies))
     }
     
     var body: some View {
@@ -306,16 +305,16 @@ struct SentRequestCard: View {
 }
 
 @MainActor
-class ConnectionsViewModel: ObservableObject {
-    @Published var connections: [Connection] = []
-    @Published var receivedRequests: [Connection] = []
-    @Published var sentRequests: [Connection] = []
-    @Published var usersMap: [UUID: User] = [:]
-    @Published var showErrorAlert = false
-    @Published var alertMessage = ""
+@Observable
+final class ConnectionsViewModel {
+    var connections: [Connection] = []
+    var receivedRequests: [Connection] = []
+    var sentRequests: [Connection] = []
+    var usersMap: [UUID: User] = [:]
+    var showErrorAlert = false
+    var alertMessage = ""
 
     let dependencies: DependencyContainer
-    private var cancellables = Set<AnyCancellable>()
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
 
     // CRITICAL: Use a shared timestamp across all ConnectionsViewModel instances
@@ -333,38 +332,36 @@ class ConnectionsViewModel: ObservableObject {
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
-
-        // Subscribe to connection manager updates
-        dependencies.connectionManager.$connections
-            .map { managedConnections in
-                // Filter and categorize connections
-                let all = Array(managedConnections.values)
-                let accepted = all.filter { $0.connection.isAccepted }.map { $0.connection }
-                let received = all.filter {
-                    $0.connection.toUserId == (CurrentUserSession.shared.userId ?? UUID()) &&
-                    $0.connection.status == .pending
-                }.map { $0.connection }
-                let sent = all.filter {
-                    $0.connection.fromUserId == (CurrentUserSession.shared.userId ?? UUID()) &&
-                    $0.connection.status == .pending
-                }.map { $0.connection }
-
-                return (accepted, received, sent)
-            }
-            .sink { [weak self] (accepted, received, sent) in
-                self?.connections = accepted
-                self?.receivedRequests = received
-                self?.sentRequests = sent
-            }
-            .store(in: &cancellables)
     }
-    
+
+    // Required to prevent crashes in XCTest due to Swift bug #85221
+    nonisolated deinit {}
+
     func loadConnections(forceRefresh: Bool = false) async {
         // Use ConnectionManager - it handles caching and sync automatically
         await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
 
+        // Update connections from manager
+        updateConnectionsFromManager()
+
         // Load user details for all connections
         await loadUserDetails(forceRefresh: forceRefresh)
+    }
+
+    /// Update local connection arrays from ConnectionManager
+    private func updateConnectionsFromManager() {
+        let managedConnections = dependencies.connectionManager.connections
+        let all = Array(managedConnections.values)
+
+        connections = all.filter { $0.connection.isAccepted }.map { $0.connection }
+        receivedRequests = all.filter {
+            $0.connection.toUserId == currentUserId &&
+            $0.connection.status == .pending
+        }.map { $0.connection }
+        sentRequests = all.filter {
+            $0.connection.fromUserId == currentUserId &&
+            $0.connection.status == .pending
+        }.map { $0.connection }
     }
 
     /// Public method to preload user details (called from ContentView)
@@ -411,12 +408,11 @@ class ConnectionsViewModel: ObservableObject {
                 await ImageCache.shared.clearProfileImages()
             }
 
-            // Fetch users from CloudKit in background
-            for userId in userIds {
-                if let cloudUser = try? await dependencies.cloudKitService.fetchUser(byUserId: userId) {
-                    usersMap[userId] = cloudUser
+            // Batch fetch users from CloudKit (single query instead of N queries)
+            if let cloudUsers = try? await dependencies.userCloudService.fetchUsers(byUserIds: Array(userIds)) {
+                for cloudUser in cloudUsers {
+                    usersMap[cloudUser.id] = cloudUser
                     try? await dependencies.sharingRepository.save(cloudUser)
-                    // Fetched and cached user from CloudKit (don't log routine operations)
                 }
             }
 

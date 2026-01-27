@@ -72,14 +72,14 @@ extension RecipeRepository {
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipeToSave, cloudKitService] in
+        Task.detached { [weak self, recipeToSave, cloudKitCore, recipeCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipeToSave.id)
 
             // Attempt sync
-            await self.syncRecipeToCloudKit(recipeToSave, cloudKitService: cloudKitService)
+            await self.syncRecipeToCloudKit(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Upload image to CloudKit if exists
             if recipeToSave.imageURL != nil {
@@ -87,7 +87,7 @@ extension RecipeRepository {
             }
 
             // If visibility is public, also copy to PUBLIC database for sharing
-            await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitService: cloudKitService)
+            await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Mark operation as completed
             await self.operationQueueService.markCompleted(
@@ -145,8 +145,7 @@ extension RecipeRepository {
         // Download image from Public database if exists
         if recipe.imageURL != nil {
             do {
-                let publicDB = try await cloudKitService.getPublicDatabase()
-                if let imageData = try await cloudKitService.downloadImageAsset(recipeId: recipe.id, from: publicDB),
+                if let imageData = try await recipeCloudService.downloadImageAsset(recipeId: recipe.id, fromPublic: true),
                    let image = UIImage(data: imageData) {
                     // Save image locally with new recipe ID
                     _ = try await imageManager.saveImage(image, recipeId: newRecipe.id)
@@ -276,17 +275,17 @@ extension RecipeRepository {
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipe, oldRecipe, skipImageSync, cloudKitService] in
+        Task.detached { [weak self, recipe, oldRecipe, skipImageSync, cloudKitCore, recipeCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             // Sync recipe metadata to CloudKit FIRST (recipe record must exist before image can be attached)
-            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Sync to public database if needed
-            await self.syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Sync image changes only if not skipped (returns updated recipe with cloud metadata)
             if !skipImageSync {
@@ -298,10 +297,10 @@ extension RecipeRepository {
                 // If image metadata was updated, sync the updated recipe to CloudKit again
                 if let recipeWithImageMetadata = recipeWithImageMetadata,
                    recipeWithImageMetadata.cloudImageRecordName != recipe.cloudImageRecordName {
-                    await self.syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitService: cloudKitService)
+                    await self.syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
                     if recipeWithImageMetadata.visibility == .publicRecipe {
-                        await self.syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitService: cloudKitService)
+                        await self.syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
                     }
                 }
             }
@@ -382,12 +381,12 @@ extension RecipeRepository {
         )
 
         // 4. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitService] in
+        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
             guard let self = self else { return }
 
             // Sync to CloudKit
-            await self.syncRecipeToCloudKit(recipe, cloudKitService: cloudKitService)
-            await self.syncRecipeToPublicDatabase(recipe, cloudKitService: cloudKitService)
+            await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Mark operation as completed
             await self.operationQueueService.markCompleted(
@@ -542,7 +541,7 @@ extension RecipeRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitService] in
+        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
@@ -563,10 +562,10 @@ extension RecipeRepository {
             // Delete recipe metadata from CloudKit
             // IMPORTANT: Only delete if this is the user's own recipe, NOT a preview
             if !recipe.isPreview {
-                await self.deleteRecipeFromCloudKit(recipe, cloudKitService: cloudKitService)
+                await self.deleteRecipeFromCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
                 // Also delete from PUBLIC database if it was shared
-                await self.deleteRecipeFromPublicDatabase(recipe, cloudKitService: cloudKitService)
+                await self.deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
             }
 
             // Mark operation as completed

@@ -126,12 +126,12 @@ struct DeleteAccountView: View {
             // Step 3: Delete all connections involving this user
             AppLogger.general.info("Deleting all user connections...")
             try await dependencies.connectionRepository.deleteAllConnectionsForUser(userId: userId)
-            try await dependencies.cloudKitService.deleteAllConnectionsForUser(userId: userId)
+            try await dependencies.connectionCloudService.deleteAllConnectionsForUser(userId: userId)
             AppLogger.general.info("✅ All connections deleted")
 
             // Step 4: Delete user profile from CloudKit
             AppLogger.general.info("Deleting user profile from CloudKit...")
-            try await dependencies.cloudKitService.deleteUserProfile(userId: userId)
+            try await dependencies.userCloudService.deleteUserProfile(userId: userId)
             AppLogger.general.info("✅ User profile deleted from CloudKit")
 
             // Step 5: Clear local user data and sign out
