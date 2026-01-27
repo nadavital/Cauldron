@@ -14,6 +14,7 @@ struct ProfileAvatar: View {
     let dependencies: DependencyContainer?
     @State private var profileImage: UIImage?
     @State private var isLoadingImage = false
+    @ObservedObject private var currentUserSession = CurrentUserSession.shared
 
     init(user: User, size: CGFloat, dependencies: DependencyContainer? = nil) {
         self.user = user
@@ -26,19 +27,28 @@ struct ProfileAvatar: View {
         _profileImage = State(initialValue: ImageCache.shared.get(cacheKey))
     }
 
+    /// Returns the current user from session if this is the current user's avatar, otherwise the passed user
+    /// This ensures profile changes propagate immediately throughout the app
+    private var displayUser: User {
+        if let currentUser = currentUserSession.currentUser, currentUser.id == user.id {
+            return currentUser
+        }
+        return user
+    }
+
     private var backgroundColor: Color {
-        if let colorHex = user.profileColor, let color = Color.fromHex(colorHex) {
+        if let colorHex = displayUser.profileColor, let color = Color.fromHex(colorHex) {
             return color
         }
         return .profileOrange // Default fallback
     }
 
     private var displayContent: String {
-        if let emoji = user.profileEmoji, !emoji.isEmpty {
+        if let emoji = displayUser.profileEmoji, !emoji.isEmpty {
             return emoji
         }
         // Fallback to initials
-        return String(user.displayName.prefix(2).uppercased())
+        return String(displayUser.displayName.prefix(2).uppercased())
     }
 
     private var fontSize: CGFloat {
@@ -68,13 +78,25 @@ struct ProfileAvatar: View {
                     .overlay(
                         Text(displayContent)
                             .font(.system(size: fontSize))
-                            .fontWeight(user.profileEmoji != nil ? .regular : .bold)
+                            .fontWeight(displayUser.profileEmoji != nil ? .regular : .bold)
                             .foregroundColor(backgroundColor)
                     )
             }
         }
         .task {
             await loadProfileImage()
+        }
+        .onChange(of: displayUser.profileImageURL) { oldValue, newValue in
+            // If user switched from image to emoji (profileImageURL became nil), clear local image
+            if newValue == nil && oldValue != nil {
+                profileImage = nil
+            }
+            // If profileImageURL changed, reload the image
+            if newValue != oldValue {
+                Task {
+                    await loadProfileImage()
+                }
+            }
         }
     }
 

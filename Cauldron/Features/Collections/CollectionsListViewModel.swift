@@ -21,9 +21,29 @@ class CollectionsListViewModel: ObservableObject {
     @Published var showError = false
 
     let dependencies: DependencyContainer
+    private var cancellables = Set<AnyCancellable>()
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+        setupCollectionNotificationObserver()
+    }
+
+    /// Setup observer for collection metadata changes to update UI immediately
+    private func setupCollectionNotificationObserver() {
+        NotificationCenter.default.publisher(for: .collectionMetadataChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let collectionId = notification.userInfo?["collectionId"] as? UUID,
+                      let updatedCollection = notification.userInfo?["collection"] as? Collection else {
+                    return
+                }
+                // Update the collection in our local array for immediate UI refresh
+                if let index = self.ownedCollections.firstIndex(where: { $0.id == collectionId }) {
+                    self.ownedCollections[index] = updatedCollection
+                }
+            }
+            .store(in: &cancellables)
     }
 
     /// Load all collections (owned + referenced)

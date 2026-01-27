@@ -9,6 +9,16 @@ import Foundation
 import SwiftData
 import os
 
+// MARK: - Collection Notification Names
+extension Notification.Name {
+    /// Posted when collection metadata (name, emoji, color, description, cover image) changes
+    static let collectionMetadataChanged = Notification.Name("CollectionMetadataChanged")
+    /// Posted when collection visibility changes
+    static let collectionUpdated = Notification.Name("CollectionUpdated")
+    /// Posted when recipes in a collection change
+    static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
+}
+
 /// Thread-safe repository for Collection operations
 actor CollectionRepository {
     private let modelContainer: ModelContainer
@@ -156,6 +166,11 @@ actor CollectionRepository {
         // Capture old state for change detection
         let oldVisibility = RecipeVisibility(rawValue: existingModel.visibility) ?? .publicRecipe
         let oldRecipeIds = (try? JSONDecoder().decode([UUID].self, from: existingModel.recipeIdsBlob)) ?? []
+        let oldName = existingModel.name
+        let oldEmoji = existingModel.emoji
+        let oldColor = existingModel.color
+        let oldDescription = existingModel.descriptionText
+        let oldCoverImageType = existingModel.coverImageType
 
         // 1. Update locally (immediate)
         let updatedModel = try CollectionModel.from(collection)
@@ -202,6 +217,23 @@ actor CollectionRepository {
                 userInfo: [
                     "collectionId": collection.id,
                     "recipeIds": collection.recipeIds
+                ]
+            )
+        }
+
+        // Post notification for metadata changes (name, emoji, color, description, cover image)
+        let metadataChanged = oldName != collection.name ||
+                              oldEmoji != collection.emoji ||
+                              oldColor != collection.color ||
+                              oldDescription != collection.description ||
+                              oldCoverImageType != collection.coverImageType.rawValue
+        if metadataChanged {
+            NotificationCenter.default.post(
+                name: .collectionMetadataChanged,
+                object: nil,
+                userInfo: [
+                    "collectionId": collection.id,
+                    "collection": collection
                 ]
             )
         }

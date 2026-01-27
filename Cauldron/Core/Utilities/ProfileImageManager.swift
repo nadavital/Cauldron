@@ -61,12 +61,17 @@ actor ProfileImageManager {
         return UIImage(data: imageData)
     }
 
-    /// Delete profile image file
+    /// Delete profile image file and clear from cache
     func deleteImage(userId: UUID) {
         let filename = "\(userId.uuidString).jpg"
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
-        AppLogger.general.info("🗑️ Deleted profile image for user \(userId)")
+
+        // Clear from ImageCache to prevent stale image display
+        Task { @MainActor in
+            let cacheKey = ImageCache.profileImageKey(userId: userId)
+            ImageCache.shared.remove(cacheKey)
+        }
     }
 
     /// Get full file URL for a user ID
