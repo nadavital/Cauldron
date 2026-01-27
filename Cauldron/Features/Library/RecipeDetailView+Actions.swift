@@ -467,9 +467,21 @@ extension RecipeDetailView {
     }
 
     func saveAsPreviewIfNeeded() async {
+        // Safety check: Don't create preview for recipes owned by current user
+        // This prevents race conditions where isOwnedByCurrentUser() returns false
+        // for a recipe that was just created (before ownerId is properly set on the view's recipe object)
+        if let currentUserId = CurrentUserSession.shared.userId,
+           let recipeOwnerId = recipe.ownerId,
+           currentUserId == recipeOwnerId {
+            AppLogger.general.debug("Skipping preview save - recipe belongs to current user: \(recipe.title)")
+            return
+        }
+
         do {
             if let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
-                if existingRecipe.imageURL == nil && recipe.cloudImageRecordName != nil {
+                // Recipe already exists locally - don't create a duplicate
+                // Only download image if this is a preview recipe (not user's own recipe)
+                if existingRecipe.isPreview && existingRecipe.imageURL == nil && recipe.cloudImageRecordName != nil {
                     AppLogger.general.info("📥 Downloading image for existing preview recipe: \(recipe.title)")
                     let publicDB = try await dependencies.cloudKitService.getPublicDatabase()
                     if let filename = try await dependencies.imageManager.downloadImageFromCloud(
@@ -478,7 +490,7 @@ extension RecipeDetailView {
                     ) {
                         let imageURL = await dependencies.imageManager.imageURL(for: filename)
                         let updatedRecipe = existingRecipe.withImageURL(imageURL)
-                        try await dependencies.recipeRepository.update(updatedRecipe)
+                        try await dependencies.recipeRepository.update(updatedRecipe, skipImageSync: true)
                         AppLogger.general.info("✅ Updated preview with image: \(recipe.title)")
 
                         self.recipe = updatedRecipe

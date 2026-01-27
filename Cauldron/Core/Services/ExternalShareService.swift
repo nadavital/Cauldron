@@ -51,9 +51,9 @@ final class ExternalShareService: Sendable {
 
     private let session: URLSession
     private let imageManager: ImageManager
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
 
-    init(imageManager: ImageManager, cloudKitService: CloudKitService) {
+    init(imageManager: ImageManager, cloudKitService: CloudKitServiceFacade) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)

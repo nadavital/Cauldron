@@ -223,10 +223,19 @@ class RecipeEditorViewModel: ObservableObject {
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
             Task {
-                let result = await dependencies.recipeImageService.loadImage(from: imageURL)
-                if case .success(let image) = result {
+                // First check cache for optimistic UI (in case user just saved a new image)
+                let cacheKey = ImageCache.recipeImageKey(recipeId: recipe.id)
+                if let cachedImage = ImageCache.shared.get(cacheKey) {
                     await MainActor.run {
-                        selectedImage = image
+                        selectedImage = cachedImage
+                    }
+                } else {
+                    // Fall back to loading from URL
+                    let result = await dependencies.recipeImageService.loadImage(from: imageURL)
+                    if case .success(let image) = result {
+                        await MainActor.run {
+                            selectedImage = image
+                        }
                     }
                 }
             }

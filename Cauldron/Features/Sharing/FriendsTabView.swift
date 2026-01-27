@@ -122,11 +122,6 @@ struct FriendsTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 
-                // Shared collections section (only show if there are collections)
-                if !viewModel.sharedCollections.isEmpty {
-                    sharedCollectionsSection
-                }
-
                 if viewModel.isLoading {
                     ProgressView("Loading recipes...")
                         .padding(.vertical, 40)
@@ -322,32 +317,6 @@ struct FriendsTabView: View {
         }
     }
 
-    private var sharedCollectionsSection: some View {
-        VStack(spacing: 0) {
-            SectionHeader(title: "Shared Collections", icon: "folder.fill", color: .purple)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(viewModel.sharedCollections) { collection in
-                        NavigationLink {
-                            SharedCollectionDetailView(
-                                collection: collection,
-                                dependencies: dependencies
-                            )
-                        } label: {
-                            SharedCollectionCard(collection: collection)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-            }
-        }
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
-        .padding(.horizontal, 16)
-    }
 }
 
 /// Row view for a shared recipe with enhanced visuals (used in list view)
@@ -547,53 +516,6 @@ struct ConnectionsInlineView: View {
                 await viewModel.loadConnections(forceRefresh: true)
             }
         }
-    }
-}
-
-// MARK: - Shared Collection Card
-
-struct SharedCollectionCard: View {
-    let collection: Collection
-
-    var body: some View {
-        VStack(spacing: 8) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(selectedColor.opacity(0.15))
-                    .frame(width: 60, height: 60)
-
-                if let emoji = collection.emoji {
-                    Text(emoji)
-                        .font(.system(size: 32))
-                } else {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(selectedColor)
-                }
-            }
-
-            // Collection name
-            Text(collection.name)
-                .font(.caption)
-                .fontWeight(.medium)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(width: 80)
-
-            // Recipe count
-            Text("\(collection.recipeCount) recipes")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var selectedColor: Color {
-        if let colorHex = collection.color {
-            return Color(hex: colorHex) ?? .purple
-        }
-        return .purple
     }
 }
 

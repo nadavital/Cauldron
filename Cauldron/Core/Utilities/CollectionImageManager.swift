@@ -14,9 +14,9 @@ import os
 /// Manages collection cover image storage and retrieval
 actor CollectionImageManager {
     private let imageDirectoryURL: URL
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
 
-    init(cloudKitService: CloudKitService) {
+    init(cloudKitService: CloudKitServiceFacade) {
         self.cloudKitService = cloudKitService
 
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -61,12 +61,17 @@ actor CollectionImageManager {
         return UIImage(data: imageData)
     }
 
-    /// Delete collection cover image file
+    /// Delete collection cover image file and clear from cache
     func deleteImage(collectionId: UUID) {
         let filename = "\(collectionId.uuidString).jpg"
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
-        AppLogger.general.info("🗑️ Deleted collection cover image for \(collectionId)")
+
+        // Clear from ImageCache to prevent stale image display
+        Task { @MainActor in
+            let cacheKey = ImageCache.collectionImageKey(collectionId: collectionId)
+            ImageCache.shared.remove(cacheKey)
+        }
     }
 
     /// Get full file URL for a collection ID

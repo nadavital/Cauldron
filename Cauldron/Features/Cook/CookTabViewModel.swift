@@ -30,10 +30,11 @@ class CookTabViewModel: ObservableObject {
 
     let dependencies: DependencyContainer
     private var hasLoadedInitially = false
-
+    private var cancellables = Set<AnyCancellable>()
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
+        setupCollectionNotificationObserver()
 
         // CRITICAL: This is the key to preventing empty state flash!
         // If we have preloaded data from ContentView, use it immediately to populate arrays
@@ -101,6 +102,26 @@ class CookTabViewModel: ObservableObject {
         } catch {
             AppLogger.general.error("Failed to silently load cook tab data: \(error.localizedDescription)")
         }
+    }
+
+    /// Setup observer for collection metadata changes to update UI immediately
+    private func setupCollectionNotificationObserver() {
+        NotificationCenter.default.publisher(for: .collectionMetadataChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let collectionId = notification.userInfo?["collectionId"] as? UUID,
+                      let updatedCollection = notification.userInfo?["collection"] as? Collection else {
+                    return
+                }
+                // Update the collection in our local array for immediate UI refresh
+                if let index = self.collections.firstIndex(where: { $0.id == collectionId }) {
+                    self.collections[index] = updatedCollection
+                    // Re-sort by updatedAt
+                    self.collections.sort { $0.updatedAt > $1.updatedAt }
+                }
+            }
+            .store(in: &cancellables)
     }
 
     /// Fetch all recipes (owned recipes only - references have been deprecated)

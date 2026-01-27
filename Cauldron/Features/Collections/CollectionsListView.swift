@@ -19,126 +19,78 @@ struct CollectionsListView: View {
 
     var body: some View {
         ScrollView {
-                VStack(spacing: 24) {
-                    // My Collections Section
-                    if !viewModel.filteredOwnedCollections.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Only show "My Collections" header if there are also saved collections
-                            if !viewModel.filteredReferencedCollections.isEmpty {
-                                Text("My Collections")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                    .padding(.horizontal)
-                            }
-
-                            LazyVGrid(columns: [
-                                GridItem(.flexible(), spacing: 16),
-                                GridItem(.flexible(), spacing: 16)
-                            ], spacing: 20) {
-                                ForEach(viewModel.filteredOwnedCollections) { collection in
-                                    NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
-                                        CollectionCardView(
-                                            collection: collection,
-                                            recipeImages: recipeImageCache[collection.id] ?? [],
-                                            dependencies: dependencies
-                                        )
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .task(id: collection.id) {
-                                        // Load recipe images if not cached
-                                        if recipeImageCache[collection.id] == nil {
-                                            let images = await viewModel.getRecipeImages(for: collection)
-                                            recipeImageCache[collection.id] = images
-                                        }
-                                    }
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            Task {
-                                                await viewModel.deleteCollection(collection)
-                                            }
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
+            VStack(spacing: 24) {
+                // My Collections Section
+                if !viewModel.filteredOwnedCollections.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible(), spacing: 16),
+                            GridItem(.flexible(), spacing: 16)
+                        ], spacing: 20) {
+                            ForEach(viewModel.filteredOwnedCollections) { collection in
+                                NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
+                                    CollectionCardView(
+                                        collection: collection,
+                                        recipeImages: recipeImageCache[collection.id] ?? [],
+                                        dependencies: dependencies
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .task(id: collection.id) {
+                                    // Load recipe images if not cached
+                                    if recipeImageCache[collection.id] == nil {
+                                        let images = await viewModel.getRecipeImages(for: collection)
+                                        recipeImageCache[collection.id] = images
                                     }
                                 }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-
-                    // Saved Collections Section (Referenced from friends)
-                    if !viewModel.filteredReferencedCollections.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Saved Collections")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-
-                            LazyVGrid(columns: [
-                                GridItem(.flexible(), spacing: 16),
-                                GridItem(.flexible(), spacing: 16)
-                            ], spacing: 20) {
-                                ForEach(viewModel.filteredReferencedCollections) { reference in
-                                    NavigationLink {
-                                        ReferencedCollectionDetailView(
-                                            reference: reference,
-                                            dependencies: dependencies
-                                        )
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await viewModel.deleteCollection(collection)
+                                        }
                                     } label: {
-                                        CollectionReferenceCardView(
-                                            reference: reference,
-                                            recipeImages: []
-                                        )
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            Task {
-                                                await viewModel.deleteCollectionReference(reference)
-                                            }
-                                        } label: {
-                                            Label("Remove", systemImage: "trash")
-                                        }
+                                        Label("Delete", systemImage: "trash")
                                     }
                                 }
                             }
-                            .padding(.horizontal)
                         }
-                    }
-
-                    // Empty State
-                    if viewModel.filteredOwnedCollections.isEmpty && viewModel.filteredReferencedCollections.isEmpty {
-                        VStack(spacing: 16) {
-                            Spacer()
-                                .frame(height: 60)
-
-                            Image(systemName: "folder.badge.plus")
-                                .font(.system(size: 60))
-                                .foregroundColor(.secondary)
-
-                            Text("No Collections Yet")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-
-                            Text("Create a collection to organize your recipes")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-
-                            Button {
-                                showingCreateSheet = true
-                            } label: {
-                                Label("Create Collection", systemImage: "plus.circle.fill")
-                                    .font(.headline)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.cauldronOrange)
-                            .padding(.top, 8)
-                        }
-                        .padding()
+                        .padding(.horizontal)
                     }
                 }
-                .padding(.vertical)
+
+                // Empty State
+                if viewModel.filteredOwnedCollections.isEmpty {
+                    VStack(spacing: 16) {
+                        Spacer()
+                            .frame(height: 60)
+
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 60))
+                            .foregroundColor(.secondary)
+
+                        Text("No Collections Yet")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+
+                        Text("Create a collection to organize your recipes")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Button {
+                            showingCreateSheet = true
+                        } label: {
+                            Label("Create Collection", systemImage: "plus.circle.fill")
+                                .font(.headline)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.cauldronOrange)
+                        .padding(.top, 8)
+                    }
+                    .padding()
+                }
+            }
+            .padding(.vertical)
         }
         .navigationTitle("Collections")
         .navigationBarTitleDisplayMode(.large)

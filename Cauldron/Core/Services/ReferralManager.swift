@@ -50,7 +50,7 @@ final class ReferralManager: ObservableObject {
     private let usedReferralCodeKey = "cauldron_used_referral_code"
 
     // CloudKit service reference (set during app initialization)
-    private var cloudKitService: CloudKitService?
+    private var cloudKitService: CloudKitServiceFacade?
 
     /// Number of unlocked icons
     var unlockedIconCount: Int {
@@ -78,7 +78,7 @@ final class ReferralManager: ObservableObject {
     }
 
     /// Configure the CloudKit service (called during app initialization)
-    func configure(with cloudKitService: CloudKitService) {
+    func configure(with cloudKitService: CloudKitServiceFacade) {
         self.cloudKitService = cloudKitService
     }
 

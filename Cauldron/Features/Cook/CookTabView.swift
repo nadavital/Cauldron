@@ -97,7 +97,7 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(.vertical)
             }
             .navigationTitle("Cook")
             .toolbar {
@@ -232,14 +232,15 @@ struct CookTabView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                
+
                 NavigationLink(destination: RecentlyCookedListView(recipes: viewModel.recentlyCookedRecipes, dependencies: viewModel.dependencies)) {
                     Text("See All")
                         .font(.subheadline)
                         .foregroundColor(.cauldronOrange)
                 }
             }
-            
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(viewModel.recentlyCookedRecipes.prefix(10)) { recipe in
@@ -256,6 +257,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -277,6 +279,7 @@ struct CookTabView: View {
                         .foregroundColor(.cauldronOrange)
                 }
             }
+            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -294,6 +297,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -304,7 +308,7 @@ struct CookTabView: View {
             HStack {
                 Image(systemName: "folder.fill")
                     .foregroundColor(.cauldronOrange)
-                Text("My Collections")
+                Text("Collections")
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
@@ -315,11 +319,13 @@ struct CookTabView: View {
                         .foregroundColor(.cauldronOrange)
                 }
             }
+            .padding(.horizontal, 16)
 
             if viewModel.collections.isEmpty {
                 Text("Organize your recipes into collections")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .padding(.horizontal, 16)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
@@ -341,6 +347,7 @@ struct CookTabView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                 }
             }
@@ -357,7 +364,8 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(viewModel.quickRecipes.prefix(10)) { recipe in
@@ -374,6 +382,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -389,7 +398,8 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(viewModel.onRotationRecipes.prefix(10)) { recipe in
@@ -406,6 +416,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -421,7 +432,8 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(viewModel.forgottenFavorites.prefix(10)) { recipe in
@@ -438,6 +450,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -456,14 +469,15 @@ struct CookTabView: View {
                 }
 
                 Spacer()
-                
+
                 NavigationLink(destination: AllRecipesListView(recipes: viewModel.allRecipes, dependencies: viewModel.dependencies)) {
                     Text("See All")
                         .font(.subheadline)
                         .foregroundColor(.cauldronOrange)
                 }
             }
-            
+            .padding(.horizontal, 16)
+
             if viewModel.allRecipes.isEmpty {
                 emptyState
             } else {
@@ -483,6 +497,7 @@ struct CookTabView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                 }
             }
@@ -498,14 +513,15 @@ struct CookTabView: View {
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
-                
+
                 NavigationLink(destination: ExploreTagView(tag: Tag(name: tag), dependencies: viewModel.dependencies)) {
                     Text("See All")
                         .font(.subheadline)
                         .foregroundColor(.cauldronOrange)
                 }
             }
-            
+            .padding(.horizontal, 16)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(recipes) { recipe in
@@ -522,6 +538,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -579,6 +596,7 @@ struct CookTabView: View {
             .padding(.horizontal, 40)
         }
         .padding(.vertical, 40)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - New User CTA
@@ -639,6 +657,7 @@ struct CookTabView: View {
         .frame(maxWidth: .infinity)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(16)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Friends' Recipes Section
@@ -653,6 +672,7 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
+            .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -672,6 +692,7 @@ struct CookTabView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }
@@ -689,10 +710,12 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
+            .padding(.horizontal, 16)
 
             Text("Discover recipes from the Cauldron community")
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -722,6 +745,7 @@ struct CookTabView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
         }

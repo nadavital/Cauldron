@@ -19,10 +19,10 @@ class RecipeImageService {
     private let maxCacheCount = 50
 
     // CloudKit service for fallback loading
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
     private let imageManager: ImageManager
 
-    init(cloudKitService: CloudKitService, imageManager: ImageManager) {
+    init(cloudKitService: CloudKitServiceFacade, imageManager: ImageManager) {
         self.cloudKitService = cloudKitService
         self.imageManager = imageManager
         cache.countLimit = maxCacheCount

@@ -11,11 +11,46 @@ import SwiftUI
 import Combine
 
 /// Dependency injection container
+///
+/// ## Architecture
+/// Services are organized in layers:
+/// 1. **Infrastructure Layer**: CloudKitCore, ModelContainer
+/// 2. **Cloud Services Layer**: RecipeCloudService, UserCloudService, etc.
+/// 3. **Local Persistence Layer**: RecipeRepository, CollectionRepository, etc.
+/// 4. **Domain Services Layer**: RecipeSyncService, ConnectionManager, etc.
+/// 5. **Feature Services Layer**: ImageManager, ProfileImageManager, etc.
 @MainActor
 class DependencyContainer: ObservableObject {
     let modelContainer: ModelContainer
-    
-    // Repositories (actors - thread-safe)
+
+    // MARK: - Layer 1: Infrastructure
+
+    /// Core CloudKit infrastructure (shared by all cloud services)
+    let cloudKitCore: CloudKitCore
+
+    // MARK: - Layer 2: Cloud Services
+
+    /// Recipe cloud operations (private database sync, public sharing)
+    let recipeCloudService: RecipeCloudService
+
+    /// User profile cloud operations
+    let userCloudService: UserCloudService
+
+    /// Collection cloud operations
+    let collectionCloudService: CollectionCloudService
+
+    /// Friend connection cloud operations
+    let connectionCloudService: ConnectionCloudService
+
+    /// Search cloud operations
+    let searchCloudService: SearchCloudService
+
+    /// Facade for backwards compatibility (wraps all domain services)
+    /// NOTE: Prefer using domain-specific services directly in new code
+    let cloudKitService: CloudKitServiceFacade
+
+    // MARK: - Layer 3: Local Persistence (Repositories)
+
     let recipeRepository: RecipeRepository
     let deletedRecipeRepository: DeletedRecipeRepository
     let groceryRepository: GroceryRepository
@@ -23,8 +58,9 @@ class DependencyContainer: ObservableObject {
     let sharingRepository: SharingRepository
     let connectionRepository: ConnectionRepository
     let collectionRepository: CollectionRepository
-    
-    // Services (actors - thread-safe)
+
+    // MARK: - Layer 4: Domain Services
+
     let unitsService: UnitsService
     let cookSessionManager: CookSessionManager
     let groceryService: GroceryService
@@ -32,15 +68,17 @@ class DependencyContainer: ObservableObject {
     let groceryCategorizer: GroceryCategorizer
     let sharingService: SharingService
     let externalShareService: ExternalShareService
-    let cloudKitService: CloudKitService
     let recipeSyncService: RecipeSyncService
     let imageMigrationService: CloudImageMigration
     let imageSyncManager: ImageSyncManager
+    let operationQueueService: OperationQueueService
+
+    // MARK: - Layer 5: Feature Services
+
     let imageManager: ImageManager
     let profileImageManager: ProfileImageManager
     let collectionImageManager: CollectionImageManager
     let recipeImageService: RecipeImageService
-    let operationQueueService: OperationQueueService
 
     // UI Services (MainActor)
     let timerManager: TimerManager
@@ -65,16 +103,36 @@ class DependencyContainer: ObservableObject {
     nonisolated init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
 
-        // Initialize services that repositories depend on
-        self.cloudKitService = CloudKitService()
+        // ============================================================
+        // LAYER 1: Infrastructure
+        // ============================================================
+        self.cloudKitCore = CloudKitCore()
+
+        // ============================================================
+        // LAYER 2: Cloud Services (depend on CloudKitCore)
+        // ============================================================
+        self.recipeCloudService = RecipeCloudService(core: cloudKitCore)
+        self.userCloudService = UserCloudService(core: cloudKitCore)
+        self.collectionCloudService = CollectionCloudService(core: cloudKitCore)
+        self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
+        self.searchCloudService = SearchCloudService(core: cloudKitCore)
+
+        // Facade for backwards compatibility
+        self.cloudKitService = CloudKitServiceFacade()
+
+        // Image managers (still using old CloudKitService for now)
+        // TODO: Migrate to use domain-specific cloud services
         self.imageManager = ImageManager(cloudKitService: cloudKitService)
         self.profileImageManager = ProfileImageManager(cloudKitService: cloudKitService)
         self.collectionImageManager = CollectionImageManager(cloudKitService: cloudKitService)
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
 
-        // Initialize MainActor-isolated services first (ExternalShareService needs to be injected into RecipeRepository)
-        // MainActor-isolated services require temporary references to avoid capture issues
+        // ============================================================
+        // LAYER 3: Local Persistence (Repositories)
+        // ============================================================
+
+        // Temporary references for MainActor-isolated services
         let tempCloudKitService = cloudKitService
         let tempImageManager = imageManager
 
@@ -85,7 +143,6 @@ class DependencyContainer: ObservableObject {
             )
         }
 
-        // Initialize repositories (now with CloudKit service and ExternalShareService)
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
         self.collectionRepository = CollectionRepository(
             modelContainer: modelContainer,
@@ -107,7 +164,9 @@ class DependencyContainer: ObservableObject {
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
         self.connectionRepository = ConnectionRepository(modelContainer: modelContainer)
 
-        // Initialize other services
+        // ============================================================
+        // LAYER 4: Domain Services
+        // ============================================================
         self.unitsService = UnitsService()
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
@@ -139,9 +198,11 @@ class DependencyContainer: ObservableObject {
             imageSyncManager: imageSyncManager
         )
 
-        // Note: imageSyncViewModel is lazy and will be initialized on first access
+        // ============================================================
+        // LAYER 5: Feature Services
+        // ============================================================
 
-        // Initialize parsers
+        // Parsers
         self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser()
         self.youtubeParser = YouTubeRecipeParser(foundationModelsService: foundationModelsService)
@@ -155,7 +216,8 @@ class DependencyContainer: ObservableObject {
             )
         }
 
-        // Note: cookModeCoordinator and connectionManager are lazy and will be initialized on first access
+        // Note: lazy properties (imageSyncViewModel, operationQueueViewModel,
+        // cookModeCoordinator, connectionManager) are initialized on first access
 
         // Start periodic sync after initialization
         self.recipeSyncService.startPeriodicSync()
@@ -179,10 +241,9 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self,
-            CollectionReferenceModel.self
+            CollectionModel.self
         ])
-        
+
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
         
@@ -200,8 +261,7 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self,
-            CollectionReferenceModel.self
+            CollectionModel.self
         ])
 
         // Ensure Application Support directory exists

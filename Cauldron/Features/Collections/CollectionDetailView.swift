@@ -46,6 +46,15 @@ struct CollectionDetailView: View {
         collection.nonConformingRecipes(from: recipes)
     }
 
+    /// Check if the current user owns this collection
+    @MainActor
+    var isOwned: Bool {
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return false
+        }
+        return collection.userId == currentUserId
+    }
+
     init(collection: Collection, dependencies: DependencyContainer) {
         self.initialCollection = collection
         self.dependencies = dependencies
@@ -211,19 +220,48 @@ struct CollectionDetailView: View {
         defer { isLoading = false }
 
         do {
-            // IMPORTANT: Refresh the collection object from the database first
-            // This ensures we have the latest recipeIds array after any updates
-            if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
-                collection = updatedCollection
-                AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
-            }
+            // For owned collections, refresh from local database
+            if isOwned {
+                // Refresh the collection object from the database first
+                if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
+                    collection = updatedCollection
+                    AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
+                }
 
-            // Fetch all owned recipes
-            let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                // Fetch all owned recipes from local storage
+                let allRecipes = try await dependencies.recipeRepository.fetchAll()
 
-            // Filter to only recipes in this collection
-            recipes = allRecipes.filter { recipe in
-                collection.recipeIds.contains(recipe.id)
+                // Filter to only recipes in this collection
+                recipes = allRecipes.filter { recipe in
+                    collection.recipeIds.contains(recipe.id)
+                }
+            } else {
+                // For non-owned collections, fetch recipes from CloudKit in parallel
+                AppLogger.general.info("📡 Loading recipes from CloudKit for non-owned collection: \(collection.name)")
+
+                let fetchedRecipes = await withTaskGroup(of: Recipe?.self, returning: [Recipe].self) { group in
+                    for recipeId in collection.recipeIds {
+                        group.addTask {
+                            do {
+                                return try await dependencies.cloudKitService.fetchPublicRecipe(id: recipeId)
+                            } catch {
+                                AppLogger.general.warning("Failed to fetch recipe \(recipeId) from CloudKit: \(error.localizedDescription)")
+                                return nil
+                            }
+                        }
+                    }
+
+                    var results: [Recipe] = []
+                    for await recipe in group {
+                        if let recipe = recipe {
+                            results.append(recipe)
+                        }
+                    }
+                    return results
+                }
+
+                recipes = fetchedRecipes
+                AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes from CloudKit")
             }
 
             // Load recipe images for grid display
@@ -291,11 +329,18 @@ struct CollectionDetailView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
-                    if searchText.isEmpty {
-                        Text("Add recipes from the recipe detail view")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                    // Only show "add recipes" button for owner
+                    if searchText.isEmpty && isOwned {
+                        Button {
+                            activeSheet = .addRecipes
+                        } label: {
+                            Label("Add Recipes", systemImage: "plus.circle.fill")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.cauldronOrange)
+                        .padding(.top, 8)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -310,15 +355,18 @@ struct CollectionDetailView: View {
                     } label: {
                         RecipeRowView(recipe: recipe, dependencies: dependencies)
                     }
+                    // Only allow removal for owner
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            Task {
-                                await removeRecipe(recipe)
+                        if isOwned {
+                            Button(role: .destructive) {
+                                Task {
+                                    await removeRecipe(recipe)
+                                }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
                             }
-                        } label: {
-                            Label("Remove", systemImage: "trash")
+                            .tint(.red)
                         }
-                        .tint(.red)
                     }
                 }
             }
@@ -345,17 +393,19 @@ struct CollectionDetailView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Action buttons
-                HStack(spacing: 12) {
-                    editCollectionButton
-                        .id("edit-button")
-                    addRecipesButton
-                        .id("add-button")
+                // Action buttons (only for owner)
+                if isOwned {
+                    HStack(spacing: 12) {
+                        editCollectionButton
+                            .id("edit-button")
+                        addRecipesButton
+                            .id("add-button")
+                    }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
 
-                // Warning banner
-                if collection.isShared && !nonConformingRecipes.isEmpty {
+                // Warning banner (only for owner who can fix it)
+                if isOwned && collection.isShared && !nonConformingRecipes.isEmpty {
                     nonConformingRecipesWarning
                 }
             }

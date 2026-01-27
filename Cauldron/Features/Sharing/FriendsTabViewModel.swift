@@ -15,7 +15,6 @@ class FriendsTabViewModel: ObservableObject {
     static let shared = FriendsTabViewModel()
 
     @Published var sharedRecipes: [SharedRecipe] = []
-    @Published var sharedCollections: [Collection] = []
     @Published var isLoading = false
     @Published var showSuccessAlert = false
     @Published var showErrorAlert = false
@@ -58,9 +57,6 @@ class FriendsTabViewModel: ObservableObject {
         do {
             sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
             // Loaded shared recipes (don't log routine operations)
-
-            // Load shared collections from friends
-            await loadSharedCollections()
 
             // Fetch tier information for sharers
             await fetchSharerTiers()
@@ -178,38 +174,6 @@ class FriendsTabViewModel: ObservableObject {
         }
 
         // Finished preloading images (don't log routine operations)
-    }
-
-    /// Load shared collections from friends
-    private func loadSharedCollections() async {
-        guard let dependencies = dependencies else { return }
-
-        do {
-            guard let currentUserId = CurrentUserSession.shared.userId else {
-                sharedCollections = []
-                return
-            }
-
-            // Get list of friend user IDs
-            let connections = try await dependencies.connectionRepository.fetchAcceptedConnections(forUserId: currentUserId)
-
-            let friendIds = connections.compactMap { connection in
-                connection.otherUserId(currentUserId: currentUserId)
-            }
-
-            guard !friendIds.isEmpty else {
-                sharedCollections = []
-                return
-            }
-
-            // Fetch shared collections from friends
-            sharedCollections = try await dependencies.cloudKitService.fetchSharedCollections(friendIds: friendIds)
-            // Loaded shared collections (don't log routine operations)
-        } catch {
-            AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
-            sharedCollections = []
-            // Non-critical failure - don't show error alert
-        }
     }
 
     func copyToPersonalCollection(_ sharedRecipe: SharedRecipe) async {

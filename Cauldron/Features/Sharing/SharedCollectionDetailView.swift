@@ -14,10 +14,6 @@ struct SharedCollectionDetailView: View {
 
     @State private var recipes: [Recipe] = []
     @State private var isLoading = true
-    @State private var isSavingReference = false
-    @State private var hasExistingReference = false
-    @State private var isCheckingReference = true
-    @State private var showReferenceToast = false
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var hiddenRecipeCount = 0
@@ -58,27 +54,6 @@ struct SharedCollectionDetailView: View {
         }
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            // Save Collection Reference (bookmark)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    Task {
-                        await saveCollectionReference()
-                    }
-                } label: {
-                    if isSavingReference {
-                        ProgressView()
-                    } else if hasExistingReference {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    } else {
-                        Image(systemName: "bookmark")
-                    }
-                }
-                .disabled(isSavingReference || hasExistingReference || isCheckingReference)
-            }
-        }
-        .toast(isShowing: $showReferenceToast, icon: "bookmark.fill", message: "Collection saved!")
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -90,7 +65,6 @@ struct SharedCollectionDetailView: View {
             await loadCollectionOwner()
             await checkFriendshipStatus()
             await loadRecipes()
-            await checkForExistingReference()
         }
     }
 
@@ -277,75 +251,11 @@ struct SharedCollectionDetailView: View {
         AppLogger.general.info("✅ Loaded \(recipes.count) visible recipes, \(hiddenRecipeCount) hidden")
     }
 
-    private func saveCollectionReference() async {
-        isSavingReference = true
-        defer { isSavingReference = false }
-
-        do {
-            // Get current user
-            guard let userId = CurrentUserSession.shared.userId else {
-                AppLogger.general.error("Cannot save collection reference - no current user")
-                errorMessage = "Please sign in to save collections"
-                showError = true
-                return
-            }
-
-            // Create collection reference
-            let reference = CollectionReference.reference(
-                userId: userId,
-                collection: collection
-            )
-
-            // Save to CloudKit PUBLIC database
-            try await dependencies.cloudKitService.saveCollectionReference(reference)
-
-            AppLogger.general.info("Saved collection reference: \(collection.name)")
-
-            // Update tracking state immediately
-            hasExistingReference = true
-
-            // Notify other views that a collection was added
-            NotificationCenter.default.post(name: NSNotification.Name("CollectionAdded"), object: nil)
-
-            // Show toast notification
-            withAnimation {
-                showReferenceToast = true
-            }
-
-            // Dismiss sheet after toast appears
-            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
-            dismiss()
-        } catch {
-            AppLogger.general.error("Failed to save collection reference: \(error.localizedDescription)")
-            errorMessage = "Failed to save collection: \(error.localizedDescription)"
-            showError = true
-        }
-    }
-
     private func loadCollectionOwner() async {
         do {
             collectionOwner = try await dependencies.cloudKitService.fetchUser(byUserId: collection.userId)
         } catch {
             AppLogger.general.warning("Failed to fetch collection owner: \(error.localizedDescription)")
-        }
-    }
-
-    private func checkForExistingReference() async {
-        guard let userId = CurrentUserSession.shared.userId else {
-            isCheckingReference = false
-            return
-        }
-
-        do {
-            // Check if user already has a reference to this collection
-            let references = try await dependencies.cloudKitService.fetchCollectionReferences(forUserId: userId)
-            hasExistingReference = references.contains { $0.originalCollectionId == collection.id }
-            isCheckingReference = false
-
-            AppLogger.general.info("Reference check complete - hasExistingReference: \(hasExistingReference)")
-        } catch {
-            AppLogger.general.error("Failed to check for existing reference: \(error.localizedDescription)")
-            isCheckingReference = false
         }
     }
 

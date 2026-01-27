@@ -14,7 +14,7 @@ import UIKit
 /// Thread-safe repository for Recipe operations
 actor RecipeRepository {
     internal let modelContainer: ModelContainer
-    internal let cloudKitService: CloudKitService
+    internal let cloudKitService: CloudKitServiceFacade
     internal let deletedRecipeRepository: DeletedRecipeRepository
     internal let collectionRepository: CollectionRepository?
     internal let imageManager: ImageManager
@@ -33,7 +33,7 @@ actor RecipeRepository {
 
     init(
         modelContainer: ModelContainer,
-        cloudKitService: CloudKitService,
+        cloudKitService: CloudKitServiceFacade,
         deletedRecipeRepository: DeletedRecipeRepository,
         collectionRepository: CollectionRepository? = nil,
         imageManager: ImageManager,

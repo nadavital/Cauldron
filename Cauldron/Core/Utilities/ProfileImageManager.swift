@@ -14,9 +14,13 @@ import os
 /// Manages profile image storage and retrieval
 actor ProfileImageManager {
     private let imageDirectoryURL: URL
-    private let cloudKitService: CloudKitService
+    private let cloudKitService: CloudKitServiceFacade
 
-    init(cloudKitService: CloudKitService) {
+    /// Track in-flight downloads to prevent duplicate requests
+    /// Key: userId, Value: Task that will return the downloaded URL
+    private var inFlightDownloads: [UUID: Task<URL?, Error>] = [:]
+
+    init(cloudKitService: CloudKitServiceFacade) {
         self.cloudKitService = cloudKitService
 
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
@@ -61,12 +65,17 @@ actor ProfileImageManager {
         return UIImage(data: imageData)
     }
 
-    /// Delete profile image file
+    /// Delete profile image file and clear from cache
     func deleteImage(userId: UUID) {
         let filename = "\(userId.uuidString).jpg"
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
-        AppLogger.general.info("🗑️ Deleted profile image for user \(userId)")
+
+        // Clear from ImageCache to prevent stale image display
+        Task { @MainActor in
+            let cacheKey = ImageCache.profileImageKey(userId: userId)
+            ImageCache.shared.remove(cacheKey)
+        }
     }
 
     /// Get full file URL for a user ID
@@ -118,24 +127,53 @@ actor ProfileImageManager {
     /// Download profile image from CloudKit and save locally
     /// - Parameter userId: The user ID to download image for
     /// - Returns: The local URL, or nil if no image exists
+    ///
+    /// This method uses request coalescing - if a download for the same userId
+    /// is already in progress, new requests will await that instead of starting
+    /// a duplicate download.
     func downloadImageFromCloud(userId: UUID) async throws -> URL? {
+        // Check if download is already in progress for this user
+        if let existingTask = inFlightDownloads[userId] {
+            AppLogger.general.debug("Download already in progress for user \(userId), awaiting existing task")
+            return try await existingTask.value
+        }
+
         AppLogger.general.info("☁️ Downloading profile image from CloudKit for user \(userId)")
 
-        // Download from CloudKit (always from public database for profiles)
-        guard let imageData = try await cloudKitService.downloadUserProfileImage(userId: userId) else {
-            AppLogger.general.info("No profile image found in CloudKit for user \(userId)")
-            return nil
+        // Create and store the task BEFORE starting any async work
+        // This ensures any subsequent calls see the in-flight task
+        let downloadTask = Task<URL?, Error> {
+            // Download from CloudKit (always from public database for profiles)
+            guard let imageData = try await self.cloudKitService.downloadUserProfileImage(userId: userId) else {
+                AppLogger.general.info("No profile image found in CloudKit for user \(userId)")
+                return nil
+            }
+
+            // Convert to UIImage
+            guard let image = UIImage(data: imageData) else {
+                throw ProfileImageError.invalidImageData
+            }
+
+            // Save locally
+            let fileURL = try await self.saveImage(image, userId: userId)
+            AppLogger.general.info("✅ Downloaded and saved profile image for user \(userId)")
+            return fileURL
         }
 
-        // Convert to UIImage
-        guard let image = UIImage(data: imageData) else {
-            throw ProfileImageError.invalidImageData
-        }
+        // Track the in-flight download
+        inFlightDownloads[userId] = downloadTask
 
-        // Save locally
-        let fileURL = try await saveImage(image, userId: userId)
-        AppLogger.general.info("✅ Downloaded and saved profile image for user \(userId)")
-        return fileURL
+        // Await the result
+        do {
+            let result = try await downloadTask.value
+            // Clean up after successful completion
+            inFlightDownloads.removeValue(forKey: userId)
+            return result
+        } catch {
+            // Clean up on error too
+            inFlightDownloads.removeValue(forKey: userId)
+            throw error
+        }
     }
 
     /// Delete profile image from CloudKit

@@ -16,6 +16,7 @@ struct SocialRecipeCard: View {
     let creatorTier: UserTier?
     let sharedAt: Date?
     let dependencies: DependencyContainer
+    @ObservedObject private var currentUserSession = CurrentUserSession.shared
 
     /// Initialize with a SharedRecipe
     init(sharedRecipe: SharedRecipe, creatorTier: UserTier? = nil, dependencies: DependencyContainer) {
@@ -35,6 +36,15 @@ struct SocialRecipeCard: View {
         self.dependencies = dependencies
     }
 
+    /// Returns the current user from session if creator is the current user, otherwise the passed creator
+    /// This ensures profile changes propagate immediately throughout the app
+    private var displayCreator: User {
+        if let currentUser = currentUserSession.currentUser, currentUser.id == creator.id {
+            return currentUser
+        }
+        return creator
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with creator overlay (top left) and tier badge (top right)
@@ -47,9 +57,9 @@ struct SocialRecipeCard: View {
                     HStack(alignment: .top) {
                         // Creator info overlay (top left)
                         HStack(spacing: 6) {
-                            ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
+                            ProfileAvatar(user: displayCreator, size: 24, dependencies: dependencies)
 
-                            Text(creator.displayName)
+                            Text(displayCreator.displayName)
                                 .font(.caption2)
                                 .fontWeight(.medium)
                                 .lineLimit(1)

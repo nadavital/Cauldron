@@ -22,16 +22,6 @@ struct PeopleSearchSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    // Pending requests section (most important)
-                    if !viewModel.receivedRequests.isEmpty {
-                        pendingRequestsSection
-                    }
-
-                    // Sent requests section
-                    if !viewModel.sentRequests.isEmpty {
-                        sentRequestsSection
-                    }
-
                     // Search results or suggestions
                     if viewModel.searchText.isEmpty {
                         suggestionsSection
@@ -44,16 +34,8 @@ struct PeopleSearchSheet: View {
             .navigationTitle("Find Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         dismiss()
                     }
                 }
@@ -71,90 +53,6 @@ struct PeopleSearchSheet: View {
                 Text(viewModel.alertMessage)
             }
         }
-    }
-
-    // MARK: - Pending Requests Section
-
-    private var pendingRequestsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "bell.badge.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text("Pending Requests")
-                    .font(.headline)
-                Text("(\(viewModel.receivedRequests.count))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-
-            ForEach(viewModel.receivedRequests, id: \.id) { connection in
-                if let user = viewModel.usersMap[connection.fromUserId] {
-                    PeopleSearchRequestCard(
-                        user: user,
-                        connection: connection,
-                        dependencies: dependencies,
-                        onAccept: {
-                            await viewModel.acceptRequest(connection)
-                        },
-                        onReject: {
-                            await viewModel.rejectRequest(connection)
-                        }
-                    )
-                }
-            }
-        }
-        .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
-    }
-
-    // MARK: - Sent Requests Section
-
-    private var sentRequestsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "paperplane.fill")
-                    .foregroundColor(.blue)
-                Text("Sent Requests")
-                    .font(.headline)
-                Text("(\(viewModel.sentRequests.count))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-
-            ForEach(viewModel.sentRequests, id: \.id) { connection in
-                if let user = viewModel.usersMap[connection.toUserId] {
-                    HStack(spacing: 12) {
-                        ProfileAvatar(user: user, size: 44, dependencies: dependencies)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(user.displayName)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            Text("@\(user.username)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-
-                        Text("Pending")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
     }
 
     // MARK: - Suggestions Section
@@ -415,10 +313,11 @@ class PeopleSearchViewModel: ObservableObject {
     @Published var searchText = "" {
         didSet {
             searchDebounceTask?.cancel()
+            let queryText = searchText
             searchDebounceTask = Task {
                 try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
                 guard !Task.isCancelled else { return }
-                await performSearch()
+                await performSearch(query: queryText)
             }
         }
     }
@@ -433,6 +332,7 @@ class PeopleSearchViewModel: ObservableObject {
 
     let dependencies: DependencyContainer
     private var searchDebounceTask: Task<Void, Never>?
+    private var currentSearchId: UUID?
 
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
@@ -481,19 +381,28 @@ class PeopleSearchViewModel: ObservableObject {
 
     func loadRecommendedUsers() async {
         do {
-            // Get friends of friends as recommendations
+            // Build a set of all users we're already connected to or have pending requests with
+            var excludedUserIds = Set<UUID>()
+
+            // Exclude accepted connections (friends)
             let friends = try await dependencies.connectionRepository.fetchAcceptedConnections(forUserId: currentUserId)
-            var friendIds = Set<UUID>()
             for connection in friends {
                 if let otherId = connection.otherUserId(currentUserId: currentUserId) {
-                    friendIds.insert(otherId)
+                    excludedUserIds.insert(otherId)
                 }
             }
 
-            // For now, just show some recent users as suggestions (could be improved with friend-of-friend logic)
+            // Also exclude anyone from the connection manager (covers pending sent/received)
+            for managedConnection in dependencies.connectionManager.connections.values {
+                if let otherId = managedConnection.connection.otherUserId(currentUserId: currentUserId) {
+                    excludedUserIds.insert(otherId)
+                }
+            }
+
+            // Fetch users and filter to only show strangers
             let allUsers = try await dependencies.cloudKitService.searchUsers(query: "")
             recommendedUsers = allUsers
-                .filter { $0.id != currentUserId && !friendIds.contains($0.id) }
+                .filter { $0.id != currentUserId && !excludedUserIds.contains($0.id) }
                 .prefix(5)
                 .map { $0 }
         } catch {
@@ -501,20 +410,32 @@ class PeopleSearchViewModel: ObservableObject {
         }
     }
 
-    func performSearch() async {
-        guard !searchText.isEmpty else {
+    func performSearch(query: String) async {
+        guard !query.isEmpty else {
             searchResults = []
+            currentSearchId = nil
             return
         }
+
+        // Track this search with a unique ID
+        let searchId = UUID()
+        currentSearchId = searchId
 
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let users = try await dependencies.cloudKitService.searchUsers(query: searchText)
+            let users = try await dependencies.cloudKitService.searchUsers(query: query)
+
+            // Only apply results if this is still the current search
+            guard currentSearchId == searchId else { return }
+
             searchResults = users.filter { $0.id != currentUserId }
         } catch {
             AppLogger.general.error("Failed to search users: \(error.localizedDescription)")
+
+            // Only clear results if this is still the current search
+            guard currentSearchId == searchId else { return }
             searchResults = []
         }
     }

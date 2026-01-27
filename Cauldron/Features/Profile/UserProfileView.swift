@@ -82,7 +82,7 @@ struct UserProfileView: View {
             }
             .padding()
         }
-        .navigationTitle(user.displayName)
+        .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
         .refreshable {
@@ -474,8 +474,8 @@ struct UserProfileView: View {
 
         let referrer = await referralManager.redeemReferralCode(
             trimmedCode,
-            currentUser: user,
-            displayName: user.displayName
+            currentUser: displayUser,
+            displayName: displayUser.displayName
         )
 
         if referrer != nil {
