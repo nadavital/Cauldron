@@ -164,8 +164,14 @@ struct RecipeScaler {
         for ingredient in ingredients {
             guard let quantity = ingredient.quantity else { continue }
             
-            // Warn about very small quantities
-            if quantity.value < 0.125 && !quantity.unit.isWeight {
+            // Warn about very small quantities (normalized for comparison)
+            // Volume threshold: ~2.5ml (half a teaspoon) - genuinely hard to measure
+            // Weight threshold: ~2g - very small pinch
+            let volumeInMl = normalizeVolumeToMilliliters(quantity)
+            let weightInGrams = normalizeWeightToGrams(quantity)
+            let isVerySmallVolume = quantity.unit.isVolume && volumeInMl > 0 && volumeInMl < 2.5
+            let isVerySmallWeight = quantity.unit.isWeight && weightInGrams > 0 && weightInGrams < 2
+            if isVerySmallVolume || isVerySmallWeight {
                 warnings.append(ScalingWarning(
                     type: .verySmallQuantity,
                     message: "'\(ingredient.name)' requires a very small amount (\(quantity.displayString)). Consider measuring carefully or omitting."
@@ -183,8 +189,12 @@ struct RecipeScaler {
                 }
             }
             
-            // Warn about very large quantities
-            if quantity.value > 50 && quantity.unit.isVolume {
+            // Warn about very large quantities (using normalized values from above)
+            // Volume threshold: ~5 liters (5000ml) - about 21 cups
+            // Weight threshold: ~5kg (5000g) - about 11 lbs
+            let isVeryLargeVolume = volumeInMl > 5000
+            let isVeryLargeWeight = weightInGrams > 5000
+            if isVeryLargeVolume || isVeryLargeWeight {
                 warnings.append(ScalingWarning(
                     type: .veryLargeQuantity,
                     message: "'\(ingredient.name)' requires a large amount (\(quantity.displayString)). Verify this is practical for your equipment."
@@ -206,6 +216,39 @@ struct RecipeScaler {
         }
         
         return warnings
+    }
+
+    /// Convert a volume quantity to milliliters for threshold comparison
+    /// Returns 0 for non-volume units (they won't trigger volume warnings)
+    private static func normalizeVolumeToMilliliters(_ quantity: Quantity) -> Double {
+        guard quantity.unit.isVolume else { return 0 }
+
+        switch quantity.unit {
+        case .milliliter: return quantity.value
+        case .liter: return quantity.value * 1000
+        case .teaspoon: return quantity.value * 4.92892
+        case .tablespoon: return quantity.value * 14.7868
+        case .fluidOunce: return quantity.value * 29.5735
+        case .cup: return quantity.value * 236.588
+        case .pint: return quantity.value * 473.176
+        case .quart: return quantity.value * 946.353
+        case .gallon: return quantity.value * 3785.41
+        default: return 0
+        }
+    }
+
+    /// Convert a weight quantity to grams for threshold comparison
+    /// Returns 0 for non-weight units (they won't trigger weight warnings)
+    private static func normalizeWeightToGrams(_ quantity: Quantity) -> Double {
+        guard quantity.unit.isWeight else { return 0 }
+
+        switch quantity.unit {
+        case .gram: return quantity.value
+        case .kilogram: return quantity.value * 1000
+        case .ounce: return quantity.value * 28.3495
+        case .pound: return quantity.value * 453.592
+        default: return 0
+        }
     }
 }
 
