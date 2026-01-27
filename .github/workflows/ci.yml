@@ -1,0 +1,113 @@
+# Cauldron CI Pipeline
+# Runs build, tests, and lint on pull requests and pushes to main
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+
+jobs:
+  # ============================================================
+  # BUILD JOB - Required
+  # ============================================================
+  build:
+    name: Build
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild build \
+            -project Cauldron.xcodeproj \
+            -scheme Cauldron \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty --color && exit ${PIPESTATUS[0]}
+
+  # ============================================================
+  # TEST JOB - Required
+  # ============================================================
+  test:
+    name: Test
+    runs-on: macos-15
+    timeout-minutes: 30
+    needs: build  # Run after build succeeds
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Run Tests
+        run: |
+          xcodebuild test \
+            -project Cauldron.xcodeproj \
+            -scheme Cauldron \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty --color --report junit && exit ${PIPESTATUS[0]}
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: build/reports/
+
+  # ============================================================
+  # LINT JOB - Advisory (does not block merge)
+  # ============================================================
+  lint:
+    name: Lint
+    runs-on: macos-15
+    timeout-minutes: 10
+    # This job runs in parallel with build/test
+    # continue-on-error means failures don't block the PR
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: |
+          echo "Running SwiftLint..."
+          swiftlint lint --reporter github-actions-logging
+
+      - name: SwiftLint Summary
+        if: always()
+        run: |
+          echo "## SwiftLint Results" >> $GITHUB_STEP_SUMMARY
+          swiftlint lint --reporter markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "See job logs for details" >> $GITHUB_STEP_SUMMARY
