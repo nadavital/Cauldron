@@ -70,6 +70,7 @@ enum ConnectionError: LocalizedError {
 private enum OperationType {
     case accept(Connection)
     case create(Connection)
+    case reject(Connection)
 }
 
 /// Represents a pending sync operation
@@ -81,7 +82,7 @@ private struct PendingOperation {
 
     var connection: Connection {
         switch type {
-        case .accept(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn), .reject(let conn):
             return conn
         }
     }
@@ -210,17 +211,11 @@ class ConnectionManager: ObservableObject {
         // Delete from local cache immediately
         try? await dependencies.connectionRepository.delete(connection)
 
-        // Delete from CloudKit (rejection = deletion for cleaner UX)
-        do {
-            try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
-            // Connection rejected successfully (don't log routine operations)
+        // Queue CloudKit delete in background (rejection = deletion for cleaner UX)
+        await queueOperation(.reject(connection))
 
-            // Update badge count (one less pending request)
-            updateBadgeCount()
-        } catch {
-            logger.error("❌ Failed to reject connection in CloudKit: \(error.localizedDescription)")
-            throw error
-        }
+        // Update badge count (one less pending request)
+        updateBadgeCount()
     }
 
     /// Send a connection request (optimistic update)
@@ -427,7 +422,7 @@ class ConnectionManager: ObservableObject {
         let operation: PendingOperation
 
         switch type {
-        case .accept(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn), .reject(let conn):
             operation = PendingOperation(
                 id: conn.id,
                 type: type,
@@ -463,6 +458,9 @@ class ConnectionManager: ObservableObject {
 
             case .create(let connection):
                 try await dependencies.connectionCloudService.saveConnection(connection)
+
+            case .reject(let connection):
+                try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
             }
 
             // Success! Remove from queue and mark as synced
