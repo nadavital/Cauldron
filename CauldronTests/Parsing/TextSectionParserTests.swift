@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class TextSectionParserTests: XCTestCase {
 
     // MARK: - Numbered Step Detection

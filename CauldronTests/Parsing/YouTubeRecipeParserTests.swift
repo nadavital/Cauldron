@@ -15,6 +15,7 @@ import XCTest
 /// IngredientParser, TextSectionParser, TimerExtractor) which are thoroughly tested.
 ///
 /// These tests focus on integration and any YouTubeRecipeParser-specific logic.
+@MainActor
 final class YouTubeRecipeParserTests: XCTestCase {
 
     // MARK: - Architecture Verification

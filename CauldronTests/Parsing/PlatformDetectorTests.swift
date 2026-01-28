@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class PlatformDetectorTests: XCTestCase {
 
     // MARK: - YouTube Detection Tests

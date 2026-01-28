@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class NotesExtractorTests: XCTestCase {
 
     // MARK: - Basic Notes Extraction
