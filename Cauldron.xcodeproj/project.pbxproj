@@ -43,28 +43,6 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
-/* Begin PBXShellScriptBuildPhase section */
-		AE999999EFC0000000000001 /* SwiftLint */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = SwiftLint;
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# SwiftLint Build Phase\n# Lints Swift files during build\n\nif which swiftlint > /dev/null; then\n    swiftlint\nelse\n    echo \"warning: SwiftLint not installed, download from https://github.com/realm/SwiftLint or install via: brew install swiftlint\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
-
 /* Begin PBXFileReference section */
 		50F5BA822E937E2C00E4A5C4 /* Cauldron.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cauldron.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AE678D9F2EB9545B00786709 /* CauldronWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CauldronWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -187,7 +165,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 50F5BA8A2E937E2D00E4A5C4 /* Build configuration list for PBXNativeTarget "Cauldron" */;
 			buildPhases = (
-				AE999999EFC0000000000001 /* SwiftLint */,
 				50F5BA7E2E937E2C00E4A5C4 /* Sources */,
 				50F5BA7F2E937E2C00E4A5C4 /* Frameworks */,
 				50F5BA802E937E2C00E4A5C4 /* Resources */,

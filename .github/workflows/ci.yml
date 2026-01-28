@@ -27,35 +27,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: List available Xcode versions
-        run: ls -d /Applications/Xcode*.app
-
       - name: Select Xcode 26.2
         run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
 
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
+
       - name: Build for iOS Simulator
         run: |
           xcodebuild build \
             -project Cauldron.xcodeproj \
             -scheme Cauldron \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -configuration Debug \
             -skipPackagePluginValidation \
             -skipMacroValidation \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES
+            ONLY_ACTIVE_ARCH=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf
 
   # ============================================================
-  # TEST JOB - Required
+  # TEST JOB - Required (runs after build completes)
   # ============================================================
   test:
     name: Test
     runs-on: macos-15
+    needs: build
     timeout-minutes: 30
 
     steps:
@@ -65,69 +73,32 @@ jobs:
       - name: Select Xcode 26.2
         run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
 
-      - name: Show Xcode version
-        run: xcodebuild -version
-
-      - name: List available runtimes and simulators
-        run: |
-          echo "=== Runtimes ==="
-          xcrun simctl list runtimes
-          echo ""
-          echo "=== Devices ==="
-          xcrun simctl list devices available
-
-      - name: Create simulator if needed
-        run: |
-          # Get the iOS runtime identifier
-          RUNTIME=$(xcrun simctl list runtimes | grep -i "iOS" | grep -v unavailable | tail -1 | awk '{print $NF}')
-          echo "Found runtime: $RUNTIME"
-
-          if [ -n "$RUNTIME" ]; then
-            # Try to create a simulator
-            DEVICE_ID=$(xcrun simctl create "CI_Test_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
-                        xcrun simctl create "CI_Test_iPhone" "iPhone 16 Pro" "$RUNTIME" 2>/dev/null || \
-                        xcrun simctl create "CI_Test_iPhone" "iPhone 15 Pro" "$RUNTIME" 2>/dev/null || echo "")
-
-            if [ -n "$DEVICE_ID" ]; then
-              echo "Created simulator with ID: $DEVICE_ID"
-              xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
-              echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
-            else
-              echo "Could not create simulator, will try generic destination"
-            fi
-          fi
+      - name: Restore DerivedData Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
 
       - name: Run Tests
         run: |
-          if [ -n "$DEVICE_ID" ]; then
-            echo "Running tests on simulator: $DEVICE_ID"
-            xcodebuild test \
-              -project Cauldron.xcodeproj \
-              -scheme Cauldron \
-              -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-              -configuration Debug \
-              -skipPackagePluginValidation \
-              -skipMacroValidation \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              ONLY_ACTIVE_ARCH=YES \
-              -resultBundlePath TestResults.xcresult
-          else
-            echo "No simulator available, running with generic destination"
-            xcodebuild test \
-              -project Cauldron.xcodeproj \
-              -scheme Cauldron \
-              -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' \
-              -configuration Debug \
-              -skipPackagePluginValidation \
-              -skipMacroValidation \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              ONLY_ACTIVE_ARCH=YES \
-              -resultBundlePath TestResults.xcresult
-          fi
+          xcodebuild test \
+            -project Cauldron.xcodeproj \
+            -scheme Cauldron \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -configuration Debug \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -quiet \
+            -enableCodeCoverage NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            -resultBundlePath TestResults.xcresult
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
