@@ -46,7 +46,7 @@ jobs:
           xcodebuild build \
             -project Cauldron.xcodeproj \
             -scheme Cauldron \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             -skipPackagePluginValidation \
             -skipMacroValidation \
@@ -81,12 +81,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deriveddata-
 
+      - name: Boot Simulator
+        run: |
+          # Get latest iOS runtime identifier (e.g., com.apple.CoreSimulator.SimRuntime.iOS-18-0)
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS[^ ]+' | tail -1)
+          echo "Using runtime: $RUNTIME"
+
+          # Create and boot a simulator (try different iPhone models)
+          UDID=$(xcrun simctl create "CI_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 15" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 14" "$RUNTIME")
+          echo "Created simulator: $UDID"
+
+          xcrun simctl boot "$UDID"
+          echo "SIMULATOR_UDID=$UDID" >> $GITHUB_ENV
+
       - name: Run Tests
         run: |
           xcodebuild test \
             -project Cauldron.xcodeproj \
             -scheme Cauldron \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -configuration Debug \
             -skipPackagePluginValidation \
             -skipMacroValidation \
