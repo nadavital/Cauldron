@@ -59,6 +59,20 @@ actor CloudKitCore {
     // MARK: - Initialization
 
     init() {
+        // CloudKit will SIGTRAP if entitlements are missing (common in CI tests).
+        // Skip CloudKit initialization in tests/CI to avoid crashing the test host app.
+        let env = ProcessInfo.processInfo.environment
+        let isRunningTests = env["XCTestConfigurationFilePath"] != nil
+        let isCI = env["CI"] == "true"
+        if isRunningTests || isCI {
+            self.container = nil
+            self._privateDatabase = nil
+            self._publicDatabase = nil
+            self.isEnabled = false
+            logger.notice("CloudKit disabled for tests/CI environment")
+            return
+        }
+
         // Use explicit container identifier to support multiple bundle IDs (dev/production)
         // This must match the container in the entitlements file
         let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
