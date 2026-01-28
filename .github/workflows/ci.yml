@@ -68,20 +68,66 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: List available runtimes and simulators
+        run: |
+          echo "=== Runtimes ==="
+          xcrun simctl list runtimes
+          echo ""
+          echo "=== Devices ==="
+          xcrun simctl list devices available
+
+      - name: Create simulator if needed
+        run: |
+          # Get the iOS runtime identifier
+          RUNTIME=$(xcrun simctl list runtimes | grep -i "iOS" | grep -v unavailable | tail -1 | awk '{print $NF}')
+          echo "Found runtime: $RUNTIME"
+
+          if [ -n "$RUNTIME" ]; then
+            # Try to create a simulator
+            DEVICE_ID=$(xcrun simctl create "CI_Test_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
+                        xcrun simctl create "CI_Test_iPhone" "iPhone 16 Pro" "$RUNTIME" 2>/dev/null || \
+                        xcrun simctl create "CI_Test_iPhone" "iPhone 15 Pro" "$RUNTIME" 2>/dev/null || echo "")
+
+            if [ -n "$DEVICE_ID" ]; then
+              echo "Created simulator with ID: $DEVICE_ID"
+              xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+              echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+            else
+              echo "Could not create simulator, will try generic destination"
+            fi
+          fi
+
       - name: Run Tests
         run: |
-          xcodebuild test \
-            -project Cauldron.xcodeproj \
-            -scheme Cauldron \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -configuration Debug \
-            -skipPackagePluginValidation \
-            -skipMacroValidation \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES \
-            -resultBundlePath TestResults.xcresult
+          if [ -n "$DEVICE_ID" ]; then
+            echo "Running tests on simulator: $DEVICE_ID"
+            xcodebuild test \
+              -project Cauldron.xcodeproj \
+              -scheme Cauldron \
+              -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+              -configuration Debug \
+              -skipPackagePluginValidation \
+              -skipMacroValidation \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              ONLY_ACTIVE_ARCH=YES \
+              -resultBundlePath TestResults.xcresult
+          else
+            echo "No simulator available, running with generic destination"
+            xcodebuild test \
+              -project Cauldron.xcodeproj \
+              -scheme Cauldron \
+              -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' \
+              -configuration Debug \
+              -skipPackagePluginValidation \
+              -skipMacroValidation \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              ONLY_ACTIVE_ARCH=YES \
+              -resultBundlePath TestResults.xcresult
+          fi
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
