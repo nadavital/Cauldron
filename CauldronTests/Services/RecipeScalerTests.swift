@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class RecipeScalerTests: XCTestCase {
 
     var testRecipe: Recipe!

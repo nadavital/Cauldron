@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class GroceryServiceTests: XCTestCase {
 
     var service: GroceryService!

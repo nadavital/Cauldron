@@ -83,14 +83,15 @@ jobs:
 
       - name: Boot Simulator
         run: |
-          # Get latest iOS runtime identifier (e.g., com.apple.CoreSimulator.SimRuntime.iOS-18-0)
+          # Get latest iOS runtime identifier
           RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS[^ ]+' | tail -1)
           echo "Using runtime: $RUNTIME"
 
-          # Create and boot a simulator (try different iPhone models)
-          UDID=$(xcrun simctl create "CI_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
-                 xcrun simctl create "CI_iPhone" "iPhone 15" "$RUNTIME" 2>/dev/null || \
-                 xcrun simctl create "CI_iPhone" "iPhone 14" "$RUNTIME")
+          # Create and boot a simulator (try available iPhone models for Xcode 26.x)
+          UDID=$(xcrun simctl create "CI_iPhone" "iPhone 17 Pro" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 17" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 15" "$RUNTIME")
           echo "Created simulator: $UDID"
 
           xcrun simctl boot "$UDID"
