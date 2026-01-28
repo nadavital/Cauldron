@@ -97,6 +97,11 @@ jobs:
           xcrun simctl boot "$UDID"
           echo "SIMULATOR_UDID=$UDID" >> $GITHUB_ENV
 
+          # Wait for simulator to be fully booted
+          echo "Waiting for simulator to boot..."
+          xcrun simctl bootstatus "$UDID" -b
+          echo "Simulator is ready"
+
       - name: Run Tests
         run: |
           xcodebuild test \
