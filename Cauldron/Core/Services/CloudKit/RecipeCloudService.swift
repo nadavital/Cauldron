@@ -212,7 +212,8 @@ actor RecipeCloudService {
         let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
                                    ownerId.uuidString,
                                    RecipeVisibility.publicRecipe.rawValue)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
+        // Use sharedRecipe record type - public recipes are stored in the public database
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
 
         let db = try await core.getPublicDatabase()

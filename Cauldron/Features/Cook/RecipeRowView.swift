@@ -37,11 +37,14 @@ struct RecipeRowView: View {
 
                 HStack(spacing: 8) {
                     if let time = recipe.displayTime {
-                        Label(time, systemImage: "clock")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .fixedSize()
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                            Text(time)
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
                     }
 
                     Text(recipe.yields)

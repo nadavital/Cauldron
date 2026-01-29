@@ -46,34 +46,37 @@ actor SearchCloudService {
         // 1. Visibility Predicate
         predicates.append(NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue))
 
-        // 2. Text Search Predicate
-        if !query.isEmpty {
-            let textPredicate = NSPredicate(format: "title BEGINSWITH %@ OR searchableTags CONTAINS %@", query, query)
-            predicates.append(textPredicate)
-        }
-
-        // 3. Category Filter Predicate
-        if let categories = categories, !categories.isEmpty {
-            for category in categories {
-                let categoryPredicate = NSPredicate(format: "searchableTags CONTAINS %@", category)
-                predicates.append(categoryPredicate)
-            }
-        }
+        // Text and category filtering is done client-side in RecipeGroupingService
+        // CloudKit's predicate support is limited (no CONTAINS, no complex OR)
+        // We fetch all public recipes and filter client-side for proper substring matching
 
         let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        let queryObj = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: compoundPredicate)
-        queryObj.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+        // Query SharedRecipe record type (public recipes), not Recipe (private)
+        let queryObj = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: compoundPredicate)
+        queryObj.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        logger.info("🔍 Searching SharedRecipe with predicate: \(compoundPredicate.predicateFormat)")
 
         let results = try await db.records(matching: queryObj, resultsLimit: limit)
 
+        logger.info("🔍 Search returned \(results.matchResults.count) raw results")
+
         var recipes: [Recipe] = []
         for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
+            switch result {
+            case .success(let record):
+                do {
+                    let recipe = try recipeFromRecord(record)
+                    recipes.append(recipe)
+                } catch {
+                    logger.error("❌ Failed to parse record \(record.recordID.recordName): \(error.localizedDescription)")
+                }
+            case .failure(let error):
+                logger.error("❌ Failed to get record: \(error.localizedDescription)")
             }
         }
 
+        logger.info("✅ Search returning \(recipes.count) parsed recipes")
         return recipes
     }
 

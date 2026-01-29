@@ -112,13 +112,13 @@ actor SharingRepository {
     /// Save a shared recipe
     func saveSharedRecipe(_ sharedRecipe: SharedRecipe) async throws {
         let context = ModelContext(modelContainer)
-        
+
         // Check if shared recipe already exists
         let descriptor = FetchDescriptor<SharedRecipeModel>(
             predicate: #Predicate { $0.id == sharedRecipe.id }
         )
         let existing = try context.fetch(descriptor)
-        
+
         if existing.isEmpty {
             let model = try SharedRecipeModel.from(sharedRecipe)
             context.insert(model)
@@ -126,8 +126,8 @@ actor SharingRepository {
             logger.info("Saved shared recipe: \(sharedRecipe.recipe.title)")
         }
     }
-    
 
-    
+
+
 
 }

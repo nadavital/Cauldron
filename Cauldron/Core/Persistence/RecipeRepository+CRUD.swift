@@ -547,6 +547,9 @@ extension RecipeRepository {
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
+            var privateDeleteSucceeded = true
+            var publicDeleteSucceeded = true
+
             // Delete image from CloudKit if exists
             // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
             if recipe.imageURL != nil && !recipe.isPreview {
@@ -562,17 +565,40 @@ extension RecipeRepository {
             // Delete recipe metadata from CloudKit
             // IMPORTANT: Only delete if this is the user's own recipe, NOT a preview
             if !recipe.isPreview {
-                await self.deleteRecipeFromCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+                // Delete from private database
+                do {
+                    try await recipeCloudService.deleteRecipe(recipe)
+                } catch {
+                    privateDeleteSucceeded = false
+                    await self.operationQueueService.markFailed(
+                        operationId: recipe.id,
+                        error: "Private DB deletion failed: \(error.localizedDescription)"
+                    )
+                }
 
-                // Also delete from PUBLIC database if it was shared
-                await self.deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+                // Always attempt to delete from PUBLIC database (regardless of current visibility)
+                // This handles orphaned records from visibility changes or previous sync failures
+                do {
+                    try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+                } catch {
+                    publicDeleteSucceeded = false
+                    // Only mark failed if private also failed (public deletion is best-effort)
+                    if !privateDeleteSucceeded {
+                        await self.operationQueueService.markFailed(
+                            operationId: recipe.id,
+                            error: "Both private and public DB deletion failed"
+                        )
+                    }
+                }
             }
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: recipe.id,
-                entityType: .recipe
-            )
+            // Only mark completed if at least private deletion succeeded
+            if privateDeleteSucceeded {
+                await self.operationQueueService.markCompleted(
+                    entityId: recipe.id,
+                    entityType: .recipe
+                )
+            }
         }
     }
     

@@ -148,7 +148,7 @@ struct ExploreTagView: View {
                 HStack(spacing: 16) {
                     ForEach(viewModel.allRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                            ExploreTagRecipeCard(recipe: recipe, dependencies: dependencies)
+                            RecipeCardView(recipe: recipe, dependencies: dependencies)
                         }
                         .buttonStyle(.plain)
                     }
@@ -191,7 +191,7 @@ struct ExploreTagView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            ExploreTagRecipeCard(recipe: sharedRecipe.recipe, dependencies: dependencies, sharedBy: sharedRecipe.sharedBy)
+                            RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                         }
                         .buttonStyle(.plain)
                     }
@@ -233,11 +233,7 @@ struct ExploreTagView: View {
                             dependencies: dependencies,
                             sharedBy: sharedRecipe.sharedBy
                         )) {
-                            ExploreTagRecipeCard(
-                                recipe: sharedRecipe.recipe,
-                                dependencies: dependencies,
-                                sharedBy: sharedRecipe.sharedBy
-                            )
+                            RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                         }
                         .buttonStyle(.plain)
                     }
@@ -263,84 +259,6 @@ struct ExploreTagView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
-    }
-}
-
-// MARK: - Recipe Card for Tag Exploration
-
-struct ExploreTagRecipeCard: View {
-    let recipe: Recipe
-    let dependencies: DependencyContainer
-    var sharedBy: User? = nil
-    var ownerTier: UserTier? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Image with badges
-            ZStack(alignment: .topTrailing) {
-                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-
-                // Favorite indicator (top-right)
-                if recipe.isFavorite {
-                    Image(systemName: "star.fill")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                        .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
-                        .padding(8)
-                }
-            }
-            .frame(width: 240, height: 160)
-
-            // Title - single line for clean look
-            Text(recipe.title)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
-
-            // Metadata row - fixed height for alignment
-            HStack(spacing: 4) {
-                // Time - always reserve space
-                if let time = recipe.displayTime {
-                    Label(time, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text(" ")
-                        .font(.caption)
-                        .frame(width: 60)
-                }
-
-                Spacer()
-
-                // Shared by indicator with tier badge, or tag
-                if let sharedBy = sharedBy {
-                    HStack(spacing: 4) {
-                        ProfileAvatar(user: sharedBy, size: 16, dependencies: dependencies)
-                        Text(sharedBy.displayName)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-
-                        // Tier badge (compact)
-                        if let tier = ownerTier {
-                            TierBadgeView(tier: tier, style: .compact)
-                        }
-                    }
-                    .frame(maxWidth: 140, alignment: .trailing)
-                } else if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
-                    TagView(firstTag)
-                        .scaleEffect(0.9)
-                        .frame(maxWidth: 100, alignment: .trailing)
-                } else {
-                    Text(" ")
-                        .font(.caption2)
-                        .frame(width: 60)
-                }
-            }
-            .frame(width: 240, height: 20)
-        }
-        .frame(width: 240)
     }
 }
 

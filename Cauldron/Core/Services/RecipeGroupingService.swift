@@ -44,31 +44,39 @@ enum RecipeGroupingService {
         selectedCategories: Set<RecipeCategory> = []
     ) -> [SearchRecipeGroup] {
 
-        // 1. Filter Local Recipes
-        var filteredLocal = localRecipes
+        // Helper to filter recipes by text and categories
+        func filterRecipes(_ recipes: [Recipe]) -> [Recipe] {
+            var filtered = recipes
 
-        if !filterText.isEmpty {
-            let lowercased = filterText.lowercased()
-            filteredLocal = filteredLocal.filter { recipe in
-                recipe.title.lowercased().contains(lowercased) ||
-                recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
-                recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
-            }
-        }
-
-        if !selectedCategories.isEmpty {
-            filteredLocal = filteredLocal.filter { recipe in
-                selectedCategories.allSatisfy { category in
-                    recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
+            if !filterText.isEmpty {
+                let lowercased = filterText.lowercased()
+                filtered = filtered.filter { recipe in
+                    recipe.title.lowercased().contains(lowercased) ||
+                    recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
+                    recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
                 }
             }
+
+            if !selectedCategories.isEmpty {
+                filtered = filtered.filter { recipe in
+                    selectedCategories.allSatisfy { category in
+                        recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
+                    }
+                }
+            }
+
+            return filtered
         }
+
+        // 1. Filter both local and public recipes by search text and categories
+        let filteredLocal = filterRecipes(localRecipes)
+        let filteredPublic = filterRecipes(publicRecipes)
 
         // 2. Merge Local + Public
         // Ensure we don't have duplicates by ID (e.g. if I own it, it might be in both lists?)
         // Typically localRecipes are "My Recipes" and publicRecipes are "Others".
         // But for safety, let's combine and then group.
-        let allResults = filteredLocal + publicRecipes
+        let allResults = filteredLocal + filteredPublic
 
         // 3. Group by Original Recipe ID (Deduplication)
         // Key: originalRecipeId ?? id (of original)
