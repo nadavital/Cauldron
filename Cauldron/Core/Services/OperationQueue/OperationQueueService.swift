@@ -216,6 +216,45 @@ actor OperationQueueService {
 
         operations = loaded
         // Loaded persisted operations (don't log routine operations)
+
+        // Recover any stalled operations (e.g., app was killed during sync)
+        recoverStalledOperations()
+    }
+
+    /// Recover operations that have been stuck in progress too long (e.g., app was killed)
+    /// These operations were marked inProgress but never completed - reset them for retry
+    private func recoverStalledOperations() {
+        let stalledThreshold: TimeInterval = 300 // 5 minutes
+        let now = Date()
+        var recoveredCount = 0
+
+        for operation in operations.values where operation.status == .inProgress {
+            // Check if operation has been in progress too long
+            if let lastAttempt = operation.lastAttemptDate,
+               now.timeIntervalSince(lastAttempt) > stalledThreshold {
+                // Mark as pending for retry
+                let recovered = SyncOperation(
+                    id: operation.id,
+                    type: operation.type,
+                    entityType: operation.entityType,
+                    entityId: operation.entityId,
+                    status: .pending,
+                    attempts: operation.attempts,
+                    lastAttemptDate: operation.lastAttemptDate,
+                    nextRetryDate: nil, // Ready to retry immediately
+                    errorMessage: "Recovered from stalled state",
+                    createdAt: operation.createdAt
+                )
+                operations[operation.id] = recovered
+                recoveredCount += 1
+                AppLogger.general.info("🔄 Recovered stalled operation: \(operation.displayDescription)")
+            }
+        }
+
+        if recoveredCount > 0 {
+            persistOperations()
+            AppLogger.general.info("🔄 Recovered \(recoveredCount) stalled operations")
+        }
     }
 
     /// Persist operations to UserDefaults

@@ -683,7 +683,7 @@ struct CookTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            SocialRecipeCard(
+                            RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.friendsRecipeTiers[sharedRecipe.sharedBy.id],
                                 dependencies: viewModel.dependencies
@@ -728,18 +728,18 @@ struct CookTabView: View {
                                 dependencies: viewModel.dependencies,
                                 sharedBy: owner
                             )) {
-                                SocialRecipeCard(
+                                RecipeCardView(
                                     recipe: recipe,
-                                    creator: owner,
-                                    creatorTier: viewModel.popularRecipeTiers[ownerId],
-                                    dependencies: viewModel.dependencies
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: owner,
+                                    creatorTier: viewModel.popularRecipeTiers[ownerId]
                                 )
                             }
                             .buttonStyle(.plain)
                         } else {
                             // Fallback for recipes without owner info
                             NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
-                                PopularRecipeCardSimple(recipe: recipe, dependencies: viewModel.dependencies)
+                                RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             }
                             .buttonStyle(.plain)
                         }
@@ -893,136 +893,6 @@ struct CategoryCardView: View {
     }
 }
 
-// MARK: - Recipe Card View (horizontal scroll cards)
-
-struct RecipeCardView: View {
-    let recipe: Recipe
-    let dependencies: DependencyContainer
-    var onTagTap: ((Tag) -> Void)? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Image with badges
-            ZStack(alignment: .topTrailing) {
-                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-
-                // Favorite indicator (top-right)
-                if recipe.isFavorite {
-                    Image(systemName: "star.fill")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                        .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
-                        .padding(8)
-                }
-            }
-            .frame(width: 240, height: 160)
-            
-            // Title - single line for clean look
-            Text(recipe.title)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
-
-            // Metadata row - fixed height for alignment
-            HStack(spacing: 4) {
-                // Time - always reserve space
-                if let time = recipe.displayTime {
-                    Label(time, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text(" ")
-                        .font(.caption)
-                        .frame(width: 60)
-                }
-
-                Spacer()
-
-                // Tag - always reserve space
-                if !recipe.tags.isEmpty, let firstTag = recipe.tags.first, onTagTap != nil {
-                    TagView(firstTag)
-                        .scaleEffect(0.9) // Scale down slightly for the card
-                        .frame(maxWidth: 100, alignment: .trailing)
-                        .onTapGesture {
-                            onTagTap?(firstTag)
-                        }
-                } else if !recipe.tags.isEmpty, let firstTag = recipe.tags.first {
-                    TagView(firstTag)
-                        .scaleEffect(0.9) // Scale down slightly for the card
-                        .frame(maxWidth: 100, alignment: .trailing)
-                } else {
-                    Text(" ")
-                        .font(.caption2)
-                        .frame(width: 60)
-                }
-            }
-            .frame(width: 240, height: 20)
-        }
-        .frame(width: 240)
-    }
-
-}
-
-// MARK: - Popular Recipe Card (Simple - for community recipes without creator info)
-
-struct PopularRecipeCardSimple: View {
-    let recipe: Recipe
-    let dependencies: DependencyContainer
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Image with "Community" badge
-            ZStack(alignment: .topLeading) {
-                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-                    .frame(width: 240, height: 160)
-
-                // Community badge
-                HStack(spacing: 4) {
-                    Image(systemName: "globe")
-                        .font(.caption2)
-                    Text("Community")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(8)
-            }
-
-            // Title
-            Text(recipe.title)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
-
-            // Time and tag
-            HStack(spacing: 4) {
-                if let time = recipe.displayTime {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock")
-                            .font(.caption2)
-                        Text(time)
-                            .font(.caption)
-                    }
-                    .foregroundColor(.cauldronOrange)
-                }
-
-                Spacer()
-
-                // Show first tag if available
-                if let firstTag = recipe.tags.first {
-                    TagView(firstTag)
-                        .scaleEffect(0.85)
-                        .frame(maxWidth: 100, alignment: .trailing)
-                }
-            }
-            .frame(width: 240, height: 20)
-        }
-        .frame(width: 240)
-    }
-}
 
 #Preview {
     CookTabView(dependencies: .preview(), preloadedData: nil)

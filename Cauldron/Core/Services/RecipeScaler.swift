@@ -163,21 +163,11 @@ struct RecipeScaler {
         // Check for impractical quantities
         for ingredient in ingredients {
             guard let quantity = ingredient.quantity else { continue }
-            
-            // Warn about very small quantities (normalized for comparison)
-            // Volume threshold: ~2.5ml (half a teaspoon) - genuinely hard to measure
-            // Weight threshold: ~2g - very small pinch
+
+            // Normalize values for threshold comparisons
             let volumeInMl = normalizeVolumeToMilliliters(quantity)
             let weightInGrams = normalizeWeightToGrams(quantity)
-            let isVerySmallVolume = quantity.unit.isVolume && volumeInMl > 0 && volumeInMl < 2.5
-            let isVerySmallWeight = quantity.unit.isWeight && weightInGrams > 0 && weightInGrams < 2
-            if isVerySmallVolume || isVerySmallWeight {
-                warnings.append(ScalingWarning(
-                    type: .verySmallQuantity,
-                    message: "'\(ingredient.name)' requires a very small amount (\(quantity.displayString)). Consider measuring carefully or omitting."
-                ))
-            }
-            
+
             // Warn about fractional eggs
             if ingredient.name.lowercased().contains("egg") {
                 let fractionalPart = quantity.value - floor(quantity.value)
@@ -270,24 +260,22 @@ struct ScalingWarning: Identifiable {
     let message: String
     
     enum WarningType {
-        case verySmallQuantity
         case veryLargeQuantity
         case fractionalEggs
         case extremeScaling
     }
-    
+
     var icon: String {
         switch type {
-        case .verySmallQuantity: return "exclamationmark.triangle.fill"
         case .veryLargeQuantity: return "exclamationmark.triangle.fill"
         case .fractionalEggs: return "info.circle.fill"
         case .extremeScaling: return "exclamationmark.triangle.fill"
         }
     }
-    
+
     var color: Color {
         switch type {
-        case .verySmallQuantity, .veryLargeQuantity, .extremeScaling:
+        case .veryLargeQuantity, .extremeScaling:
             return .orange
         case .fractionalEggs:
             return .blue

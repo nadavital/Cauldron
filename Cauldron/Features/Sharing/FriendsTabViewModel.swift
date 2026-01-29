@@ -43,30 +43,41 @@ final class FriendsTabViewModel {
         self.dependencies = dependencies
     }
 
-    func loadSharedRecipes() async {
+    func loadSharedRecipes(forceRefresh: Bool = false) async {
         guard let dependencies = dependencies else {
             AppLogger.general.warning("FriendsTabViewModel not configured with dependencies")
             return
         }
 
-        // Only show loading indicator on first load
-        // After that, show cached data while refreshing in background
+        // On first load, try to use cached data for instant display
         if !hasLoadedOnce {
+            if let cached = await dependencies.sharingService.getCachedSharedRecipes() {
+                // Show cached data immediately
+                sharedRecipes = cached
+                organizeRecipesIntoSections()
+                await preloadImagesForSharedRecipes()
+                hasLoadedOnce = true
+
+                // Fetch tiers in background
+                await fetchSharerTiers()
+                return
+            }
+            // No cache, show loading indicator
             isLoading = true
         }
+
         defer {
             isLoading = false
             hasLoadedOnce = true
         }
 
         do {
-            sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
-            // Loaded shared recipes (don't log routine operations)
+            sharedRecipes = try await dependencies.sharingService.getSharedRecipes(forceRefresh: forceRefresh)
 
             // Fetch tier information for sharers
             await fetchSharerTiers()
 
-            // CRITICAL: Preload images into memory cache to prevent flickering
+            // Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
 
             // Organize recipes into sections for better UX

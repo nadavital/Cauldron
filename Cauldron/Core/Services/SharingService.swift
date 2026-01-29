@@ -100,13 +100,31 @@ actor SharingService {
     
     // MARK: - Recipe Sharing
 
+    // In-memory cache for shared recipes with TTL
+    private var cachedSharedRecipes: [SharedRecipe] = []
+    private var cacheTimestamp: Date?
+    private let cacheTTL: TimeInterval = 5 * 60 // 5 minutes
+
+    /// Get cached shared recipes if still valid (for instant UI)
+    func getCachedSharedRecipes() -> [SharedRecipe]? {
+        guard let timestamp = cacheTimestamp,
+              Date().timeIntervalSince(timestamp) < cacheTTL,
+              !cachedSharedRecipes.isEmpty else {
+            return nil
+        }
+        return cachedSharedRecipes
+    }
+
     /// Get all recipes shared with the current user (from PUBLIC database)
     /// Fetches public recipes from friends
     ///
     /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
     /// To save a recipe for later, users must explicitly add it to their personal collection via "Add to My Recipes".
-    func getSharedRecipes() async throws -> [SharedRecipe] {
-        // Fetching shared recipes (don't log routine operations)
+    func getSharedRecipes(forceRefresh: Bool = false) async throws -> [SharedRecipe] {
+        // Return cached data if valid and not forcing refresh
+        if !forceRefresh, let cached = getCachedSharedRecipes() {
+            return cached
+        }
 
         // Get current user to know who we are
         let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
@@ -131,8 +149,6 @@ actor SharingService {
             return ids
         }
 
-        // Found connected friends (don't log routine operations)
-
         var allSharedRecipes: [SharedRecipe] = []
 
         // Fetch public recipes from friends
@@ -141,7 +157,6 @@ actor SharingService {
                 ownerIds: friendIds,
                 visibility: .publicRecipe
             )
-            // Found public recipes (don't log routine operations)
 
             // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
             // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
@@ -173,7 +188,10 @@ actor SharingService {
             }
         }
 
-        // Return shared recipes (don't log routine operations)
+        // Update in-memory cache
+        cachedSharedRecipes = allSharedRecipes
+        cacheTimestamp = Date()
+
         return allSharedRecipes
     }
     

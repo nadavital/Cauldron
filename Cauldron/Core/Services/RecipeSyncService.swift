@@ -133,6 +133,9 @@ actor RecipeSyncService {
         lastSyncDate = Date()
         UserDefaults.standard.set(lastSyncDate, forKey: lastSyncKey)
 
+        // Clean up orphaned public recipes (exist in public DB but not locally)
+        await cleanupOrphanedPublicRecipes(userId: userId, localRecipeIds: Set(localRecipes.map { $0.id }))
+
         // Clean up old tombstones (older than 30 days)
         try await deletedRecipeRepository.cleanupOldTombstones()
 
@@ -400,6 +403,40 @@ actor RecipeSyncService {
     /// Reset the sync failure counter (call after user manually triggers successful sync)
     func resetSyncHealth() {
         consecutiveSyncFailures = 0
+    }
+
+    // MARK: - Orphan Cleanup
+
+    /// Remove public recipes that no longer exist in private database
+    /// This cleans up "orphaned" records that friends can see but the owner cannot
+    private func cleanupOrphanedPublicRecipes(userId: UUID, localRecipeIds: Set<UUID>) async {
+        do {
+            // Fetch user's public recipes from CloudKit public database
+            let publicRecipes = try await recipeCloudService.querySharedRecipes(
+                ownerIds: [userId],
+                visibility: .publicRecipe
+            )
+
+            // Find orphans: public records not in local/private storage
+            let orphanedRecipes = publicRecipes.filter { !localRecipeIds.contains($0.id) }
+
+            guard !orphanedRecipes.isEmpty else { return }
+
+            logger.info("🧹 Found \(orphanedRecipes.count) orphaned public recipes to clean up")
+
+            // Delete each orphan from public database
+            for recipe in orphanedRecipes {
+                do {
+                    try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+                    logger.info("🧹 Deleted orphaned public recipe: \(recipe.title)")
+                } catch {
+                    logger.warning("Failed to delete orphan \(recipe.id): \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            // Don't fail sync if cleanup fails - this is a best-effort operation
+            logger.warning("Orphan cleanup skipped: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Image Sync Helpers

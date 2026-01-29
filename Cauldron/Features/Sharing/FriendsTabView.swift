@@ -77,8 +77,8 @@ struct FriendsTabView: View {
                 await viewModel.loadSharedRecipes()
             }
             .refreshable {
-                // Refresh shared recipes and collections
-                await viewModel.loadSharedRecipes()
+                // Force refresh shared recipes from CloudKit
+                await viewModel.loadSharedRecipes(forceRefresh: true)
 
                 // Also refresh friends list by posting notification
                 NotificationCenter.default.post(name: .refreshConnections, object: nil)
@@ -210,7 +210,7 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            SocialRecipeCard(
+                            RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
                                 dependencies: dependencies
@@ -256,7 +256,7 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            SocialRecipeCard(
+                            RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
                                 dependencies: dependencies
@@ -302,7 +302,7 @@ struct FriendsTabView: View {
                             sharedBy: sharedRecipe.sharedBy,
                             sharedAt: sharedRecipe.sharedAt
                         )) {
-                            SocialRecipeCard(
+                            RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
                                 dependencies: dependencies

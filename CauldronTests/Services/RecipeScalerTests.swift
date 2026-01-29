@@ -201,25 +201,6 @@ final class RecipeScalerTests: XCTestCase {
 
     // MARK: - Warning Tests
 
-    func testScale_VerySmallQuantity_GeneratesWarning() {
-        // Given - 0.5 tsp scaled by 0.1 = 0.05 tsp (very small, non-weight)
-        let recipe = Recipe(
-            title: "Test",
-            ingredients: [
-                Ingredient(name: "spice", quantity: Quantity(value: 0.5, unit: .teaspoon))
-            ],
-            steps: [CookStep(index: 0, text: "Mix")],
-            yields: "1 serving"
-        )
-
-        // When
-        let scaled = RecipeScaler.scale(recipe, by: 0.1)
-
-        // Then
-        XCTAssertTrue(scaled.hasWarnings)
-        XCTAssertTrue(scaled.warnings.contains { $0.type == .verySmallQuantity })
-    }
-
     func testScale_FractionalEggs_GeneratesWarning() {
         // Given - 3 eggs scaled by 0.5 = 1.5 eggs
         // When

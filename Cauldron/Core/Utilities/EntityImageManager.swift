@@ -337,7 +337,6 @@ actor EntityImageManager<Entity: ImageManageable> {
         if let cachedTime = notFoundCache[cacheKey] {
             let age = Date().timeIntervalSince(cachedTime)
             if age < notFoundCacheDuration {
-                logger.debug("⏭️ Skipping download for \(entityId) (not found cached \(Int(age))s ago)")
                 return nil
             } else {
                 notFoundCache.removeValue(forKey: cacheKey)
@@ -409,11 +408,8 @@ actor EntityImageManager<Entity: ImageManageable> {
         if let cachedTime = notFoundCache[cacheKey] {
             let age = Date().timeIntervalSince(cachedTime)
             if age < notFoundCacheDuration {
-                // Still within cache duration - return nil without hitting CloudKit
-                logger.debug("⏭️ Skipping download for \(entityId) (not found cached \(Int(age))s ago)")
                 return nil
             } else {
-                // Cache expired - remove it
                 notFoundCache.removeValue(forKey: cacheKey)
             }
         }
