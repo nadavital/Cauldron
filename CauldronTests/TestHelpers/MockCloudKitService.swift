@@ -10,7 +10,8 @@ import CloudKit
 @testable import Cauldron
 
 /// Mock CloudKitService for testing repositories without real CloudKit calls
-actor MockCloudKitService {
+@MainActor
+final class MockCloudKitService {
 
     // MARK: - Mock State
 
@@ -110,53 +111,33 @@ actor MockCloudKitService {
 
     // MARK: - Collection Operations
 
-    nonisolated func saveCollection(_ collection: Collection) async throws {
-        await setRecordCalled()
+    func saveCollection(_ collection: Collection) async throws {
+        saveRecordCalled = true
 
-        if await shouldFailSave {
+        if shouldFailSave {
             throw CloudKitError.networkError
         }
 
-        await saveCollectionToStorage(collection)
-    }
-
-    nonisolated func fetchCollections(forUserId userId: UUID) async throws -> [Collection] {
-        await setFetchCalled()
-
-        if await shouldFailFetch {
-            throw CloudKitError.networkError
-        }
-
-        return await Array(savedCollections.values).filter { $0.userId == userId }
-    }
-
-    private func saveCollectionToStorage(_ collection: Collection) {
         savedCollections[collection.id] = collection
     }
 
-    private func setRecordCalled() {
-        saveRecordCalled = true
-    }
-
-    private func setFetchCalled() {
+    func fetchCollections(forUserId userId: UUID) async throws -> [Collection] {
         fetchRecordCalled = true
-    }
 
-    private func setDeleteCalled() {
-        deleteRecordCalled = true
-    }
-
-    nonisolated func deleteCollection(_ collectionId: UUID) async throws {
-        await setDeleteCalled()
-
-        if await shouldFailDelete {
+        if shouldFailFetch {
             throw CloudKitError.networkError
         }
 
-        await deleteCollectionFromStorage(collectionId)
+        return Array(savedCollections.values).filter { $0.userId == userId }
     }
 
-    private func deleteCollectionFromStorage(_ collectionId: UUID) {
+    func deleteCollection(_ collectionId: UUID) async throws {
+        deleteRecordCalled = true
+
+        if shouldFailDelete {
+            throw CloudKitError.networkError
+        }
+
         deletedCollectionIDs.insert(collectionId)
         savedCollections.removeValue(forKey: collectionId)
     }

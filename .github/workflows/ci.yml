@@ -1,0 +1,159 @@
+# Cauldron CI Pipeline
+# Runs build, tests, and lint on pull requests and pushes to main
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # BUILD JOB - Required
+  # ============================================================
+  build:
+    name: Build
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild build \
+            -project Cauldron.xcodeproj \
+            -scheme Cauldron \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf
+
+  # ============================================================
+  # TEST JOB - Required (runs after build completes)
+  # ============================================================
+  test:
+    name: Test
+    runs-on: macos-15
+    needs: build
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+
+      - name: Restore DerivedData Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
+
+      - name: Boot Simulator
+        run: |
+          # Get latest iOS runtime identifier
+          RUNTIME=$(xcrun simctl list runtimes | grep -oE 'com.apple.CoreSimulator.SimRuntime.iOS[^ ]+' | tail -1)
+          echo "Using runtime: $RUNTIME"
+
+          # Create and boot a simulator (try available iPhone models for Xcode 26.x)
+          UDID=$(xcrun simctl create "CI_iPhone" "iPhone 17 Pro" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 17" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 16" "$RUNTIME" 2>/dev/null || \
+                 xcrun simctl create "CI_iPhone" "iPhone 15" "$RUNTIME")
+          echo "Created simulator: $UDID"
+
+          xcrun simctl boot "$UDID"
+          echo "SIMULATOR_UDID=$UDID" >> $GITHUB_ENV
+
+          # Wait for simulator to be fully booted
+          echo "Waiting for simulator to boot..."
+          xcrun simctl bootstatus "$UDID" -b
+          echo "Simulator is ready"
+
+      - name: Run Tests
+        run: |
+          xcodebuild test \
+            -project Cauldron.xcodeproj \
+            -scheme Cauldron \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -configuration Debug \
+            -parallel-testing-enabled NO \
+            -maximum-parallel-testing-workers 1 \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            -quiet \
+            -enableCodeCoverage NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            -resultBundlePath TestResults.xcresult
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults.xcresult
+
+  # ============================================================
+  # LINT JOB - Advisory (does not block merge)
+  # ============================================================
+  lint:
+    name: Lint
+    runs-on: macos-15
+    timeout-minutes: 10
+    # continue-on-error means failures don't block the PR
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: |
+          echo "Running SwiftLint..."
+          swiftlint lint --reporter github-actions-logging
+
+      - name: SwiftLint Summary
+        if: always()
+        run: |
+          echo "## SwiftLint Results" >> $GITHUB_STEP_SUMMARY
+          swiftlint lint --reporter markdown >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "See job logs for details" >> $GITHUB_STEP_SUMMARY

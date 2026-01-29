@@ -8,6 +8,7 @@
 import Foundation
 @testable import Cauldron
 
+@MainActor
 enum TestFixtures {
     // MARK: - Sample Recipes
 

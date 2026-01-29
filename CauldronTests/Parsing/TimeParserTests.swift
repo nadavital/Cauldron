@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class TimeParserTests: XCTestCase {
 
     // MARK: - Total Time Extraction

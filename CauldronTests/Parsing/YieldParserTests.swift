@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class YieldParserTests: XCTestCase {
 
     // MARK: - Basic Pattern Tests

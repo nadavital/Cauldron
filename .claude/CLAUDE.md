@@ -3,8 +3,9 @@
 ## Project Overview
 Cauldron is a modern iOS recipe management and social sharing platform built with SwiftUI and CloudKit. Users can import recipes from multiple sources (web, YouTube, TikTok, Instagram), cook with interactive timers, share recipes with friends, and generate new recipes using Apple Intelligence.
 
-**Current Version:** 1.0 (Build 1)
-**Deployment Target:** iOS 17.0+
+**Current Version:** 1.1.4
+**Deployment Target:** iOS 18.0+
+**App Store:** Live on the App Store
 **TestFlight:** https://testflight.apple.com/join/Zk5WuCcE
 
 ---
@@ -30,6 +31,15 @@ The app follows a clean architecture with clear separation of concerns:
 User Action → ViewModel → Service → Repository → SwiftData/CloudKit → UI Update
 ```
 
+### 5-Layer Dependency Container Architecture
+Services are organized in the `DependencyContainer` in a clear hierarchy:
+
+1. **Infrastructure Layer**: CloudKitCore, ModelContainer
+2. **Cloud Services Layer**: RecipeCloudService, UserCloudService, CollectionCloudService, ConnectionCloudService, SearchCloudService
+3. **Local Persistence Layer**: RecipeRepository, CollectionRepository, ConnectionRepository, etc.
+4. **Domain Services Layer**: RecipeSyncService, ConnectionManager, GroceryService, SharingService, etc.
+5. **Feature Services Layer**: EntityImageManager, RecipeImageService, TimerManager, Parsers, etc.
+
 ---
 
 ## Code Organization
@@ -49,17 +59,47 @@ Each feature is self-contained with its own views and view models:
 - **Importer** (`Features/Importer/`) - Multi-source recipe import flow
 
 ### Core Services
-Located in `Cauldron/Core/Services/`:
 
-- **CloudKitService.swift** (⚠️ 2,266 LOC - needs refactoring) - All CloudKit operations
-- **RecipeSyncService.swift** - Recipe cloud synchronization
-- **ImageManager.swift** - Recipe image handling
-- **ProfileImageManager.swift** - User profile images
-- **CollectionImageManager.swift** - Collection cover images
+#### CloudKit Services (`Cauldron/Core/Services/CloudKit/`)
+Modular CloudKit services organized by domain:
+
+- **CloudKitCore.swift** - Shared infrastructure (container, zones, account status)
+- **CloudKitTypes.swift** - Common types, errors, and constants
+- **RecipeCloudService.swift** - Recipe sync, sharing, and image operations
+- **UserCloudService.swift** - User profiles and authentication
+- **CollectionCloudService.swift** - Collection sync and sharing
+- **ConnectionCloudService.swift** - Friend connections and requests
+- **SearchCloudService.swift** - Recipe discovery and search
+
+#### Image Management
+Unified image management system using generic `EntityImageManager<T>`:
+
+- **EntityImageManager.swift** (`Core/Utilities/`) - Generic actor for all entity images with:
+  - Two-tier caching (memory + disk)
+  - Request coalescing for duplicate downloads
+  - Automatic image compression and resizing
+  - CloudKit upload/download integration
+- **RecipeImageService.swift** - Recipe image loading with CloudKit fallback
+- **ImageSyncManager.swift** - Tracks pending image syncs with status reporting
+- **CloudImageMigration.swift** - Background migration of images to public database
+- **ImageCache.swift** - Shared in-memory image cache
+
+Type aliases for domain-specific managers:
+- `RecipeImageManager` = `EntityImageManager<RecipeModel>`
+- `ProfileImageManagerV2` = `EntityImageManager<UserModel>`
+- `CollectionImageManagerV2` = `EntityImageManager<CollectionModel>`
+
+#### Other Services (`Cauldron/Core/Services/`)
+- **RecipeSyncService.swift** - Recipe cloud synchronization with conflict resolution
+- **OperationQueueService.swift** - Persistent operation queue for offline-first operations
+- **CurrentUserSession.swift** - User authentication state singleton
+- **ReferralManager.swift** - Referral system management
 - **UnitsService.swift** - Unit conversion and scaling
 - **GroceryService.swift** - Grocery list management
 - **ConnectionManager.swift** - Friend connections
 - **CookSessionManager.swift** - Active cooking sessions
+- **SharingService.swift** - Recipe sharing coordination
+- **ExternalShareService.swift** - External sharing (links, social)
 
 ### Persistence Layer
 SwiftData repositories in `Cauldron/Core/Persistence/`:
@@ -107,13 +147,28 @@ Platform-specific parsers in `Cauldron/Core/Parsing/`:
 - Actor-based concurrency for thread safety
 - Conflict resolution via CloudKit change tokens
 - Deleted item tracking with tombstone records
+- Persistent operation queue for offline-first operations
+
+### Service Architecture
+CloudKit operations are organized into domain-specific services:
+
+```
+CloudKitCore (shared infrastructure)
+    ├── RecipeCloudService (recipes)
+    ├── UserCloudService (profiles)
+    ├── CollectionCloudService (collections)
+    ├── ConnectionCloudService (friends)
+    └── SearchCloudService (discovery)
+```
+
+Each service is an actor that depends on `CloudKitCore` for shared functionality.
 
 ---
 
 ## Swift Coding Conventions
 
 ### Naming
-- **Types:** PascalCase (`RecipeDetailView`, `CloudKitService`)
+- **Types:** PascalCase (`RecipeDetailView`, `CloudKitCore`)
 - **Properties/Variables:** camelCase (`selectedRecipe`, `isLoading`)
 - **Functions:** camelCase with verb prefix (`fetchRecipes()`, `updateProfile()`)
 - **SwiftUI Views:** Noun-based names ending in `View` or `Screen`
@@ -194,9 +249,15 @@ Firebase is used for public recipe sharing and preview pages:
 - **Firestore:** Share metadata storage
 - **Deploy:** `firebase deploy --only functions` (from firebase/ directory)
 
-### TestFlight
-- Manual deployment via Xcode → Archive → Distribute
-- No CI/CD currently configured (corporate network limitation)
+### App Store
+- Archive via Xcode → Product → Archive
+- Distribute to App Store Connect
+- TestFlight for beta testing
+
+### CI/CD
+- GitHub Actions for automated builds and tests
+- SwiftLint for code quality checks
+- Pre-commit hooks for local linting
 
 ---
 
@@ -211,11 +272,11 @@ Firebase is used for public recipe sharing and preview pages:
 6. Add tests in `CauldronTests/Features/`
 
 ### Working with CloudKit
-1. All CloudKit operations go through `CloudKitService.swift` (actor)
+1. Choose the appropriate domain service (RecipeCloudService, UserCloudService, etc.)
 2. Use async/await for all CloudKit calls
 3. Handle errors gracefully - network can fail
-4. Test with `MockCloudKitService`
-5. Consider refactoring CloudKitService if adding major features (it's getting large!)
+4. For new functionality, extend the relevant domain service
+5. Test with mock services
 
 ### Adding a New Recipe Parser
 1. Create parser in `Cauldron/Core/Parsing/`
@@ -235,25 +296,13 @@ Firebase is used for public recipe sharing and preview pages:
 
 ## Known Issues & Technical Debt
 
-### CloudKitService.swift is Too Large (2,266 LOC)
-- **Problem:** Single actor handling ALL CloudKit operations
-- **Impact:** Hard to maintain, test, and understand
-- **Solution:** Refactor into feature-specific services (RecipeCloudService, UserCloudService, etc.)
-
-### iOS Deployment Target
-- Currently set to iOS 26.0 (doesn't exist - likely typo)
-- Should be iOS 17.0 or 18.0
-- Check `Cauldron.xcodeproj` build settings
-
 ### Test Coverage Gaps
-- CloudKitService has no tests (mocked in other tests)
 - Many ViewModels lack tests
 - Integration tests needed for sync scenarios
 
-### No Code Quality Tools
-- No SwiftLint configuration
-- No SwiftFormat automation
-- Manual code review only
+### Code Quality
+- SwiftLint configured with lenient rules - gradually tighten over time
+- Some files could benefit from further modularization
 
 ---
 
@@ -266,15 +315,18 @@ The app uses only Apple platform frameworks - no CocoaPods or SPM packages. This
 - `firebase-admin` (Node.js) for Cloud Functions
 - `@google-cloud/firestore` for database operations
 
+### Development Tools
+- **SwiftLint** - Code style enforcement (install via Homebrew: `brew install swiftlint`)
+
 ---
 
 ## Useful Xcode Locations
 
-- **Project File:** `/Users/navital/Desktop/Cauldron/Cauldron.xcodeproj`
-- **Main Source:** `/Users/navital/Desktop/Cauldron/Cauldron/`
-- **Tests:** `/Users/navital/Desktop/Cauldron/CauldronTests/`
-- **DerivedData:** `/Users/navital/Library/Developer/Xcode/DerivedData/Cauldron-*/`
-- **Build Logs:** `/Users/navital/Library/Developer/Xcode/DerivedData/Cauldron-*/Logs/Build/`
+- **Project File:** `/Users/nadav/Desktop/Cauldron/Cauldron.xcodeproj`
+- **Main Source:** `/Users/nadav/Desktop/Cauldron/Cauldron/`
+- **Tests:** `/Users/nadav/Desktop/Cauldron/CauldronTests/`
+- **DerivedData:** `/Users/nadav/Library/Developer/Xcode/DerivedData/Cauldron-*/`
+- **Build Logs:** `/Users/nadav/Library/Developer/Xcode/DerivedData/Cauldron-*/Logs/Build/`
 
 ---
 
@@ -282,9 +334,10 @@ The app uses only Apple platform frameworks - no CocoaPods or SPM packages. This
 
 ### Image Management
 - Images stored in CloudKit as CKAssets
-- Local caching via ImageManager actors
-- Migration from private to public database for sharing
-- Consider lazy loading for large collections
+- Two-tier caching: memory (ImageCache) + disk (EntityImageManager)
+- Request coalescing prevents duplicate downloads
+- Automatic compression and resizing on save
+- Background migration to public database for sharing
 
 ### SwiftData Query Performance
 - Use `#Predicate` for type-safe filtering
@@ -297,6 +350,7 @@ The app uses only Apple platform frameworks - no CocoaPods or SPM packages. This
 - Use CloudKit zones for better organization
 - Implement pagination for large queries
 - Cache frequently accessed data locally
+- Persistent operation queue for offline resilience
 
 ---
 

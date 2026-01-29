@@ -70,6 +70,7 @@ enum ConnectionError: LocalizedError {
 private enum OperationType {
     case accept(Connection)
     case create(Connection)
+    case reject(Connection)
 }
 
 /// Represents a pending sync operation
@@ -81,7 +82,7 @@ private struct PendingOperation {
 
     var connection: Connection {
         switch type {
-        case .accept(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn), .reject(let conn):
             return conn
         }
     }
@@ -111,6 +112,8 @@ class ConnectionManager: ObservableObject {
     private var retryTimer: Timer?
 
     private let maxRetries = 5
+    private let pendingRejectsKey = "pendingRejectedConnectionIds"
+    private var pendingRejectIds: Set<UUID> = []
 
     // Cache management
     private var lastSyncTime: Date?
@@ -125,6 +128,7 @@ class ConnectionManager: ObservableObject {
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+        self.pendingRejectIds = loadPendingRejectIds()
         startRetryTimer()
     }
 
@@ -210,17 +214,15 @@ class ConnectionManager: ObservableObject {
         // Delete from local cache immediately
         try? await dependencies.connectionRepository.delete(connection)
 
-        // Delete from CloudKit (rejection = deletion for cleaner UX)
-        do {
-            try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
-            // Connection rejected successfully (don't log routine operations)
+        // Track pending reject to avoid re-adding from CloudKit during sync
+        pendingRejectIds.insert(connection.id)
+        persistPendingRejectIds()
 
-            // Update badge count (one less pending request)
-            updateBadgeCount()
-        } catch {
-            logger.error("❌ Failed to reject connection in CloudKit: \(error.localizedDescription)")
-            throw error
-        }
+        // Queue CloudKit delete in background (rejection = deletion for cleaner UX)
+        await queueOperation(.reject(connection))
+
+        // Update badge count (one less pending request)
+        updateBadgeCount()
     }
 
     /// Send a connection request (optimistic update)
@@ -351,6 +353,12 @@ class ConnectionManager: ObservableObject {
             let cachedConnections = try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
 
             for connection in cachedConnections {
+                if pendingRejectIds.contains(connection.id) {
+                    // Clean up any cached entries for pending rejects
+                    try? await dependencies.connectionRepository.delete(connection)
+                    continue
+                }
+
                 // Check if we have a pending operation for this connection
                 let syncState: ConnectionSyncState
                 if pendingOperations[connection.id] != nil {
@@ -371,6 +379,16 @@ class ConnectionManager: ObservableObject {
         }
     }
 
+    private func loadPendingRejectIds() -> Set<UUID> {
+        let stored = UserDefaults.standard.stringArray(forKey: pendingRejectsKey) ?? []
+        return Set(stored.compactMap { UUID(uuidString: $0) })
+    }
+
+    private func persistPendingRejectIds() {
+        let stored = pendingRejectIds.map { $0.uuidString }
+        UserDefaults.standard.set(stored, forKey: pendingRejectsKey)
+    }
+
     /// Sync connections from CloudKit
     private func syncFromCloudKit(userId: UUID) async {
         do {
@@ -379,8 +397,21 @@ class ConnectionManager: ObservableObject {
             // Track cloud connection IDs
             let cloudConnectionIds = Set(cloudConnections.map { $0.id })
 
+            // Clear pending rejects that are no longer in CloudKit
+            if !pendingRejectIds.isEmpty {
+                let resolvedRejects = pendingRejectIds.subtracting(cloudConnectionIds)
+                if !resolvedRejects.isEmpty {
+                    pendingRejectIds.subtract(resolvedRejects)
+                    persistPendingRejectIds()
+                }
+            }
+
+            // Filter out pending rejects to prevent reappearing requests
+            let filteredConnections = cloudConnections.filter { !pendingRejectIds.contains($0.id) }
+            let filteredConnectionIds = Set(filteredConnections.map { $0.id })
+
             // Update local cache and state with cloud connections
-            for connection in cloudConnections {
+            for connection in filteredConnections {
                 try? await dependencies.connectionRepository.save(connection)
 
                 // Only update if not currently syncing
@@ -394,7 +425,7 @@ class ConnectionManager: ObservableObject {
 
             // Remove connections that exist locally but not in CloudKit (they were deleted)
             let localConnectionIds = Set(connections.keys)
-            let deletedConnectionIds = localConnectionIds.subtracting(cloudConnectionIds)
+            let deletedConnectionIds = localConnectionIds.subtracting(filteredConnectionIds)
 
             for deletedId in deletedConnectionIds {
                 // Skip if it's currently syncing (pending operation)
@@ -427,7 +458,7 @@ class ConnectionManager: ObservableObject {
         let operation: PendingOperation
 
         switch type {
-        case .accept(let conn), .create(let conn):
+        case .accept(let conn), .create(let conn), .reject(let conn):
             operation = PendingOperation(
                 id: conn.id,
                 type: type,
@@ -463,6 +494,11 @@ class ConnectionManager: ObservableObject {
 
             case .create(let connection):
                 try await dependencies.connectionCloudService.saveConnection(connection)
+
+            case .reject(let connection):
+                try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
+                pendingRejectIds.remove(connection.id)
+                persistPendingRejectIds()
             }
 
             // Success! Remove from queue and mark as synced

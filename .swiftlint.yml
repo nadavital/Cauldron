@@ -1,0 +1,131 @@
+# SwiftLint Configuration for Cauldron
+# Starting with lenient rules for gradual adoption
+
+# Paths to exclude from linting
+excluded:
+  - DerivedData
+  - .build
+  - Pods
+  - Carthage
+  - vendor
+  - CauldronWidget  # Widget extension can be added later
+  - "*.generated.swift"
+
+# Paths to include (only lint main app and tests)
+included:
+  - Cauldron
+  - CauldronTests
+
+# ============================================================
+# DISABLED RULES
+# These are disabled to start lenient - enable gradually
+# ============================================================
+
+disabled_rules:
+  # Style rules that may conflict with existing code
+  - trailing_whitespace  # Too noisy initially
+  - vertical_whitespace  # Allow multiple blank lines for now
+  - opening_brace        # Brace style variations acceptable
+  - statement_position   # else/catch position variations
+  - colon               # Spacing around colons
+  - comma               # Spacing after commas
+
+  # Rules that require significant refactoring
+  - type_body_length     # Some files are large
+  - file_length          # Some files are large
+  - function_body_length # Some functions are long
+  - cyclomatic_complexity # Complex business logic exists
+
+  # Rules that may have false positives
+  - force_cast           # Sometimes needed with SwiftData/CloudKit
+  - force_try            # Sometimes acceptable in controlled contexts
+  - force_unwrapping     # Sometimes needed with CloudKit
+
+  # Identifier rules (existing naming is fine)
+  - identifier_name      # Short names like 'id' are fine
+  - type_name           # Type naming is consistent
+
+  # Other relaxed rules
+  - todo                 # Allow TODO comments
+  - nesting              # Some nesting is needed
+  - large_tuple          # Allow larger tuples for now
+
+# ============================================================
+# ENABLED OPT-IN RULES
+# Only enable the most impactful rules initially
+# ============================================================
+
+opt_in_rules:
+  # Safety rules
+  - empty_count                    # Use isEmpty instead of count == 0
+  - empty_string                   # Use isEmpty for strings
+  - first_where                    # Use first(where:) for performance
+  - last_where                     # Use last(where:) for performance
+  - contains_over_first_not_nil    # Use contains instead of first != nil
+  - contains_over_filter_count     # Use contains for better performance
+  - contains_over_filter_is_empty  # Use contains for better performance
+  - flatmap_over_map_reduce        # Use flatMap for better performance
+
+  # Clarity rules
+  - redundant_nil_coalescing      # Remove redundant ?? nil
+  - yoda_condition                # Avoid yoda conditions (value == constant)
+  - toggle_bool                   # Use .toggle() instead of x = !x
+
+  # Modern Swift
+  - prefer_zero_over_explicit_init # Use .zero instead of CGPoint(x: 0, y: 0)
+  - shorthand_optional_binding    # Use if let x instead of if let x = x
+
+# ============================================================
+# RULE CONFIGURATION
+# ============================================================
+
+# Line length - be lenient
+line_length:
+  warning: 150
+  error: 300
+  ignores_comments: true
+  ignores_urls: true
+  ignores_function_declarations: true
+  ignores_interpolated_strings: true
+
+# Function parameter count
+function_parameter_count:
+  warning: 8
+  error: 12
+
+# Nesting - allow reasonable depth
+nesting:
+  type_level:
+    warning: 3
+  function_level:
+    warning: 5
+
+# Trailing closure - only for common APIs
+trailing_closure:
+  only_single_muted_parameter: true
+
+# Custom rules (none for now)
+custom_rules: {}
+
+# Reporter type (for CI integration)
+reporter: "xcode"
+
+# ============================================================
+# TODO: Rules to enable later as codebase improves
+# ============================================================
+#
+# Phase 2 (after initial adoption):
+# - trailing_whitespace
+# - vertical_whitespace
+# - colon
+# - comma
+#
+# Phase 3 (cleanup sprint):
+# - type_body_length (after refactoring large files)
+# - file_length (after modularization)
+# - function_body_length (after extraction)
+#
+# Phase 4 (strictness):
+# - force_cast (with proper error handling)
+# - force_try (with do-catch blocks)
+# - cyclomatic_complexity (after simplification)

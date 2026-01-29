@@ -8,6 +8,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class CookSessionManagerTests: XCTestCase {
 
     var manager: CookSessionManager!
