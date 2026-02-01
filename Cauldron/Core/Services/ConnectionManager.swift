@@ -48,7 +48,8 @@ enum ConnectionError: LocalizedError {
     case networkFailure(Error)
     case permissionDenied
     case maxRetriesExceeded
-    case invalidState
+    case alreadySentRequest
+    case alreadyConnected
 
     var errorDescription: String? {
         switch self {
@@ -60,8 +61,10 @@ enum ConnectionError: LocalizedError {
             return "You don't have permission to perform this action"
         case .maxRetriesExceeded:
             return "Failed to sync after multiple attempts. Please try again."
-        case .invalidState:
-            return "Connection is in an invalid state"
+        case .alreadySentRequest:
+            return "You already sent a friend request to this person"
+        case .alreadyConnected:
+            return "You're already friends with this person"
         }
     }
 }
@@ -229,12 +232,24 @@ class ConnectionManager: ObservableObject {
     func sendConnectionRequest(to userId: UUID, user: User) async throws {
         // Check if there's an existing connection (including rejected ones)
         if let existingConnection = connectionStatus(with: userId) {
-            // Found existing connection (only log for debugging duplicates)
+            let conn = existingConnection.connection
 
-            // Connection already exists (pending or accepted)
-            if existingConnection.connection.status == .pending || existingConnection.connection.status == .accepted {
-                logger.warning("Connection already exists with status: \(existingConnection.connection.status.rawValue)")
-                throw ConnectionError.invalidState
+            if conn.status == .accepted {
+                // Already friends
+                throw ConnectionError.alreadyConnected
+            }
+
+            if conn.status == .pending {
+                // Check if this is an incoming request we can accept
+                if conn.toUserId == currentUserId {
+                    // They sent us a request - just accept it!
+                    logger.info("Auto-accepting incoming request from \(userId)")
+                    try await acceptConnection(conn)
+                    return
+                } else {
+                    // We already sent them a request
+                    throw ConnectionError.alreadySentRequest
+                }
             }
         }
 
