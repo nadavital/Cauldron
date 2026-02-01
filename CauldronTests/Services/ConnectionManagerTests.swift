@@ -167,7 +167,8 @@ final class ConnectionManagerTests: XCTestCase {
             .networkFailure(NSError(domain: "test", code: 0)),
             .permissionDenied,
             .maxRetriesExceeded,
-            .invalidState
+            .alreadySentRequest,
+            .alreadyConnected
         ]
 
         for error in errors {
