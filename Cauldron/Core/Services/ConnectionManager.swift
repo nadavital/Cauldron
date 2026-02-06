@@ -112,6 +112,7 @@ class ConnectionManager: ObservableObject {
 
     // Sync queue for background CloudKit operations
     private var pendingOperations: [UUID: PendingOperation] = [:]
+    private var operationsInFlight: Set<UUID> = []
     private var retryTimer: Timer?
 
     private let maxRetries = 5
@@ -172,6 +173,22 @@ class ConnectionManager: ObservableObject {
             throw ConnectionError.permissionDenied
         }
 
+        // Idempotency guard: ignore duplicate accepts while already accepted/syncing.
+        if let existing = connections[connection.id] {
+            if existing.connection.status == .accepted {
+                return
+            }
+        }
+
+        if let existingOperation = pendingOperations[connection.id] {
+            switch existingOperation.type {
+            case .accept:
+                return
+            case .create, .reject:
+                break
+            }
+        }
+
         // Get current user's info for the acceptor fields
         let currentUser = CurrentUserSession.shared.currentUser
 
@@ -186,7 +203,7 @@ class ConnectionManager: ObservableObject {
             fromUsername: connection.fromUsername,
             fromDisplayName: connection.fromDisplayName,
             toUsername: currentUser?.username,
-            toDisplayName: currentUser?.displayName
+            toDisplayName: currentUser?.displayName ?? currentUser?.username
         )
 
         // Update local state immediately (optimistic)
@@ -491,6 +508,12 @@ class ConnectionManager: ObservableObject {
     /// Process a pending operation
     private func processOperation(_ operation: PendingOperation) async {
         // Processing operation (don't log routine operations)
+        guard !operationsInFlight.contains(operation.id) else {
+            return
+        }
+
+        operationsInFlight.insert(operation.id)
+        defer { operationsInFlight.remove(operation.id) }
 
         // Update sync state to syncing
         if var managedConn = connections[operation.id] {

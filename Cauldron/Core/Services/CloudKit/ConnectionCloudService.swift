@@ -46,7 +46,11 @@ actor ConnectionCloudService {
             toUserId: connection.toUserId,
             status: .accepted,
             createdAt: connection.createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            fromUsername: connection.fromUsername,
+            fromDisplayName: connection.fromDisplayName,
+            toUsername: connection.toUsername,
+            toDisplayName: connection.toDisplayName
         )
 
         try await saveConnection(accepted)
@@ -451,11 +455,13 @@ actor ConnectionCloudService {
         )
 
         let notification = CKSubscription.NotificationInfo()
+        notification.alertLocalizationKey = "CONNECTION_ACCEPTED_ALERT"
+        notification.alertLocalizationArgs = ["toDisplayName"]
         notification.alertBody = "Your friend request was accepted!"
         notification.soundName = "default"
         notification.shouldBadge = false
         notification.shouldSendContentAvailable = true
-        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status"]
+        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status", "toUsername", "toDisplayName"]
 
         subscription.notificationInfo = notification
 

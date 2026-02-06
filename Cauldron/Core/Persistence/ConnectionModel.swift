@@ -21,6 +21,8 @@ final class ConnectionModel {
     // Cached sender info for notifications
     var fromUsername: String?
     var fromDisplayName: String?
+    var toUsername: String?
+    var toDisplayName: String?
 
     init(
         id: UUID,
@@ -30,7 +32,9 @@ final class ConnectionModel {
         createdAt: Date,
         updatedAt: Date,
         fromUsername: String? = nil,
-        fromDisplayName: String? = nil
+        fromDisplayName: String? = nil,
+        toUsername: String? = nil,
+        toDisplayName: String? = nil
     ) {
         self.id = id
         self.fromUserId = fromUserId
@@ -40,6 +44,8 @@ final class ConnectionModel {
         self.updatedAt = updatedAt
         self.fromUsername = fromUsername
         self.fromDisplayName = fromDisplayName
+        self.toUsername = toUsername
+        self.toDisplayName = toDisplayName
     }
     
     /// Convert to domain model
@@ -56,7 +62,9 @@ final class ConnectionModel {
             createdAt: createdAt,
             updatedAt: updatedAt,
             fromUsername: fromUsername,
-            fromDisplayName: fromDisplayName
+            fromDisplayName: fromDisplayName,
+            toUsername: toUsername,
+            toDisplayName: toDisplayName
         )
     }
     
@@ -70,7 +78,9 @@ final class ConnectionModel {
             createdAt: connection.createdAt,
             updatedAt: connection.updatedAt,
             fromUsername: connection.fromUsername,
-            fromDisplayName: connection.fromDisplayName
+            fromDisplayName: connection.fromDisplayName,
+            toUsername: connection.toUsername,
+            toDisplayName: connection.toDisplayName
         )
     }
 }

@@ -174,8 +174,9 @@ struct ConnectionRequestCard: View {
             } else {
                 HStack(spacing: 8) {
                     Button {
+                        guard !isProcessing else { return }
+                        isProcessing = true
                         Task {
-                            isProcessing = true
                             await onAccept()
                             isProcessing = false
                         }
@@ -189,8 +190,9 @@ struct ConnectionRequestCard: View {
                     }
 
                     Button {
+                        guard !isProcessing else { return }
+                        isProcessing = true
                         Task {
-                            isProcessing = true
                             await onReject()
                             isProcessing = false
                         }
