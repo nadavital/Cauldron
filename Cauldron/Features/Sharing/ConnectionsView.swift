@@ -456,77 +456,16 @@ final class ConnectionsViewModel {
     /// Ensure profile images are loaded into memory cache
     /// Called when using cached data to make sure images are ready for display
     private func ensureProfileImagesInCache() async {
-        for user in usersMap.values {
-            // Skip if already in memory cache
-            let cacheKey = ImageCache.profileImageKey(userId: user.id)
-            if ImageCache.shared.get(cacheKey) != nil {
-                continue
-            }
-
-            // Load from local file into memory cache
-            if let imageURL = user.profileImageURL,
-               let imageData = try? Data(contentsOf: imageURL),
-               let image = UIImage(data: imageData) {
-                ImageCache.shared.set(cacheKey, image: image)
-            }
-        }
+        await dependencies.entityImageLoader.ensureProfileImagesInCache(users: Array(usersMap.values))
     }
 
     /// Preload profile images for all connected users
     private func preloadProfileImages(forceRefresh: Bool = false) async {
-        // Preloading profile images (don't log routine operations)
-
-        // Download images in parallel for better performance
-        await withTaskGroup(of: (UUID, UIImage?).self) { group in
-            for user in usersMap.values {
-                // Skip if user doesn't have a cloud profile image and no local image
-                guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
-                    continue
-                }
-
-                group.addTask { @MainActor in
-                    let cacheKey = ImageCache.profileImageKey(userId: user.id)
-
-                    // If already in memory cache and not force refreshing, skip
-                    if !forceRefresh, ImageCache.shared.get(cacheKey) != nil {
-                        return (user.id, nil)
-                    }
-
-                    // Try to load from local file first
-                    if let imageURL = user.profileImageURL,
-                       let imageData = try? Data(contentsOf: imageURL),
-                       let image = UIImage(data: imageData) {
-                        return (user.id, image)
-                    }
-
-                    // If no local file or force refreshing, download from CloudKit
-                    if forceRefresh || user.profileImageURL == nil {
-                        do {
-                            if let downloadedURL = try await self.dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                               let imageData = try? Data(contentsOf: downloadedURL),
-                               let image = UIImage(data: imageData) {
-                                // Downloaded profile image (don't log routine operations)
-                                return (user.id, image)
-                            }
-                        } catch {
-                            AppLogger.general.warning("⚠️ Failed to download profile image for \(user.username): \(error.localizedDescription)")
-                        }
-                    }
-
-                    return (user.id, nil)
-                }
-            }
-
-            // Collect results and load into memory cache
-            for await (userId, image) in group {
-                if let image = image {
-                    let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    ImageCache.shared.set(cacheKey, image: image)
-                }
-            }
-        }
-
-        // Finished preloading profile images (don't log routine operations)
+        await dependencies.entityImageLoader.preloadProfileImages(
+            users: Array(usersMap.values),
+            dependencies: dependencies,
+            forceRefresh: forceRefresh
+        )
     }
 
     func acceptRequest(_ connection: Connection) async {
