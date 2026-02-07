@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UIKit
 import os
 
 @MainActor
@@ -20,6 +21,9 @@ import os
     var errorMessage: String?
     var importedRecipe: Recipe?
     var sourceInfo: String?
+    var selectedOCRImage: UIImage?
+    var isProcessingOCR = false
+    var ocrErrorMessage: String?
 
     let dependencies: DependencyContainer
     
@@ -38,10 +42,21 @@ import os
             return !textInput.trimmed.isEmpty
         }
     }
+
+    func preloadURL(_ url: URL) {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return
+        }
+
+        importType = .url
+        urlString = url.absoluteString
+    }
     
     func importRecipe() async {
         isLoading = true
         errorMessage = nil
+        ocrErrorMessage = nil
         isSuccess = false
         importedRecipe = nil
         sourceInfo = nil
@@ -125,5 +140,23 @@ import os
     private func importFromText() async throws -> Recipe {
         // Use text parser directly
         return try await dependencies.textParser.parse(from: textInput)
+    }
+
+    func extractTextFromSelectedImage() async {
+        guard let image = selectedOCRImage else { return }
+
+        isProcessingOCR = true
+        ocrErrorMessage = nil
+        defer { isProcessingOCR = false }
+
+        do {
+            let extractedText = try await dependencies.recipeOCRService.extractText(from: image)
+            textInput = extractedText
+            importType = .text
+            AppLogger.parsing.info("OCR extraction succeeded with \(extractedText.count) chars")
+        } catch {
+            ocrErrorMessage = error.localizedDescription
+            AppLogger.parsing.error("OCR extraction failed: \(error.localizedDescription)")
+        }
     }
 }

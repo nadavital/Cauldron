@@ -6,15 +6,23 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// View for importing recipes
 struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ImporterViewModel
     @State private var showingPreview = false
+    @State private var showingOCRPicker = false
+    @State private var showingOCRSourceDialog = false
+    @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
 
-    init(dependencies: DependencyContainer) {
-        _viewModel = State(initialValue: ImporterViewModel(dependencies: dependencies))
+    init(dependencies: DependencyContainer, initialURL: URL? = nil) {
+        let viewModel = ImporterViewModel(dependencies: dependencies)
+        if let initialURL {
+            viewModel.preloadURL(initialURL)
+        }
+        _viewModel = State(initialValue: viewModel)
     }
     
     var body: some View {
@@ -33,6 +41,14 @@ struct ImporterView: View {
                     }
 
                     quickImportSection
+
+                    if viewModel.isProcessingOCR {
+                        ocrProcessingSection
+                    }
+
+                    if let ocrError = viewModel.ocrErrorMessage {
+                        errorSection(ocrError)
+                    }
 
                     if let error = viewModel.errorMessage {
                         errorSection(error)
@@ -74,6 +90,29 @@ struct ImporterView: View {
                         }
                     )
                 }
+            }
+            .fullScreenCover(isPresented: $showingOCRPicker, onDismiss: {
+                Task {
+                    await viewModel.extractTextFromSelectedImage()
+                }
+            }) {
+                ImagePicker(image: $viewModel.selectedOCRImage, sourceType: ocrSourceType)
+                    .ignoresSafeArea()
+            }
+            .confirmationDialog("Scan Recipe Text", isPresented: $showingOCRSourceDialog, titleVisibility: .visible) {
+                Button("Photo Library") {
+                    ocrSourceType = .photoLibrary
+                    showingOCRPicker = true
+                }
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Camera") {
+                        ocrSourceType = .camera
+                        showingOCRPicker = true
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Choose a photo source for OCR text extraction.")
             }
         }
     }
@@ -242,12 +281,48 @@ struct ImporterView: View {
                 .cornerRadius(12)
             }
 
+            Button {
+                showingOCRSourceDialog = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.viewfinder")
+                    Text("Scan from Photo (OCR)")
+                        .fontWeight(.semibold)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.cauldronSecondaryBackground)
+                .foregroundColor(.primary)
+                .cornerRadius(12)
+            }
+
             Text("We'll detect whether it's a link or recipe text automatically.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
         .padding(16)
         .cardStyle()
+    }
+
+    private var ocrProcessingSection: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .tint(.cauldronOrange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Extracting text from image...")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text("This usually takes a few seconds.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(12)
     }
 
     private func errorSection(_ message: String) -> some View {

@@ -63,6 +63,7 @@ class DependencyContainer: ObservableObject {
     let groceryService: GroceryService
     let foundationModelsService: FoundationModelsService
     let groceryCategorizer: GroceryCategorizer
+    let recipeOCRService: RecipeOCRService
     let sharingService: SharingService
     let externalShareService: ExternalShareService
     let recipeSyncService: RecipeSyncService
@@ -171,6 +172,7 @@ class DependencyContainer: ObservableObject {
         self.cookSessionManager = CookSessionManager()
         self.foundationModelsService = FoundationModelsService()
         self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
+        self.recipeOCRService = RecipeOCRService()
         self.timerManager = TimerManager()
         self.profileCacheManager = ProfileCacheManager()
 
@@ -328,4 +330,3 @@ extension View {
         environment(\.dependencies, container)
     }
 }
-

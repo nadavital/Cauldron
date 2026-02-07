@@ -22,6 +22,8 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
+    @State private var showingSharedImporter = false
+    @State private var sharedImportURL: URL?
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
@@ -77,6 +79,12 @@ struct MainTabView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingSharedImporter) {
+            ImporterView(
+                dependencies: dependencies,
+                initialURL: sharedImportURL
+            )
+        }
         .tint(.cauldronOrange)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
             // Switch to Friends tab when connection notification is tapped
@@ -106,6 +114,14 @@ struct MainTabView: View {
             // Switch to Search tab when "Find people to add" is tapped from Friends empty state
             AppLogger.general.info("📍 Switching to Search tab to find people")
             selectedTab = .search
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openRecipeImportURL)) { notification in
+            guard let url = notification.object as? URL else { return }
+            AppLogger.general.info("📥 Opening importer from Share Extension URL: \(url.absoluteString)")
+            _ = ShareExtensionImportStore.consumePendingRecipeURL()
+            selectedTab = .cook
+            sharedImportURL = url
+            showingSharedImporter = true
         }
         .toast(
             isShowing: Binding(
