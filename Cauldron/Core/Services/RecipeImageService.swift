@@ -12,17 +12,10 @@ import CloudKit
 /// Centralized service for loading and caching recipe images
 @MainActor
 class RecipeImageService {
-    // Memory cache for loaded images
-    private let cache = NSCache<NSString, UIImage>()
-
-    // Maximum cache size (50 images)
-    private let maxCacheCount = 50
-
     private let imageManager: RecipeImageManager
 
     init(imageManager: RecipeImageManager) {
         self.imageManager = imageManager
-        cache.countLimit = maxCacheCount
     }
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
@@ -36,10 +29,10 @@ class RecipeImageService {
             return .failure(.invalidURL)
         }
 
-        let cacheKey = url.absoluteString as NSString
+        let cacheKey = cacheKey(for: url)
 
         // Check cache first
-        if let cachedImage = cache.object(forKey: cacheKey) {
+        if let cachedImage = ImageCache.shared.get(cacheKey) {
             return .success(cachedImage)
         }
 
@@ -60,7 +53,7 @@ class RecipeImageService {
             }
 
             // Cache the loaded image
-            cache.setObject(image, forKey: cacheKey)
+            ImageCache.shared.set(cacheKey, image: image)
 
             return .success(image)
         } catch {
@@ -123,6 +116,13 @@ class RecipeImageService {
     ///   - ownerId: The owner ID of the recipe (to determine which database to use)
     /// - Returns: Result containing UIImage or error
     func loadImage(forRecipeId recipeId: UUID, localURL url: URL?, ownerId: UUID? = nil) async -> Result<UIImage, ImageLoadError> {
+        let recipeCacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+
+        // Recipe-keyed cache check first for instant render on repeat displays
+        if let cachedImage = ImageCache.shared.get(recipeCacheKey) {
+            return .success(cachedImage)
+        }
+
         // Try loading from local URL first
         if let url = url {
             // For non-owned recipes, verify file exists before attempting load
@@ -134,14 +134,16 @@ class RecipeImageService {
                     // Fall through to CloudKit
                 } else {
                     let result = await loadImage(from: url)
-                    if case .success = result {
+                    if case .success(let image) = result {
+                        ImageCache.shared.set(recipeCacheKey, image: image)
                         return result
                     }
                 }
             } else {
                 // Own recipe - try loading normally
                 let result = await loadImage(from: url)
-                if case .success = result {
+                if case .success(let image) = result {
+                    ImageCache.shared.set(recipeCacheKey, image: image)
                     return result
                 }
             }
@@ -169,7 +171,11 @@ class RecipeImageService {
                         .appendingPathComponent("RecipeImages")
                         .appendingPathComponent(filename)
 
-                    return await loadImage(from: imageURL)
+                    let result = await loadImage(from: imageURL)
+                    if case .success(let image) = result {
+                        ImageCache.shared.set(recipeCacheKey, image: image)
+                    }
+                    return result
                 }
             }
         } catch {
@@ -184,21 +190,25 @@ class RecipeImageService {
     func prefetchImages(forRecipeIds recipeIds: [UUID]) {
         Task {
             for recipeId in recipeIds.prefix(4) {  // Only prefetch first 4 for grid
-                let filename = "\(recipeId.uuidString).jpg"
-                _ = await loadImage(filename: filename)
+                let localURL = await imageManager.imageURL(recipeId: recipeId)
+                _ = await loadImage(forRecipeId: recipeId, localURL: localURL)
             }
         }
     }
 
     /// Clear all cached images from memory
     func clearCache() {
-        cache.removeAllObjects()
+        ImageCache.shared.clearRecipeImages()
     }
 
     /// Remove a specific image from cache
     func removeFromCache(url: URL?) {
         guard let url = url else { return }
-        cache.removeObject(forKey: url.absoluteString as NSString)
+        ImageCache.shared.remove(cacheKey(for: url))
+    }
+
+    private func cacheKey(for url: URL) -> String {
+        "url_\(url.absoluteString)"
     }
 }
 

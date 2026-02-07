@@ -78,6 +78,8 @@ class DependencyContainer: ObservableObject {
     let profileImageManager: ProfileImageManagerV2
     /// Collection image manager (unified implementation)
     let collectionImageManager: CollectionImageManagerV2
+    /// Shared loader for profile/collection image orchestration
+    let entityImageLoader: EntityImageLoader
     let recipeImageService: RecipeImageService
 
     // UI Services (MainActor)
@@ -214,6 +216,9 @@ class DependencyContainer: ObservableObject {
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(imageManager: tempImageManager)
         }
+        self.entityImageLoader = MainActor.assumeIsolated {
+            EntityImageLoader.shared
+        }
 
         // Note: lazy properties (imageSyncViewModel, operationQueueViewModel,
         // cookModeCoordinator, connectionManager) are initialized on first access
@@ -323,5 +328,4 @@ extension View {
         environment(\.dependencies, container)
     }
 }
-
 

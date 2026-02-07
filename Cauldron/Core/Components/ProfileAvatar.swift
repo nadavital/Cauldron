@@ -101,90 +101,35 @@ struct ProfileAvatar: View {
     }
 
     private func loadProfileImage() async {
-        let cacheKey = ImageCache.profileImageKey(userId: user.id)
+        guard !isLoadingImage else { return }
+        isLoadingImage = true
+        defer { isLoadingImage = false }
 
-        // Strategy 0: Check in-memory cache first (fastest)
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
-            // CRITICAL: Always set profileImage if it's nil (initial load)
-            // Only compare if we already have an image loaded
-            if let currentImage = profileImage {
-                // Only update UI if the image actually changed
-                if !areImagesEqual(cachedImage, currentImage) {
-                    profileImage = cachedImage
-                }
-            } else {
-                // First load - always set the image
-                profileImage = cachedImage
-            }
-            return
-        }
+        let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
+        let result = await loader.loadProfileImage(for: displayUser, dependencies: dependencies)
 
-        // Strategy 1: Try to load from local file
-        if let imageURL = user.profileImageURL,
-           let imageData = try? Data(contentsOf: imageURL),
-           let image = UIImage(data: imageData) {
-            // CRITICAL: Always set profileImage if it's nil (initial load)
+        if let image = result.image {
             if let currentImage = profileImage {
-                // Only update UI if the image actually changed
                 if !areImagesEqual(image, currentImage) {
                     profileImage = image
-                    ImageCache.shared.set(cacheKey, image: image)
                 }
             } else {
-                // First load - always set the image
                 profileImage = image
-                ImageCache.shared.set(cacheKey, image: image)
             }
-            return
         }
 
-        // Strategy 2: If local file is missing but we have a cloud record, try downloading
-        // This handles the case where app was reinstalled or local storage was cleared
-        if let dependencies = dependencies,
-           user.cloudProfileImageRecordName != nil,
-           user.profileImageURL == nil,
-           !isLoadingImage {
-            // Mark as loading to prevent duplicate downloads from this view instance
-            isLoadingImage = true
-            defer { isLoadingImage = false }
-
-            do {
-                if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                   let imageData = try? Data(contentsOf: downloadedURL),
-                   let image = UIImage(data: imageData) {
-                    // CRITICAL: Always set profileImage if it's nil (initial load)
-                    if let currentImage = profileImage {
-                        // Only update UI if the image actually changed
-                        if !areImagesEqual(image, currentImage) {
-                            profileImage = image
-                            ImageCache.shared.set(cacheKey, image: image)
-                        }
-                    } else {
-                        // First load - always set the image
-                        profileImage = image
-                        ImageCache.shared.set(cacheKey, image: image)
-                    }
-
-                    // Update CurrentUserSession with the downloaded image URL
-                    if let currentUser = CurrentUserSession.shared.currentUser,
-                       currentUser.id == user.id {
-                        let updatedUser = currentUser.updatedProfile(
-                            profileEmoji: currentUser.profileEmoji,
-                            profileColor: currentUser.profileColor,
-                            profileImageURL: downloadedURL,
-                            cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
-                            profileImageModifiedAt: currentUser.profileImageModifiedAt
-                        )
-                        await MainActor.run {
-                            CurrentUserSession.shared.currentUser = updatedUser
-                        }
-                    }
-
-                    // Downloaded profile image from CloudKit (don't log routine operations)
-                }
-            } catch {
-                AppLogger.general.warning("Failed to download profile image from CloudKit: \(error.localizedDescription)")
-                // Fall back to emoji/initials display
+        if let downloadedURL = result.downloadedURL,
+           let currentUser = CurrentUserSession.shared.currentUser,
+           currentUser.id == displayUser.id {
+            let updatedUser = currentUser.updatedProfile(
+                profileEmoji: currentUser.profileEmoji,
+                profileColor: currentUser.profileColor,
+                profileImageURL: downloadedURL,
+                cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
+                profileImageModifiedAt: currentUser.profileImageModifiedAt
+            )
+            await MainActor.run {
+                CurrentUserSession.shared.currentUser = updatedUser
             }
         }
     }

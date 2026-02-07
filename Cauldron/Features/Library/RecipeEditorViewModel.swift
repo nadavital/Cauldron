@@ -226,19 +226,14 @@ struct NutritionInput {
         if let imageURL = recipe.imageURL {
             imageFilename = imageURL.lastPathComponent
             Task {
-                // First check cache for optimistic UI (in case user just saved a new image)
-                let cacheKey = ImageCache.recipeImageKey(recipeId: recipe.id)
-                if let cachedImage = ImageCache.shared.get(cacheKey) {
+                let result = await dependencies.recipeImageService.loadImage(
+                    forRecipeId: recipe.id,
+                    localURL: imageURL,
+                    ownerId: recipe.ownerId
+                )
+                if case .success(let image) = result {
                     await MainActor.run {
-                        selectedImage = cachedImage
-                    }
-                } else {
-                    // Fall back to loading from URL
-                    let result = await dependencies.recipeImageService.loadImage(from: imageURL)
-                    if case .success(let image) = result {
-                        await MainActor.run {
-                            selectedImage = image
-                        }
+                        selectedImage = image
                     }
                 }
             }
@@ -694,5 +689,4 @@ enum RecipeEditorError: LocalizedError {
         }
     }
 }
-
 

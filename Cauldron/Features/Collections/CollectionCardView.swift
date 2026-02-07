@@ -200,70 +200,18 @@ struct CollectionCardView: View {
 
     @MainActor
     private func loadCustomImage() async {
-        let cacheKey = ImageCache.collectionImageKey(collectionId: collection.id)
+        guard !isLoadingImage else { return }
+        isLoadingImage = true
+        defer { isLoadingImage = false }
 
-        // Strategy 0: Check in-memory cache first (fastest)
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
-            // CRITICAL: Always set customCoverImage if it's nil (initial load)
+        let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
+        if let image = await loader.loadCollectionCoverImage(for: collection, dependencies: dependencies) {
             if let currentImage = customCoverImage {
-                // Only update UI if the image actually changed
-                if !areImagesEqual(cachedImage, currentImage) {
-                    customCoverImage = cachedImage
-                }
-            } else {
-                // First load - always set the image
-                customCoverImage = cachedImage
-            }
-            return
-        }
-
-        // Strategy 1: Try loading from local file URL
-        if let coverImageURL = collection.coverImageURL,
-           let imageData = try? Data(contentsOf: coverImageURL),
-           let image = UIImage(data: imageData) {
-            // CRITICAL: Always set customCoverImage if it's nil (initial load)
-            if let currentImage = customCoverImage {
-                // Only update UI if the image actually changed
                 if !areImagesEqual(image, currentImage) {
                     customCoverImage = image
-                    ImageCache.shared.set(cacheKey, image: image)
                 }
             } else {
-                // First load - always set the image
                 customCoverImage = image
-                ImageCache.shared.set(cacheKey, image: image)
-            }
-            return
-        }
-
-        // Strategy 2: If local file is missing but we have a cloud record, try downloading
-        // This handles the case where app was reinstalled or local storage was cleared
-        if let dependencies = dependencies,
-           collection.cloudCoverImageRecordName != nil,
-           collection.coverImageURL == nil {
-            AppLogger.general.info("Local collection cover image missing, attempting download from CloudKit for collection \(collection.name)")
-
-            do {
-                if let downloadedURL = try await dependencies.collectionImageManager.downloadImageFromCloud(collectionId: collection.id),
-                   let imageData = try? Data(contentsOf: downloadedURL),
-                   let image = UIImage(data: imageData) {
-                    // CRITICAL: Always set customCoverImage if it's nil (initial load)
-                    if let currentImage = customCoverImage {
-                        // Only update UI if the image actually changed
-                        if !areImagesEqual(image, currentImage) {
-                            customCoverImage = image
-                            ImageCache.shared.set(cacheKey, image: image)
-                        }
-                    } else {
-                        // First load - always set the image
-                        customCoverImage = image
-                        ImageCache.shared.set(cacheKey, image: image)
-                    }
-                    // Downloaded collection cover image from CloudKit (don't log routine operations)
-                }
-            } catch {
-                AppLogger.general.warning("Failed to download collection cover image from CloudKit: \(error.localizedDescription)")
-                // Fall back to recipe grid display
             }
         }
     }
