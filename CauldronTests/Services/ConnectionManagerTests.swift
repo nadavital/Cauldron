@@ -328,16 +328,17 @@ final class ConnectionManagerTests: XCTestCase {
     }
 
     func testOperationQueueRetryOperationByEntity() async throws {
-        let (_, dependencies, _) = makeConnectionManager()
+        // Use an isolated queue service for deterministic retry behavior.
+        let queueService = OperationQueueService()
         let connectionId = UUID()
 
-        await dependencies.operationQueueService.addOperation(
+        await queueService.addOperation(
             type: .rejectConnection,
             entityType: .connection,
             entityId: connectionId
         )
 
-        guard let initial = await dependencies.operationQueueService.getOperation(
+        guard let initial = await queueService.getOperation(
             for: connectionId,
             entityType: .connection
         ) else {
@@ -345,12 +346,12 @@ final class ConnectionManagerTests: XCTestCase {
             return
         }
 
-        await dependencies.operationQueueService.markFailed(
+        await queueService.markFailed(
             operationId: initial.id,
             error: "Network timeout"
         )
 
-        let retried = await dependencies.operationQueueService.retryOperation(
+        let retried = await queueService.retryOperation(
             entityId: connectionId,
             entityType: .connection
         )

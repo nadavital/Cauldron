@@ -107,7 +107,7 @@ actor TextRecipeParser: RecipeParser {
             switch currentSection {
             case .ingredients:
                 // OCR can interleave columns; route obvious action lines to steps.
-                if looksLikeInstructionSentence(line) {
+                if looksLikeInstructionSentence(cleanedLine) {
                     let timers = TimerExtractor.extractTimers(from: cleanedLine)
                     steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
                     currentSection = .steps
@@ -133,7 +133,7 @@ actor TextRecipeParser: RecipeParser {
             }
         }
 
-        if !foundExplicitSection || ingredients.isEmpty || steps.isEmpty {
+        if !foundExplicitSection || (ingredients.isEmpty && steps.isEmpty) {
             let heuristic = parseHeuristic(lines: Array(lines.dropFirst()))
 
             if ingredients.isEmpty {
