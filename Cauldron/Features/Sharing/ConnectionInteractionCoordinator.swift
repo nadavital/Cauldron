@@ -29,6 +29,10 @@ final class ConnectionInteractionCoordinator {
         self.currentUserProvider = currentUserProvider
     }
 
+    // Matches other @MainActor view-model helpers to avoid XCTest teardown crashes
+    // from Swift bug #85221.
+    nonisolated deinit {}
+
     func relationshipState(with userId: UUID) -> ConnectionRelationshipState {
         ConnectionRelationshipState.from(
             managedConnection: connectionManager.connectionStatus(with: userId),
