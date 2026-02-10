@@ -19,11 +19,13 @@ enum AppTab: String, Hashable {
 
 /// Main tab-based navigation view
 struct MainTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
     @State private var showingSharedImporter = false
     @State private var sharedImportURL: URL?
+    @State private var didCheckInitialPendingImport = false
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
@@ -119,9 +121,16 @@ struct MainTabView: View {
             guard let url = notification.object as? URL else { return }
             AppLogger.general.info("📥 Opening importer from Share Extension URL: \(url.absoluteString)")
             _ = ShareExtensionImportStore.consumePendingRecipeURL()
-            selectedTab = .cook
-            sharedImportURL = url
-            showingSharedImporter = true
+            openImporter(with: url)
+        }
+        .task {
+            guard !didCheckInitialPendingImport else { return }
+            didCheckInitialPendingImport = true
+            openPendingImporterIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            openPendingImporterIfNeeded()
         }
         .toast(
             isShowing: Binding(
@@ -131,6 +140,21 @@ struct MainTabView: View {
             icon: "trash.fill",
             message: "Recipe was deleted"
         )
+    }
+
+    private func openPendingImporterIfNeeded() {
+        guard let pendingURL = ShareExtensionImportStore.consumePendingRecipeURL() else {
+            return
+        }
+
+        AppLogger.general.info("📥 Consumed pending Share Extension URL: \(pendingURL.absoluteString)")
+        openImporter(with: pendingURL)
+    }
+
+    private func openImporter(with url: URL) {
+        selectedTab = .cook
+        sharedImportURL = url
+        showingSharedImporter = true
     }
 }
 

@@ -461,7 +461,7 @@ actor ConnectionCloudService {
         notification.soundName = "default"
         notification.shouldBadge = false
         notification.shouldSendContentAvailable = true
-        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status", "toUsername", "toDisplayName"]
+        notification.desiredKeys = ["connectionId", "fromUserId", "toUserId", "status", "toDisplayName"]
 
         subscription.notificationInfo = notification
 

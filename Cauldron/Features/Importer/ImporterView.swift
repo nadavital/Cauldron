@@ -13,15 +13,18 @@ struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ImporterViewModel
     @State private var showingPreview = false
+    @State private var hasTriggeredAutoImport = false
     @State private var showingOCRPicker = false
     @State private var showingOCRSourceDialog = false
     @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
+    private let autoImportFromInitialURL: Bool
 
     init(dependencies: DependencyContainer, initialURL: URL? = nil) {
         let viewModel = ImporterViewModel(dependencies: dependencies)
         if let initialURL {
             viewModel.preloadURL(initialURL)
         }
+        self.autoImportFromInitialURL = initialURL != nil
         _viewModel = State(initialValue: viewModel)
     }
     
@@ -72,6 +75,9 @@ struct ImporterView: View {
                         dismiss()
                     }
                 }
+            }
+            .task {
+                await autoImportIfNeeded()
             }
             .fullScreenCover(isPresented: $showingPreview) {
                 if let recipe = viewModel.importedRecipe, let source = viewModel.sourceInfo {
@@ -144,7 +150,7 @@ struct ImporterView: View {
     }
 
     private var generateLoadingTitle: String {
-        "Importing..."
+        autoImportFromInitialURL && viewModel.importType == .url ? "Importing shared link..." : "Importing..."
     }
     
     private var headerSection: some View {
@@ -173,7 +179,7 @@ struct ImporterView: View {
                     .font(.title3)
                     .fontWeight(.semibold)
 
-                Text("Bring recipes into Cauldron from a URL, raw text, or a recipe image.")
+                Text(headerDescription)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -344,6 +350,13 @@ struct ImporterView: View {
         viewModel.selectedOCRImage == nil ? "Choose Recipe Image" : "Replace Image"
     }
 
+    private var headerDescription: String {
+        if autoImportFromInitialURL {
+            return "Link received from Share Sheet. We'll import it now, then you can review and save."
+        }
+        return "Bring recipes into Cauldron from a URL, raw text, or a recipe image."
+    }
+
     private func errorSection(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.circle.fill")
@@ -375,6 +388,18 @@ struct ImporterView: View {
         if viewModel.isSuccess {
             showingPreview = true
         }
+    }
+
+    private func autoImportIfNeeded() async {
+        guard autoImportFromInitialURL,
+              !hasTriggeredAutoImport,
+              viewModel.importType == .url,
+              viewModel.canImport else {
+            return
+        }
+
+        hasTriggeredAutoImport = true
+        await performImport()
     }
 }
 

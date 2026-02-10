@@ -172,14 +172,6 @@ struct ContentView: View {
                 }
             }
 
-            if let pendingImportURL = ShareExtensionImportStore.consumePendingRecipeURL() {
-                AppLogger.general.info("🔔 ContentView: Found pending recipe import URL: \(pendingImportURL)")
-                NotificationCenter.default.post(
-                    name: .openRecipeImportURL,
-                    object: pendingImportURL
-                )
-            }
-
             maybeShowSplashScreen()
         }
         .onChange(of: userSession.isInitialized) { _ in
