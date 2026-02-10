@@ -118,7 +118,7 @@ struct CategoryRecipesListView: View {
                     Button {
                         showingImporter = true
                     } label: {
-                        Label("Import from URL or Text", systemImage: "arrow.down.doc")
+                        Label("Import", systemImage: "arrow.down.doc")
                     }
                 } label: {
                     Image(systemName: "plus")

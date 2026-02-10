@@ -40,6 +40,8 @@ import os
             return !urlString.trimmed.isEmpty
         case .text:
             return !textInput.trimmed.isEmpty
+        case .image:
+            return selectedOCRImage != nil
         }
     }
 
@@ -73,6 +75,9 @@ import os
             case .text:
                 recipe = try await importFromText()
                 source = "Imported from text"
+            case .image:
+                recipe = try await importFromImage()
+                source = "Imported from image"
             }
             
             // Validate recipe
@@ -89,7 +94,9 @@ import os
             AppLogger.parsing.info("Successfully imported recipe: \(recipe.title)")
             
         } catch {
-            errorMessage = error.localizedDescription
+            if ocrErrorMessage == nil {
+                errorMessage = error.localizedDescription
+            }
             AppLogger.parsing.error("Failed to import recipe: \(error.localizedDescription)")
         }
     }
@@ -142,8 +149,10 @@ import os
         return try await dependencies.textParser.parse(from: textInput)
     }
 
-    func extractTextFromSelectedImage() async {
-        guard let image = selectedOCRImage else { return }
+    private func importFromImage() async throws -> Recipe {
+        guard let image = selectedOCRImage else {
+            throw ImporterError.noImageSelected
+        }
 
         isProcessingOCR = true
         ocrErrorMessage = nil
@@ -151,12 +160,23 @@ import os
 
         do {
             let extractedText = try await dependencies.recipeOCRService.extractText(from: image)
-            textInput = extractedText
-            importType = .text
             AppLogger.parsing.info("OCR extraction succeeded with \(extractedText.count) chars")
+            return try await dependencies.textParser.parse(from: extractedText)
         } catch {
             ocrErrorMessage = error.localizedDescription
             AppLogger.parsing.error("OCR extraction failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+}
+
+private enum ImporterError: LocalizedError {
+    case noImageSelected
+
+    var errorDescription: String? {
+        switch self {
+        case .noImageSelected:
+            return "Select a recipe image before importing."
         }
     }
 }

@@ -13,10 +13,16 @@ struct ImagePicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
     @Environment(\.dismiss) private var dismiss
     let sourceType: UIImagePickerController.SourceType
+    let allowsEditing: Bool
     
-    init(image: Binding<UIImage?>, sourceType: UIImagePickerController.SourceType = .camera) {
+    init(
+        image: Binding<UIImage?>,
+        sourceType: UIImagePickerController.SourceType = .camera,
+        allowsEditing: Bool = true
+    ) {
         self._image = image
         self.sourceType = sourceType
+        self.allowsEditing = allowsEditing
     }
     
     func makeUIViewController(context: Context) -> UIImagePickerController {
@@ -30,7 +36,7 @@ struct ImagePicker: UIViewControllerRepresentable {
             picker.sourceType = .photoLibrary
         }
         
-        picker.allowsEditing = true
+        picker.allowsEditing = allowsEditing
         return picker
     }
     
