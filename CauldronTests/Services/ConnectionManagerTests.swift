@@ -274,4 +274,89 @@ final class ConnectionManagerTests: XCTestCase {
             XCTAssertTrue(managed2.connection.isAccepted)
         }
     }
+
+    // MARK: - Operation Queue Integration
+
+    func testOperationQueueSupportsConnectionEntityPayload() async throws {
+        let (_, dependencies, _) = makeConnectionManager()
+
+        let connection = Connection(
+            id: UUID(),
+            fromUserId: UUID(),
+            toUserId: UUID(),
+            status: .accepted
+        )
+        let payload = try JSONEncoder().encode(connection)
+
+        await dependencies.operationQueueService.addOperation(
+            type: .acceptConnection,
+            entityType: .connection,
+            entityId: connection.id,
+            payload: payload
+        )
+
+        let queued = await dependencies.operationQueueService.getOperation(
+            for: connection.id,
+            entityType: .connection
+        )
+
+        XCTAssertNotNil(queued)
+        XCTAssertEqual(queued?.type, .acceptConnection)
+        XCTAssertEqual(queued?.entityType, .connection)
+        XCTAssertEqual(queued?.payload, payload)
+    }
+
+    func testOperationQueueMarkInProgressByEntityIdFallback() async throws {
+        let (_, dependencies, _) = makeConnectionManager()
+        let connectionId = UUID()
+
+        await dependencies.operationQueueService.addOperation(
+            type: .create,
+            entityType: .connection,
+            entityId: connectionId
+        )
+
+        // Existing repository call sites pass entity IDs here.
+        await dependencies.operationQueueService.markInProgress(operationId: connectionId)
+
+        let queued = await dependencies.operationQueueService.getOperation(
+            for: connectionId,
+            entityType: .connection
+        )
+
+        XCTAssertEqual(queued?.status, .inProgress)
+    }
+
+    func testOperationQueueRetryOperationByEntity() async throws {
+        let (_, dependencies, _) = makeConnectionManager()
+        let connectionId = UUID()
+
+        await dependencies.operationQueueService.addOperation(
+            type: .rejectConnection,
+            entityType: .connection,
+            entityId: connectionId
+        )
+
+        guard let initial = await dependencies.operationQueueService.getOperation(
+            for: connectionId,
+            entityType: .connection
+        ) else {
+            XCTFail("Expected queued operation")
+            return
+        }
+
+        await dependencies.operationQueueService.markFailed(
+            operationId: initial.id,
+            error: "Network timeout"
+        )
+
+        let retried = await dependencies.operationQueueService.retryOperation(
+            entityId: connectionId,
+            entityType: .connection
+        )
+
+        XCTAssertNotNil(retried)
+        XCTAssertEqual(retried?.status, .pending)
+        XCTAssertEqual(retried?.attempts, 1)
+    }
 }

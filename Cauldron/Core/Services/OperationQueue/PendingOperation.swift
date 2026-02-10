@@ -12,6 +12,8 @@ enum SyncOperationType: String, Codable {
     case create
     case update
     case delete
+    case acceptConnection
+    case rejectConnection
 }
 
 /// Represents the type of entity being operated on
@@ -20,6 +22,7 @@ enum EntityType: String, Codable {
     case collection
     case groceryItem
     case userProfile
+    case connection
 }
 
 /// Represents the status of a pending operation
@@ -36,6 +39,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     let type: SyncOperationType
     let entityType: EntityType
     let entityId: UUID
+    let payload: Data?
     var status: OperationStatus
     var attempts: Int
     var lastAttemptDate: Date?
@@ -48,6 +52,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
         type: SyncOperationType,
         entityType: EntityType,
         entityId: UUID,
+        payload: Data? = nil,
         status: OperationStatus = .pending,
         attempts: Int = 0,
         lastAttemptDate: Date? = nil,
@@ -59,6 +64,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
         self.type = type
         self.entityType = entityType
         self.entityId = entityId
+        self.payload = payload
         self.status = status
         self.attempts = attempts
         self.lastAttemptDate = lastAttemptDate
@@ -77,6 +83,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
             type: type,
             entityType: entityType,
             entityId: entityId,
+            payload: payload,
             status: .failed,
             attempts: newAttempts,
             lastAttemptDate: Date(),
@@ -93,6 +100,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
             type: type,
             entityType: entityType,
             entityId: entityId,
+            payload: payload,
             status: .inProgress,
             attempts: attempts,
             lastAttemptDate: Date(),
@@ -109,6 +117,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
             type: type,
             entityType: entityType,
             entityId: entityId,
+            payload: payload,
             status: .completed,
             attempts: attempts,
             lastAttemptDate: Date(),
@@ -156,6 +165,8 @@ extension SyncOperationType {
         case .create: return "Creating"
         case .update: return "Updating"
         case .delete: return "Deleting"
+        case .acceptConnection: return "Accepting"
+        case .rejectConnection: return "Rejecting"
         }
     }
 }
@@ -167,6 +178,7 @@ extension EntityType {
         case .collection: return "collection"
         case .groceryItem: return "grocery item"
         case .userProfile: return "profile"
+        case .connection: return "connection"
         }
     }
 }
