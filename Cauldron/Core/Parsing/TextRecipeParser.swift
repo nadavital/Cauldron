@@ -9,98 +9,142 @@ import Foundation
 
 /// Parser for extracting recipes from plain text
 actor TextRecipeParser: RecipeParser {
-    
+
+    private enum Section {
+        case unknown
+        case ingredients
+        case steps
+        case notes
+    }
+
+    private let instructionKeywords = [
+        "add", "bake", "beat", "blend", "boil", "combine", "cook", "cool",
+        "drain", "fold", "fry", "grill", "heat", "knead", "let", "marinate",
+        "mix", "place", "pour", "preheat", "reduce", "rest", "roast", "saute",
+        "season", "serve", "simmer", "stir", "transfer", "whisk"
+    ]
+
+    private let ingredientHints = [
+        "to taste", "for garnish", "optional", "divided", "room temperature", "melted"
+    ]
+
+    private let notePrefixes = [
+        "note:", "notes:", "tip:", "tips:", "pro tip:", "variation:", "variations:",
+        "substitution:", "substitutions:", "storage:", "make ahead", "make-ahead",
+        "serving suggestion", "chef's note", "recipe note"
+    ]
+
     func parse(from text: String) async throws -> Recipe {
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let normalizedText = InputNormalizer.normalize(text)
+        let lines = normalizedText
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        
+
         guard !lines.isEmpty else {
             throw ParsingError.invalidSource
         }
-        
-        // First line is typically the title
-        let title = lines[0]
-        
-        // Find ingredients and steps sections
+
+        let title = cleanTitle(lines[0])
+
         var ingredients: [Ingredient] = []
         var steps: [CookStep] = []
+        var noteCandidates: [String] = []
+
         var currentSection: Section = .unknown
-        var foundExplicitSection = false  // Track if we found any explicit section header
+        var foundExplicitSection = false
+        var currentIngredientSection: String?
+        var currentStepSection: String?
 
-        enum Section {
-            case unknown, ingredients, steps
-        }
-
-        var currentIngredientSection: String? = nil
-        var currentStepSection: String? = nil
-        
         for line in lines.dropFirst() {
-            let lowercased = line.lowercased()
-            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            // Detect section headers
-            if lowercased.contains("ingredient") {
+            if TextSectionParser.isIngredientSectionHeader(line) {
                 currentSection = .ingredients
-                foundExplicitSection = true
-                continue
-            } else if lowercased.contains("instruction") || lowercased.contains("step") || lowercased.contains("direction") {
-                currentSection = .steps
+                currentIngredientSection = nil
                 foundExplicitSection = true
                 continue
             }
-            
-            // Detect Ingredient/Step Subsection Headers (e.g. "For the Dough:", "Filling:")
-            // Only treat as subsection header if:
-            // - Line is short (1-4 words) AND ends with colon
-            // - Doesn't contain numbers (which would indicate a quantity)
-            // - Doesn't match patterns like "Step 1:" or "Note:"
-            if trimmedLine.hasSuffix(":") {
-                let potentialSection = String(trimmedLine.dropLast()).trimmingCharacters(in: .whitespaces)
-                let wordCount = potentialSection.components(separatedBy: .whitespaces).count
-                let hasNumbers = potentialSection.contains(where: { $0.isNumber })
-                let isNoteOrStep = lowercased.hasPrefix("step") || lowercased.hasPrefix("note")
 
-                // Only treat as subsection if short, no numbers, and not "Step X:" or "Note:"
-                if wordCount <= 4 && !hasNumbers && !isNoteOrStep {
-                    if currentSection == .ingredients || currentSection == .unknown {
-                        currentIngredientSection = potentialSection
-                        currentSection = .ingredients
-                        continue
-                    } else if currentSection == .steps {
-                        currentStepSection = potentialSection
-                        continue
-                    }
+            if TextSectionParser.isStepsSectionHeader(line) {
+                currentSection = .steps
+                currentStepSection = nil
+                foundExplicitSection = true
+                continue
+            }
+
+            if NotesExtractor.looksLikeNotesSectionHeader(line) {
+                currentSection = .notes
+                foundExplicitSection = true
+                noteCandidates.append(line)
+                continue
+            }
+
+            if let subsection = subsectionName(from: line), subsection.count <= 32 {
+                switch currentSection {
+                case .ingredients, .unknown:
+                    currentSection = .ingredients
+                    currentIngredientSection = subsection
+                    foundExplicitSection = true
+                    continue
+                case .steps:
+                    currentStepSection = subsection
+                    continue
+                case .notes:
+                    noteCandidates.append(line)
+                    continue
                 }
             }
-            
-            // Parse based on current section
+
+            let cleanedLine = cleanListMarkers(line)
+            guard !cleanedLine.isEmpty else {
+                continue
+            }
+
+            if isLikelyInlineNoteLine(cleanedLine) {
+                noteCandidates.append(cleanedLine)
+                continue
+            }
+
             switch currentSection {
             case .ingredients:
-                ingredients.append(parseIngredient(line, section: currentIngredientSection))
-                
+                // OCR can interleave columns; route obvious action lines to steps.
+                if looksLikeInstructionSentence(line) {
+                    let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                    steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                    currentSection = .steps
+                } else {
+                    ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
+                }
+
             case .steps:
-                let cleanedStep = cleanListMarkers(line)
-                let timers = TimerExtractor.extractTimers(from: cleanedStep)
-                steps.append(CookStep(
-                    index: steps.count,
-                    text: cleanedStep,
-                    timers: timers,
-                    section: currentStepSection
-                ))
-                
+                // OCR can interleave columns; route obvious ingredient lines back.
+                if TextSectionParser.looksLikeIngredient(cleanedLine) {
+                    ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
+                } else {
+                    let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                    steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                }
+
+            case .notes:
+                noteCandidates.append(cleanedLine)
+
             case .unknown:
-                // Without explicit section headers, don't try to guess
-                // Let the heuristic parser handle it after the loop
-                break
+                // Delay to heuristic pass.
+                continue
             }
         }
-        
-        // If we didn't find explicit sections and don't have a clear split, try heuristic
-        // But if we DID find explicit sections (like "Instructions:"), respect that and throw
-        // appropriate errors rather than falling back to heuristic
-        if !foundExplicitSection && (ingredients.isEmpty || steps.isEmpty) {
-            return try parseHeuristic(lines)
+
+        if !foundExplicitSection || ingredients.isEmpty || steps.isEmpty {
+            let heuristic = parseHeuristic(lines: Array(lines.dropFirst()))
+
+            if ingredients.isEmpty {
+                ingredients = heuristic.ingredients
+            }
+
+            if steps.isEmpty {
+                steps = heuristic.steps
+            }
+
+            noteCandidates.append(contentsOf: heuristic.notes)
         }
 
         guard !ingredients.isEmpty else {
@@ -110,123 +154,194 @@ actor TextRecipeParser: RecipeParser {
         guard !steps.isEmpty else {
             throw ParsingError.noStepsFound
         }
-        
+
+        let notes = extractNotes(from: noteCandidates)
+
         return Recipe(
             title: title,
             ingredients: ingredients,
-            steps: steps
+            steps: steps,
+            notes: notes
         )
     }
-    
-    /// Remove bullet points, numbers, and other list markers from text
+
+    private func cleanTitle(_ line: String) -> String {
+        let cleaned = cleanListMarkers(line)
+        return cleaned.isEmpty ? line : cleaned
+    }
+
     private func cleanListMarkers(_ line: String) -> String {
         line
-            .replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\d+[\.)]\s*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"^[•●○◦▪▫\-]\s*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"^Step\s*\d*[:\.]?\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
-            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func parseIngredient(_ line: String, section: String? = nil) -> Ingredient {
-        // Remove bullet points and numbering
-        let cleaned = cleanListMarkers(line)
-        
-        // Try to parse quantity if present
-        if let quantity = QuantityParser.parse(cleaned) {
-            // Remove the quantity part from the name
-            // Note: QuantityParser now handles ranges, but we need to remove the matched text
-            // This simple removal logic might be brittle if parser matched complex range
-            // For now, relies on shared logic or we'd ideally get the range back from parser
-            
-            // Re-parsing logic here for name extraction is a bit duplicate but acceptable for now
-            // If parsed quantity string ends with unit, we try to strip it
-            
-            // Simple heuristic to strip quantity + unit from start
-            // If we identify unit type, we can try to find it in string and split
-            
-            // Fallback: If QuantityParser succeeded, assume the components approach works
-            let components = cleaned.components(separatedBy: .whitespaces)
-            
-            // If we have a range (e.g. 2 - 3 cups), that's at least 3 parts (2, -, 3, cups) + name
-            // If we have "2 cups", that's 2 parts + name
-            
-            // Let's try to remove the parts that made up the quantity
-            // This is tricky without range info.
-            // Simplified approach: Drop first few words if they look like numbers/units
-            
-            // Re-implement name extraction robustly?
-            // For now, keep existing logic but be aware it might need more sophisticated matching
-             if components.count > 2 {
-                // Heuristic: drop first 2 parts is too simple for "2 - 3 cups" (4 parts)
-                // Let's rely on the parsing result.
-                // If quantity has upperValue, it was likely "X - Y Unit" (3 or 4 tokens) or "X-Y Unit" (2 tokens)
-                
-                var dropCount = 2
-                if quantity.upperValue != nil {
-                     if cleaned.contains(" - ") { dropCount = 4 } // 1 - 2 cups
-                     else if cleaned.contains("-") { dropCount = 2 } // 1-2 cups (if space-separated) or 1 (1-2cups)
-                     // This is getting guessy.
-                     // Better: check if start of string matches generic quantity pattern
-                }
-                
-                // New Approach: Iterate words and consume while they match number/range/unit
-                // Not implementing full tokenizer here to save complexity.
-                // Retaining old logic for simple cases, might fail to strip range perfectly:
-                
-                // Use the old logic for now, risk: might leave "- 3" in name if "2 - 3"
-                if quantity.upperValue != nil && cleaned.contains("-") {
-                     // Attempt to be slightly smarter
-                     // If we find "-", let's assume it's part of quantity
-                     dropCount = 3 // "2", "-", "3", "cups" -> 4?
-                     // Let's stick to safe fallback:
-                }
-                 
-                let name = components.dropFirst(2).joined(separator: " ")
-                 return Ingredient(name: name, quantity: quantity, section: section) // Use name? No, wait, old logic used dropFirst(2)
-            }
-        }
-        
-        return Ingredient(name: cleaned, section: section)
+        let parsed = IngredientParser.parseIngredientText(line)
+        return Ingredient(
+            name: parsed.name,
+            quantity: parsed.quantity,
+            note: parsed.note,
+            section: section ?? parsed.section
+        )
     }
-    
-    private func parseHeuristic(_ lines: [String]) throws -> Recipe {
-        let title = lines[0]
-        
-        // Simple heuristic: shorter lines (~1-3 words, or with quantities) are likely ingredients
-        // Longer lines are likely steps
+
+    private func parseHeuristic(lines: [String]) -> (ingredients: [Ingredient], steps: [CookStep], notes: [String]) {
         var ingredients: [Ingredient] = []
         var steps: [CookStep] = []
-        
-        for line in lines.dropFirst() {
-            let wordCount = line.components(separatedBy: .whitespaces).count
-            
-            if wordCount <= 5 || line.contains(where: { "0123456789/".contains($0) }) {
-                // Likely an ingredient
-                ingredients.append(parseIngredient(line))
+        var notes: [String] = []
+
+        var inNotesSection = false
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if NotesExtractor.looksLikeNotesSectionHeader(line) {
+                inNotesSection = true
+                notes.append(line)
+                continue
+            }
+
+            if inNotesSection {
+                if TextSectionParser.isIngredientSectionHeader(line) || TextSectionParser.isStepsSectionHeader(line) {
+                    inNotesSection = false
+                } else {
+                    notes.append(line)
+                    continue
+                }
+            }
+
+            let cleanedLine = cleanListMarkers(line)
+            guard !cleanedLine.isEmpty else { continue }
+
+            if isLikelyInlineNoteLine(cleanedLine) {
+                notes.append(cleanedLine)
+                continue
+            }
+
+            if TextSectionParser.looksLikeNumberedStep(line) || looksLikeInstructionSentence(cleanedLine) {
+                let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers))
+                continue
+            }
+
+            if TextSectionParser.looksLikeIngredient(cleanedLine) || looksLikeIngredientPhrase(cleanedLine) {
+                ingredients.append(parseIngredient(cleanedLine))
+                continue
+            }
+
+            if !ingredients.isEmpty && cleanedLine.count > 18 {
+                let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers))
             } else {
-                // Likely a step
-                let cleanedStep = cleanListMarkers(line)
-                let timers = TimerExtractor.extractTimers(from: cleanedStep)
-                steps.append(CookStep(
-                    index: steps.count,
-                    text: cleanedStep,
-                    timers: timers
-                ))
+                ingredients.append(parseIngredient(cleanedLine))
             }
         }
-        
-        guard !ingredients.isEmpty else {
-            throw ParsingError.noIngredientsFound
+
+        return (ingredients, steps, notes)
+    }
+
+    private func subsectionName(from line: String) -> String? {
+        guard line.hasSuffix(":"), !NotesExtractor.looksLikeNotesSectionHeader(line) else {
+            return nil
         }
-        
-        guard !steps.isEmpty else {
-            throw ParsingError.noStepsFound
+
+        let withoutColon = String(line.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !withoutColon.isEmpty else {
+            return nil
         }
-        
-        return Recipe(
-            title: title,
-            ingredients: ingredients,
-            steps: steps
-        )
+
+        let lowercased = withoutColon.lowercased()
+        guard !TextSectionParser.isIngredientSectionHeader(lowercased),
+              !TextSectionParser.isStepsSectionHeader(lowercased),
+              !lowercased.hasPrefix("step") else {
+            return nil
+        }
+
+        if withoutColon.contains(where: { $0.isNumber }) {
+            return nil
+        }
+
+        return withoutColon
+    }
+
+    private func looksLikeInstructionSentence(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        let words = lowercased
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        let tokens = lowercased
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        if TextSectionParser.looksLikeNumberedStep(line) {
+            return true
+        }
+
+        if instructionKeywords.contains(where: { tokens.contains($0) }) {
+            return true
+        }
+
+        if words.count >= 8 {
+            return true
+        }
+
+        if words.count >= 5, line.contains(",") {
+            return true
+        }
+
+        return false
+    }
+
+    private func looksLikeIngredientPhrase(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        let words = lowercased
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+
+        if words.isEmpty || words.count > 6 {
+            return false
+        }
+
+        if ingredientHints.contains(where: { lowercased.contains($0) }) {
+            return true
+        }
+
+        if lowercased.contains(" and "), words.count <= 4 {
+            return true
+        }
+
+        if instructionKeywords.contains(where: { lowercased.hasPrefix($0 + " ") }) {
+            return false
+        }
+
+        return words.count <= 4
+    }
+
+    private func isLikelyInlineNoteLine(_ line: String) -> Bool {
+        let lowercased = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return notePrefixes.contains { lowercased.hasPrefix($0) }
+    }
+
+    private func extractNotes(from noteCandidates: [String]) -> String? {
+        let cleaned = noteCandidates
+            .map { cleanListMarkers($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !cleaned.isEmpty else {
+            return nil
+        }
+
+        if let extracted = NotesExtractor.extractNotes(from: cleaned), !extracted.isEmpty {
+            return extracted
+        }
+
+        var seen = Set<String>()
+        let deduped = cleaned.filter { seen.insert($0.lowercased()).inserted }
+        return deduped.joined(separator: "\n")
     }
 }

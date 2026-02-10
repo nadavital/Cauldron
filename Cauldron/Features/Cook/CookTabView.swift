@@ -24,6 +24,9 @@ struct CookTabView: View {
     @State private var showSessionConflictAlert = false
     @State private var isAIAvailable = false
     @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
+    @State private var shouldSpotlightRecentlyAdded = false
+    @State private var recentlyAddedSpotlightTask: Task<Void, Never>?
+    private let recentlyAddedSectionID = "cookRecentlyAddedSection"
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         _viewModel = State(initialValue: CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData))
@@ -31,74 +34,80 @@ struct CookTabView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // New User CTA (if no own recipes) - show social content for new users
-                    if viewModel.allRecipes.isEmpty {
-                        newUserCTA
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        // New User CTA (if no own recipes) - show social content for new users
+                        if viewModel.allRecipes.isEmpty {
+                            newUserCTA
 
-                        // From Friends (show early for new users)
-                        if !viewModel.friendsRecipes.isEmpty {
-                            friendsRecipesSection
-                        }
+                            // From Friends (show early for new users)
+                            if !viewModel.friendsRecipes.isEmpty {
+                                friendsRecipesSection
+                            }
 
-                        // Popular in Cauldron (show early for new users)
-                        if !viewModel.popularRecipes.isEmpty {
-                            popularRecipesSection
-                        }
-                    } else {
-                        // User has recipes - show their content first
+                            // Popular in Cauldron (show early for new users)
+                            if !viewModel.popularRecipes.isEmpty {
+                                popularRecipesSection
+                            }
+                        } else {
+                            // User has recipes - show their content first
 
-                        // Dynamic Tag Rows (Promoted & Standard)
-                        ForEach(viewModel.tagRows, id: \.tag) { tagRow in
-                            tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
-                        }
+                            if shouldSpotlightRecentlyAdded, !viewModel.recentlyAddedRecipes.isEmpty {
+                                recentlyAddedSection
+                                    .id(recentlyAddedSectionID)
+                            }
 
-                        // Quick & Easy
-                        if !viewModel.quickRecipes.isEmpty {
-                            quickRecipesSection
-                        }
+                            // Dynamic Tag Rows (Promoted & Standard)
+                            ForEach(viewModel.tagRows, id: \.tag) { tagRow in
+                                tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
+                            }
 
-                        // On Rotation
-                        if !viewModel.onRotationRecipes.isEmpty {
-                            onRotationSection
-                        }
+                            // Quick & Easy
+                            if !viewModel.quickRecipes.isEmpty {
+                                quickRecipesSection
+                            }
 
-                        // Rediscover Favorites
-                        if !viewModel.forgottenFavorites.isEmpty {
-                            forgottenFavoritesSection
-                        }
+                            // On Rotation
+                            if !viewModel.onRotationRecipes.isEmpty {
+                                onRotationSection
+                            }
 
-                        // My Collections
-                        collectionsSection
+                            // Rediscover Favorites
+                            if !viewModel.forgottenFavorites.isEmpty {
+                                forgottenFavoritesSection
+                            }
 
-                        // Recently Cooked
-                        if !viewModel.recentlyCookedRecipes.isEmpty {
-                            recentlyCookedSection
-                        }
+                            // My Collections
+                            collectionsSection
 
-                        // Favorites
-                        if !viewModel.favoriteRecipes.isEmpty {
-                            favoritesSection
-                        }
+                            // Recently Cooked
+                            if !viewModel.recentlyCookedRecipes.isEmpty {
+                                recentlyCookedSection
+                            }
 
-                        // All Recipes
-                        allRecipesSection
+                            // Favorites
+                            if !viewModel.favoriteRecipes.isEmpty {
+                                favoritesSection
+                            }
 
-                        // Social content at bottom for users with recipes
-                        // From Friends (inspiration section)
-                        if !viewModel.friendsRecipes.isEmpty {
-                            friendsRecipesSection
-                        }
+                            // All Recipes
+                            allRecipesSection
 
-                        // Popular in Cauldron (discovery section)
-                        if !viewModel.popularRecipes.isEmpty {
-                            popularRecipesSection
+                            // Social content at bottom for users with recipes
+                            // From Friends (inspiration section)
+                            if !viewModel.friendsRecipes.isEmpty {
+                                friendsRecipesSection
+                            }
+
+                            // Popular in Cauldron (discovery section)
+                            if !viewModel.popularRecipes.isEmpty {
+                                popularRecipesSection
+                            }
                         }
                     }
+                    .padding(.vertical)
                 }
-                .padding(.vertical)
-            }
             .navigationTitle("Cook")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -193,10 +202,19 @@ struct CookTabView: View {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .recipeAdded)) { _ in
                 // Refresh when a recipe is added from another tab
                 Task {
                     await viewModel.loadData()
+                    let hasRecentlyAdded = !viewModel.recentlyAddedRecipes.isEmpty
+                    await MainActor.run {
+                        guard hasRecentlyAdded else { return }
+                        shouldSpotlightRecentlyAdded = true
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(recentlyAddedSectionID, anchor: .top)
+                        }
+                        scheduleRecentlyAddedSpotlightReset()
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { _ in
@@ -219,6 +237,62 @@ struct CookTabView: View {
             }
             .navigationDestination(for: Tag.self) { tag in
                 ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
+            }
+            .onDisappear {
+                recentlyAddedSpotlightTask?.cancel()
+                recentlyAddedSpotlightTask = nil
+            }
+            }
+        }
+    }
+
+    private func scheduleRecentlyAddedSpotlightReset() {
+        recentlyAddedSpotlightTask?.cancel()
+        recentlyAddedSpotlightTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                shouldSpotlightRecentlyAdded = false
+            }
+        }
+    }
+
+    private var recentlyAddedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "clock.badge.plus")
+                    .foregroundColor(.cauldronOrange)
+                Text("Recently Added")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: AllRecipesListView(recipes: viewModel.recentlyAddedRecipes, dependencies: viewModel.dependencies)) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.recentlyAddedRecipes.prefix(10)) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            recipeContextMenu(for: recipe)
+                        } preview: {
+                            RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
+                                .padding()
+                                .background(Color(.systemBackground))
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
         }
     }
