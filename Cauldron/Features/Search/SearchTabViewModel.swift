@@ -75,6 +75,11 @@ import os
             .removeDuplicates { $0 == $1 }
             .sink { [weak self] (query, categories) in
                 guard let self = self else { return }
+                // Drop stale emissions that no longer match the latest UI state.
+                guard query == self.recipeSearchText,
+                      categories == self.selectedCategories else {
+                    return
+                }
                 self.recipeSearchTask?.cancel()
                 self.recipeSearchTask = Task {
                     await self.performRecipeSearch(query: query, categories: Array(categories))
