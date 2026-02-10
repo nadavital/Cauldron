@@ -34,6 +34,7 @@ import os
     @ObservationIgnored private var cancellables = Set<AnyCancellable>()
     @ObservationIgnored private var recipeSearchTask: Task<Void, Never>?
     @ObservationIgnored private var peopleSearchTask: Task<Void, Never>?
+    @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
 
     // Search results caching
     private var cachedSearchResults: [String: [Recipe]] = [:] // Key: query+categories hash
@@ -50,6 +51,10 @@ import os
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+        self.connectionCoordinator = ConnectionInteractionCoordinator(
+            connectionManager: dependencies.connectionManager,
+            currentUserProvider: { dependencies.connectionManager.currentUserId }
+        )
 
         // Set up debounced people search
         peopleSearchSubject
@@ -188,10 +193,14 @@ import os
 
     // MARK: - Connection Actions
 
+    func relationshipState(for user: User) -> ConnectionRelationshipState {
+        connectionCoordinator.relationshipState(with: user.id)
+    }
+
     /// Accept a connection request
-    func acceptConnection(_ connection: Connection) async {
+    func acceptConnectionRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.acceptConnection(connection)
+            try await connectionCoordinator.acceptRequest(from: user.id)
             AppLogger.general.info("✅ Connection accepted successfully")
         } catch {
             AppLogger.general.error("❌ Failed to accept connection: \(error.localizedDescription)")
@@ -200,9 +209,9 @@ import os
     }
 
     /// Reject a connection request
-    func rejectConnection(_ connection: Connection) async {
+    func rejectConnectionRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.rejectConnection(connection)
+            try await connectionCoordinator.rejectRequest(from: user.id)
             AppLogger.general.info("✅ Connection rejected successfully")
         } catch {
             AppLogger.general.error("❌ Failed to reject connection: \(error.localizedDescription)")
@@ -213,12 +222,16 @@ import os
     /// Send a connection request
     func sendConnectionRequest(to user: User) async {
         do {
-            try await dependencies.connectionManager.sendConnectionRequest(to: user.id, user: user)
+            try await connectionCoordinator.sendRequest(to: user)
             AppLogger.general.info("✅ Connection request sent successfully")
         } catch {
             AppLogger.general.error("❌ Failed to send connection request: \(error.localizedDescription)")
             connectionError = error as? ConnectionError ?? .networkFailure(error)
         }
+    }
+
+    func retryConnectionOperation(for user: User) async {
+        await connectionCoordinator.retryFailedOperation(with: user.id)
     }
     
     func updateRecipeSearch(_ query: String) {

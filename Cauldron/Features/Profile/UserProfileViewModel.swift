@@ -12,7 +12,8 @@ import os
 /// View model for user profile view - handles connection management and user info
 @MainActor
 @Observable final class UserProfileViewModel {
-    var connectionState: ConnectionState = .loading
+    var connectionState: ConnectionRelationshipState = .syncing
+    var isLoadingConnectionState = false
     var showError = false
     var errorMessage = ""
     var isProcessing = false
@@ -29,17 +30,10 @@ import os
 
     let user: User
     let dependencies: DependencyContainer
-
-    enum ConnectionState: Equatable {
-        case notConnected
-        case pendingSent
-        case pendingReceived
-        case connected
-        case loading
-    }
+    private let connectionCoordinator: ConnectionInteractionCoordinator
 
     var currentUserId: UUID {
-        CurrentUserSession.shared.userId ?? UUID()
+        dependencies.connectionManager.currentUserId
     }
 
     var isCurrentUser: Bool {
@@ -49,6 +43,10 @@ import os
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
         self.dependencies = dependencies
+        self.connectionCoordinator = ConnectionInteractionCoordinator(
+            connectionManager: dependencies.connectionManager,
+            currentUserProvider: { dependencies.connectionManager.currentUserId }
+        )
     }
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
@@ -82,28 +80,15 @@ import os
     }
 
     private func updateConnectionState() async {
-        // Don't show connection state for current user
+        isLoadingConnectionState = true
+        defer { isLoadingConnectionState = false }
+
         if isCurrentUser {
-            connectionState = .notConnected
+            connectionState = .currentUser
             return
         }
 
-        connectionState = .loading
-
-        // Get connection status from ConnectionManager
-        if let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) {
-            let connection = managedConnection.connection
-
-            if connection.isAccepted {
-                connectionState = .connected
-            } else if connection.fromUserId == currentUserId {
-                connectionState = .pendingSent
-            } else {
-                connectionState = .pendingReceived
-            }
-        } else {
-            connectionState = .notConnected
-        }
+        connectionState = connectionCoordinator.relationshipState(with: user.id)
     }
 
     func sendConnectionRequest() async {
@@ -111,7 +96,8 @@ import os
         defer { isProcessing = false }
 
         do {
-            try await dependencies.connectionManager.sendConnectionRequest(to: user.id, user: user)
+            try await connectionCoordinator.sendRequest(to: user)
+            await updateConnectionState()
             AppLogger.general.info("✅ Connection request sent to \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to send connection request: \(error.localizedDescription)")
@@ -121,16 +107,12 @@ import os
     }
 
     func acceptConnection() async {
-        guard let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) else {
-            AppLogger.general.error("No connection found to accept")
-            return
-        }
-
         isProcessing = true
         defer { isProcessing = false }
 
         do {
-            try await dependencies.connectionManager.acceptConnection(managedConnection.connection)
+            try await connectionCoordinator.acceptRequest(from: user.id)
+            await updateConnectionState()
             AppLogger.general.info("✅ Connection accepted from \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to accept connection: \(error.localizedDescription)")
@@ -140,16 +122,12 @@ import os
     }
 
     func rejectConnection() async {
-        guard let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) else {
-            AppLogger.general.error("No connection found to reject")
-            return
-        }
-
         isProcessing = true
         defer { isProcessing = false }
 
         do {
-            try await dependencies.connectionManager.rejectConnection(managedConnection.connection)
+            try await connectionCoordinator.rejectRequest(from: user.id)
+            await updateConnectionState()
             AppLogger.general.info("✅ Connection rejected from \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to reject connection: \(error.localizedDescription)")
@@ -159,16 +137,12 @@ import os
     }
 
     func removeConnection() async {
-        guard let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) else {
-            AppLogger.general.error("No connection found to remove")
-            return
-        }
-
         isProcessing = true
         defer { isProcessing = false }
 
         do {
-            try await dependencies.connectionManager.deleteConnection(managedConnection.connection)
+            try await connectionCoordinator.removeConnection(with: user.id)
+            await updateConnectionState()
             AppLogger.general.info("✅ Connection removed with \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to remove connection: \(error.localizedDescription)")
@@ -178,14 +152,7 @@ import os
     }
 
     func cancelConnectionRequest() async {
-        guard let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) else {
-            AppLogger.general.error("No connection found to cancel")
-            return
-        }
-
-        // Verify it's a pending request sent by current user
-        guard managedConnection.connection.fromUserId == currentUserId &&
-              managedConnection.connection.status == .pending else {
+        guard connectionState == .pendingOutgoing else {
             AppLogger.general.error("Connection is not a pending sent request")
             return
         }
@@ -194,7 +161,8 @@ import os
         defer { isProcessing = false }
 
         do {
-            try await dependencies.connectionManager.deleteConnection(managedConnection.connection)
+            try await connectionCoordinator.removeConnection(with: user.id)
+            await updateConnectionState()
             AppLogger.general.info("✅ Connection request canceled to \(self.user.username)")
         } catch {
             AppLogger.general.error("❌ Failed to cancel connection request: \(error.localizedDescription)")
