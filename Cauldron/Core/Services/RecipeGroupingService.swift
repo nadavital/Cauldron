@@ -14,6 +14,7 @@ struct SearchRecipeGroup: Identifiable {
     let saveCount: Int
     let friendSavers: [User]
     let ownerTier: UserTier
+    let relevanceScore: Double
 
     /// Effective score for ranking (save count multiplied by tier boost)
     var effectiveScore: Double {
@@ -43,78 +44,113 @@ enum RecipeGroupingService {
         filterText: String = "",
         selectedCategories: Set<RecipeCategory> = []
     ) -> [SearchRecipeGroup] {
+        let normalizedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let queryTokens = tokenize(normalizedQuery)
 
-        // Helper to filter recipes by text and categories
-        func filterRecipes(_ recipes: [Recipe]) -> [Recipe] {
-            var filtered = recipes
-
-            if !filterText.isEmpty {
-                let lowercased = filterText.lowercased()
-                filtered = filtered.filter { recipe in
-                    recipe.title.lowercased().contains(lowercased) ||
-                    recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
-                    recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
-                }
+        func matchesSelectedCategories(_ recipe: Recipe) -> Bool {
+            guard !selectedCategories.isEmpty else { return true }
+            return selectedCategories.allSatisfy { category in
+                recipe.tags.contains { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame }
             }
-
-            if !selectedCategories.isEmpty {
-                filtered = filtered.filter { recipe in
-                    selectedCategories.allSatisfy { category in
-                        recipe.tags.contains(where: { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame })
-                    }
-                }
-            }
-
-            return filtered
         }
 
-        // 1. Filter both local and public recipes by search text and categories
-        let filteredLocal = filterRecipes(localRecipes)
-        let filteredPublic = filterRecipes(publicRecipes)
+        func recipeTextScore(_ recipe: Recipe) -> Double {
+            guard !normalizedQuery.isEmpty else { return 1 }
 
-        // 2. Merge Local + Public
-        // Ensure we don't have duplicates by ID (e.g. if I own it, it might be in both lists?)
-        // Typically localRecipes are "My Recipes" and publicRecipes are "Others".
-        // But for safety, let's combine and then group.
-        let allResults = filteredLocal + filteredPublic
+            let title = recipe.title.lowercased()
+            let tags = recipe.tags.map { $0.name.lowercased() }
+            let ingredients = recipe.ingredients.map { $0.name.lowercased() }
+            let combined = ([title] + tags + ingredients).joined(separator: " ")
 
-        // 3. Group by Original Recipe ID (Deduplication)
-        // Key: originalRecipeId ?? id (of original)
-        let grouped = Dictionary(grouping: allResults) { recipe -> UUID in
+            var score: Double = 0
+            let queryLower = normalizedQuery.lowercased()
+
+            if title == queryLower {
+                score += 320
+            } else if title.hasPrefix(queryLower) {
+                score += 250
+            } else if title.localizedStandardContains(queryLower) {
+                score += 180
+            }
+
+            if combined.localizedStandardContains(queryLower) {
+                score += 90
+            }
+
+            if !queryTokens.isEmpty {
+                var matchedTokens = 0
+                for token in queryTokens {
+                    if title.localizedStandardContains(token) {
+                        score += 65
+                        matchedTokens += 1
+                    } else if tags.contains(where: { $0.localizedStandardContains(token) }) {
+                        score += 38
+                        matchedTokens += 1
+                    } else if ingredients.contains(where: { $0.localizedStandardContains(token) }) {
+                        score += 32
+                        matchedTokens += 1
+                    }
+                }
+
+                if matchedTokens == queryTokens.count {
+                    score += 80
+                } else if matchedTokens == 0 {
+                    score = 0
+                }
+            }
+
+            return score
+        }
+
+        func buildCandidate(_ recipe: Recipe) -> (recipe: Recipe, textScore: Double)? {
+            guard matchesSelectedCategories(recipe) else { return nil }
+            let textScore = recipeTextScore(recipe)
+            guard normalizedQuery.isEmpty || textScore > 0 else {
+                return nil
+            }
+            return (recipe: recipe, textScore: textScore)
+        }
+
+        // Filter + score local and public results first.
+        let allCandidates = (localRecipes + publicRecipes).compactMap(buildCandidate)
+
+        // Group related copies under original ID.
+        let grouped = Dictionary(grouping: allCandidates) { candidate -> UUID in
+            let recipe = candidate.recipe
             return recipe.originalRecipeId ?? recipe.id
         }
 
-        // 4. Create SearchRecipeGroup objects
+        // Build grouped result cards.
         var groups: [SearchRecipeGroup] = []
 
-        for (_, recipes) in grouped {
-            // Identify Primary Recipe to show
-            // Preference: 1. Owned by self (if in local results), 2. Original (originalRecipeId == nil), 3. First one
+        for (_, candidates) in grouped {
+            let recipes = candidates.map(\.recipe)
+            let recipeScores = Dictionary(uniqueKeysWithValues: candidates.map { ($0.recipe.id, $0.textScore) })
+
+            // Choose best representative recipe.
             let primary: Recipe
-            if let owned = recipes.first(where: { $0.ownerId == currentUserId }) {
+            if let owned = recipes
+                .filter({ $0.ownerId == currentUserId })
+                .max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) {
                 primary = owned
-            } else if let original = recipes.first(where: { $0.originalRecipeId == nil }) {
+            } else if let original = recipes
+                .filter({ $0.originalRecipeId == nil })
+                .max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) {
                 primary = original
             } else {
-                primary = recipes.first!
+                primary = recipes.max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) ?? recipes[0]
             }
 
-            // Find friends who saved this recipe
-            // We check if any recipe in this group is owned by a friend
             let friendIds = Set(friends.map { $0.id })
             let friendSavers = recipes
                 .filter { $0.ownerId != nil && friendIds.contains($0.ownerId!) }
                 .compactMap { recipe -> User? in
                     return friends.first(where: { $0.id == recipe.ownerId })
                 }
-            // Remove duplicates (e.g. if friend saved multiple versions? Unlikely but safe)
             let uniqueFriendSavers = Array(Set(friendSavers))
 
-            // Total Save Count (proxy: number of copies found in search + maybe explicit save count from server if we had it)
-            // Currently using group size as proxy for visible popularity in this search
             let saveCount = recipes.count
 
-            // Get owner tier for the primary recipe (default to Apprentice if not found)
             let ownerTier: UserTier
             if let ownerId = primary.ownerId, let tier = ownerTiers[ownerId] {
                 ownerTier = tier
@@ -122,22 +158,37 @@ enum RecipeGroupingService {
                 ownerTier = .apprentice
             }
 
+            let bestTextScore = candidates.map(\.textScore).max() ?? 0
+            let popularityBoost = Double(max(saveCount - 1, 0)) * 30
+            let friendBoost = Double(uniqueFriendSavers.count) * 110
+            let tierBoost = ownerTier.searchBoost * 35
+            let recencyBoost = max(0, 14 - min(14, Date().timeIntervalSince(primary.updatedAt) / 86_400))
+            let relevanceScore = bestTextScore + popularityBoost + friendBoost + tierBoost + recencyBoost
+
             groups.append(SearchRecipeGroup(
                 primaryRecipe: primary,
                 saveCount: saveCount,
                 friendSavers: uniqueFriendSavers,
-                ownerTier: ownerTier
+                ownerTier: ownerTier,
+                relevanceScore: relevanceScore
             ))
         }
 
-        // 5. Sort/Rank
-        // Rank by: Friend activity (top), then effective score (save count × tier boost)
         groups.sort { g1, g2 in
-             if !g1.friendSavers.isEmpty && g2.friendSavers.isEmpty { return true }
-             if g1.friendSavers.isEmpty && !g2.friendSavers.isEmpty { return false }
-             return g1.effectiveScore > g2.effectiveScore
+            if g1.relevanceScore != g2.relevanceScore {
+                return g1.relevanceScore > g2.relevanceScore
+            }
+            return g1.primaryRecipe.updatedAt > g2.primaryRecipe.updatedAt
         }
 
         return groups
+    }
+
+    private static func tokenize(_ query: String) -> [String] {
+        query
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count >= 2 }
     }
 }

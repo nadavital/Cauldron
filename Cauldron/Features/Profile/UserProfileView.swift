@@ -492,7 +492,7 @@ struct UserProfileView: View {
 
     @ViewBuilder
     private var connectionActionBadge: some View {
-        if viewModel.isProcessing {
+        if viewModel.isProcessing || viewModel.isLoadingConnectionState {
             ProgressView()
                 .scaleEffect(0.8)
         } else {
@@ -522,7 +522,7 @@ struct UserProfileView: View {
                     .cornerRadius(8)
                 }
 
-            case .pendingSent:
+            case .pendingOutgoing:
                 // Pending badge - tap to cancel
                 Menu {
                     Button(role: .destructive) {
@@ -547,7 +547,7 @@ struct UserProfileView: View {
                     .cornerRadius(8)
                 }
 
-            case .pendingReceived:
+            case .pendingIncoming:
                 // Request received badge - shown in header, actions below
                 HStack(spacing: 4) {
                     Image(systemName: "person.badge.clock")
@@ -562,7 +562,7 @@ struct UserProfileView: View {
                 .background(Color.blue.opacity(0.15))
                 .cornerRadius(8)
 
-            case .notConnected:
+            case .none:
                 // Add Friend badge - tap to send request
                 Button {
                     Task {
@@ -583,9 +583,32 @@ struct UserProfileView: View {
                     .cornerRadius(8)
                 }
 
-            case .loading:
+            case .syncing:
                 ProgressView()
                     .scaleEffect(0.8)
+
+            case .failed:
+                Button {
+                    Task {
+                        await viewModel.loadConnectionStatus()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                        Text("Retry")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.15))
+                    .cornerRadius(8)
+                }
+
+            case .currentUser:
+                EmptyView()
             }
         }
     }
@@ -594,7 +617,7 @@ struct UserProfileView: View {
 
     @ViewBuilder
     private var connectionSection: some View {
-        if viewModel.connectionState == .pendingReceived && !viewModel.isProcessing {
+        if viewModel.connectionState == .pendingIncoming && !viewModel.isProcessing && !viewModel.isLoadingConnectionState {
             VStack(spacing: 12) {
                 Text("\(user.displayName) wants to be friends")
                     .font(.subheadline)

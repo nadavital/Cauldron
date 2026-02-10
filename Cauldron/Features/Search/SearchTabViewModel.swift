@@ -32,7 +32,9 @@ import os
     private var recipeSearchText: String = ""
     private var peopleSearchText: String = ""
     @ObservationIgnored private var cancellables = Set<AnyCancellable>()
-    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var recipeSearchTask: Task<Void, Never>?
+    @ObservationIgnored private var peopleSearchTask: Task<Void, Never>?
+    @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
 
     // Search results caching
     private var cachedSearchResults: [String: [Recipe]] = [:] // Key: query+categories hash
@@ -49,15 +51,19 @@ import os
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+        self.connectionCoordinator = ConnectionInteractionCoordinator(
+            connectionManager: dependencies.connectionManager,
+            currentUserProvider: { dependencies.connectionManager.currentUserId }
+        )
 
         // Set up debounced people search
         peopleSearchSubject
-            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+            .debounce(for: .milliseconds(250), scheduler: DispatchQueue.main)
             .removeDuplicates()
             .sink { [weak self] query in
                 guard let self = self else { return }
-                self.searchTask?.cancel()
-                self.searchTask = Task {
+                self.peopleSearchTask?.cancel()
+                self.peopleSearchTask = Task {
                     await self.performPeopleSearch(query)
                 }
             }
@@ -65,12 +71,17 @@ import os
 
         // Set up debounced recipe search
         recipeSearchSubject
-            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
+            .debounce(for: .milliseconds(280), scheduler: DispatchQueue.main)
             .removeDuplicates { $0 == $1 }
             .sink { [weak self] (query, categories) in
                 guard let self = self else { return }
-                self.searchTask?.cancel()
-                self.searchTask = Task {
+                // Drop stale emissions that no longer match the latest UI state.
+                guard query == self.recipeSearchText,
+                      categories == self.selectedCategories else {
+                    return
+                }
+                self.recipeSearchTask?.cancel()
+                self.recipeSearchTask = Task {
                     await self.performRecipeSearch(query: query, categories: Array(categories))
                 }
             }
@@ -79,7 +90,7 @@ import os
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {
-        // Note: Cannot access cancellables or searchTask here as they're isolated
+        // Note: Cannot access cancellables or task references here as they're isolated
         // Cleanup happens automatically when the object is deallocated
     }
     
@@ -187,10 +198,14 @@ import os
 
     // MARK: - Connection Actions
 
+    func relationshipState(for user: User) -> ConnectionRelationshipState {
+        connectionCoordinator.relationshipState(with: user.id)
+    }
+
     /// Accept a connection request
-    func acceptConnection(_ connection: Connection) async {
+    func acceptConnectionRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.acceptConnection(connection)
+            try await connectionCoordinator.acceptRequest(from: user.id)
             AppLogger.general.info("✅ Connection accepted successfully")
         } catch {
             AppLogger.general.error("❌ Failed to accept connection: \(error.localizedDescription)")
@@ -199,9 +214,9 @@ import os
     }
 
     /// Reject a connection request
-    func rejectConnection(_ connection: Connection) async {
+    func rejectConnectionRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.rejectConnection(connection)
+            try await connectionCoordinator.rejectRequest(from: user.id)
             AppLogger.general.info("✅ Connection rejected successfully")
         } catch {
             AppLogger.general.error("❌ Failed to reject connection: \(error.localizedDescription)")
@@ -212,20 +227,35 @@ import os
     /// Send a connection request
     func sendConnectionRequest(to user: User) async {
         do {
-            try await dependencies.connectionManager.sendConnectionRequest(to: user.id, user: user)
+            try await connectionCoordinator.sendRequest(to: user)
             AppLogger.general.info("✅ Connection request sent successfully")
         } catch {
             AppLogger.general.error("❌ Failed to send connection request: \(error.localizedDescription)")
             connectionError = error as? ConnectionError ?? .networkFailure(error)
         }
     }
+
+    func retryConnectionOperation(for user: User) async {
+        await connectionCoordinator.retryFailedOperation(with: user.id)
+    }
     
     func updateRecipeSearch(_ query: String) {
-        recipeSearchText = query
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        recipeSearchText = normalizedQuery
         // Update local results immediately
         filterLocalRecipes()
-        // Trigger server search
-        recipeSearchSubject.send((query, selectedCategories))
+
+        // Avoid debounce delay when query is empty so default discovery results appear instantly.
+        if normalizedQuery.isEmpty {
+            recipeSearchTask?.cancel()
+            recipeSearchTask = Task {
+                await performRecipeSearch(query: "", categories: Array(selectedCategories))
+            }
+            return
+        }
+
+        // Trigger debounced server search for active query.
+        recipeSearchSubject.send((normalizedQuery, selectedCategories))
     }
     
     func toggleCategory(_ category: RecipeCategory) {
@@ -236,8 +266,12 @@ import os
         }
         // Update local results immediately
         filterLocalRecipes()
-        // Trigger server search
-        recipeSearchSubject.send((recipeSearchText, selectedCategories))
+
+        // Category toggles should feel snappy; run immediately.
+        recipeSearchTask?.cancel()
+        recipeSearchTask = Task {
+            await performRecipeSearch(query: recipeSearchText, categories: Array(selectedCategories))
+        }
     }
     
     private func filterLocalRecipes() {
@@ -245,9 +279,11 @@ import os
     }
     
     private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
         // Generate cache key from query and categories
         let categoryTags = categories.map { $0.tagValue }.sorted()
-        let cacheKey = "\(query.lowercased())|\(categoryTags.joined(separator: ","))"
+        let cacheKey = "\(normalizedQuery.lowercased())|\(categoryTags.joined(separator: ","))"
 
         // Check if we have valid cached results
         if let cachedResults = cachedSearchResults[cacheKey],
@@ -268,7 +304,7 @@ import os
         do {
             // Perform server-side search
             let results = try await dependencies.searchCloudService.searchPublicRecipes(
-                query: query,
+                query: normalizedQuery,
                 categories: categoryTags.isEmpty ? nil : categoryTags
             )
 
@@ -339,12 +375,13 @@ import os
     }
     
     func updatePeopleSearch(_ query: String) {
-        peopleSearchText = query
-        if query.isEmpty {
+        peopleSearchText = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if peopleSearchText.isEmpty {
+            peopleSearchTask?.cancel()
             peopleSearchResults = []
         } else {
             // Send to debounced subject instead of fetching immediately
-            peopleSearchSubject.send(query)
+            peopleSearchSubject.send(peopleSearchText)
         }
     }
 

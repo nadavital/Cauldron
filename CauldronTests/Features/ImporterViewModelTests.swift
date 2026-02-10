@@ -7,6 +7,7 @@
 
 import XCTest
 import SwiftData
+import UIKit
 @testable import Cauldron
 
 /// Tests for ImporterViewModel
@@ -20,6 +21,14 @@ final class ImporterViewModelTests: XCTestCase {
         let dependencies = DependencyContainer.preview()
         let viewModel = ImporterViewModel(dependencies: dependencies)
         return (viewModel, dependencies)
+    }
+
+    private func makeTestImage() -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
+        return renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
     }
 
     // MARK: - Initial State Tests
@@ -71,6 +80,15 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
+    func testCanImport_URL_WithoutScheme_ReturnsTrue() async {
+        let (viewModel, _) = makeViewModel()
+
+        viewModel.importType = .url
+        viewModel.urlString = "allrecipes.com/recipe/12345"
+
+        XCTAssertTrue(viewModel.canImport)
+    }
+
     func testCanImport_Text_EmptyString_ReturnsFalse() async {
         let (viewModel, _) = makeViewModel()
 
@@ -88,6 +106,28 @@ final class ImporterViewModelTests: XCTestCase {
         // Given
         viewModel.importType = .text
         viewModel.textInput = "Chocolate chip cookies recipe"
+
+        // Then
+        XCTAssertTrue(viewModel.canImport)
+    }
+
+    func testCanImport_Image_NoSelection_ReturnsFalse() async {
+        let (viewModel, _) = makeViewModel()
+
+        // Given
+        viewModel.importType = .image
+        viewModel.selectedOCRImage = nil
+
+        // Then
+        XCTAssertFalse(viewModel.canImport)
+    }
+
+    func testCanImport_Image_WithSelection_ReturnsTrue() async {
+        let (viewModel, _) = makeViewModel()
+
+        // Given
+        viewModel.importType = .image
+        viewModel.selectedOCRImage = makeTestImage()
 
         // Then
         XCTAssertTrue(viewModel.canImport)

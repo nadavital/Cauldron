@@ -446,6 +446,19 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
     private func handleURL(_ url: URL) {
         AppLogger.general.info("🟣 SceneDelegate: handleURL: \(url.absoluteString)")
 
+        // Share Extension handoff for recipe import URLs from Safari.
+        if url.scheme == "cauldron" && url.host == "import-recipe" {
+            if let pendingURL = ShareExtensionImportStore.pendingRecipeURL() {
+                NotificationCenter.default.post(
+                    name: .openRecipeImportURL,
+                    object: pendingURL
+                )
+            } else {
+                AppLogger.general.warning("⚠️ No pending recipe URL found for Share Extension handoff")
+            }
+            return
+        }
+
         // Check if it's an external share deep link (cauldron://import/...)
         if url.scheme == "cauldron" && url.host == "import" {
             AppLogger.general.info("🟣 SceneDelegate: Detected external share deep link")

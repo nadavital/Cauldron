@@ -69,37 +69,6 @@ enum ConnectionError: LocalizedError {
     }
 }
 
-/// Operation types for the sync queue
-private enum OperationType {
-    case accept(Connection)
-    case create(Connection)
-    case reject(Connection)
-}
-
-/// Represents a pending sync operation
-private struct PendingOperation {
-    let id: UUID
-    let type: OperationType
-    var retryCount: Int = 0
-    var nextRetryAt: Date?
-
-    var connection: Connection {
-        switch type {
-        case .accept(let conn), .create(let conn), .reject(let conn):
-            return conn
-        }
-    }
-
-    func withIncrementedRetry() -> PendingOperation {
-        var updated = self
-        updated.retryCount += 1
-        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
-        let delay = min(Double(1 << retryCount), 30.0)
-        updated.nextRetryAt = Date().addingTimeInterval(delay)
-        return updated
-    }
-}
-
 /// Centralized service for managing connection state with optimistic updates and sync
 @MainActor
 class ConnectionManager: ObservableObject {
@@ -110,10 +79,8 @@ class ConnectionManager: ObservableObject {
     private let dependencies: DependencyContainer
     private let logger = Logger(subsystem: "com.cauldron", category: "ConnectionManager")
 
-    // Sync queue for background CloudKit operations
-    private var pendingOperations: [UUID: PendingOperation] = [:]
-    private var operationsInFlight: Set<UUID> = []
-    private var retryTimer: Timer?
+    private var queueEventTask: Task<Void, Never>?
+    private var processingConnectionIds: Set<UUID> = []
 
     private let maxRetries = 5
     private let pendingRejectsKey = "pendingRejectedConnectionIds"
@@ -133,7 +100,11 @@ class ConnectionManager: ObservableObject {
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
         self.pendingRejectIds = loadPendingRejectIds()
-        startRetryTimer()
+        startQueueEventListener()
+
+        Task {
+            await processPendingConnectionOperations()
+        }
     }
 
     // MARK: - Public API
@@ -167,26 +138,17 @@ class ConnectionManager: ObservableObject {
 
     /// Accept a connection request (optimistic update)
     func acceptConnection(_ connection: Connection) async throws {
-        // Accepting connection (don't log routine operations)
-
         guard connection.toUserId == currentUserId else {
             throw ConnectionError.permissionDenied
         }
 
         // Idempotency guard: ignore duplicate accepts while already accepted/syncing.
-        if let existing = connections[connection.id] {
-            if existing.connection.status == .accepted {
-                return
-            }
+        if let existing = connections[connection.id], existing.connection.status == .accepted {
+            return
         }
 
-        if let existingOperation = pendingOperations[connection.id] {
-            switch existingOperation.type {
-            case .accept:
-                return
-            case .create, .reject:
-                break
-            }
+        if let queued = await queuedConnectionOperation(for: connection.id), queued.type == .acceptConnection {
+            return
         }
 
         // Get current user's info for the acceptor fields
@@ -215,8 +177,8 @@ class ConnectionManager: ObservableObject {
         // Save to local cache immediately
         try? await dependencies.connectionRepository.save(acceptedConnection)
 
-        // Queue CloudKit sync in background
-        await queueOperation(.accept(acceptedConnection))
+        // Queue CloudKit sync via shared queue service
+        await enqueueConnectionOperation(type: .acceptConnection, connection: acceptedConnection)
 
         // Update badge count (one less pending request)
         updateBadgeCount()
@@ -239,7 +201,7 @@ class ConnectionManager: ObservableObject {
         persistPendingRejectIds()
 
         // Queue CloudKit delete in background (rejection = deletion for cleaner UX)
-        await queueOperation(.reject(connection))
+        await enqueueConnectionOperation(type: .rejectConnection, connection: connection)
 
         // Update badge count (one less pending request)
         updateBadgeCount()
@@ -294,8 +256,8 @@ class ConnectionManager: ObservableObject {
         // Save to local cache immediately
         try? await dependencies.connectionRepository.save(connection)
 
-        // Queue CloudKit sync in background
-        await queueOperation(.create(connection))
+        // Queue CloudKit sync via shared queue service
+        await enqueueConnectionOperation(type: .create, connection: connection)
     }
 
     /// Get connection status with a specific user
@@ -308,33 +270,30 @@ class ConnectionManager: ObservableObject {
 
     /// Manually retry a failed operation
     func retryFailedOperation(connectionId: UUID) async {
-        guard let operation = pendingOperations[connectionId] else {
-            logger.warning("No pending operation found for connection: \(connectionId)")
+        syncErrors.removeValue(forKey: connectionId)
+
+        if let _ = await dependencies.operationQueueService.retryOperation(entityId: connectionId, entityType: .connection) {
+            if let managedConnection = connections[connectionId] {
+                connections[connectionId] = ManagedConnection(
+                    connection: managedConnection.connection,
+                    syncState: .syncing
+                )
+            }
+            await processQueuedConnectionOperation(connectionId: connectionId)
             return
         }
 
-        // Manually retrying operation (don't log routine retries)
-
-        // Reset retry count for manual retry
-        var resetOperation = operation
-        resetOperation.retryCount = 0
-        resetOperation.nextRetryAt = Date()
-        pendingOperations[connectionId] = resetOperation
-
-        // Clear error state
-        syncErrors.removeValue(forKey: connectionId)
-
-        // Update sync state to syncing
-        if var managedConn = connections[connectionId] {
-            managedConn = ManagedConnection(
-                connection: managedConn.connection,
-                syncState: .syncing
-            )
-            connections[connectionId] = managedConn
+        // If queue operation was already removed after max retries, recreate from local connection state.
+        guard let managedConnection = connections[connectionId] else {
+            logger.warning("No connection found for manual retry: \(connectionId)")
+            return
         }
 
-        // Process immediately
-        await processOperation(operation)
+        let operationType: SyncOperationType = managedConnection.connection.status == .accepted
+            ? .acceptConnection
+            : .create
+
+        await enqueueConnectionOperation(type: operationType, connection: managedConnection.connection)
     }
 
     /// Get all connections (filtered by status if needed)
@@ -354,15 +313,12 @@ class ConnectionManager: ObservableObject {
 
     /// Delete a connection (removes friend/unfriends)
     func deleteConnection(_ connection: Connection) async throws {
-        // Deleting connection (don't log routine operations)
-
         // Remove from local state immediately (optimistic)
         connections.removeValue(forKey: connection.id)
 
         // Delete from local cache
         do {
             try await dependencies.connectionRepository.delete(connection)
-            // Deleted from local cache
         } catch {
             logger.warning("Failed to delete from cache: \(error.localizedDescription)")
         }
@@ -370,7 +326,6 @@ class ConnectionManager: ObservableObject {
         // Delete from CloudKit
         do {
             try await dependencies.connectionCloudService.deleteConnection(connection)
-            // Connection deleted successfully
         } catch {
             logger.error("❌ Failed to delete connection from CloudKit: \(error.localizedDescription)")
             throw error
@@ -391,21 +346,12 @@ class ConnectionManager: ObservableObject {
                     continue
                 }
 
-                // Check if we have a pending operation for this connection
-                let syncState: ConnectionSyncState
-                if pendingOperations[connection.id] != nil {
-                    syncState = .pendingSync(retryCount: 0)
-                } else {
-                    syncState = .synced
-                }
-
+                let syncState = await syncStateForConnection(connection.id)
                 connections[connection.id] = ManagedConnection(
                     connection: connection,
                     syncState: syncState
                 )
             }
-
-            // Loaded connections from cache (don't log routine operations)
         } catch {
             logger.error("Failed to load from cache: \(error.localizedDescription)")
         }
@@ -446,8 +392,8 @@ class ConnectionManager: ObservableObject {
             for connection in filteredConnections {
                 try? await dependencies.connectionRepository.save(connection)
 
-                // Only update if not currently syncing
-                if connections[connection.id]?.syncState != .syncing {
+                // Don't override optimistic local states while an operation is queued.
+                if !(await hasQueuedConnectionOperation(for: connection.id)) {
                     connections[connection.id] = ManagedConnection(
                         connection: connection,
                         syncState: .synced
@@ -460,12 +406,10 @@ class ConnectionManager: ObservableObject {
             let deletedConnectionIds = localConnectionIds.subtracting(filteredConnectionIds)
 
             for deletedId in deletedConnectionIds {
-                // Skip if it's currently syncing (pending operation)
-                if connections[deletedId]?.syncState == .syncing {
+                // Skip if operation is currently queued for this connection
+                if await hasQueuedConnectionOperation(for: deletedId) {
                     continue
                 }
-
-                // Removing locally cached connection deleted in CloudKit
 
                 // Remove from in-memory state
                 if let connection = connections[deletedId]?.connection {
@@ -476,8 +420,6 @@ class ConnectionManager: ObservableObject {
                 }
             }
 
-            // Synced connections from CloudKit (don't log routine operations)
-
             // Update badge count after syncing
             updateBadgeCount()
         } catch {
@@ -485,128 +427,193 @@ class ConnectionManager: ObservableObject {
         }
     }
 
-    /// Queue an operation for background sync
-    private func queueOperation(_ type: OperationType) async {
-        let operation: PendingOperation
-
-        switch type {
-        case .accept(let conn), .create(let conn), .reject(let conn):
-            operation = PendingOperation(
-                id: conn.id,
-                type: type,
-                retryCount: 0,
-                nextRetryAt: Date()
-            )
+    private func startQueueEventListener() {
+        let queueService = dependencies.operationQueueService
+        queueEventTask = Task { @MainActor [weak self, queueService] in
+            for await event in queueService.events {
+                await self?.handleQueueEvent(event)
+            }
         }
-
-        pendingOperations[operation.id] = operation
-
-        // Try to process immediately
-        await processOperation(operation)
     }
 
-    /// Process a pending operation
-    private func processOperation(_ operation: PendingOperation) async {
-        // Processing operation (don't log routine operations)
-        guard !operationsInFlight.contains(operation.id) else {
+    private func handleQueueEvent(_ event: OperationQueueEvent) async {
+        switch event {
+        case .operationAdded(let operation), .operationRetrying(let operation):
+            guard operation.entityType == .connection else { return }
+            await processQueuedConnectionOperation(connectionId: operation.entityId)
+
+        case .operationStarted(let operation):
+            guard operation.entityType == .connection else { return }
+            if let managed = connections[operation.entityId] {
+                connections[operation.entityId] = ManagedConnection(
+                    connection: managed.connection,
+                    syncState: .syncing
+                )
+            }
+
+        case .operationFailed(let operation):
+            guard operation.entityType == .connection else { return }
+            if let managed = connections[operation.entityId] {
+                connections[operation.entityId] = ManagedConnection(
+                    connection: managed.connection,
+                    syncState: .pendingSync(retryCount: operation.attempts)
+                )
+            }
+
+        case .operationCompleted, .queueEmpty:
+            break
+        }
+    }
+
+    private func processPendingConnectionOperations() async {
+        let operations = await dependencies.operationQueueService.getAllOperations()
+            .filter { operation in
+                operation.entityType == .connection &&
+                (operation.status == .pending || operation.isReadyForRetry)
+            }
+
+        for operation in operations {
+            await processQueuedConnectionOperation(connectionId: operation.entityId)
+        }
+    }
+
+    private func enqueueConnectionOperation(type: SyncOperationType, connection: Connection) async {
+        let payload = try? JSONEncoder().encode(connection)
+
+        await dependencies.operationQueueService.addOperation(
+            type: type,
+            entityType: .connection,
+            entityId: connection.id,
+            payload: payload
+        )
+
+        syncErrors.removeValue(forKey: connection.id)
+        await processQueuedConnectionOperation(connectionId: connection.id)
+    }
+
+    private func queuedConnectionOperation(for connectionId: UUID) async -> SyncOperation? {
+        let operations = await dependencies.operationQueueService.getOperations(for: connectionId)
+            .filter { $0.entityType == .connection }
+            .sorted { $0.createdAt > $1.createdAt }
+
+        return operations.first
+    }
+
+    private func hasQueuedConnectionOperation(for connectionId: UUID) async -> Bool {
+        guard let operation = await queuedConnectionOperation(for: connectionId) else {
+            return false
+        }
+
+        return operation.status != .completed
+    }
+
+    private func syncStateForConnection(_ connectionId: UUID) async -> ConnectionSyncState {
+        guard let operation = await queuedConnectionOperation(for: connectionId) else {
+            return .synced
+        }
+
+        switch operation.status {
+        case .inProgress:
+            return .syncing
+        case .pending, .failed:
+            return .pendingSync(retryCount: operation.attempts)
+        case .completed:
+            return .synced
+        }
+    }
+
+    private func processQueuedConnectionOperation(connectionId: UUID) async {
+        guard processingConnectionIds.insert(connectionId).inserted else {
+            return
+        }
+        defer { processingConnectionIds.remove(connectionId) }
+
+        guard let operation = await queuedConnectionOperation(for: connectionId) else {
             return
         }
 
-        operationsInFlight.insert(operation.id)
-        defer { operationsInFlight.remove(operation.id) }
+        guard operation.status == .pending else {
+            return
+        }
 
-        // Update sync state to syncing
-        if var managedConn = connections[operation.id] {
-            managedConn = ManagedConnection(
-                connection: managedConn.connection,
+        if let managed = connections[connectionId] {
+            connections[connectionId] = ManagedConnection(
+                connection: managed.connection,
                 syncState: .syncing
             )
-            connections[operation.id] = managedConn
+        }
+
+        await dependencies.operationQueueService.markInProgress(operationId: operation.id)
+
+        guard let connection = await connectionFromOperation(operation) else {
+            await dependencies.operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Missing connection payload for queued operation"
+            )
+            return
         }
 
         do {
-            // Perform CloudKit operation
             switch operation.type {
-            case .accept(let connection):
-                try await dependencies.connectionCloudService.acceptConnectionRequest(connection)
-
-            case .create(let connection):
+            case .create:
                 try await dependencies.connectionCloudService.saveConnection(connection)
 
-            case .reject(let connection):
+            case .acceptConnection, .update:
+                try await dependencies.connectionCloudService.acceptConnectionRequest(connection)
+
+            case .rejectConnection, .delete:
                 try await dependencies.connectionCloudService.rejectConnectionRequest(connection)
                 pendingRejectIds.remove(connection.id)
                 persistPendingRejectIds()
             }
 
-            // Success! Remove from queue and mark as synced
-            pendingOperations.removeValue(forKey: operation.id)
-            syncErrors.removeValue(forKey: operation.id)
+            syncErrors.removeValue(forKey: connection.id)
+            await dependencies.operationQueueService.markCompleted(entityId: connection.id, entityType: .connection)
 
-            if var managedConn = connections[operation.id] {
-                managedConn = ManagedConnection(
-                    connection: managedConn.connection,
+            if let managed = connections[connection.id] {
+                connections[connection.id] = ManagedConnection(
+                    connection: managed.connection,
                     syncState: .synced
                 )
-                connections[operation.id] = managedConn
             }
-
-            // Successfully synced connection
-
         } catch {
-            logger.error("❌ Failed to sync connection: \(error.localizedDescription)")
+            let nextAttempt = operation.attempts + 1
 
-            // Check if we should retry
-            if operation.retryCount < maxRetries {
-                // Queue for retry with exponential backoff
-                let updatedOperation = operation.withIncrementedRetry()
-                pendingOperations[operation.id] = updatedOperation
+            if nextAttempt >= maxRetries {
+                await dependencies.operationQueueService.removeOperation(operationId: operation.id)
+                syncErrors[connection.id] = .maxRetriesExceeded
 
-                if var managedConn = connections[operation.id] {
-                    managedConn = ManagedConnection(
-                        connection: managedConn.connection,
-                        syncState: .pendingSync(retryCount: operation.retryCount + 1)
-                    )
-                    connections[operation.id] = managedConn
-                }
-
-                // Scheduled retry (don't log routine retries)
-            } else {
-                // Max retries exceeded, mark as failed
-                pendingOperations.removeValue(forKey: operation.id)
-                syncErrors[operation.id] = .maxRetriesExceeded
-
-                if var managedConn = connections[operation.id] {
-                    managedConn = ManagedConnection(
-                        connection: managedConn.connection,
+                if let managed = connections[connection.id] {
+                    connections[connection.id] = ManagedConnection(
+                        connection: managed.connection,
                         syncState: .syncFailed(error)
                     )
-                    connections[operation.id] = managedConn
                 }
 
-                logger.error("❌ Max retries exceeded for connection: \(operation.id)")
+                logger.error("❌ Max retries exceeded for connection: \(connection.id)")
+            } else {
+                await dependencies.operationQueueService.markFailed(
+                    operationId: operation.id,
+                    error: error.localizedDescription
+                )
+
+                if let managed = connections[connection.id] {
+                    connections[connection.id] = ManagedConnection(
+                        connection: managed.connection,
+                        syncState: .pendingSync(retryCount: nextAttempt)
+                    )
+                }
             }
         }
     }
 
-    /// Start background timer to process pending operations
-    private func startRetryTimer() {
-        retryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.processRetries()
-            }
+    private func connectionFromOperation(_ operation: SyncOperation) async -> Connection? {
+        if let payload = operation.payload,
+           let connection = try? JSONDecoder().decode(Connection.self, from: payload) {
+            return connection
         }
-    }
 
-    /// Process operations that are ready for retry
-    private func processRetries() async {
-        let now = Date()
-
-        for (id, operation) in pendingOperations {
-            if let nextRetry = operation.nextRetryAt, nextRetry <= now {
-                await processOperation(operation)
-            }
-        }
+        return try? await dependencies.connectionRepository.fetch(id: operation.entityId)
     }
 
     // MARK: - Badge Management
@@ -621,8 +628,6 @@ class ConnectionManager: ObservableObject {
 
     /// Update app icon badge count based on pending connection requests
     func updateBadgeCount() {
-        // Updating badge count (don't log routine updates)
-
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(pendingRequestsCount)
@@ -634,8 +639,6 @@ class ConnectionManager: ObservableObject {
 
     /// Clear app icon badge (call when user views connection requests)
     func clearBadge() {
-        // Clearing badge
-
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(0)
@@ -646,6 +649,6 @@ class ConnectionManager: ObservableObject {
     }
 
     deinit {
-        retryTimer?.invalidate()
+        queueEventTask?.cancel()
     }
 }

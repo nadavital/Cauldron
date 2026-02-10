@@ -36,6 +36,20 @@ actor ConnectionRepository {
         let connections = try await fetchConnections(forUserId: userId)
         return connections.filter { $0.isAccepted }
     }
+
+    /// Fetch a connection by ID
+    func fetch(id: UUID) async throws -> Connection? {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<ConnectionModel>(
+            predicate: #Predicate { $0.id == id }
+        )
+
+        guard let model = try context.fetch(descriptor).first else {
+            return nil
+        }
+
+        return model.toDomain()
+    }
     
     /// Fetch pending connection requests sent by user
     func fetchSentRequests(fromUserId userId: UUID) async throws -> [Connection] {

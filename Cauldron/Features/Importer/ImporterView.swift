@@ -6,42 +6,84 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// View for importing recipes
 struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ImporterViewModel
-    @State private var showingPreview = false
+    @State private var previewContext: PreviewContext?
+    @State private var hasTriggeredAutoImport = false
+    @State private var hasPresentedPreparedPreview = false
+    @State private var showingOCRPicker = false
+    @State private var showingOCRSourceDialog = false
+    @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
+    private let autoImportFromInitialURL: Bool
+    private let hasPreparedRecipe: Bool
 
-    init(dependencies: DependencyContainer) {
-        _viewModel = State(initialValue: ImporterViewModel(dependencies: dependencies))
+    private struct PreviewContext: Identifiable {
+        let id = UUID()
+        let recipe: Recipe
+        let sourceInfo: String
+    }
+
+    init(
+        dependencies: DependencyContainer,
+        initialURL: URL? = nil,
+        preparedRecipe: Recipe? = nil,
+        preparedSourceInfo: String? = nil
+    ) {
+        let viewModel = ImporterViewModel(dependencies: dependencies)
+        if let initialURL {
+            viewModel.preloadURL(initialURL)
+        }
+        if let preparedRecipe, let preparedSourceInfo {
+            viewModel.preloadImportedRecipe(preparedRecipe, sourceInfo: preparedSourceInfo)
+        }
+        self.autoImportFromInitialURL = initialURL != nil
+        self.hasPreparedRecipe = preparedRecipe != nil
+        _viewModel = State(initialValue: viewModel)
     }
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    headerSection
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        headerSection
 
-                    importTypePicker
+                        importTypePicker
 
-                    switch viewModel.importType {
-                    case .url:
-                        urlSection
-                    case .text:
-                        textSection
+                        switch viewModel.importType {
+                        case .url:
+                            urlSection
+                        case .text:
+                            textSection
+                        case .image:
+                            imageSection
+                        }
+
+                        if let ocrError = viewModel.ocrErrorMessage {
+                            errorSection(ocrError)
+                        }
+
+                        if let error = viewModel.errorMessage {
+                            errorSection(error)
+                        }
                     }
-
-                    quickImportSection
-
-                    if let error = viewModel.errorMessage {
-                        errorSection(error)
-                    }
+                    .padding(.vertical, 32)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 110)
                 }
-                .padding(.vertical, 32)
-                .padding(.horizontal, 20)
+                .background(Color.cauldronBackground.ignoresSafeArea())
+
+                if viewModel.canImport || viewModel.isLoading {
+                    generateActionButton
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
-            .background(Color.cauldronBackground.ignoresSafeArea())
+            .animation(.spring(), value: viewModel.canImport)
+            .animation(.spring(), value: viewModel.isLoading)
             .navigationTitle("Import Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -50,32 +92,83 @@ struct ImporterView: View {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Import", systemImage: "checkmark") {
-                        Task {
-                            await viewModel.importRecipe()
-                            if viewModel.isSuccess {
-                                showingPreview = true
-                            }
-                        }
-                    }
-                    .disabled(viewModel.isLoading || !viewModel.canImport)
-                }
             }
-            .fullScreenCover(isPresented: $showingPreview) {
-                if let recipe = viewModel.importedRecipe, let source = viewModel.sourceInfo {
-                    RecipeImportPreviewView(
-                        importedRecipe: recipe,
-                        dependencies: viewModel.dependencies,
-                        sourceInfo: source,
-                        onSave: {
-                            // Dismiss the importer sheet when recipe is saved
-                            dismiss()
-                        }
-                    )
+            .task {
+                await autoImportIfNeeded()
+            }
+            .fullScreenCover(item: $previewContext) { context in
+                RecipeImportPreviewView(
+                    importedRecipe: context.recipe,
+                    dependencies: viewModel.dependencies,
+                    sourceInfo: context.sourceInfo,
+                    onSave: {
+                        // Dismiss the importer sheet when recipe is saved
+                        dismiss()
+                    }
+                )
+            }
+            .fullScreenCover(isPresented: $showingOCRPicker) {
+                ImagePicker(image: $viewModel.selectedOCRImage, sourceType: ocrSourceType, allowsEditing: false)
+                    .ignoresSafeArea()
+            }
+            .confirmationDialog("Import from Image", isPresented: $showingOCRSourceDialog, titleVisibility: .visible) {
+                Button("Photo Library") {
+                    ocrSourceType = .photoLibrary
+                    showingOCRPicker = true
                 }
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Camera") {
+                        ocrSourceType = .camera
+                        showingOCRPicker = true
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Choose a photo source for recipe image import.")
             }
         }
+    }
+
+    private var generateActionButton: some View {
+        Button {
+            Task { await performImport() }
+        } label: {
+            HStack(spacing: 12) {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                    Text(generateLoadingTitle)
+                        .font(.headline)
+                } else {
+                    Image(systemName: generateActionIcon)
+                        .font(.headline)
+                    Text(generateActionTitle)
+                        .font(.headline)
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(Color.cauldronOrange, in: Capsule())
+        }
+        .disabled(viewModel.isLoading || !viewModel.canImport)
+        .padding(.bottom, 32)
+    }
+
+    private var generateActionTitle: String {
+        "Import Recipe"
+    }
+
+    private var generateActionIcon: String {
+        "arrow.down.doc"
+    }
+
+    private var generateLoadingTitle: String {
+        if hasPreparedRecipe {
+            return "Preparing shared recipe..."
+        }
+        return autoImportFromInitialURL && viewModel.importType == .url ? "Importing shared link..." : "Importing..."
     }
     
     private var headerSection: some View {
@@ -104,7 +197,7 @@ struct ImporterView: View {
                     .font(.title3)
                     .fontWeight(.semibold)
 
-                Text("Bring recipes into Cauldron by pasting a link or the full recipe text.")
+                Text(headerDescription)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -125,6 +218,7 @@ struct ImporterView: View {
             Picker("Import Type", selection: $viewModel.importType) {
                 Label("URL", systemImage: "link").tag(ImportType.url)
                 Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
+                Label("Image", systemImage: "photo.on.rectangle").tag(ImportType.image)
             }
             .pickerStyle(.segmented)
         }
@@ -161,6 +255,15 @@ struct ImporterView: View {
                 Text("Paste a link to the recipe and we'll import the details.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Button {
+                    pasteURLFromClipboard()
+                } label: {
+                    Label("Paste URL from Clipboard", systemImage: "doc.on.clipboard")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cauldronOrange)
             }
         }
         .padding(16)
@@ -168,12 +271,7 @@ struct ImporterView: View {
     }
 
     private var isValidURL: Bool {
-        guard !viewModel.urlString.isEmpty else { return false }
-        if let url = URL(string: viewModel.urlString),
-           (url.scheme == "http" || url.scheme == "https") {
-            return true
-        }
-        return false
+        viewModel.normalizedURLInput() != nil
     }
 
     private var textSection: some View {
@@ -214,27 +312,38 @@ struct ImporterView: View {
             Text("Include the title, ingredients, and steps for the most accurate import.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            Button {
+                pasteTextFromClipboard()
+            } label: {
+                Label("Paste Text from Clipboard", systemImage: "doc.on.clipboard")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.cauldronOrange)
         }
         .padding(16)
         .cardStyle()
     }
 
-    private var quickImportSection: some View {
+    private var imageSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Quick Actions")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
+            Label("Recipe Image", systemImage: "photo.on.rectangle")
+                .font(.headline)
+
+            if let selectedImage = viewModel.selectedOCRImage {
+                Image(uiImage: selectedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
 
             Button {
-                pasteFromClipboard()
+                showingOCRSourceDialog = true
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.on.clipboard.fill")
-                    Text("Paste from Clipboard")
-                        .fontWeight(.semibold)
-                }
-                .font(.headline)
+                Label(imageSourceButtonTitle, systemImage: "photo.badge.plus")
+                    .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(Color.cauldronOrange.opacity(0.12))
@@ -242,12 +351,26 @@ struct ImporterView: View {
                 .cornerRadius(12)
             }
 
-            Text("We'll detect whether it's a link or recipe text automatically.")
+            Text("When you tap Import Recipe, Cauldron reads the image and tries to build a complete recipe.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
         .padding(16)
         .cardStyle()
+    }
+
+    private var imageSourceButtonTitle: String {
+        viewModel.selectedOCRImage == nil ? "Choose Recipe Image" : "Replace Image"
+    }
+
+    private var headerDescription: String {
+        if hasPreparedRecipe {
+            return "Recipe details were prepared in Share Sheet. Review and save to your library."
+        }
+        if autoImportFromInitialURL {
+            return "Link received from Share Sheet. We'll import it now, then you can review and save."
+        }
+        return "Bring recipes into Cauldron from a URL, raw text, or a recipe image."
     }
 
     private func errorSection(_ message: String) -> some View {
@@ -265,26 +388,51 @@ struct ImporterView: View {
         .background(Color.red.opacity(0.1))
         .cornerRadius(12)
     }
-    
-    private func pasteFromClipboard() {
-        if let clipboardString = UIPasteboard.general.string {
-            // Try to detect if it's a URL
-            if let url = URL(string: clipboardString),
-               (url.scheme == "http" || url.scheme == "https") {
-                viewModel.importType = .url
-                viewModel.urlString = clipboardString
-            } else {
-                // Otherwise treat as text
-                viewModel.importType = .text
-                viewModel.textInput = clipboardString
-            }
+
+    private func pasteURLFromClipboard() {
+        guard let clipboardString = UIPasteboard.general.string else { return }
+        viewModel.urlString = clipboardString
+    }
+
+    private func pasteTextFromClipboard() {
+        guard let clipboardString = UIPasteboard.general.string else { return }
+        viewModel.textInput = clipboardString
+    }
+
+    private func performImport() async {
+        await viewModel.importRecipe()
+        if let recipe = viewModel.importedRecipe,
+           let source = viewModel.sourceInfo {
+            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
         }
+    }
+
+    private func autoImportIfNeeded() async {
+        if hasPreparedRecipe,
+           !hasPresentedPreparedPreview,
+           let recipe = viewModel.importedRecipe,
+           let source = viewModel.sourceInfo {
+            hasPresentedPreparedPreview = true
+            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
+            return
+        }
+
+        guard autoImportFromInitialURL,
+              !hasTriggeredAutoImport,
+              viewModel.importType == .url,
+              viewModel.canImport else {
+            return
+        }
+
+        hasTriggeredAutoImport = true
+        await performImport()
     }
 }
 
 enum ImportType {
     case url
     case text
+    case image
 }
 
 #Preview {

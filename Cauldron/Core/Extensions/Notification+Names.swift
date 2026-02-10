@@ -16,6 +16,9 @@ extension Notification.Name {
     /// Posted when navigating to shared content (recipe, profile, collection)
     static let navigateToSharedContent = Notification.Name("NavigateToSharedContent")
 
+    /// Posted when recipe import URL arrives from Share Extension handoff
+    static let openRecipeImportURL = Notification.Name("OpenRecipeImportURL")
+
     // MARK: - CloudKit Share Notifications
 
     /// Posted when a CloudKit share should be accepted

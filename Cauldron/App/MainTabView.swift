@@ -19,12 +19,24 @@ enum AppTab: String, Hashable {
 
 /// Main tab-based navigation view
 struct MainTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
+    @State private var sharedImportRequest: SharedImportRequest?
+    @State private var didCheckInitialPendingImport = false
+    @State private var isSavingPreparedSharedRecipe = false
+    @State private var showSharedRecipeSavedToast = false
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
+
+    private struct SharedImportRequest: Identifiable {
+        let id = UUID()
+        let initialURL: URL?
+        let preparedRecipe: Recipe?
+        let preparedSourceInfo: String?
+    }
 
     private var isCookModeActive: Bool {
         dependencies.cookModeCoordinator.isActive
@@ -77,6 +89,14 @@ struct MainTabView: View {
                 }
             }
         }
+        .sheet(item: $sharedImportRequest) { request in
+            ImporterView(
+                dependencies: dependencies,
+                initialURL: request.initialURL,
+                preparedRecipe: request.preparedRecipe,
+                preparedSourceInfo: request.preparedSourceInfo
+            )
+        }
         .tint(.cauldronOrange)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
             // Switch to Friends tab when connection notification is tapped
@@ -107,6 +127,21 @@ struct MainTabView: View {
             AppLogger.general.info("📍 Switching to Search tab to find people")
             selectedTab = .search
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openRecipeImportURL)) { notification in
+            guard let url = notification.object as? URL else { return }
+            AppLogger.general.info("📥 Opening importer from Share Extension URL: \(url.absoluteString)")
+            _ = ShareExtensionImportStore.consumePendingRecipeURL()
+            openImporter(with: url)
+        }
+        .task {
+            guard !didCheckInitialPendingImport else { return }
+            didCheckInitialPendingImport = true
+            openPendingImporterIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            openPendingImporterIfNeeded()
+        }
         .toast(
             isShowing: Binding(
                 get: { dependencies.cookModeCoordinator.showRecipeDeletedToast },
@@ -115,6 +150,73 @@ struct MainTabView: View {
             icon: "trash.fill",
             message: "Recipe was deleted"
         )
+        .toast(
+            isShowing: $showSharedRecipeSavedToast,
+            icon: "checkmark.circle.fill",
+            message: "Recipe imported from share sheet"
+        )
+    }
+
+    private func openPendingImporterIfNeeded() {
+        guard !isSavingPreparedSharedRecipe else {
+            return
+        }
+
+        if let prepared = ShareExtensionImportStore.consumePreparedRecipe() {
+            AppLogger.general.info("📥 Consumed prepared Share Extension recipe payload")
+            isSavingPreparedSharedRecipe = true
+            Task {
+                await autoSavePreparedSharedRecipe(prepared)
+            }
+            return
+        }
+
+        guard let pendingURL = ShareExtensionImportStore.consumePendingRecipeURL() else {
+            return
+        }
+
+        AppLogger.general.info("📥 Consumed pending Share Extension URL: \(pendingURL.absoluteString)")
+        openImporter(with: pendingURL)
+    }
+
+    private func openImporter(with url: URL) {
+        selectedTab = .cook
+        sharedImportRequest = SharedImportRequest(
+            initialURL: url,
+            preparedRecipe: nil,
+            preparedSourceInfo: nil
+        )
+    }
+
+    private func openPreparedImporter(recipe: Recipe, sourceInfo: String) {
+        selectedTab = .cook
+        sharedImportRequest = SharedImportRequest(
+            initialURL: nil,
+            preparedRecipe: recipe,
+            preparedSourceInfo: sourceInfo
+        )
+    }
+
+    @MainActor
+    private func autoSavePreparedSharedRecipe(_ prepared: PreparedSharedRecipe) async {
+        defer { isSavingPreparedSharedRecipe = false }
+
+        let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
+            from: prepared.recipe,
+            userId: CurrentUserSession.shared.userId,
+            imageManager: dependencies.imageManager
+        )
+
+        do {
+            try await dependencies.recipeRepository.create(recipeToSave)
+            AppLogger.general.info("✅ Auto-saved prepared share recipe: \(recipeToSave.title)")
+            NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
+            selectedTab = .cook
+            showSharedRecipeSavedToast = true
+        } catch {
+            AppLogger.general.error("❌ Failed to auto-save prepared share recipe: \(error.localizedDescription)")
+            openPreparedImporter(recipe: prepared.recipe, sourceInfo: prepared.sourceInfo)
+        }
     }
 }
 

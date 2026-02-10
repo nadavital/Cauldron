@@ -15,7 +15,7 @@ final class ProfileCacheManager: @unchecked Sendable {
         var collections: [Collection]
         var lastRecipeLoadTime: Date
         var lastCollectionLoadTime: Date
-        var connectionState: UserProfileViewModel.ConnectionState
+        var connectionState: ConnectionRelationshipState
     }
 
     private var cache: [UUID: ProfileCache] = [:]
@@ -26,7 +26,7 @@ final class ProfileCacheManager: @unchecked Sendable {
 
     func getCachedRecipes(
         for userId: UUID,
-        connectionState: UserProfileViewModel.ConnectionState
+        connectionState: ConnectionRelationshipState
     ) -> [SharedRecipe]? {
         lock.lock()
         defer { lock.unlock() }
@@ -48,7 +48,7 @@ final class ProfileCacheManager: @unchecked Sendable {
     func cacheRecipes(
         _ recipes: [SharedRecipe],
         for userId: UUID,
-        connectionState: UserProfileViewModel.ConnectionState
+        connectionState: ConnectionRelationshipState
     ) {
         lock.lock()
         defer { lock.unlock() }
@@ -73,7 +73,7 @@ final class ProfileCacheManager: @unchecked Sendable {
 
     func getCachedCollections(
         for userId: UUID,
-        connectionState: UserProfileViewModel.ConnectionState
+        connectionState: ConnectionRelationshipState
     ) -> [Collection]? {
         lock.lock()
         defer { lock.unlock() }
@@ -95,7 +95,7 @@ final class ProfileCacheManager: @unchecked Sendable {
     func cacheCollections(
         _ collections: [Collection],
         for userId: UUID,
-        connectionState: UserProfileViewModel.ConnectionState
+        connectionState: ConnectionRelationshipState
     ) {
         lock.lock()
         defer { lock.unlock() }

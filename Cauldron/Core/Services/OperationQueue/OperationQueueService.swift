@@ -28,11 +28,22 @@ actor OperationQueueService {
     let events: AsyncStream<OperationQueueEvent>
 
     // Persistence
-    private let persistenceKey = "com.cauldron.operationQueue.operations"
+    private let persistenceKey: String
 
     // MARK: - Initialization
 
     init() {
+        let env = ProcessInfo.processInfo.environment
+        let isRunningTests = env["XCTestConfigurationFilePath"] != nil
+        let isCI = env["CI"] == "true"
+        if isRunningTests || isCI {
+            // Keep queue persistence process-local in tests to avoid leaking operations
+            // across test cases and causing nondeterministic retries.
+            self.persistenceKey = "com.cauldron.operationQueue.operations.test.\(UUID().uuidString)"
+        } else {
+            self.persistenceKey = "com.cauldron.operationQueue.operations"
+        }
+
         var continuation: AsyncStream<OperationQueueEvent>.Continuation!
         self.events = AsyncStream<OperationQueueEvent> { cont in
             continuation = cont
@@ -52,7 +63,8 @@ actor OperationQueueService {
     func addOperation(
         type: SyncOperationType,
         entityType: EntityType,
-        entityId: UUID
+        entityId: UUID,
+        payload: Data? = nil
     ) {
         // Check if there's already a pending operation for this entity
         if let existingOp = operations.values.first(where: {
@@ -67,6 +79,7 @@ actor OperationQueueService {
                 type: type,
                 entityType: entityType,
                 entityId: entityId,
+                payload: payload ?? existingOp.payload,
                 status: .pending,
                 attempts: 0,
                 createdAt: existingOp.createdAt
@@ -81,7 +94,8 @@ actor OperationQueueService {
         let operation = SyncOperation(
             type: type,
             entityType: entityType,
-            entityId: entityId
+            entityId: entityId,
+            payload: payload
         )
 
         operations[operation.id] = operation
@@ -93,19 +107,21 @@ actor OperationQueueService {
 
     /// Mark an operation as in progress
     func markInProgress(operationId: UUID) {
-        guard let operation = operations[operationId] else { return }
+        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
+              let operation = operations[resolvedID] else { return }
         let updated = operation.markInProgress()
-        operations[operationId] = updated
+        operations[resolvedID] = updated
         persistOperations()
         eventContinuation.yield(.operationStarted(updated))
     }
 
     /// Mark an operation as completed
     func markCompleted(operationId: UUID) {
-        guard let operation = operations[operationId] else { return }
-        operations.removeValue(forKey: operationId)
+        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
+              let operation = operations[resolvedID] else { return }
+        operations.removeValue(forKey: resolvedID)
         persistOperations()
-        eventContinuation.yield(.operationCompleted(operationId))
+        eventContinuation.yield(.operationCompleted(resolvedID))
 
         AppLogger.general.info("✅ Completed operation: \(operation.displayDescription)")
 
@@ -125,9 +141,10 @@ actor OperationQueueService {
 
     /// Mark an operation as failed and schedule for retry
     func markFailed(operationId: UUID, error: String) {
-        guard let operation = operations[operationId] else { return }
+        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
+              let operation = operations[resolvedID] else { return }
         let updated = operation.withRetry(error: error)
-        operations[operationId] = updated
+        operations[resolvedID] = updated
         persistOperations()
         eventContinuation.yield(.operationFailed(updated))
 
@@ -142,6 +159,12 @@ actor OperationQueueService {
     /// Get operations for a specific entity
     func getOperations(for entityId: UUID) -> [SyncOperation] {
         operations.values.filter { $0.entityId == entityId }
+    }
+
+    /// Get the first operation for a specific entity/type pair
+    func getOperation(for entityId: UUID, entityType: EntityType) -> SyncOperation? {
+        operations.values
+            .first { $0.entityId == entityId && $0.entityType == entityType }
     }
 
     /// Check if an entity has pending operations
@@ -174,6 +197,7 @@ actor OperationQueueService {
                 type: operation.type,
                 entityType: operation.entityType,
                 entityId: operation.entityId,
+                payload: operation.payload,
                 status: .pending,
                 attempts: operation.attempts,
                 createdAt: operation.createdAt
@@ -183,6 +207,31 @@ actor OperationQueueService {
         }
         persistOperations()
         AppLogger.general.info("🔄 Manually retrying all failed operations")
+    }
+
+    /// Retry a specific failed operation by entity
+    @discardableResult
+    func retryOperation(entityId: UUID, entityType: EntityType) -> SyncOperation? {
+        guard let operation = operations.values.first(where: {
+            $0.entityId == entityId && $0.entityType == entityType
+        }) else {
+            return nil
+        }
+
+        let updated = SyncOperation(
+            id: operation.id,
+            type: operation.type,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            payload: operation.payload,
+            status: .pending,
+            attempts: operation.attempts,
+            createdAt: operation.createdAt
+        )
+        operations[operation.id] = updated
+        persistOperations()
+        eventContinuation.yield(.operationRetrying(updated))
+        return updated
     }
 
     /// Clear all completed operations
@@ -238,6 +287,7 @@ actor OperationQueueService {
                     type: operation.type,
                     entityType: operation.entityType,
                     entityId: operation.entityId,
+                    payload: operation.payload,
                     status: .pending,
                     attempts: operation.attempts,
                     lastAttemptDate: operation.lastAttemptDate,
@@ -297,6 +347,7 @@ actor OperationQueueService {
                     type: operation.type,
                     entityType: operation.entityType,
                     entityId: operation.entityId,
+                    payload: operation.payload,
                     status: .pending,
                     attempts: operation.attempts,
                     createdAt: operation.createdAt
@@ -316,6 +367,14 @@ actor OperationQueueService {
     func stop() {
         retryTask?.cancel()
         retryTask = nil
+    }
+
+    private func resolveOperationID(operationIdOrEntityId: UUID) -> UUID? {
+        if operations[operationIdOrEntityId] != nil {
+            return operationIdOrEntityId
+        }
+
+        return operations.values.first(where: { $0.entityId == operationIdOrEntityId })?.id
     }
 
     deinit {

@@ -12,6 +12,7 @@ import os
 @MainActor
 @Observable final class CookTabViewModel {
     var allRecipes: [Recipe] = []
+    var recentlyAddedRecipes: [Recipe] = []
     var recentlyCookedRecipes: [Recipe] = []
     var favoriteRecipes: [Recipe] = []
     var timeOfDayRecipes: [Recipe] = []
@@ -43,6 +44,7 @@ import os
             // This happens synchronously during init, so when CookTabView's body renders
             // for the first time, allRecipes and collections are already populated and won't show empty state
             self.allRecipes = preloadedData.allRecipes
+            self.recentlyAddedRecipes = preloadedData.allRecipes.sorted { $0.createdAt > $1.createdAt }
             self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
             self.hasLoadedInitially = true
 
@@ -85,6 +87,7 @@ import os
         do {
             // Load all recipes (owned + referenced)
             allRecipes = try await fetchAllRecipesIncludingReferences()
+            recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
 
             // Load collections
             collections = try await dependencies.collectionRepository.fetchAll()
@@ -161,6 +164,7 @@ import os
         do {
             // Load all recipes (owned + referenced)
             allRecipes = try await fetchAllRecipesIncludingReferences()
+            recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
 
             // Load collections
             collections = try await dependencies.collectionRepository.fetchAll()

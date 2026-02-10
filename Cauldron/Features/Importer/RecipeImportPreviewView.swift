@@ -328,72 +328,11 @@ struct RecipeImportPreviewView: View {
         // It will be reset on error, and on success the view will dismiss
 
         do {
-            // Add source URL to notes and ownerId for CloudKit sync
-            var recipeToSave = editedRecipe
-            let userId = CurrentUserSession.shared.userId
-
-            if let sourceURL = editedRecipe.sourceURL {
-                let sourceNote = "\n\nSource: \(sourceURL.absoluteString)"
-                if let existingNotes = recipeToSave.notes {
-                    recipeToSave = Recipe(
-                        id: recipeToSave.id,
-                        title: recipeToSave.title,
-                        ingredients: recipeToSave.ingredients,
-                        steps: recipeToSave.steps,
-                        yields: recipeToSave.yields,
-                        totalMinutes: recipeToSave.totalMinutes,
-                        tags: recipeToSave.tags,
-                        nutrition: recipeToSave.nutrition,
-                        sourceURL: recipeToSave.sourceURL,
-                        sourceTitle: recipeToSave.sourceTitle,
-                        notes: existingNotes + sourceNote,
-                        imageURL: recipeToSave.imageURL,
-                        isFavorite: recipeToSave.isFavorite,
-                        ownerId: userId,  // Add ownerId for CloudKit sync
-                        createdAt: recipeToSave.createdAt,
-                        updatedAt: recipeToSave.updatedAt
-                    )
-                } else {
-                    recipeToSave = Recipe(
-                        id: recipeToSave.id,
-                        title: recipeToSave.title,
-                        ingredients: recipeToSave.ingredients,
-                        steps: recipeToSave.steps,
-                        yields: recipeToSave.yields,
-                        totalMinutes: recipeToSave.totalMinutes,
-                        tags: recipeToSave.tags,
-                        nutrition: recipeToSave.nutrition,
-                        sourceURL: recipeToSave.sourceURL,
-                        sourceTitle: recipeToSave.sourceTitle,
-                        notes: "Source: \(sourceURL.absoluteString)",
-                        imageURL: recipeToSave.imageURL,
-                        isFavorite: recipeToSave.isFavorite,
-                        ownerId: userId,  // Add ownerId for CloudKit sync
-                        createdAt: recipeToSave.createdAt,
-                        updatedAt: recipeToSave.updatedAt
-                    )
-                }
-            } else if userId != nil {
-                // No source URL but still need to add ownerId
-                recipeToSave = Recipe(
-                    id: recipeToSave.id,
-                    title: recipeToSave.title,
-                    ingredients: recipeToSave.ingredients,
-                    steps: recipeToSave.steps,
-                    yields: recipeToSave.yields,
-                    totalMinutes: recipeToSave.totalMinutes,
-                    tags: recipeToSave.tags,
-                    nutrition: recipeToSave.nutrition,
-                    sourceURL: recipeToSave.sourceURL,
-                    sourceTitle: recipeToSave.sourceTitle,
-                    notes: recipeToSave.notes,
-                    imageURL: recipeToSave.imageURL,
-                    isFavorite: recipeToSave.isFavorite,
-                    ownerId: userId,
-                    createdAt: recipeToSave.createdAt,
-                    updatedAt: recipeToSave.updatedAt
-                )
-            }
+            let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
+                from: editedRecipe,
+                userId: CurrentUserSession.shared.userId,
+                imageManager: dependencies.imageManager
+            )
 
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
@@ -423,8 +362,7 @@ struct RecipeImportPreviewView: View {
         }
         
         for match in matches.reversed() {
-            if let range = Range(match.range, in: text),
-               let url = match.url {
+            if let url = match.url {
                 let startIndex = attributedString.characters.index(attributedString.startIndex, offsetBy: match.range.location)
                 let endIndex = attributedString.characters.index(startIndex, offsetBy: match.range.length)
                 let attributedRange = startIndex..<endIndex

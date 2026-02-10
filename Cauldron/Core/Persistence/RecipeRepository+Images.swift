@@ -28,6 +28,13 @@ extension RecipeRepository {
     internal func uploadRecipeImage(_ recipe: Recipe, to databaseType: DatabaseType) async {
         guard recipe.imageURL != nil else { return }
 
+        let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
+        guard hasLocalImage else {
+            logger.warning("⚠️ Skipping image upload for recipe '\(recipe.title)' because local image file is missing")
+            await imageSyncManager.removePendingUpload(recipe.id)
+            return
+        }
+
         // Check if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {

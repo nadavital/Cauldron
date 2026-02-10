@@ -115,6 +115,34 @@ final class TextRecipeParserTests: XCTestCase {
         XCTAssertEqual(recipe.steps.count, 3)
     }
 
+    func testParseRecipeWithNotesSection_ExtractsNotes() async throws {
+        let recipeText = """
+        Lemon Pasta
+
+        Ingredients:
+        8 oz pasta
+        2 tbsp butter
+        1 lemon
+
+        Instructions:
+        Boil pasta until al dente
+        Melt butter in a pan
+        Toss pasta with lemon and butter
+
+        Notes:
+        Add pasta water if the sauce is too thick.
+        Tip: Fresh parsley works great as garnish.
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.ingredients.count, 3)
+        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertNotNil(recipe.notes)
+        XCTAssertTrue(recipe.notes?.contains("sauce is too thick") ?? false)
+        XCTAssertTrue(recipe.notes?.contains("Fresh parsley") ?? false)
+    }
+
     // MARK: - Bullet Point and Numbering Tests
 
     // Note: testParseRecipeWithBulletPoints removed - bullet handling needs parser fixes
@@ -203,6 +231,26 @@ final class TextRecipeParserTests: XCTestCase {
 
         XCTAssertTrue(shortItems.contains { $0.name.contains("eggs") })
         XCTAssertTrue(longItems.contains { $0.text.contains("Heat butter") })
+    }
+
+    func testParseRecipeHeuristic_SeparatesInlineNotes() async throws {
+        let recipeText = """
+        Quick Tomato Salad
+        2 tomatoes
+        1 tbsp olive oil
+        Salt to taste
+        Chop tomatoes into bite-size pieces
+        Mix with olive oil and salt
+        Note: You can add feta for extra richness
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertGreaterThanOrEqual(recipe.ingredients.count, 3)
+        XCTAssertGreaterThanOrEqual(recipe.steps.count, 2)
+        XCTAssertNotNil(recipe.notes)
+        XCTAssertTrue(recipe.notes?.contains("add feta") ?? false)
+        XCTAssertFalse(recipe.ingredients.contains { $0.name.lowercased().contains("note:") })
     }
 
     // Note: testHeuristicPrefersIngredientsWithQuantities removed - parser heuristic needs redesign

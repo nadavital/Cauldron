@@ -74,6 +74,15 @@ struct PeopleSearchSheet: View {
                         connectionState: viewModel.connectionState(for: user),
                         onConnect: {
                             await viewModel.sendConnectionRequest(to: user)
+                        },
+                        onAccept: {
+                            await viewModel.acceptRequest(from: user)
+                        },
+                        onReject: {
+                            await viewModel.rejectRequest(from: user)
+                        },
+                        onRetry: {
+                            await viewModel.retryFailedRequest(for: user)
                         }
                     )
                 }
@@ -147,6 +156,15 @@ struct PeopleSearchSheet: View {
                         connectionState: viewModel.connectionState(for: user),
                         onConnect: {
                             await viewModel.sendConnectionRequest(to: user)
+                        },
+                        onAccept: {
+                            await viewModel.acceptRequest(from: user)
+                        },
+                        onReject: {
+                            await viewModel.rejectRequest(from: user)
+                        },
+                        onRetry: {
+                            await viewModel.retryFailedRequest(for: user)
                         }
                     )
                 }
@@ -160,8 +178,11 @@ struct PeopleSearchSheet: View {
 struct PeopleSearchUserRow: View {
     let user: User
     let dependencies: DependencyContainer
-    let connectionState: PeopleSearchConnectionState
+    let connectionState: ConnectionRelationshipState
     let onConnect: () async -> Void
+    let onAccept: () async -> Void
+    let onReject: () async -> Void
+    let onRetry: () async -> Void
 
     @State private var isProcessing = false
 
@@ -206,7 +227,7 @@ struct PeopleSearchUserRow: View {
             }
             .disabled(isProcessing)
 
-        case .pending:
+        case .pendingOutgoing:
             Text("Pending")
                 .font(.caption)
                 .foregroundColor(.blue)
@@ -215,10 +236,60 @@ struct PeopleSearchUserRow: View {
                 .background(Color.blue.opacity(0.1))
                 .cornerRadius(8)
 
+        case .pendingIncoming:
+            HStack(spacing: 8) {
+                Button {
+                    Task {
+                        isProcessing = true
+                        await onAccept()
+                        isProcessing = false
+                    }
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.green)
+                }
+                .disabled(isProcessing)
+
+                Button {
+                    Task {
+                        isProcessing = true
+                        await onReject()
+                        isProcessing = false
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.red)
+                }
+                .disabled(isProcessing)
+            }
+
         case .connected:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 32))
                 .foregroundColor(.green)
+
+        case .syncing:
+            ProgressView()
+                .scaleEffect(0.85)
+
+        case .failed:
+            Button {
+                Task {
+                    isProcessing = true
+                    await onRetry()
+                    isProcessing = false
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Retry")
+                        .font(.caption)
+                }
+            }
+            .disabled(isProcessing)
 
         case .currentUser:
             Text("You")
@@ -227,82 +298,6 @@ struct PeopleSearchUserRow: View {
                 .italic()
         }
     }
-}
-
-// MARK: - People Search Request Card
-
-struct PeopleSearchRequestCard: View {
-    let user: User
-    let connection: Connection
-    let dependencies: DependencyContainer
-    let onAccept: () async -> Void
-    let onReject: () async -> Void
-
-    @State private var isProcessing = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ProfileAvatar(user: user, size: 48, dependencies: dependencies)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(user.displayName)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Text("@\(user.username)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if isProcessing {
-                ProgressView()
-            } else {
-                HStack(spacing: 8) {
-                    Button {
-                        Task {
-                            isProcessing = true
-                            await onAccept()
-                            isProcessing = false
-                        }
-                    } label: {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.green)
-                            .clipShape(Circle())
-                    }
-
-                    Button {
-                        Task {
-                            isProcessing = true
-                            await onReject()
-                            isProcessing = false
-                        }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.red)
-                            .clipShape(Circle())
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Connection State Enum
-
-enum PeopleSearchConnectionState {
-    case none
-    case pending
-    case connected
-    case currentUser
 }
 
 // MARK: - View Model
@@ -333,13 +328,18 @@ final class PeopleSearchViewModel {
     let dependencies: DependencyContainer
     private var searchDebounceTask: Task<Void, Never>?
     private var currentSearchId: UUID?
+    private let connectionCoordinator: ConnectionInteractionCoordinator
 
     var currentUserId: UUID {
-        CurrentUserSession.shared.userId ?? UUID()
+        dependencies.connectionManager.currentUserId
     }
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
+        self.connectionCoordinator = ConnectionInteractionCoordinator(
+            connectionManager: dependencies.connectionManager,
+            currentUserProvider: { dependencies.connectionManager.currentUserId }
+        )
     }
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
@@ -354,6 +354,7 @@ final class PeopleSearchViewModel {
     }
 
     func loadConnections() async {
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
         let managedConnections = Array(dependencies.connectionManager.connections.values)
 
         receivedRequests = managedConnections
@@ -443,25 +444,13 @@ final class PeopleSearchViewModel {
         }
     }
 
-    func connectionState(for user: User) -> PeopleSearchConnectionState {
-        if user.id == currentUserId {
-            return .currentUser
-        }
-
-        if let managedConnection = dependencies.connectionManager.connectionStatus(with: user.id) {
-            if managedConnection.connection.isAccepted {
-                return .connected
-            } else {
-                return .pending
-            }
-        }
-
-        return .none
+    func connectionState(for user: User) -> ConnectionRelationshipState {
+        connectionCoordinator.relationshipState(with: user.id)
     }
 
     func sendConnectionRequest(to user: User) async {
         do {
-            try await dependencies.connectionManager.sendConnectionRequest(to: user.id, user: user)
+            try await connectionCoordinator.sendRequest(to: user)
             await loadConnections()
         } catch {
             alertMessage = "Failed to send connection request: \(error.localizedDescription)"
@@ -469,9 +458,9 @@ final class PeopleSearchViewModel {
         }
     }
 
-    func acceptRequest(_ connection: Connection) async {
+    func acceptRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.acceptConnection(connection)
+            try await connectionCoordinator.acceptRequest(from: user.id)
             await loadConnections()
         } catch {
             alertMessage = "Failed to accept request: \(error.localizedDescription)"
@@ -479,14 +468,19 @@ final class PeopleSearchViewModel {
         }
     }
 
-    func rejectRequest(_ connection: Connection) async {
+    func rejectRequest(from user: User) async {
         do {
-            try await dependencies.connectionManager.rejectConnection(connection)
+            try await connectionCoordinator.rejectRequest(from: user.id)
             await loadConnections()
         } catch {
             alertMessage = "Failed to reject request: \(error.localizedDescription)"
             showErrorAlert = true
         }
+    }
+
+    func retryFailedRequest(for user: User) async {
+        await connectionCoordinator.retryFailedOperation(with: user.id)
+        await loadConnections()
     }
 }
 
