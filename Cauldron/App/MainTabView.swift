@@ -201,8 +201,18 @@ struct MainTabView: View {
     private func autoSavePreparedSharedRecipe(_ prepared: PreparedSharedRecipe) async {
         defer { isSavingPreparedSharedRecipe = false }
 
+        let recipeForImport: Recipe
+        do {
+            let parsedRecipe = try await dependencies.textParser.parse(from: prepared.recipeParserInputText())
+            recipeForImport = prepared.recipeMergedWithParsedContent(parsedRecipe)
+            AppLogger.general.info("🧠 Reparsed Share Extension payload via text parser before save")
+        } catch {
+            recipeForImport = prepared.recipe
+            AppLogger.general.warning("⚠️ Failed to reparse prepared share recipe; falling back to preprocessed payload: \(error.localizedDescription)")
+        }
+
         let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
-            from: prepared.recipe,
+            from: recipeForImport,
             userId: CurrentUserSession.shared.userId,
             imageManager: dependencies.imageManager
         )
@@ -215,7 +225,7 @@ struct MainTabView: View {
             showSharedRecipeSavedToast = true
         } catch {
             AppLogger.general.error("❌ Failed to auto-save prepared share recipe: \(error.localizedDescription)")
-            openPreparedImporter(recipe: prepared.recipe, sourceInfo: prepared.sourceInfo)
+            openPreparedImporter(recipe: recipeForImport, sourceInfo: prepared.sourceInfo)
         }
     }
 }
