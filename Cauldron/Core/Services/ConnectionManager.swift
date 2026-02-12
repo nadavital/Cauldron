@@ -80,6 +80,7 @@ class ConnectionManager: ObservableObject {
     private let logger = Logger(subsystem: "com.cauldron", category: "ConnectionManager")
 
     private var queueEventTask: Task<Void, Never>?
+    private var processingConnectionIds: Set<UUID> = []
 
     private let maxRetries = 5
     private let pendingRejectsKey = "pendingRejectedConnectionIds"
@@ -522,6 +523,11 @@ class ConnectionManager: ObservableObject {
     }
 
     private func processQueuedConnectionOperation(connectionId: UUID) async {
+        guard processingConnectionIds.insert(connectionId).inserted else {
+            return
+        }
+        defer { processingConnectionIds.remove(connectionId) }
+
         guard let operation = await queuedConnectionOperation(for: connectionId) else {
             return
         }

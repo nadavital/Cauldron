@@ -28,11 +28,22 @@ actor OperationQueueService {
     let events: AsyncStream<OperationQueueEvent>
 
     // Persistence
-    private let persistenceKey = "com.cauldron.operationQueue.operations"
+    private let persistenceKey: String
 
     // MARK: - Initialization
 
     init() {
+        let env = ProcessInfo.processInfo.environment
+        let isRunningTests = env["XCTestConfigurationFilePath"] != nil
+        let isCI = env["CI"] == "true"
+        if isRunningTests || isCI {
+            // Keep queue persistence process-local in tests to avoid leaking operations
+            // across test cases and causing nondeterministic retries.
+            self.persistenceKey = "com.cauldron.operationQueue.operations.test.\(UUID().uuidString)"
+        } else {
+            self.persistenceKey = "com.cauldron.operationQueue.operations"
+        }
+
         var continuation: AsyncStream<OperationQueueEvent>.Continuation!
         self.events = AsyncStream<OperationQueueEvent> { cont in
             continuation = cont

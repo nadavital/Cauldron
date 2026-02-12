@@ -210,6 +210,7 @@ struct MainTabView: View {
         do {
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.general.info("✅ Auto-saved prepared share recipe: \(recipeToSave.title)")
+            NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
             selectedTab = .cook
             showSharedRecipeSavedToast = true
         } catch {

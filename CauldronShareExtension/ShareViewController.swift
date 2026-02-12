@@ -17,6 +17,8 @@ final class ShareViewController: UIViewController {
     private var sharedURL: URL?
     private var preparedPayload: PreparedShareRecipePayload?
     private var imageLoadTask: Task<Void, Never>?
+    private var hasSavedPayload = false
+    private var shouldPrimaryDismissOnTap = false
 
     private let accentColor = UIColor.systemOrange
 
@@ -32,7 +34,8 @@ final class ShareViewController: UIViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = "Cauldron"
-        label.font = .preferredFont(forTextStyle: .title2)
+        label.font = UIFontMetrics(forTextStyle: .title2)
+            .scaledFont(for: .systemFont(ofSize: 22, weight: .semibold))
         label.adjustsFontForContentSizeCategory = true
         return label
     }()
@@ -42,7 +45,9 @@ final class ShareViewController: UIViewController {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.textAlignment = .left
         label.numberOfLines = 0
-        label.font = .preferredFont(forTextStyle: .body)
+        label.font = UIFontMetrics(forTextStyle: .footnote)
+            .scaledFont(for: .systemFont(ofSize: 13, weight: .regular))
+        label.textColor = .secondaryLabel
         label.adjustsFontForContentSizeCategory = true
         return label
     }()
@@ -59,8 +64,9 @@ final class ShareViewController: UIViewController {
     private let recipeTitleLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .headline)
-        label.numberOfLines = 0
+        label.font = ShareViewController.recipeDetailTitleFont()
+        label.numberOfLines = 4
+        label.textColor = .label
         label.adjustsFontForContentSizeCategory = true
         label.isHidden = true
         return label
@@ -69,7 +75,8 @@ final class ShareViewController: UIViewController {
     private let recipeMetaLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.font = UIFontMetrics(forTextStyle: .subheadline)
+            .scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
         label.textColor = .secondaryLabel
         label.numberOfLines = 0
         label.adjustsFontForContentSizeCategory = true
@@ -80,13 +87,22 @@ final class ShareViewController: UIViewController {
     private let recipeSourceLabel: UILabel = {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .caption1)
+        label.font = UIFontMetrics(forTextStyle: .footnote)
+            .scaledFont(for: .systemFont(ofSize: 13, weight: .regular))
         label.textColor = .tertiaryLabel
         label.numberOfLines = 0
         label.adjustsFontForContentSizeCategory = true
         label.isHidden = true
         return label
     }()
+
+    private let imageGradientView: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isUserInteractionEnabled = false
+        return view
+    }()
+    private let imageGradientLayer = CAGradientLayer()
 
     private let activityIndicator: UIActivityIndicatorView = {
         let indicator = UIActivityIndicatorView(style: .medium)
@@ -108,16 +124,6 @@ final class ShareViewController: UIViewController {
         return button
     }()
 
-    private lazy var secondaryButton: UIButton = {
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = "Cancel"
-
-        let button = UIButton(configuration: configuration)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.addTarget(self, action: #selector(secondaryButtonTapped), for: .touchUpInside)
-        return button
-    }()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         configureLayout()
@@ -136,6 +142,11 @@ final class ShareViewController: UIViewController {
         }
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        imageGradientLayer.frame = imageGradientView.bounds
+    }
+
     deinit {
         imageLoadTask?.cancel()
     }
@@ -150,10 +161,10 @@ final class ShareViewController: UIViewController {
         headerStack.spacing = 10
 
         let detailsStack = UIStackView(arrangedSubviews: [
-            statusLabel,
             recipeTitleLabel,
             recipeMetaLabel,
             recipeSourceLabel,
+            statusLabel,
             activityIndicator
         ])
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
@@ -161,7 +172,7 @@ final class ShareViewController: UIViewController {
         detailsStack.alignment = .fill
         detailsStack.spacing = 10
         detailsStack.isLayoutMarginsRelativeArrangement = true
-        detailsStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 20, bottom: 22, trailing: 20)
+        detailsStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 20, bottom: 22, trailing: 20)
 
         let contentStack = UIStackView(arrangedSubviews: [
             previewImageView,
@@ -170,7 +181,7 @@ final class ShareViewController: UIViewController {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.axis = .vertical
         contentStack.alignment = .fill
-        contentStack.spacing = 0
+        contentStack.spacing = -72
 
         let scrollView = UIScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -178,15 +189,19 @@ final class ShareViewController: UIViewController {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.addSubview(contentStack)
 
-        let buttonStack = UIStackView(arrangedSubviews: [primaryButton, secondaryButton])
-        buttonStack.translatesAutoresizingMaskIntoConstraints = false
-        buttonStack.axis = .vertical
-        buttonStack.alignment = .fill
-        buttonStack.spacing = 8
+        imageGradientLayer.colors = [
+            UIColor.systemBackground.withAlphaComponent(0).cgColor,
+            UIColor.systemBackground.withAlphaComponent(0.55).cgColor,
+            UIColor.systemBackground.cgColor
+        ]
+        imageGradientLayer.startPoint = CGPoint(x: 0.5, y: 0.0)
+        imageGradientLayer.endPoint = CGPoint(x: 0.5, y: 1.0)
+        imageGradientView.layer.addSublayer(imageGradientLayer)
+        previewImageView.addSubview(imageGradientView)
 
         view.addSubview(headerStack)
         view.addSubview(scrollView)
-        view.addSubview(buttonStack)
+        view.addSubview(primaryButton)
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
@@ -199,7 +214,7 @@ final class ShareViewController: UIViewController {
             scrollView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 10),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: buttonStack.topAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: primaryButton.topAnchor, constant: -12),
 
             contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
             contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
@@ -207,12 +222,16 @@ final class ShareViewController: UIViewController {
             contentStack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
             contentStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
 
-            previewImageView.heightAnchor.constraint(equalToConstant: 230),
+            previewImageView.heightAnchor.constraint(equalToConstant: 340),
 
-            buttonStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            buttonStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            buttonStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            imageGradientView.leadingAnchor.constraint(equalTo: previewImageView.leadingAnchor),
+            imageGradientView.trailingAnchor.constraint(equalTo: previewImageView.trailingAnchor),
+            imageGradientView.bottomAnchor.constraint(equalTo: previewImageView.bottomAnchor),
+            imageGradientView.heightAnchor.constraint(equalToConstant: 220),
 
+            primaryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            primaryButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            primaryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             primaryButton.heightAnchor.constraint(equalToConstant: 50)
         ])
     }
@@ -401,13 +420,24 @@ final class ShareViewController: UIViewController {
         config?.showsActivityIndicator = true
         primaryButton.configuration = config
         primaryButton.isEnabled = false
-        secondaryButton.isEnabled = false
+    }
+
+    private func setSavedState() {
+        statusLabel.text = "Saved to Cauldron. You can now return to the app."
+        shouldPrimaryDismissOnTap = false
+
+        var config = primaryButton.configuration
+        config?.title = "Saved to Cauldron"
+        config?.showsActivityIndicator = false
+        primaryButton.configuration = config
+        primaryButton.isEnabled = false
     }
 
     private func setProcessingState(message: String) {
         statusLabel.text = message
         activityIndicator.startAnimating()
         activityIndicator.isHidden = false
+        shouldPrimaryDismissOnTap = false
 
         recipeTitleLabel.isHidden = true
         recipeMetaLabel.isHidden = true
@@ -419,17 +449,14 @@ final class ShareViewController: UIViewController {
         primaryConfig?.title = "Preparing..."
         primaryConfig?.showsActivityIndicator = false
         primaryButton.configuration = primaryConfig
-
-        secondaryButton.isHidden = false
-        secondaryButton.configuration?.title = "Cancel"
-        secondaryButton.isEnabled = true
     }
 
     private func setReadyState(with payload: PreparedShareRecipePayload, sourceURL: URL) {
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
 
-        statusLabel.text = "Recipe preview ready. Save to Cauldron."
+        statusLabel.text = "Tap Save to Cauldron."
+        shouldPrimaryDismissOnTap = false
 
         recipeTitleLabel.text = payload.title
         recipeTitleLabel.isHidden = false
@@ -460,10 +487,6 @@ final class ShareViewController: UIViewController {
         primaryConfig?.title = "Save to Cauldron"
         primaryConfig?.showsActivityIndicator = false
         primaryButton.configuration = primaryConfig
-
-        secondaryButton.isHidden = false
-        secondaryButton.configuration?.title = "Cancel"
-        secondaryButton.isEnabled = true
     }
 
     private func setFallbackReadyState(sourceURL: URL) {
@@ -471,6 +494,7 @@ final class ShareViewController: UIViewController {
         activityIndicator.isHidden = true
 
         statusLabel.text = "We couldn't fully parse this page here. Save the link and Cauldron will finish import."
+        shouldPrimaryDismissOnTap = false
 
         recipeTitleLabel.text = sourceURL.absoluteString
         recipeTitleLabel.isHidden = false
@@ -488,10 +512,6 @@ final class ShareViewController: UIViewController {
         primaryConfig?.title = "Send Link to Cauldron"
         primaryConfig?.showsActivityIndicator = false
         primaryButton.configuration = primaryConfig
-
-        secondaryButton.isHidden = false
-        secondaryButton.configuration?.title = "Cancel"
-        secondaryButton.isEnabled = true
     }
 
     private func setFailureState(message: String) {
@@ -499,23 +519,29 @@ final class ShareViewController: UIViewController {
         activityIndicator.isHidden = true
 
         statusLabel.text = message
+        shouldPrimaryDismissOnTap = true
         recipeTitleLabel.isHidden = true
         recipeMetaLabel.isHidden = true
         recipeSourceLabel.isHidden = true
         previewImageView.isHidden = true
 
-        primaryButton.isEnabled = false
+        primaryButton.isEnabled = true
         var primaryConfig = primaryButton.configuration
-        primaryConfig?.title = "Unavailable"
+        primaryConfig?.title = "Done"
         primaryConfig?.showsActivityIndicator = false
         primaryButton.configuration = primaryConfig
-
-        secondaryButton.isHidden = false
-        secondaryButton.configuration?.title = "Done"
-        secondaryButton.isEnabled = true
     }
 
     @objc private func primaryButtonTapped() {
+        if shouldPrimaryDismissOnTap {
+            completeRequest(after: 0)
+            return
+        }
+
+        guard !hasSavedPayload else {
+            return
+        }
+
         guard let sharedURL else {
             setFailureState(message: "Missing shared URL. Try sharing again.")
             return
@@ -530,11 +556,8 @@ final class ShareViewController: UIViewController {
             clearPreparedRecipePayload()
         }
 
-        completeRequest(after: 0)
-    }
-
-    @objc private func secondaryButtonTapped() {
-        completeRequest(after: 0)
+        hasSavedPayload = true
+        setSavedState()
     }
 
     private func persistPendingURL(_ url: URL) {
@@ -560,5 +583,13 @@ final class ShareViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
         }
+    }
+
+    private static func recipeDetailTitleFont() -> UIFont {
+        let basePointSize: CGFloat = 34
+        let baseFont = UIFont.systemFont(ofSize: basePointSize, weight: .bold)
+        let serifDescriptor = baseFont.fontDescriptor.withDesign(.serif) ?? baseFont.fontDescriptor
+        let serifFont = UIFont(descriptor: serifDescriptor, size: basePointSize)
+        return UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: serifFont)
     }
 }
