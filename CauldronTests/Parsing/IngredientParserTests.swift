@@ -185,9 +185,17 @@ final class IngredientParserTests: XCTestCase {
         let ingredient = IngredientParser.parseIngredientText("3 large eggs, beaten")
 
         // When unit is not recognized, should default to .whole
-        XCTAssertEqual(ingredient.name, "eggs, beaten")
+        XCTAssertEqual(ingredient.name, "large eggs, beaten")
         XCTAssertEqual(ingredient.quantity?.value, 3.0)
         XCTAssertEqual(ingredient.quantity?.unit, .whole)
+    }
+
+    func testParseIngredientText_UnrecognizedTokenAfterQuantity_PreservesNameToken() {
+        let ingredient = IngredientParser.parseIngredientText("3 garlic cloves, finely chopped")
+
+        XCTAssertEqual(ingredient.name, "garlic finely chopped")
+        XCTAssertEqual(ingredient.quantity?.value, 3.0)
+        XCTAssertEqual(ingredient.quantity?.unit, .clove)
     }
 
     func testParseIngredientText_RealWorld4() {
@@ -196,6 +204,97 @@ final class IngredientParserTests: XCTestCase {
         XCTAssertEqual(ingredient.name, "unsalted butter, melted")
         XCTAssertEqual(ingredient.quantity?.value, 0.25)
         XCTAssertEqual(ingredient.quantity?.unit, .cup)
+    }
+
+    func testParseIngredientText_DottedUnitAbbreviation_ParsesUnit() {
+        let ingredient = IngredientParser.parseIngredientText("1 tbsp. honey")
+
+        XCTAssertEqual(ingredient.name, "honey")
+        XCTAssertEqual(ingredient.quantity?.value, 1.0)
+        XCTAssertEqual(ingredient.quantity?.unit, .tablespoon)
+    }
+
+    func testParseIngredientText_UnitFollowedByComma_ParsesUnit() {
+        let ingredient = IngredientParser.parseIngredientText("3 cloves, garlic finely chopped")
+
+        XCTAssertEqual(ingredient.name, "garlic finely chopped")
+        XCTAssertEqual(ingredient.quantity?.value, 3.0)
+        XCTAssertEqual(ingredient.quantity?.unit, .clove)
+    }
+
+    func testParseIngredientText_OCRNoisyQuantityAndUnit_Parses() {
+        let ingredient = IngredientParser.parseIngredientText("I/2 c. sugar")
+
+        XCTAssertEqual(ingredient.name, "sugar")
+        XCTAssertEqual(ingredient.quantity?.value, 0.5)
+        XCTAssertEqual(ingredient.quantity?.unit, .cup)
+    }
+
+    func testParseIngredientText_BulletPrefix_ParsesQuantity() {
+        let ingredient = IngredientParser.parseIngredientText("• 4 Tablespoons unsalted butter melted and cooled")
+
+        XCTAssertEqual(ingredient.name, "unsalted butter melted and cooled")
+        XCTAssertEqual(ingredient.quantity?.value, 4.0)
+        XCTAssertEqual(ingredient.quantity?.unit, .tablespoon)
+    }
+
+    func testParseIngredientText_MisspelledTeaspoon_ParsesUnit() {
+        let ingredient = IngredientParser.parseIngredientText("1 teapoon toasted sesame oil, plus more for drizzling")
+
+        XCTAssertEqual(ingredient.name, "toasted sesame oil, plus more for drizzling")
+        XCTAssertEqual(ingredient.quantity?.value, 1.0)
+        XCTAssertEqual(ingredient.quantity?.unit, .teaspoon)
+    }
+
+    func testParseIngredientText_RangeQuantity_PreservesUpperValue() {
+        let ingredient = IngredientParser.parseIngredientText("8 to 8 1/2 cups all-purpose flour")
+
+        XCTAssertEqual(ingredient.name, "all-purpose flour")
+        guard let quantity = ingredient.quantity else {
+            XCTFail("Expected quantity for ranged ingredient")
+            return
+        }
+        guard let upperValue = quantity.upperValue else {
+            XCTFail("Expected upper value for ranged ingredient")
+            return
+        }
+        XCTAssertEqual(quantity.value, 8.0, accuracy: 0.001)
+        XCTAssertEqual(upperValue, 8.5, accuracy: 0.001)
+        XCTAssertEqual(quantity.unit, .cup)
+        XCTAssertTrue(ingredient.additionalQuantities.isEmpty)
+    }
+
+    func testParseIngredientText_RangeWithUnitInSecondToken_ParsesCorrectly() {
+        let ingredient = IngredientParser.parseIngredientText("3 to 4 garlic cloves")
+
+        XCTAssertEqual(ingredient.name, "garlic")
+        guard let quantity = ingredient.quantity else {
+            XCTFail("Expected quantity for ranged ingredient")
+            return
+        }
+        guard let upperValue = quantity.upperValue else {
+            XCTFail("Expected upper value for ranged ingredient")
+            return
+        }
+        XCTAssertEqual(quantity.value, 3.0, accuracy: 0.001)
+        XCTAssertEqual(upperValue, 4.0, accuracy: 0.001)
+        XCTAssertEqual(quantity.unit, .clove)
+        XCTAssertTrue(ingredient.additionalQuantities.isEmpty)
+    }
+
+    func testParseIngredientText_MixedUnits_ParsesMultipleQuantities() {
+        let ingredient = IngredientParser.parseIngredientText("1 tablespoon plus 1/2 cup sugar")
+
+        XCTAssertEqual(ingredient.name, "sugar")
+        guard let quantity = ingredient.quantity else {
+            XCTFail("Expected primary quantity for mixed-unit ingredient")
+            return
+        }
+        XCTAssertEqual(quantity.value, 1.0, accuracy: 0.001)
+        XCTAssertEqual(quantity.unit, .tablespoon)
+        XCTAssertEqual(ingredient.additionalQuantities.count, 1)
+        XCTAssertEqual(ingredient.additionalQuantities[0].value, 0.5, accuracy: 0.001)
+        XCTAssertEqual(ingredient.additionalQuantities[0].unit, .cup)
     }
 
     // MARK: - Extract Quantity and Unit

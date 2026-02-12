@@ -1,0 +1,207 @@
+{
+  "generated_at": "2026-02-11T04:42:40.198475Z",
+  "count": 20,
+  "created": [
+    {
+      "id": "holdout_001",
+      "url": "https://www.recipetineats.com/pad-kee-mao-thai-drunken-noodles/",
+      "method": "jsonld_recipe",
+      "line_count": 25,
+      "ingredient_count": 14,
+      "step_count": 8,
+      "note_count": 0,
+      "title": "Drunken Noodles (Pad Kee Mao)"
+    },
+    {
+      "id": "holdout_002",
+      "url": "https://www.inspiredtaste.net/97738/chicken-pot-pie-recipe/",
+      "method": "jsonld_recipe",
+      "line_count": 26,
+      "ingredient_count": 15,
+      "step_count": 8,
+      "note_count": 0,
+      "title": "Easy Chicken Pot Pie"
+    },
+    {
+      "id": "holdout_003",
+      "url": "https://www.inspiredtaste.net/98468/beef-bulgogi-recipe/",
+      "method": "jsonld_recipe",
+      "line_count": 24,
+      "ingredient_count": 15,
+      "step_count": 6,
+      "note_count": 0,
+      "title": "Beef Bulgogi (Korean BBQ Beef)"
+    },
+    {
+      "id": "holdout_004",
+      "url": "https://www.inspiredtaste.net/64999/glazed-salmon/",
+      "method": "jsonld_recipe",
+      "line_count": 17,
+      "ingredient_count": 9,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Maple Soy Glazed Salmon"
+    },
+    {
+      "id": "holdout_005",
+      "url": "https://www.inspiredtaste.net/47852/roasted-broccolini/",
+      "method": "jsonld_recipe",
+      "line_count": 14,
+      "ingredient_count": 6,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Crispy Roasted Broccolini"
+    },
+    {
+      "id": "holdout_006",
+      "url": "https://www.downshiftology.com/recipes/red-lentil-soup/",
+      "method": "jsonld_recipe",
+      "line_count": 24,
+      "ingredient_count": 15,
+      "step_count": 6,
+      "note_count": 0,
+      "title": "Easy Red Lentil Soup"
+    },
+    {
+      "id": "holdout_007",
+      "url": "https://www.downshiftology.com/recipes/shepherds-pie/",
+      "method": "jsonld_recipe",
+      "line_count": 28,
+      "ingredient_count": 18,
+      "step_count": 7,
+      "note_count": 0,
+      "title": "Easy Shepherd's Pie Recipe"
+    },
+    {
+      "id": "holdout_008",
+      "url": "https://www.downshiftology.com/recipes/meatloaf/",
+      "method": "jsonld_recipe",
+      "line_count": 22,
+      "ingredient_count": 14,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Classic Meatloaf Recipe"
+    },
+    {
+      "id": "holdout_009",
+      "url": "https://www.cookieandkate.com/black-bean-sweet-potato-enchiladas/",
+      "method": "jsonld_recipe",
+      "line_count": 31,
+      "ingredient_count": 19,
+      "step_count": 9,
+      "note_count": 0,
+      "title": "Vegetarian Black Bean Sweet Potato Enchiladas"
+    },
+    {
+      "id": "holdout_010",
+      "url": "https://www.cookieandkate.com/kale-apple-salad-with-granola-croutons/",
+      "method": "jsonld_recipe",
+      "line_count": 26,
+      "ingredient_count": 18,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Kale, Apple and Goat Cheese Salad with Granola Croutons"
+    },
+    {
+      "id": "holdout_011",
+      "url": "https://www.cookieandkate.com/sweet-potato-red-pepper-feta-frittata/",
+      "method": "jsonld_recipe",
+      "line_count": 26,
+      "ingredient_count": 18,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Caramelized Sweet Potato, Red Pepper and Feta Frittata"
+    },
+    {
+      "id": "holdout_012",
+      "url": "https://www.kingarthurbaking.com/recipes/no-knead-crusty-white-bread-recipe",
+      "method": "jsonld_recipe",
+      "line_count": 21,
+      "ingredient_count": 4,
+      "step_count": 14,
+      "note_count": 0,
+      "title": "No-Knead Crusty White Bread"
+    },
+    {
+      "id": "holdout_013",
+      "url": "https://www.kingarthurbaking.com/recipes/flourless-chocolate-cake-recipe",
+      "method": "jsonld_recipe",
+      "line_count": 22,
+      "ingredient_count": 9,
+      "step_count": 10,
+      "note_count": 0,
+      "title": "Flourless Chocolate Cake"
+    },
+    {
+      "id": "holdout_014",
+      "url": "https://www.sallysbakingaddiction.com/vanilla-sheet-cake/",
+      "method": "jsonld_recipe",
+      "line_count": 26,
+      "ingredient_count": 16,
+      "step_count": 7,
+      "note_count": 0,
+      "title": "Vanilla Sheet Cake with Whipped Buttercream Frosting"
+    },
+    {
+      "id": "holdout_015",
+      "url": "https://www.bbcgoodfood.com/recipes/feta-roasted-tomato-shakshuka",
+      "method": "jsonld_recipe",
+      "line_count": 18,
+      "ingredient_count": 10,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Feta & roasted tomato shakshuka"
+    },
+    {
+      "id": "holdout_016",
+      "url": "https://www.seriouseats.com/the-best-chili-recipe",
+      "method": "jsonld_recipe",
+      "line_count": 48,
+      "ingredient_count": 37,
+      "step_count": 8,
+      "note_count": 0,
+      "title": "The Best Chili Ever"
+    },
+    {
+      "id": "holdout_017",
+      "url": "https://thewoksoflife.com/hot-sour-soup/",
+      "method": "jsonld_recipe",
+      "line_count": 47,
+      "ingredient_count": 24,
+      "step_count": 16,
+      "note_count": 0,
+      "title": "Hot and Sour Soup - A Chinese Takeout \"Standard\""
+    },
+    {
+      "id": "holdout_018",
+      "url": "https://www.simplyrecipes.com/recipes/spaghetti_alla_carbonara/",
+      "method": "jsonld_recipe",
+      "line_count": 16,
+      "ingredient_count": 7,
+      "step_count": 6,
+      "note_count": 0,
+      "title": "Pasta Carbonara"
+    },
+    {
+      "id": "holdout_019",
+      "url": "https://www.allrecipes.com/recipe/24074/alysias-basic-meat-lasagna/",
+      "method": "jsonld_recipe",
+      "line_count": 24,
+      "ingredient_count": 16,
+      "step_count": 5,
+      "note_count": 0,
+      "title": "Alysia's Basic Meat Lasagna"
+    },
+    {
+      "id": "holdout_020",
+      "url": "https://www.budgetbytes.com/easy-sesame-chicken/",
+      "method": "jsonld_recipe",
+      "line_count": 25,
+      "ingredient_count": 16,
+      "step_count": 6,
+      "note_count": 0,
+      "title": "Easy Sesame Chicken"
+    }
+  ],
+  "errors": []
+}

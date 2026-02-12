@@ -64,6 +64,7 @@ class DependencyContainer: ObservableObject {
     let foundationModelsService: FoundationModelsService
     let groceryCategorizer: GroceryCategorizer
     let recipeOCRService: RecipeOCRService
+    let recipeLineClassificationService: RecipeLineClassificationService
     let sharingService: SharingService
     let externalShareService: ExternalShareService
     let recipeSyncService: RecipeSyncService
@@ -173,6 +174,7 @@ class DependencyContainer: ObservableObject {
         self.foundationModelsService = FoundationModelsService()
         self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
         self.recipeOCRService = RecipeOCRService()
+        self.recipeLineClassificationService = RecipeLineClassificationService()
         self.timerManager = TimerManager()
         self.profileCacheManager = ProfileCacheManager()
 
@@ -210,7 +212,7 @@ class DependencyContainer: ObservableObject {
 
         // Parsers
         self.htmlParser = HTMLRecipeParser()
-        self.textParser = TextRecipeParser()
+        self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
         self.youtubeParser = YouTubeRecipeParser(foundationModelsService: foundationModelsService)
         self.instagramParser = InstagramRecipeParser(foundationModelsService: foundationModelsService)
         self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)

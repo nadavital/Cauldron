@@ -80,6 +80,15 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
+    func testCanImport_URL_WithoutScheme_ReturnsTrue() async {
+        let (viewModel, _) = makeViewModel()
+
+        viewModel.importType = .url
+        viewModel.urlString = "allrecipes.com/recipe/12345"
+
+        XCTAssertTrue(viewModel.canImport)
+    }
+
     func testCanImport_Text_EmptyString_ReturnsFalse() async {
         let (viewModel, _) = makeViewModel()
 

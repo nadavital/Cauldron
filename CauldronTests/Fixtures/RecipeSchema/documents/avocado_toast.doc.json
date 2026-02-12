@@ -1,0 +1,30 @@
+{
+  "id": "avocado_toast",
+  "source_type": "manual_edge",
+  "normalized_lines": [
+    "Avocado Toast",
+    "2 slices sourdough",
+    "1 avocado",
+    "salt to taste",
+    "Toast bread until golden",
+    "Mash avocado with salt",
+    "Spread avocado on toast",
+    "Note: add chili flakes for heat"
+  ],
+  "target_recipe": {
+    "title": "Avocado Toast",
+    "ingredients": [
+      "2 slices sourdough",
+      "1 avocado",
+      "salt to taste"
+    ],
+    "steps": [
+      "Toast bread until golden",
+      "Mash avocado with salt",
+      "Spread avocado on toast"
+    ],
+    "notes": [
+      "Note: add chili flakes for heat"
+    ]
+  }
+}

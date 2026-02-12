@@ -1,0 +1,40 @@
+{
+  "id": "holdout_005",
+  "source_type": "url_holdout",
+  "source_url": "https://www.inspiredtaste.net/47852/roasted-broccolini/",
+  "normalized_lines": [
+    "Crispy Roasted Broccolini",
+    "Ingredients",
+    "2 bunches broccolini, about 1 pound",
+    "1 \u00bd tablespoons olive oil or avocado oil",
+    "1/2 teaspoon fine sea salt",
+    "1/2 teaspoon fresh ground black pepper",
+    "3 tablespoons chopped fresh fine herbs like dill, parsley, chives or a combination",
+    "Flaky sea salt for serving like Maldon sea salt",
+    "Instructions",
+    "Preheat the oven to 375\u00b0F (190\u00b0C). Line a large baking sheet with parchment paper or a silicone baking mat.",
+    "Trim an inch or two from the bottom of the stems (these can be dried out and hard). If any stalks are unusually thick compared to the rest of the bunch, slice them in half lengthwise.",
+    "Place the broccolini on the baking sheet and toss with the oil, salt, and pepper. Spread the stems out so that they are not on top of each other.",
+    "Roast for about 15 minutes or until the stems are tender and the tips of the florets are beginning to brown and crisp.",
+    "Serve with the herbs and a little flaky sea salt scattered on top."
+  ],
+  "target_recipe": {
+    "title": "Crispy Roasted Broccolini",
+    "ingredients": [
+      "2 bunches broccolini, about 1 pound",
+      "1 \u00bd tablespoons olive oil or avocado oil",
+      "1/2 teaspoon fine sea salt",
+      "1/2 teaspoon fresh ground black pepper",
+      "3 tablespoons chopped fresh fine herbs like dill, parsley, chives or a combination",
+      "Flaky sea salt for serving like Maldon sea salt"
+    ],
+    "steps": [
+      "Preheat the oven to 375\u00b0F (190\u00b0C). Line a large baking sheet with parchment paper or a silicone baking mat.",
+      "Trim an inch or two from the bottom of the stems (these can be dried out and hard). If any stalks are unusually thick compared to the rest of the bunch, slice them in half lengthwise.",
+      "Place the broccolini on the baking sheet and toss with the oil, salt, and pepper. Spread the stems out so that they are not on top of each other.",
+      "Roast for about 15 minutes or until the stems are tender and the tips of the florets are beginning to brown and crisp.",
+      "Serve with the herbs and a little flaky sea salt scattered on top."
+    ],
+    "notes": []
+  }
+}

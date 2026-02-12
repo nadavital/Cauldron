@@ -1,0 +1,14 @@
+{"line_index": 0, "text": "Cake", "label": "title"}
+{"line_index": 1, "text": "Ingredients:", "label": "header"}
+{"line_index": 2, "text": "1 cup self rising flour", "label": "ingredient"}
+{"line_index": 3, "text": "1 cup sugar", "label": "ingredient"}
+{"line_index": 4, "text": "1 cup hot chocolate mix", "label": "ingredient"}
+{"line_index": 5, "text": "2/3 cup oil", "label": "ingredient"}
+{"line_index": 6, "text": "4 eggs", "label": "ingredient"}
+{"line_index": 7, "text": "1/2 cup whipping cream", "label": "ingredient"}
+{"line_index": 8, "text": "1 cup milk chocolate chips", "label": "ingredient"}
+{"line_index": 9, "text": "Preheat your oven to 350\u00b0F", "label": "step"}
+{"line_index": 10, "text": "In a medium-sized bowl, mix the flour, sugar, and hot chocolate mix together with a whisk and make a well in the center", "label": "step"}
+{"line_index": 11, "text": "Add the oil, eggs, and cream to the well and whisk though roughly until the whole mixture is homogenous", "label": "step"}
+{"line_index": 12, "text": "Pour the batter into an oiled baking pan and sprinkle the chocolate chips on top", "label": "step"}
+{"line_index": 13, "text": "Bake for about 20 minutes or until a toothpick comes out dry", "label": "step"}

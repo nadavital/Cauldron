@@ -1,0 +1,31 @@
+{
+  "id": "overnight_oats",
+  "source_type": "manual_edge",
+  "normalized_lines": [
+    "Overnight Oats",
+    "Ingredients:",
+    "1/2 cup rolled oats",
+    "1/2 cup milk",
+    "1 tbsp chia seeds",
+    "Steps:",
+    "Combine oats, milk, and chia in a jar",
+    "Refrigerate overnight",
+    "Variation:",
+    "Top with berries before serving"
+  ],
+  "target_recipe": {
+    "title": "Overnight Oats",
+    "ingredients": [
+      "1/2 cup rolled oats",
+      "1/2 cup milk",
+      "1 tbsp chia seeds"
+    ],
+    "steps": [
+      "Combine oats, milk, and chia in a jar",
+      "Refrigerate overnight"
+    ],
+    "notes": [
+      "Top with berries before serving"
+    ]
+  }
+}

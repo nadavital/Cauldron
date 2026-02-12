@@ -1,0 +1,43 @@
+{
+  "id": "qa_2026_02_10_151051",
+  "source_type": "url",
+  "normalized_lines": [
+    "Chermoula Recipe",
+    "Ingredients",
+    "1 cup packed cilantro leaves",
+    "1/2 cup packed parsley leaves",
+    "4 medium cloves garlic, peeled",
+    "1/4 cup preserved lemon juice, or 1/3 cup of regular lemon juice",
+    "1 tablespoon paprika",
+    "2 teaspoons ground cumin",
+    "1/2 teaspoon cayenne",
+    "1/8 teaspoon crushed saffron",
+    "1/2 cup olive oil",
+    "Kosher salt, to taste",
+    "Instructions",
+    "Place cilantro, parsley, and garlic in the workbowl of a food processor fitted with a steel blade. Pulse until all ingredients are finely chopped, stopping to scrape down sides of bowl as necessary.",
+    "Add preserved lemon juice, paprika, cumin, cayenne, and saffron and pulse to combine.",
+    "With motor running, drizzle olive through feed tube. Process until sauce is uniform. Use immediately or transfer to an airtight container and store in refrigerator for up to 2 days."
+  ],
+  "target_recipe": {
+    "title": "Chermoula Recipe",
+    "ingredients": [
+      "1 cup packed cilantro leaves",
+      "1/2 cup packed parsley leaves",
+      "4 medium cloves garlic, peeled",
+      "1/4 cup preserved lemon juice, or 1/3 cup of regular lemon juice",
+      "1 tablespoon paprika",
+      "2 teaspoons ground cumin",
+      "1/2 teaspoon cayenne",
+      "1/8 teaspoon crushed saffron",
+      "1/2 cup olive oil",
+      "Kosher salt, to taste"
+    ],
+    "steps": [
+      "Place cilantro, parsley, and garlic in the workbowl of a food processor fitted with a steel blade. Pulse until all ingredients are finely chopped, stopping to scrape down sides of bowl as necessary.",
+      "Add preserved lemon juice, paprika, cumin, cayenne, and saffron and pulse to combine.",
+      "With motor running, drizzle olive through feed tube. Process until sauce is uniform. Use immediately or transfer to an airtight container and store in refrigerator for up to 2 days."
+    ],
+    "notes": []
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "id": "qa_2026_02_10_205942",
+  "source_type": "url",
+  "normalized_lines": [
+    "Vegetable Beef Soup Recipe",
+    "Ingredients",
+    "1 yellow onion ($0.70)",
+    "2 cloves garlic ($0.08)",
+    "2 Tbsp olive oil ($0.22)",
+    "1 lb. ground beef* ($4.98)",
+    "1 russet potato (about \u00be lb.) ($0.71)",
+    "1 28 oz. can diced tomatoes ($1.63)",
+    "1.5 tsp Italian seasoning ($0.15)",
+    "1/4 tsp freshly cracked black pepper ($0.04)",
+    "4 cups beef broth** ($0.52)",
+    "2 Tbsp Worcestershire sauce ($0.14)",
+    "12 oz. frozen vegetables (corn, peas, carrots, green beans)*** ($1.08)",
+    "salt to taste ($0.05)",
+    "Instructions",
+    "Dice the onion and mince the garlic. Add the onion and garlic to a soup pot along with the olive oil. Saut\u00e9 over medium heat until the onions are soft and translucent.",
+    "Add the ground beef to the pot and continue to saut\u00e9 until the ground beef is cooked through. If using a higher fat content ground beef, you can drain the excess fat, if you prefer.",
+    "While the beef is cooking, peel and dice the russet potato into \u00bd-inch cubes.",
+    "Add the cubed potatoes, diced tomatoes (with juices), Italian seasoning, pepper, beef broth, and Worcestershire sauce to the pot. Stir to combine.",
+    "Turn the heat up to medium-high and allow the soup to come up to a boil. Once boiling, turn the heat down to medium-low and let the soup simmer for about 10 minutes, or until the potatoes are fork-tender.",
+    "Add the frozen vegetables to the pot and allow the soup to come back up to a simmer. Simmer the vegetables in the soup for about five minutes.",
+    "Finally, taste the soup and add salt to help the flavors pop. Start with \u00bd tsp, if desired, and add more until it reaches your desired level."
+  ],
+  "target_recipe": {
+    "title": "Vegetable Beef Soup Recipe",
+    "ingredients": [
+      "1 yellow onion ($0.70)",
+      "2 cloves garlic ($0.08)",
+      "2 Tbsp olive oil ($0.22)",
+      "1 lb. ground beef* ($4.98)",
+      "1 russet potato (about \u00be lb.) ($0.71)",
+      "1 28 oz. can diced tomatoes ($1.63)",
+      "1.5 tsp Italian seasoning ($0.15)",
+      "1/4 tsp freshly cracked black pepper ($0.04)",
+      "4 cups beef broth** ($0.52)",
+      "2 Tbsp Worcestershire sauce ($0.14)",
+      "12 oz. frozen vegetables (corn, peas, carrots, green beans)*** ($1.08)",
+      "salt to taste ($0.05)"
+    ],
+    "steps": [
+      "Dice the onion and mince the garlic. Add the onion and garlic to a soup pot along with the olive oil. Saut\u00e9 over medium heat until the onions are soft and translucent.",
+      "Add the ground beef to the pot and continue to saut\u00e9 until the ground beef is cooked through. If using a higher fat content ground beef, you can drain the excess fat, if you prefer.",
+      "While the beef is cooking, peel and dice the russet potato into \u00bd-inch cubes.",
+      "Add the cubed potatoes, diced tomatoes (with juices), Italian seasoning, pepper, beef broth, and Worcestershire sauce to the pot. Stir to combine.",
+      "Turn the heat up to medium-high and allow the soup to come up to a boil. Once boiling, turn the heat down to medium-low and let the soup simmer for about 10 minutes, or until the potatoes are fork-tender.",
+      "Add the frozen vegetables to the pot and allow the soup to come back up to a simmer. Simmer the vegetables in the soup for about five minutes.",
+      "Finally, taste the soup and add salt to help the flavors pop. Start with \u00bd tsp, if desired, and add more until it reaches your desired level."
+    ],
+    "notes": []
+  }
+}

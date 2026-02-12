@@ -9,98 +9,236 @@ import Foundation
 
 /// Parser for extracting recipes from plain text
 actor TextRecipeParser: RecipeParser {
-    
+    private struct ParsedMetadata {
+        var yields: String?
+        var prepMinutes: Int?
+        var cookMinutes: Int?
+        var totalMinutes: Int?
+
+        var bestTotalMinutes: Int? {
+            if let totalMinutes {
+                return totalMinutes
+            }
+            if let prepMinutes, let cookMinutes {
+                return prepMinutes + cookMinutes
+            }
+            return cookMinutes ?? prepMinutes
+        }
+    }
+
+    private enum Section {
+        case unknown
+        case ingredients
+        case steps
+        case notes
+    }
+
+    private let instructionKeywords = [
+        "add", "bake", "beat", "blend", "boil", "combine", "cook", "cool",
+        "drain", "fold", "fry", "grill", "heat", "knead", "let", "marinate",
+        "mix", "place", "pour", "preheat", "reduce", "rest", "roast", "saute",
+        "season", "serve", "simmer", "stir", "transfer", "whisk"
+    ]
+
+    private let ingredientHints = [
+        "to taste", "for garnish", "optional", "divided", "room temperature", "melted"
+    ]
+
+    private let notePrefixes = [
+        "note:", "notes:", "tip:", "tips:", "pro tip:", "variation:", "variations:",
+        "substitution:", "substitutions:", "storage:", "make ahead", "make-ahead",
+        "serving suggestion", "chef's note", "recipe note"
+    ]
+
+    private let lineClassifier: RecipeLineClassifying
+    private let schemaAssembler: RecipeSchemaAssembler
+    private let modelConfidenceThreshold: Double
+
+    init(
+        lineClassifier: RecipeLineClassifying = RecipeLineClassificationService(),
+        schemaAssembler: RecipeSchemaAssembler = RecipeSchemaAssembler(),
+        modelConfidenceThreshold: Double = 0.72
+    ) {
+        self.lineClassifier = lineClassifier
+        self.schemaAssembler = schemaAssembler
+        self.modelConfidenceThreshold = modelConfidenceThreshold
+    }
+
     func parse(from text: String) async throws -> Recipe {
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let normalizedText = InputNormalizer.normalize(text)
+        let lines = normalizedText
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        
+
         guard !lines.isEmpty else {
             throw ParsingError.invalidSource
         }
-        
-        // First line is typically the title
-        let title = lines[0]
-        
-        // Find ingredients and steps sections
+
+        var title = selectTitle(from: lines)
+        let bodyLines = Array(lines.dropFirst())
+        var metadata = ParsedMetadata()
+        let contentLines = stripMetadataLines(from: bodyLines, metadata: &metadata)
+        let classifications = lineClassifier.classify(lines: contentLines)
+
         var ingredients: [Ingredient] = []
         var steps: [CookStep] = []
+        var noteCandidates: [String] = []
+
         var currentSection: Section = .unknown
-        var foundExplicitSection = false  // Track if we found any explicit section header
+        var foundExplicitSection = false
+        var currentIngredientSection: String?
+        var currentStepSection: String?
 
-        enum Section {
-            case unknown, ingredients, steps
-        }
-
-        var currentIngredientSection: String? = nil
-        var currentStepSection: String? = nil
-        
-        for line in lines.dropFirst() {
-            let lowercased = line.lowercased()
-            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            // Detect section headers
-            if lowercased.contains("ingredient") {
+        for (lineIndex, line) in contentLines.enumerated() {
+            if TextSectionParser.isIngredientSectionHeader(line) {
                 currentSection = .ingredients
-                foundExplicitSection = true
-                continue
-            } else if lowercased.contains("instruction") || lowercased.contains("step") || lowercased.contains("direction") {
-                currentSection = .steps
+                currentIngredientSection = nil
                 foundExplicitSection = true
                 continue
             }
-            
-            // Detect Ingredient/Step Subsection Headers (e.g. "For the Dough:", "Filling:")
-            // Only treat as subsection header if:
-            // - Line is short (1-4 words) AND ends with colon
-            // - Doesn't contain numbers (which would indicate a quantity)
-            // - Doesn't match patterns like "Step 1:" or "Note:"
-            if trimmedLine.hasSuffix(":") {
-                let potentialSection = String(trimmedLine.dropLast()).trimmingCharacters(in: .whitespaces)
-                let wordCount = potentialSection.components(separatedBy: .whitespaces).count
-                let hasNumbers = potentialSection.contains(where: { $0.isNumber })
-                let isNoteOrStep = lowercased.hasPrefix("step") || lowercased.hasPrefix("note")
 
-                // Only treat as subsection if short, no numbers, and not "Step X:" or "Note:"
-                if wordCount <= 4 && !hasNumbers && !isNoteOrStep {
-                    if currentSection == .ingredients || currentSection == .unknown {
-                        currentIngredientSection = potentialSection
-                        currentSection = .ingredients
-                        continue
-                    } else if currentSection == .steps {
-                        currentStepSection = potentialSection
-                        continue
-                    }
+            if TextSectionParser.isStepsSectionHeader(line) {
+                currentSection = .steps
+                currentStepSection = nil
+                foundExplicitSection = true
+                continue
+            }
+
+            if NotesExtractor.looksLikeNotesSectionHeader(line) {
+                currentSection = .notes
+                foundExplicitSection = true
+                noteCandidates.append(line)
+                continue
+            }
+
+            if let subsection = subsectionName(from: line), subsection.count <= 32 {
+                switch currentSection {
+                case .ingredients, .unknown:
+                    currentSection = .ingredients
+                    currentIngredientSection = subsection
+                    foundExplicitSection = true
+                    continue
+                case .steps:
+                    currentStepSection = subsection
+                    continue
+                case .notes:
+                    noteCandidates.append(line)
+                    continue
                 }
             }
-            
-            // Parse based on current section
+
+            let cleanedLine = cleanListMarkers(line)
+            guard !cleanedLine.isEmpty else {
+                continue
+            }
+
+            if isLikelyInlineNoteLine(cleanedLine) {
+                noteCandidates.append(cleanedLine)
+                continue
+            }
+
+            if let classification = classification(at: lineIndex, from: classifications),
+               classification.confidence >= modelConfidenceThreshold {
+                switch classification.label {
+                case .ingredient:
+                    if currentSection == .ingredients, looksLikeInstructionSentence(cleanedLine) {
+                        let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                        steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                        currentSection = .steps
+                    } else if currentSection == .steps, !TextSectionParser.looksLikeIngredient(cleanedLine) {
+                        let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                        steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                        currentSection = .steps
+                    } else {
+                        ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
+                        currentSection = .ingredients
+                    }
+                    continue
+                case .step:
+                    let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                    steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                    currentSection = .steps
+                    continue
+                case .note:
+                    noteCandidates.append(cleanedLine)
+                    currentSection = .notes
+                    continue
+                case .junk:
+                    continue
+                case .header:
+                    if NotesExtractor.looksLikeNotesSectionHeader(cleanedLine) {
+                        currentSection = .notes
+                        foundExplicitSection = true
+                    } else if currentSection == .ingredients, looksLikeInstructionSentence(cleanedLine) {
+                        let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                        steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                        currentSection = .steps
+                    }
+                    continue
+                case .title:
+                    continue
+                }
+            }
+
             switch currentSection {
             case .ingredients:
-                ingredients.append(parseIngredient(line, section: currentIngredientSection))
-                
+                // OCR can interleave columns; route obvious action lines to steps.
+                if looksLikeInstructionSentence(line) {
+                    let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                    steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                    currentSection = .steps
+                } else {
+                    ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
+                }
+
             case .steps:
-                let cleanedStep = cleanListMarkers(line)
-                let timers = TimerExtractor.extractTimers(from: cleanedStep)
-                steps.append(CookStep(
-                    index: steps.count,
-                    text: cleanedStep,
-                    timers: timers,
-                    section: currentStepSection
-                ))
-                
+                // OCR can interleave columns; route obvious ingredient lines back.
+                if TextSectionParser.looksLikeIngredient(cleanedLine) {
+                    ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
+                } else {
+                    let timers = TimerExtractor.extractTimers(from: cleanedLine)
+                    steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
+                }
+
+            case .notes:
+                noteCandidates.append(cleanedLine)
+
             case .unknown:
-                // Without explicit section headers, don't try to guess
-                // Let the heuristic parser handle it after the loop
-                break
+                // Delay to heuristic pass.
+                continue
             }
         }
-        
-        // If we didn't find explicit sections and don't have a clear split, try heuristic
-        // But if we DID find explicit sections (like "Instructions:"), respect that and throw
-        // appropriate errors rather than falling back to heuristic
-        if !foundExplicitSection && (ingredients.isEmpty || steps.isEmpty) {
-            return try parseHeuristic(lines)
+
+        let schemaAssembly = parseHeuristic(lines: contentLines)
+        if !foundExplicitSection || ingredients.isEmpty || steps.isEmpty {
+            if ingredients.isEmpty {
+                ingredients = schemaAssembly.ingredients
+            }
+
+            if steps.isEmpty {
+                steps = schemaAssembly.steps
+            }
+
+            noteCandidates.append(contentsOf: schemaAssembly.notes)
+        } else if shouldPreferSchemaAssembly(
+            currentIngredients: ingredients,
+            currentSteps: steps,
+            currentNotes: noteCandidates,
+            schema: schemaAssembly
+        ) {
+            ingredients = schemaAssembly.ingredients
+            steps = schemaAssembly.steps
+            noteCandidates = schemaAssembly.notes
+        } else {
+            noteCandidates.append(contentsOf: schemaAssembly.notes)
+        }
+
+        if title.isEmpty || title.lowercased().contains("time") {
+            if let promotedTitle = noteCandidates.first(where: looksLikeTitleCandidate) {
+                title = promotedTitle
+                noteCandidates.removeAll { $0.caseInsensitiveCompare(promotedTitle) == .orderedSame }
+            }
         }
 
         guard !ingredients.isEmpty else {
@@ -110,123 +248,331 @@ actor TextRecipeParser: RecipeParser {
         guard !steps.isEmpty else {
             throw ParsingError.noStepsFound
         }
-        
+
+        let notes = extractNotes(from: noteCandidates)
+
         return Recipe(
             title: title,
             ingredients: ingredients,
-            steps: steps
+            steps: steps,
+            yields: metadata.yields ?? "4 servings",
+            totalMinutes: metadata.bestTotalMinutes,
+            notes: notes
         )
     }
-    
-    /// Remove bullet points, numbers, and other list markers from text
+
+    private func cleanTitle(_ line: String) -> String {
+        let cleaned = cleanListMarkers(line)
+        return cleaned.isEmpty ? line : cleaned
+    }
+
+    private func selectTitle(from lines: [String]) -> String {
+        for rawLine in lines.prefix(12) {
+            let cleaned = cleanTitle(rawLine)
+            if looksLikeTitleCandidate(cleaned) {
+                return cleaned
+            }
+        }
+        return cleanTitle(lines[0])
+    }
+
+    private func looksLikeTitleCandidate(_ line: String) -> Bool {
+        let cleaned = cleanTitle(line)
+        guard !cleaned.isEmpty else {
+            return false
+        }
+        if extractMetadata(from: cleaned) != nil {
+            return false
+        }
+        if TextSectionParser.isIngredientSectionHeader(cleaned) ||
+            TextSectionParser.isStepsSectionHeader(cleaned) ||
+            NotesExtractor.looksLikeNotesSectionHeader(cleaned) {
+            return false
+        }
+        if TextSectionParser.looksLikeIngredient(cleaned) || looksLikeInstructionSentence(cleaned) || looksLikeHTMLArtifact(cleaned) {
+            return false
+        }
+        let words = cleaned.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        return (2...16).contains(words.count)
+    }
+
     private func cleanListMarkers(_ line: String) -> String {
         line
-            .replacingOccurrences(of: #"^\d+[\.\)]\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"^\d+[\.)]\s*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"^[•●○◦▪▫\-]\s*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"^Step\s*\d*[:\.]?\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
-            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func parseIngredient(_ line: String, section: String? = nil) -> Ingredient {
-        // Remove bullet points and numbering
-        let cleaned = cleanListMarkers(line)
-        
-        // Try to parse quantity if present
-        if let quantity = QuantityParser.parse(cleaned) {
-            // Remove the quantity part from the name
-            // Note: QuantityParser now handles ranges, but we need to remove the matched text
-            // This simple removal logic might be brittle if parser matched complex range
-            // For now, relies on shared logic or we'd ideally get the range back from parser
-            
-            // Re-parsing logic here for name extraction is a bit duplicate but acceptable for now
-            // If parsed quantity string ends with unit, we try to strip it
-            
-            // Simple heuristic to strip quantity + unit from start
-            // If we identify unit type, we can try to find it in string and split
-            
-            // Fallback: If QuantityParser succeeded, assume the components approach works
-            let components = cleaned.components(separatedBy: .whitespaces)
-            
-            // If we have a range (e.g. 2 - 3 cups), that's at least 3 parts (2, -, 3, cups) + name
-            // If we have "2 cups", that's 2 parts + name
-            
-            // Let's try to remove the parts that made up the quantity
-            // This is tricky without range info.
-            // Simplified approach: Drop first few words if they look like numbers/units
-            
-            // Re-implement name extraction robustly?
-            // For now, keep existing logic but be aware it might need more sophisticated matching
-             if components.count > 2 {
-                // Heuristic: drop first 2 parts is too simple for "2 - 3 cups" (4 parts)
-                // Let's rely on the parsing result.
-                // If quantity has upperValue, it was likely "X - Y Unit" (3 or 4 tokens) or "X-Y Unit" (2 tokens)
-                
-                var dropCount = 2
-                if quantity.upperValue != nil {
-                     if cleaned.contains(" - ") { dropCount = 4 } // 1 - 2 cups
-                     else if cleaned.contains("-") { dropCount = 2 } // 1-2 cups (if space-separated) or 1 (1-2cups)
-                     // This is getting guessy.
-                     // Better: check if start of string matches generic quantity pattern
-                }
-                
-                // New Approach: Iterate words and consume while they match number/range/unit
-                // Not implementing full tokenizer here to save complexity.
-                // Retaining old logic for simple cases, might fail to strip range perfectly:
-                
-                // Use the old logic for now, risk: might leave "- 3" in name if "2 - 3"
-                if quantity.upperValue != nil && cleaned.contains("-") {
-                     // Attempt to be slightly smarter
-                     // If we find "-", let's assume it's part of quantity
-                     dropCount = 3 // "2", "-", "3", "cups" -> 4?
-                     // Let's stick to safe fallback:
-                }
-                 
-                let name = components.dropFirst(2).joined(separator: " ")
-                 return Ingredient(name: name, quantity: quantity, section: section) // Use name? No, wait, old logic used dropFirst(2)
-            }
-        }
-        
-        return Ingredient(name: cleaned, section: section)
-    }
-    
-    private func parseHeuristic(_ lines: [String]) throws -> Recipe {
-        let title = lines[0]
-        
-        // Simple heuristic: shorter lines (~1-3 words, or with quantities) are likely ingredients
-        // Longer lines are likely steps
-        var ingredients: [Ingredient] = []
-        var steps: [CookStep] = []
-        
-        for line in lines.dropFirst() {
-            let wordCount = line.components(separatedBy: .whitespaces).count
-            
-            if wordCount <= 5 || line.contains(where: { "0123456789/".contains($0) }) {
-                // Likely an ingredient
-                ingredients.append(parseIngredient(line))
-            } else {
-                // Likely a step
-                let cleanedStep = cleanListMarkers(line)
-                let timers = TimerExtractor.extractTimers(from: cleanedStep)
-                steps.append(CookStep(
-                    index: steps.count,
-                    text: cleanedStep,
-                    timers: timers
-                ))
-            }
-        }
-        
-        guard !ingredients.isEmpty else {
-            throw ParsingError.noIngredientsFound
-        }
-        
-        guard !steps.isEmpty else {
-            throw ParsingError.noStepsFound
-        }
-        
-        return Recipe(
-            title: title,
-            ingredients: ingredients,
-            steps: steps
+        let parsed = IngredientParser.parseIngredientText(line)
+        return Ingredient(
+            name: parsed.name,
+            quantity: parsed.quantity,
+            additionalQuantities: parsed.additionalQuantities,
+            note: parsed.note,
+            section: section ?? parsed.section
         )
+    }
+
+    private func parseHeuristic(lines: [String]) -> (ingredients: [Ingredient], steps: [CookStep], notes: [String]) {
+        let classifications = lineClassifier.classify(lines: lines)
+        let assembly = schemaAssembler.assemble(
+            lines: lines,
+            classifications: classifications,
+            confidenceThreshold: modelConfidenceThreshold,
+            fallbackLabel: fallbackHeuristicLabel(for:)
+        )
+
+        let ingredients = assembly.ingredients.map { entry in
+            parseIngredient(entry.text, section: entry.section)
+        }
+
+        let steps = assembly.steps.enumerated().map { index, entry in
+            let timers = TimerExtractor.extractTimers(from: entry.text)
+            return CookStep(index: index, text: entry.text, timers: timers, section: entry.section)
+        }
+
+        return (ingredients, steps, assembly.notes)
+    }
+
+    private func shouldPreferSchemaAssembly(
+        currentIngredients: [Ingredient],
+        currentSteps: [CookStep],
+        currentNotes: [String],
+        schema: (ingredients: [Ingredient], steps: [CookStep], notes: [String])
+    ) -> Bool {
+        guard !schema.ingredients.isEmpty, !schema.steps.isEmpty else {
+            return false
+        }
+        if currentIngredients.isEmpty || currentSteps.isEmpty {
+            return true
+        }
+        if currentSteps.count <= 2, schema.steps.count >= 3 {
+            return true
+        }
+        if currentNotes.count >= max(6, currentSteps.count * 2), schema.steps.count > currentSteps.count {
+            return true
+        }
+        return false
+    }
+
+    private func subsectionName(from line: String) -> String? {
+        guard line.hasSuffix(":"), !NotesExtractor.looksLikeNotesSectionHeader(line) else {
+            return nil
+        }
+
+        let withoutColon = String(line.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !withoutColon.isEmpty else {
+            return nil
+        }
+
+        let lowercased = withoutColon.lowercased()
+        guard !TextSectionParser.isIngredientSectionHeader(lowercased),
+              !TextSectionParser.isStepsSectionHeader(lowercased),
+              !lowercased.hasPrefix("step") else {
+            return nil
+        }
+
+        if withoutColon.contains(where: { $0.isNumber }) {
+            return nil
+        }
+
+        return withoutColon
+    }
+
+    private func looksLikeInstructionSentence(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        let words = lowercased
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        let tokens = lowercased
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        if TextSectionParser.looksLikeNumberedStep(line) {
+            return true
+        }
+
+        if instructionKeywords.contains(where: { tokens.contains($0) }) {
+            return true
+        }
+
+        if words.count >= 8 {
+            return true
+        }
+
+        if words.count >= 5, line.contains(",") {
+            return true
+        }
+
+        return false
+    }
+
+    private func looksLikeIngredientPhrase(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        let words = lowercased
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+
+        if words.isEmpty || words.count > 6 {
+            return false
+        }
+
+        if ingredientHints.contains(where: { lowercased.contains($0) }) {
+            return true
+        }
+
+        if lowercased.contains(" and "), words.count <= 4 {
+            return true
+        }
+
+        if instructionKeywords.contains(where: { lowercased.hasPrefix($0 + " ") }) {
+            return false
+        }
+
+        return words.count <= 4
+    }
+
+    private func isLikelyInlineNoteLine(_ line: String) -> Bool {
+        let lowercased = line.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return notePrefixes.contains { lowercased.hasPrefix($0) }
+    }
+
+    private func fallbackHeuristicLabel(for line: String) -> RecipeLineLabel {
+        if looksLikeHTMLArtifact(line) {
+            return .junk
+        }
+
+        if line.hasSuffix(":") {
+            return .header
+        }
+
+        if isLikelyInlineNoteLine(line) {
+            return .note
+        }
+
+        if TextSectionParser.looksLikeNumberedStep(line) || looksLikeInstructionSentence(line) {
+            return .step
+        }
+
+        if TextSectionParser.looksLikeIngredient(line) || looksLikeIngredientPhrase(line) {
+            return .ingredient
+        }
+
+        return line.count > 18 ? .step : .ingredient
+    }
+
+    private func stripMetadataLines(from lines: [String], metadata: inout ParsedMetadata) -> [String] {
+        var content: [String] = []
+        content.reserveCapacity(lines.count)
+
+        for line in lines {
+            if let extracted = extractMetadata(from: line) {
+                if let yields = extracted.yields {
+                    metadata.yields = yields
+                }
+                if let total = extracted.totalMinutes {
+                    metadata.totalMinutes = total
+                }
+                if let prep = extracted.prepMinutes {
+                    metadata.prepMinutes = prep
+                }
+                if let cook = extracted.cookMinutes {
+                    metadata.cookMinutes = cook
+                }
+                continue
+            }
+            content.append(line)
+        }
+
+        return content
+    }
+
+    private func extractMetadata(from line: String) -> ParsedMetadata? {
+        let cleaned = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            return nil
+        }
+
+        var extracted = ParsedMetadata()
+        let lowercased = cleaned.lowercased()
+
+        if isLikelyYieldLine(lowercased), let yields = YieldParser.extractYield(from: cleaned) {
+            extracted.yields = yields
+        }
+
+        let total = extractMinutes(in: cleaned, pattern: #"(?i)^\s*(?:total\s*time|total|ready\s*in)\s*:?\s*(.+)$"#)
+            ?? extractMinutes(in: cleaned, pattern: #"(?i)^\s*time\s*:\s*(.+)$"#)
+        if let total {
+            extracted.totalMinutes = total
+        }
+        if let prep = extractMinutes(in: cleaned, pattern: #"(?i)^\s*(?:prep\s*time|prepping\s*time|preparation\s*time)\s*:?\s*(.+)$"#) {
+            extracted.prepMinutes = prep
+        }
+        if let cook = extractMinutes(in: cleaned, pattern: #"(?i)^\s*(?:cook\s*time|cooking\s*time|bake\s*time|roast\s*time)\s*:?\s*(.+)$"#) {
+            extracted.cookMinutes = cook
+        }
+
+        let hasTime = extracted.totalMinutes != nil || extracted.prepMinutes != nil || extracted.cookMinutes != nil
+        if extracted.yields == nil && !hasTime {
+            return nil
+        }
+        return extracted
+    }
+
+    private func extractMinutes(in line: String, pattern: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              match.numberOfRanges >= 2,
+              let range = Range(match.range(at: 1), in: line) else {
+            return nil
+        }
+
+        let tail = String(line[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tail.isEmpty else {
+            return nil
+        }
+
+        return TimeParser.parseTimeString(tail)
+    }
+
+    private func isLikelyYieldLine(_ lowercasedLine: String) -> Bool {
+        let normalized = lowercasedLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes = ["serves", "serving", "servings", "yield", "yields", "makes", "portion", "portions"]
+        return prefixes.contains(where: { prefix in
+            normalized == prefix || normalized.hasPrefix(prefix + " ") || normalized.hasPrefix(prefix + ":")
+        })
+    }
+
+    private func classification(at index: Int, from classifications: [RecipeLineClassification]) -> RecipeLineClassification? {
+        guard classifications.indices.contains(index) else {
+            return nil
+        }
+        return classifications[index]
+    }
+
+    private func looksLikeHTMLArtifact(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        return lowercased.contains("<div") || lowercased.contains("</") || (lowercased.hasPrefix("<") && lowercased.hasSuffix(">"))
+    }
+
+    private func extractNotes(from noteCandidates: [String]) -> String? {
+        let cleaned = noteCandidates
+            .map { cleanListMarkers($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !cleaned.isEmpty else {
+            return nil
+        }
+
+        if let extracted = NotesExtractor.extractNotes(from: cleaned), !extracted.isEmpty {
+            return extracted
+        }
+
+        var seen = Set<String>()
+        let deduped = cleaned.filter { seen.insert($0.lowercased()).inserted }
+        return deduped.joined(separator: "\n")
     }
 }

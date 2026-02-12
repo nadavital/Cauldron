@@ -176,4 +176,10 @@ struct NotesExtractor {
             .map { $0.trimmingCharacters(in: .whitespaces) }
         return extractNotes(from: lines)
     }
+
+    /// Check whether a line starts a notes/tips/variation style section.
+    /// Useful for parser section routing before full notes extraction.
+    static func looksLikeNotesSectionHeader(_ line: String) -> Bool {
+        isNotesSectionHeader(line.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+    }
 }

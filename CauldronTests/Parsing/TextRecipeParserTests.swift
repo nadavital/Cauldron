@@ -115,6 +115,34 @@ final class TextRecipeParserTests: XCTestCase {
         XCTAssertEqual(recipe.steps.count, 3)
     }
 
+    func testParseRecipeWithNotesSection_ExtractsNotes() async throws {
+        let recipeText = """
+        Lemon Pasta
+
+        Ingredients:
+        8 oz pasta
+        2 tbsp butter
+        1 lemon
+
+        Instructions:
+        Boil pasta until al dente
+        Melt butter in a pan
+        Toss pasta with lemon and butter
+
+        Notes:
+        Add pasta water if the sauce is too thick.
+        Tip: Fresh parsley works great as garnish.
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.ingredients.count, 3)
+        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertNotNil(recipe.notes)
+        XCTAssertTrue(recipe.notes?.contains("sauce is too thick") ?? false)
+        XCTAssertTrue(recipe.notes?.contains("Fresh parsley") ?? false)
+    }
+
     // MARK: - Bullet Point and Numbering Tests
 
     // Note: testParseRecipeWithBulletPoints removed - bullet handling needs parser fixes
@@ -203,6 +231,26 @@ final class TextRecipeParserTests: XCTestCase {
 
         XCTAssertTrue(shortItems.contains { $0.name.contains("eggs") })
         XCTAssertTrue(longItems.contains { $0.text.contains("Heat butter") })
+    }
+
+    func testParseRecipeHeuristic_SeparatesInlineNotes() async throws {
+        let recipeText = """
+        Quick Tomato Salad
+        2 tomatoes
+        1 tbsp olive oil
+        Salt to taste
+        Chop tomatoes into bite-size pieces
+        Mix with olive oil and salt
+        Note: You can add feta for extra richness
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertGreaterThanOrEqual(recipe.ingredients.count, 3)
+        XCTAssertGreaterThanOrEqual(recipe.steps.count, 2)
+        XCTAssertNotNil(recipe.notes)
+        XCTAssertTrue(recipe.notes?.contains("add feta") ?? false)
+        XCTAssertFalse(recipe.ingredients.contains { $0.name.lowercased().contains("note:") })
     }
 
     // Note: testHeuristicPrefersIngredientsWithQuantities removed - parser heuristic needs redesign
@@ -381,5 +429,85 @@ final class TextRecipeParserTests: XCTestCase {
 
         // Verify ingredients cleaned properly
         XCTAssertTrue(recipe.ingredients.allSatisfy { !$0.name.hasPrefix("•") })
+    }
+
+    func testParseMissingInstructionsHeader_RecoversFromIngredientMislabels() async throws {
+        let classifier = StubRecipeLineClassifier(forcedLabel: .ingredient, confidence: 0.99)
+        let parser = TextRecipeParser(
+            lineClassifier: classifier,
+            schemaAssembler: RecipeSchemaAssembler(),
+            modelConfidenceThreshold: 0.72
+        )
+
+        let recipeText = """
+        Cake
+
+        Ingredients:
+        1 cup flour
+        1 cup sugar
+        Preheat your oven to 350°F
+        In a medium-sized bowl, mix flour and sugar together
+        Bake for about 20 minutes
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.ingredients.count, 2)
+        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertTrue(recipe.ingredients.allSatisfy { !$0.name.lowercased().contains("preheat") })
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("preheat") })
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("bake for about 20 minutes") })
+    }
+
+    func testParseMetadataLines_MapToRecipeFieldsAndSkipSteps() async throws {
+        let recipeText = """
+        Weeknight Pasta
+        Serves 4
+        Total time: 45 minutes
+
+        Ingredients:
+        1 lb pasta
+        2 cups sauce
+
+        Instructions:
+        Boil pasta for 10 minutes
+        Toss with sauce
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.yields, "4 servings")
+        XCTAssertEqual(recipe.totalMinutes, 45)
+        XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("total time") })
+        XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("serves 4") })
+    }
+
+    func testParseInstructionStartingWithTimeTo_DoesNotBecomeMetadata() async throws {
+        let recipeText = """
+        Weeknight Eggs
+
+        Ingredients:
+        2 eggs
+
+        Instructions:
+        Time to whisk eggs for 2 minutes
+        Cook in butter until set
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertNil(recipe.totalMinutes)
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("time to whisk eggs") })
+    }
+}
+
+private struct StubRecipeLineClassifier: RecipeLineClassifying, Sendable {
+    let forcedLabel: RecipeLineLabel
+    let confidence: Double
+
+    nonisolated func classify(lines: [String]) -> [RecipeLineClassification] {
+        lines.map { line in
+            RecipeLineClassification(line: line, label: forcedLabel, confidence: confidence)
+        }
     }
 }

@@ -1,0 +1,48 @@
+{
+  "id": "holdout_015",
+  "source_type": "url_holdout",
+  "source_url": "https://www.bbcgoodfood.com/recipes/feta-roasted-tomato-shakshuka",
+  "normalized_lines": [
+    "Feta & roasted tomato shakshuka",
+    "Ingredients",
+    "6 medium tomatoes halved",
+    "2 tsp olive oil plus a drizzle",
+    "1 red onion finely chopped",
+    "8 padron peppers or 2 green sivri peppers (or use 1 green pepper if these aren\u2019t available), sliced into rounds",
+    "2 tsp pul biber (aleppo chilli flakes), plus a pinch to serve",
+    "handful of wild garlic or spinach",
+    "100g stale bread of your choice, torn into bite-sized pieces",
+    "3 eggs",
+    "100g feta",
+    "50g halloumi",
+    "Instructions",
+    "Heat the oven to 200C/180C fan/gas 6. Arrange the tomatoes cut-side down in a roasting tin, drizzle with some olive oil and season. Roast for 20 mins. Set aside to cool.",
+    "Meanwhile, cook the onions in a medium ovenproof frying pan with the 2 tsp olive oil over a medium heat until they start to caramelise, about 8 mins.",
+    "Once the onions have softened, add the peppers and season with salt, pepper and the pul biber. Peel the skins from the roasted tomatoes, then add these to the pan of onions and peppers along with all the resting juices.",
+    "Crush the tomatoes roughly with a wooden spoon and cook for 5 mins over a medium-high heat. Add the wild garlic or spinach and wilt for a minute, then remove from the heat. Tuck the bread pieces in amongst the mixture, then create three gaps for the eggs using the spoon. Crack the eggs into the gaps, crumble over the feta and grate over the halloumi. Drizzle with some extra olive oil and sprinkle with a pinch of pul biber.",
+    "Turn the oven down to 160C/140C fan/gas 3 and bake the shakshuka for 12-15 mins. The eggs should be cooked but runny in the middle, and the feta, halloumi and bread should be crisp and golden."
+  ],
+  "target_recipe": {
+    "title": "Feta & roasted tomato shakshuka",
+    "ingredients": [
+      "6 medium tomatoes halved",
+      "2 tsp olive oil plus a drizzle",
+      "1 red onion finely chopped",
+      "8 padron peppers or 2 green sivri peppers (or use 1 green pepper if these aren\u2019t available), sliced into rounds",
+      "2 tsp pul biber (aleppo chilli flakes), plus a pinch to serve",
+      "handful of wild garlic or spinach",
+      "100g stale bread of your choice, torn into bite-sized pieces",
+      "3 eggs",
+      "100g feta",
+      "50g halloumi"
+    ],
+    "steps": [
+      "Heat the oven to 200C/180C fan/gas 6. Arrange the tomatoes cut-side down in a roasting tin, drizzle with some olive oil and season. Roast for 20 mins. Set aside to cool.",
+      "Meanwhile, cook the onions in a medium ovenproof frying pan with the 2 tsp olive oil over a medium heat until they start to caramelise, about 8 mins.",
+      "Once the onions have softened, add the peppers and season with salt, pepper and the pul biber. Peel the skins from the roasted tomatoes, then add these to the pan of onions and peppers along with all the resting juices.",
+      "Crush the tomatoes roughly with a wooden spoon and cook for 5 mins over a medium-high heat. Add the wild garlic or spinach and wilt for a minute, then remove from the heat. Tuck the bread pieces in amongst the mixture, then create three gaps for the eggs using the spoon. Crack the eggs into the gaps, crumble over the feta and grate over the halloumi. Drizzle with some extra olive oil and sprinkle with a pinch of pul biber.",
+      "Turn the oven down to 160C/140C fan/gas 3 and bake the shakshuka for 12-15 mins. The eggs should be cooked but runny in the middle, and the feta, halloumi and bread should be crisp and golden."
+    ],
+    "notes": []
+  }
+}

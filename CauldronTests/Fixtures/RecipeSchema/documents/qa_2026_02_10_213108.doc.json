@@ -1,0 +1,55 @@
+{
+  "id": "qa_2026_02_10_213108",
+  "source_type": "url",
+  "normalized_lines": [
+    "Skillet White Pesto Chicken and Orzo",
+    "Ingredients",
+    "1/2 cup oil-packed sun-dried tomatoes, oil drained",
+    "6 boneless chicken breasts or thighs",
+    "kosher salt and black pepper",
+    "1/4 cup all-purpose flour",
+    "2 teaspoons Italian seasoning",
+    "2 tablespoons salted butter",
+    "2 cloves garlic chopped",
+    "1 cup dry orzo pasta",
+    "chili flakes",
+    "1 1/2 cups chicken broth",
+    "1 cup heavy cream",
+    "1/4 cup basil pesto",
+    "1/2 cup grated parmesan cheese",
+    "2 tablespoons fresh thyme",
+    "Instructions",
+    "1. Preheat the oven to 400\u00b0 F. Drain 3 tablespoons of oil from the sun-dried tomato jar into a large skillet with sides. Chop the sun-dried tomatoes and set aside.",
+    "2. Season the chicken with salt and pepper. Add the flour to a shallow bowl. Dredge the chicken through the flour and toss to coat.",
+    "3. Set the skillet with oil over medium-high heat. Add the chicken and sear on both sides until golden, 3-5 minutes per side. Sprinkle the chicken with 1 teaspoon Italian seasoning. Remove the chicken from the skillet to a plate.",
+    "4. To the same skillet, add the butter, 1 teaspoon Italian seasoning, garlic, orzo, and season with chili flakes. Cook until lightly golden, 2 minutes. Add the broth. Bring to a boil, cook for 3-5 minutes, then add the cream, pesto, and sun-dried tomatoes. Slide the chicken and any juices left on the plate back into the skillet. Sprinkle over the parmesan. Transfer to the oven and cook, uncovered, for 10 minutes, until the sauce is bubbling around the chicken.",
+    "5. Serve the chicken, orzo, and sauce topped with thyme. YUM."
+  ],
+  "target_recipe": {
+    "title": "Skillet White Pesto Chicken and Orzo",
+    "ingredients": [
+      "1/2 cup oil-packed sun-dried tomatoes, oil drained",
+      "6 boneless chicken breasts or thighs",
+      "kosher salt and black pepper",
+      "1/4 cup all-purpose flour",
+      "2 teaspoons Italian seasoning",
+      "2 tablespoons salted butter",
+      "2 cloves garlic chopped",
+      "1 cup dry orzo pasta",
+      "chili flakes",
+      "1 1/2 cups chicken broth",
+      "1 cup heavy cream",
+      "1/4 cup basil pesto",
+      "1/2 cup grated parmesan cheese",
+      "2 tablespoons fresh thyme"
+    ],
+    "steps": [
+      "1. Preheat the oven to 400\u00b0 F. Drain 3 tablespoons of oil from the sun-dried tomato jar into a large skillet with sides. Chop the sun-dried tomatoes and set aside.",
+      "2. Season the chicken with salt and pepper. Add the flour to a shallow bowl. Dredge the chicken through the flour and toss to coat.",
+      "3. Set the skillet with oil over medium-high heat. Add the chicken and sear on both sides until golden, 3-5 minutes per side. Sprinkle the chicken with 1 teaspoon Italian seasoning. Remove the chicken from the skillet to a plate.",
+      "4. To the same skillet, add the butter, 1 teaspoon Italian seasoning, garlic, orzo, and season with chili flakes. Cook until lightly golden, 2 minutes. Add the broth. Bring to a boil, cook for 3-5 minutes, then add the cream, pesto, and sun-dried tomatoes. Slide the chicken and any juices left on the plate back into the skillet. Sprinkle over the parmesan. Transfer to the oven and cook, uncovered, for 10 minutes, until the sauce is bubbling around the chicken.",
+      "5. Serve the chicken, orzo, and sauce topped with thyme. YUM."
+    ],
+    "notes": []
+  }
+}

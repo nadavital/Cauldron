@@ -1,0 +1,33 @@
+{
+  "id": "sheet_pan_chicken",
+  "source_type": "ocr",
+  "normalized_lines": [
+    "Sheet Pan Chicken",
+    "Ingredients",
+    "1 lb chicken thighs",
+    "2 tbsp olive oil",
+    "1 tsp paprika",
+    "Directions",
+    "1. Preheat oven to 425F",
+    "2. Toss chicken with oil and paprika",
+    "3. Roast for 30 minutes",
+    "Tip:",
+    "Let rest 5 minutes before serving"
+  ],
+  "target_recipe": {
+    "title": "Sheet Pan Chicken",
+    "ingredients": [
+      "1 lb chicken thighs",
+      "2 tbsp olive oil",
+      "1 tsp paprika"
+    ],
+    "steps": [
+      "Preheat oven to 425F",
+      "Toss chicken with oil and paprika",
+      "Roast for 30 minutes"
+    ],
+    "notes": [
+      "Let rest 5 minutes before serving"
+    ]
+  }
+}

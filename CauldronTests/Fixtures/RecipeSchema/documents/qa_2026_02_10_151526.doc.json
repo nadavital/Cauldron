@@ -1,0 +1,46 @@
+{
+  "id": "qa_2026_02_10_151526",
+  "source_type": "url",
+  "normalized_lines": [
+    "Congee (Chinese Rice Porridge)",
+    "Ingredients",
+    "1 cup medium or long-grain white rice",
+    "8 cups water",
+    "1 (1-inch) piece ginger",
+    "3 cloves garlic",
+    "2 medium scallions",
+    "1 tablespoon soy sauce or tamari",
+    "1 1/2 teaspoons kosher salt, plus more as needed",
+    "1 teapoon toasted sesame oil, plus more for drizzling",
+    "1/2 teaspoon ground white pepper",
+    "Instructions",
+    "Place 1 cup white rice in a fine-mesh strainer and rinse under cold water until the water runs mostly clear. Place the rice in a large saucepan and add 8 cups water. Bring to a boil over medium-high heat.",
+    "Meanwhile, peel and thinly slice a 1-inch piece of ginger. Thinly slice 3 garlic cloves. Thinly slice 2 medium scallions on a slight diagonal, keeping the white and green parts separate. Reserve the green parts for garnish.",
+    "When the congee is boiling, reduce the heat as needed to maintain a brisk simmer. Add the ginger, garlic, and scallion whites. Stir to combine. Simmer uncovered, stirring occasionally and making sure to scrape to the bottom of the saucepan, until very creamy and thickened, 30 to 35 minutes.",
+    "When the congee is ready, add 1 tablespoon soy sauce or tamari, 1 1/2 teaspoons kosher salt, 1 teaspoon toasted sesame oil, and 1/2 teaspoon ground white pepper. Stir to combine. Taste and season with more kosher salt as needed. Serve topped with the reserved scallion greens and a drizzle of toasted sesame oil.",
+    "Recipe Notes:",
+    "Storage: The congee can be refrigerated in an airtight container for up to 5 days. Reheat congee over medium-low heat, and add a splash of water to thin out if too thick."
+  ],
+  "target_recipe": {
+    "title": "Congee (Chinese Rice Porridge)",
+    "ingredients": [
+      "1 cup medium or long-grain white rice",
+      "8 cups water",
+      "1 (1-inch) piece ginger",
+      "3 cloves garlic",
+      "2 medium scallions",
+      "1 tablespoon soy sauce or tamari",
+      "1 1/2 teaspoons kosher salt, plus more as needed",
+      "1 teapoon toasted sesame oil, plus more for drizzling",
+      "1/2 teaspoon ground white pepper"
+    ],
+    "steps": [
+      "Place 1 cup white rice in a fine-mesh strainer and rinse under cold water until the water runs mostly clear. Place the rice in a large saucepan and add 8 cups water. Bring to a boil over medium-high heat.",
+      "Meanwhile, peel and thinly slice a 1-inch piece of ginger. Thinly slice 3 garlic cloves. Thinly slice 2 medium scallions on a slight diagonal, keeping the white and green parts separate. Reserve the green parts for garnish.",
+      "When the congee is boiling, reduce the heat as needed to maintain a brisk simmer. Add the ginger, garlic, and scallion whites. Stir to combine. Simmer uncovered, stirring occasionally and making sure to scrape to the bottom of the saucepan, until very creamy and thickened, 30 to 35 minutes.",
+      "When the congee is ready, add 1 tablespoon soy sauce or tamari, 1 1/2 teaspoons kosher salt, 1 teaspoon toasted sesame oil, and 1/2 teaspoon ground white pepper. Stir to combine. Taste and season with more kosher salt as needed. Serve topped with the reserved scallion greens and a drizzle of toasted sesame oil.",
+      "Storage: The congee can be refrigerated in an airtight container for up to 5 days. Reheat congee over medium-low heat, and add a splash of water to thin out if too thick."
+    ],
+    "notes": []
+  }
+}

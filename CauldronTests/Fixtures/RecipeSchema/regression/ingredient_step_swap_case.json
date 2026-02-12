@@ -1,0 +1,9 @@
+{
+  "name": "ingredient_step_swap_case",
+  "text": "Weeknight Stir Fry\nIngredients:\n2 tbsp soy sauce\n1 tbsp sesame oil\nInstructions:\nHeat pan over high heat\nCook vegetables for 5 minutes\nAdd sauce and toss",
+  "expected": {
+    "ingredients": ["2 tbsp soy sauce", "1 tbsp sesame oil"],
+    "steps": ["Heat pan over high heat", "Cook vegetables for 5 minutes", "Add sauce and toss"],
+    "notes_contains": []
+  }
+}

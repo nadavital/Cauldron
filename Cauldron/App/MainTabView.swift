@@ -23,12 +23,20 @@ struct MainTabView: View {
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
-    @State private var showingSharedImporter = false
-    @State private var sharedImportURL: URL?
+    @State private var sharedImportRequest: SharedImportRequest?
     @State private var didCheckInitialPendingImport = false
+    @State private var isSavingPreparedSharedRecipe = false
+    @State private var showSharedRecipeSavedToast = false
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
+
+    private struct SharedImportRequest: Identifiable {
+        let id = UUID()
+        let initialURL: URL?
+        let preparedRecipe: Recipe?
+        let preparedSourceInfo: String?
+    }
 
     private var isCookModeActive: Bool {
         dependencies.cookModeCoordinator.isActive
@@ -81,10 +89,12 @@ struct MainTabView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingSharedImporter) {
+        .sheet(item: $sharedImportRequest) { request in
             ImporterView(
                 dependencies: dependencies,
-                initialURL: sharedImportURL
+                initialURL: request.initialURL,
+                preparedRecipe: request.preparedRecipe,
+                preparedSourceInfo: request.preparedSourceInfo
             )
         }
         .tint(.cauldronOrange)
@@ -140,9 +150,27 @@ struct MainTabView: View {
             icon: "trash.fill",
             message: "Recipe was deleted"
         )
+        .toast(
+            isShowing: $showSharedRecipeSavedToast,
+            icon: "checkmark.circle.fill",
+            message: "Recipe imported from share sheet"
+        )
     }
 
     private func openPendingImporterIfNeeded() {
+        guard !isSavingPreparedSharedRecipe else {
+            return
+        }
+
+        if let prepared = ShareExtensionImportStore.consumePreparedRecipe() {
+            AppLogger.general.info("📥 Consumed prepared Share Extension recipe payload")
+            isSavingPreparedSharedRecipe = true
+            Task {
+                await autoSavePreparedSharedRecipe(prepared)
+            }
+            return
+        }
+
         guard let pendingURL = ShareExtensionImportStore.consumePendingRecipeURL() else {
             return
         }
@@ -153,8 +181,41 @@ struct MainTabView: View {
 
     private func openImporter(with url: URL) {
         selectedTab = .cook
-        sharedImportURL = url
-        showingSharedImporter = true
+        sharedImportRequest = SharedImportRequest(
+            initialURL: url,
+            preparedRecipe: nil,
+            preparedSourceInfo: nil
+        )
+    }
+
+    private func openPreparedImporter(recipe: Recipe, sourceInfo: String) {
+        selectedTab = .cook
+        sharedImportRequest = SharedImportRequest(
+            initialURL: nil,
+            preparedRecipe: recipe,
+            preparedSourceInfo: sourceInfo
+        )
+    }
+
+    @MainActor
+    private func autoSavePreparedSharedRecipe(_ prepared: PreparedSharedRecipe) async {
+        defer { isSavingPreparedSharedRecipe = false }
+
+        let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
+            from: prepared.recipe,
+            userId: CurrentUserSession.shared.userId,
+            imageManager: dependencies.imageManager
+        )
+
+        do {
+            try await dependencies.recipeRepository.create(recipeToSave)
+            AppLogger.general.info("✅ Auto-saved prepared share recipe: \(recipeToSave.title)")
+            selectedTab = .cook
+            showSharedRecipeSavedToast = true
+        } catch {
+            AppLogger.general.error("❌ Failed to auto-save prepared share recipe: \(error.localizedDescription)")
+            openPreparedImporter(recipe: prepared.recipe, sourceInfo: prepared.sourceInfo)
+        }
     }
 }
 

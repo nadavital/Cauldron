@@ -1,0 +1,31 @@
+{
+  "id": "garlic_shrimp",
+  "source_type": "url",
+  "normalized_lines": [
+    "Garlic Shrimp",
+    "Ingredients:",
+    "1 lb shrimp",
+    "3 cloves garlic, minced",
+    "2 tbsp butter",
+    "Instructions:",
+    "Pat shrimp dry",
+    "Saute garlic in butter",
+    "Add shrimp and cook 3 minutes",
+    "Serve with lemon wedges"
+  ],
+  "target_recipe": {
+    "title": "Garlic Shrimp",
+    "ingredients": [
+      "1 lb shrimp",
+      "3 cloves garlic, minced",
+      "2 tbsp butter"
+    ],
+    "steps": [
+      "Pat shrimp dry",
+      "Saute garlic in butter",
+      "Add shrimp and cook 3 minutes",
+      "Serve with lemon wedges"
+    ],
+    "notes": []
+  }
+}

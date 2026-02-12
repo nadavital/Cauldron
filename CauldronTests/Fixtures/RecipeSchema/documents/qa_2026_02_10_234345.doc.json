@@ -1,0 +1,63 @@
+{
+  "id": "qa_2026_02_10_234345",
+  "source_type": "url",
+  "normalized_lines": [
+    "Greek Chicken Souvlaki Recipe with Tzatziki",
+    "Ingredients",
+    "10 garlic cloves, peeled",
+    "2 tbsp dried oregano",
+    "1 tsp dried rosemary",
+    "1 tsp sweet paprika",
+    "1 tsp each Kosher salt and black pepper",
+    "1/4 cup Private Reserve Greek extra virgin olive oil",
+    "1/4 cup dry white wine",
+    "Juice of 1 lemon",
+    "2 bay leaves",
+    "2 1/2 lb organic boneless skinless chicken breast, fat removed, cut into 1 1/2 inch pieces",
+    "Greek pita bread",
+    "Tzatziki Sauce (make according to this recipe)",
+    "Sliced tomato, cucumber, onions, and Kalamata olives",
+    "Greek salad recipe",
+    "Roasted Garlic Hummus",
+    "Mezze Platter",
+    "Watermelon and Cucumber Salad",
+    "Instructions",
+    "Prepare the marinade. In the bowl of a small food processor, add garlic, oregano, rosemary, paprika, salt, pepper, olive oil, white wine, and lemon juice (do NOT add the dried bay leaves yet). Pulse until well combined.",
+    "Place chicken in a large bowl and add bay leaves. Top with marinade. Toss to combine, making sure chicken is well-coated with marinade. cover tightly and refrigerate for 2 hours or overnight (see note for quicker marinating option.)",
+    "Soak 10 to 12 wooden skewers in water for 30 to 45 minutes or so. Prepare Tzatziki sauce and other fixings, and if you\u2019re adding Greek salad or other sides, prepare those as well. (some sides like roasted garlic hummus may take longer, you can prepare those in advance).",
+    "When ready, thread marinated chicken pieces through the prepared skewers.",
+    "Prepare outdoor grill (or griddle). Brush grates with a little oil and heat over medium-high heat. t. Place chicken skewers on grill (or cook in batches on griddle) until well browned and internal temperature registers 160\u00b0F on instant read thermometer (it will continue cooking to 165\u00b0F as it rests). Be sure to turn skewers evenly to cook on all sides, about 5 minutes total. (Adjust temperature of grill if necessary). While grilling, brush lightly with the marinade (then discard any left marinade).",
+    "Transfer chicken to serving platter and let rest for 3 minutes. Meanwhile, briefly grill pitas and keep warm.",
+    "Assemble grilled chicken souvlaki pitas. First, spread Tzatziki sauce on pita, add chicken pieces (take them off skewers first, of course) then add veggies and olives.",
+    "Optional: if you want more items to add to your buffet, consider Greek salad, watermelon salad, roasted garlic hummus, or a big Mezze platter."
+  ],
+  "target_recipe": {
+    "title": "Greek Chicken Souvlaki Recipe with Tzatziki",
+    "ingredients": [
+      "10 garlic cloves, peeled",
+      "2 tbsp dried oregano",
+      "1 tsp dried rosemary",
+      "1 tsp sweet paprika",
+      "1 tsp each Kosher salt and black pepper",
+      "1/4 cup Private Reserve Greek extra virgin olive oil",
+      "1/4 cup dry white wine",
+      "Juice of 1 lemon",
+      "2 bay leaves",
+      "2 1/2 lb organic boneless skinless chicken breast, fat removed, cut into 1 1/2 inch pieces",
+      "Greek pita bread",
+      "Tzatziki Sauce (make according to this recipe)",
+      "Sliced tomato, cucumber, onions, and Kalamata olives"
+    ],
+    "steps": [
+      "Prepare the marinade. In the bowl of a small food processor, add garlic, oregano, rosemary, paprika, salt, pepper, olive oil, white wine, and lemon juice (do NOT add the dried bay leaves yet). Pulse until well combined.",
+      "Place chicken in a large bowl and add bay leaves. Top with marinade. Toss to combine, making sure chicken is well-coated with marinade. cover tightly and refrigerate for 2 hours or overnight (see note for quicker marinating option.)",
+      "Soak 10 to 12 wooden skewers in water for 30 to 45 minutes or so. Prepare Tzatziki sauce and other fixings, and if you\u2019re adding Greek salad or other sides, prepare those as well. (some sides like roasted garlic hummus may take longer, you can prepare those in advance).",
+      "When ready, thread marinated chicken pieces through the prepared skewers.",
+      "Prepare outdoor grill (or griddle). Brush grates with a little oil and heat over medium-high heat. t. Place chicken skewers on grill (or cook in batches on griddle) until well browned and internal temperature registers 160\u00b0F on instant read thermometer (it will continue cooking to 165\u00b0F as it rests). Be sure to turn skewers evenly to cook on all sides, about 5 minutes total. (Adjust temperature of grill if necessary). While grilling, brush lightly with the marinade (then discard any left marinade).",
+      "Transfer chicken to serving platter and let rest for 3 minutes. Meanwhile, briefly grill pitas and keep warm.",
+      "Assemble grilled chicken souvlaki pitas. First, spread Tzatziki sauce on pita, add chicken pieces (take them off skewers first, of course) then add veggies and olives.",
+      "Optional: if you want more items to add to your buffet, consider Greek salad, watermelon salad, roasted garlic hummus, or a big Mezze platter."
+    ],
+    "notes": []
+  }
+}

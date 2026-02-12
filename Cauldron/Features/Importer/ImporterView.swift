@@ -12,19 +12,36 @@ import UIKit
 struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ImporterViewModel
-    @State private var showingPreview = false
+    @State private var previewContext: PreviewContext?
     @State private var hasTriggeredAutoImport = false
+    @State private var hasPresentedPreparedPreview = false
     @State private var showingOCRPicker = false
     @State private var showingOCRSourceDialog = false
     @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
     private let autoImportFromInitialURL: Bool
+    private let hasPreparedRecipe: Bool
 
-    init(dependencies: DependencyContainer, initialURL: URL? = nil) {
+    private struct PreviewContext: Identifiable {
+        let id = UUID()
+        let recipe: Recipe
+        let sourceInfo: String
+    }
+
+    init(
+        dependencies: DependencyContainer,
+        initialURL: URL? = nil,
+        preparedRecipe: Recipe? = nil,
+        preparedSourceInfo: String? = nil
+    ) {
         let viewModel = ImporterViewModel(dependencies: dependencies)
         if let initialURL {
             viewModel.preloadURL(initialURL)
         }
+        if let preparedRecipe, let preparedSourceInfo {
+            viewModel.preloadImportedRecipe(preparedRecipe, sourceInfo: preparedSourceInfo)
+        }
         self.autoImportFromInitialURL = initialURL != nil
+        self.hasPreparedRecipe = preparedRecipe != nil
         _viewModel = State(initialValue: viewModel)
     }
     
@@ -79,18 +96,16 @@ struct ImporterView: View {
             .task {
                 await autoImportIfNeeded()
             }
-            .fullScreenCover(isPresented: $showingPreview) {
-                if let recipe = viewModel.importedRecipe, let source = viewModel.sourceInfo {
-                    RecipeImportPreviewView(
-                        importedRecipe: recipe,
-                        dependencies: viewModel.dependencies,
-                        sourceInfo: source,
-                        onSave: {
-                            // Dismiss the importer sheet when recipe is saved
-                            dismiss()
-                        }
-                    )
-                }
+            .fullScreenCover(item: $previewContext) { context in
+                RecipeImportPreviewView(
+                    importedRecipe: context.recipe,
+                    dependencies: viewModel.dependencies,
+                    sourceInfo: context.sourceInfo,
+                    onSave: {
+                        // Dismiss the importer sheet when recipe is saved
+                        dismiss()
+                    }
+                )
             }
             .fullScreenCover(isPresented: $showingOCRPicker) {
                 ImagePicker(image: $viewModel.selectedOCRImage, sourceType: ocrSourceType, allowsEditing: false)
@@ -150,7 +165,10 @@ struct ImporterView: View {
     }
 
     private var generateLoadingTitle: String {
-        autoImportFromInitialURL && viewModel.importType == .url ? "Importing shared link..." : "Importing..."
+        if hasPreparedRecipe {
+            return "Preparing shared recipe..."
+        }
+        return autoImportFromInitialURL && viewModel.importType == .url ? "Importing shared link..." : "Importing..."
     }
     
     private var headerSection: some View {
@@ -253,12 +271,7 @@ struct ImporterView: View {
     }
 
     private var isValidURL: Bool {
-        guard !viewModel.urlString.isEmpty else { return false }
-        if let url = URL(string: viewModel.urlString),
-           (url.scheme == "http" || url.scheme == "https") {
-            return true
-        }
-        return false
+        viewModel.normalizedURLInput() != nil
     }
 
     private var textSection: some View {
@@ -351,6 +364,9 @@ struct ImporterView: View {
     }
 
     private var headerDescription: String {
+        if hasPreparedRecipe {
+            return "Recipe details were prepared in Share Sheet. Review and save to your library."
+        }
         if autoImportFromInitialURL {
             return "Link received from Share Sheet. We'll import it now, then you can review and save."
         }
@@ -385,12 +401,22 @@ struct ImporterView: View {
 
     private func performImport() async {
         await viewModel.importRecipe()
-        if viewModel.isSuccess {
-            showingPreview = true
+        if let recipe = viewModel.importedRecipe,
+           let source = viewModel.sourceInfo {
+            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
         }
     }
 
     private func autoImportIfNeeded() async {
+        if hasPreparedRecipe,
+           !hasPresentedPreparedPreview,
+           let recipe = viewModel.importedRecipe,
+           let source = viewModel.sourceInfo {
+            hasPresentedPreparedPreview = true
+            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
+            return
+        }
+
         guard autoImportFromInitialURL,
               !hasTriggeredAutoImport,
               viewModel.importType == .url,

@@ -1,0 +1,72 @@
+{
+  "id": "qa_2026_02_10_205649",
+  "source_type": "manual_edge",
+  "normalized_lines": [
+    "Lemon Herb Chicken With Pan Sauce",
+    "Recipe by Test Kitchen",
+    "\u2605\u2605\u2605\u2605\u2605 4.8 (41)",
+    "Jump to recipe",
+    "Prep: 20 mins",
+    "Cook: 30 mins",
+    "Total: 50 mins",
+    "Yield: 4 servings",
+    "Ingredients",
+    "Chicken:",
+    "1 1/2 lb chicken thighs",
+    "1 tsp kosher salt",
+    "1/2 tsp black pepper",
+    "2 tbsp olive oil",
+    "Sauce:",
+    "1 tablespoon plus 1/2 cup chicken stock",
+    "3 to 4 garlic cloves, minced",
+    "1 tbsp butter",
+    "1 tsp Dijon mustard",
+    "1 lemon, juiced",
+    "2 tbsp chopped parsley",
+    "To serve:",
+    "Cooked rice, for serving",
+    "Lemon wedges",
+    "Method",
+    "Pat chicken dry and season with salt and pepper.",
+    "Heat oil in a skillet over medium-high heat.",
+    "Sear chicken 5 to 6 minutes per side, then transfer to a plate.",
+    "Lower heat and add garlic; cook 30 seconds.",
+    "Add stock and scrape browned bits from the pan.",
+    "Whisk in butter, mustard, and lemon juice.",
+    "Return chicken to pan and simmer 5 minutes.",
+    "Finish with parsley and serve with rice and lemon wedges.",
+    "Chef's note: add a splash of cream for a richer sauce.",
+    "Nutrition disclaimer: values are estimates only.",
+    "Share this recipe on Pinterest"
+  ],
+  "target_recipe": {
+    "title": "Lemon Herb Chicken With Pan Sauce",
+    "ingredients": [
+      "1 1/2 lb chicken thighs",
+      "1 tsp kosher salt",
+      "1/2 tsp black pepper",
+      "2 tbsp olive oil",
+      "1 tablespoon plus 1/2 cup chicken stock",
+      "3 to 4 garlic cloves, minced",
+      "1 tbsp butter",
+      "1 tsp Dijon mustard",
+      "1 lemon, juiced",
+      "2 tbsp chopped parsley",
+      "Cooked rice, for serving",
+      "Lemon wedges"
+    ],
+    "steps": [
+      "Pat chicken dry and season with salt and pepper.",
+      "Heat oil in a skillet over medium-high heat.",
+      "Sear chicken 5 to 6 minutes per side, then transfer to a plate.",
+      "Lower heat and add garlic; cook 30 seconds.",
+      "Add stock and scrape browned bits from the pan.",
+      "Whisk in butter, mustard, and lemon juice.",
+      "Return chicken to pan and simmer 5 minutes.",
+      "Finish with parsley and serve with rice and lemon wedges."
+    ],
+    "notes": [
+      "Chef's note: add a splash of cream for a richer sauce."
+    ]
+  }
+}

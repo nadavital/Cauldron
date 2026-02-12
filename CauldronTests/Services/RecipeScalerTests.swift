@@ -81,6 +81,33 @@ final class RecipeScalerTests: XCTestCase {
         XCTAssertEqual(scaled.recipe.ingredients[4].name, "salt")
     }
 
+    func testScale_IngredientWithAdditionalQuantities_ScalesAllQuantities() {
+        let recipe = Recipe(
+            title: "Test",
+            ingredients: [
+                Ingredient(
+                    name: "sugar",
+                    quantity: Quantity(value: 1, unit: .tablespoon),
+                    additionalQuantities: [Quantity(value: 0.5, unit: .cup)]
+                )
+            ],
+            steps: [CookStep(index: 0, text: "Mix")],
+            yields: "2 servings"
+        )
+
+        let scaled = RecipeScaler.scale(recipe, by: 2.0)
+
+        guard let primaryQuantity = scaled.recipe.ingredients[0].quantity else {
+            XCTFail("Expected primary quantity after scaling")
+            return
+        }
+        XCTAssertEqual(primaryQuantity.value, 2.0, accuracy: 0.001)
+        XCTAssertEqual(primaryQuantity.unit, .tablespoon)
+        XCTAssertEqual(scaled.recipe.ingredients[0].additionalQuantities.count, 1)
+        XCTAssertEqual(scaled.recipe.ingredients[0].additionalQuantities[0].value, 1.0, accuracy: 0.001)
+        XCTAssertEqual(scaled.recipe.ingredients[0].additionalQuantities[0].unit, .cup)
+    }
+
     // MARK: - Smart Rounding Tests
 
     func testScale_SmallQuantity_RoundsToSixteenth() {

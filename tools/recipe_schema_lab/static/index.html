@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cauldron Model Lab</title>
+  <link rel="icon" type="image/svg+xml" href="/cauldron-icon.svg" />
+  <link rel="stylesheet" href="/static/css/base.css" />
+  <link rel="stylesheet" href="/static/css/layout.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
+</head>
+<body>
+  <div class="appShell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="/cauldron-icon.svg" alt="Cauldron" class="brandIcon" />
+        <div>
+          <h1>Cauldron Model Lab</h1>
+          <p>Local recipe model QA</p>
+        </div>
+      </div>
+
+      <nav class="navStack">
+        <button class="navBtn active" data-view="lab">Lab</button>
+        <button class="navBtn" data-view="local">Saved Local Cases</button>
+        <button class="navBtn" data-view="dataset">Dataset Fixtures</button>
+        <button class="navBtn" data-view="metrics">Metrics</button>
+        <button class="navBtn" data-view="settings">Settings</button>
+      </nav>
+
+      <p class="small muted">Use tabs to test parsing, inspect saved corrections, and reload fixtures into the editor.</p>
+    </aside>
+
+    <main class="mainView">
+      <section id="view-lab" class="view">
+        <div id="statusBar"></div>
+
+        <div id="labEmptyState" class="blankState">
+          <h2>Run a Recipe Parse</h2>
+          <p class="small muted">Paste a recipe URL or text, or attach an image in the composer below.</p>
+        </div>
+
+        <div id="labWorkspace" class="hidden">
+          <div class="card" id="resultsCard">
+            <div class="sectionHeader split">
+              <div>
+                <h2>Predicted / Corrected Lines</h2>
+                <p class="small muted">Edit both line text and labels before export.</p>
+              </div>
+              <div class="actionsInline">
+                <button id="saveBtn" class="secondary">Save Local JSON</button>
+                <button id="appendBtn" class="warn">Append To Dataset</button>
+              </div>
+            </div>
+            <div id="resultsSummary">No predictions yet.</div>
+            <div id="quickOutput">No output yet. Use the composer at the bottom to run a prediction.</div>
+            <div class="tableWrap">
+              <table id="linesTable">
+                <thead>
+                  <tr><th>#</th><th>Line</th><th>Predicted</th><th>Confidence</th><th>Corrected Label</th><th>Derived Section</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="linesPager" class="linesPager hidden">
+              <button id="linesPrevBtn" class="secondary smallBtn" type="button">Previous</button>
+              <div id="linesPageSummary" class="small muted">Rows 0-0 of 0</div>
+              <button id="linesNextBtn" class="secondary smallBtn" type="button">Next</button>
+            </div>
+          </div>
+
+          <div class="card" id="appPreviewCard">
+            <div class="sectionHeader split">
+              <div>
+                <h2>App Save Preview</h2>
+                <p class="small muted">Uses corrected labels to approximate iOS saved recipe shape.</p>
+              </div>
+              <button id="refreshPreviewBtn" class="secondary">Refresh App Preview</button>
+            </div>
+
+            <div id="appPreviewSummary">No app save preview yet.</div>
+            <div class="previewColumns">
+              <div>
+                <label>Ingredient Sections (Qty + Unit)</label>
+                <div id="ingredientSectionsPreview" class="previewBox mono">No sections yet.</div>
+              </div>
+              <div>
+                <label>Step Sections</label>
+                <div id="stepSectionsPreview" class="previewBox mono">No sections yet.</div>
+              </div>
+            </div>
+            <div class="sectionHeader split">
+              <label>Recipe JSON (App-like Save Shape)</label>
+              <button id="copyAppRecipeJsonBtn" class="secondary smallBtn" type="button">Copy JSON</button>
+            </div>
+            <pre id="appRecipeJson" class="mono">No preview yet.</pre>
+          </div>
+        </div>
+
+        <div class="labComposerDock">
+          <div class="composerShell">
+            <button id="composerAttachBtn" class="composerIconBtn" type="button" title="Attach image">+</button>
+            <input id="composerImageInput" type="file" accept="image/*" class="hiddenInput" />
+            <textarea
+              id="composerInput"
+              class="composerInput"
+              placeholder="Paste a recipe URL or text. Attach an image for OCR."
+              aria-label="Recipe input"
+            ></textarea>
+            <button id="predictBtn" class="primary composerSendBtn" type="button">Predict</button>
+          </div>
+          <div id="composerAttachmentRow" class="composerMeta hidden">
+            <span class="composerAttachmentChip">
+              <span id="composerAttachmentName"></span>
+              <button id="composerAttachmentRemoveBtn" class="composerAttachmentRemoveBtn" type="button" aria-label="Remove attached image">x</button>
+            </span>
+          </div>
+          <div class="composerMeta composerOptionsRow">
+            <label class="saveKindInline" for="composerSaveKind">
+              <span>Save as</span>
+              <select id="composerSaveKind">
+                <option value="train">Training Example</option>
+                <option value="holdout">Holdout Example (Excluded from training)</option>
+                <option value="ocr_failure">OCR Failure (Excluded from training)</option>
+                <option value="parse_failure">Parse Failure (Excluded from training)</option>
+              </select>
+            </label>
+            <label class="checkInline" for="composerHoldoutCheck">
+              <input id="composerHoldoutCheck" type="checkbox" />
+              Holdout (<code>holdout_*</code>)
+            </label>
+            <span id="composerSaveKindHint" class="small muted"></span>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-local" class="view hidden">
+        <div class="card">
+          <div class="sectionHeader split">
+            <div>
+              <h2>Saved Local Cases</h2>
+              <p id="localCasesSummary" class="small muted">Loading local cases...</p>
+            </div>
+            <button id="localRefreshBtn" class="secondary">Refresh</button>
+          </div>
+
+          <div class="caseGrid">
+            <div class="tableWrap">
+              <table id="localCasesTable">
+                <thead>
+                  <tr><th>ID</th><th>Title</th><th>Type</th><th class="tightCell">Lines</th><th class="tightCell">Action</th></tr>
+                </thead>
+                <tbody id="localCasesBody"></tbody>
+              </table>
+            </div>
+            <div>
+              <label>Case Detail</label>
+              <pre id="localCaseDetail" class="caseDetail mono">Pick a local case to inspect it.</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-dataset" class="view hidden">
+        <div class="card">
+          <div class="sectionHeader split">
+            <div class="grow">
+              <h2>Dataset Fixtures</h2>
+              <label for="datasetBrowseDir">Dataset dir (browse fixtures)</label>
+              <input id="datasetBrowseDir" type="text" />
+              <p id="datasetCasesSummary" class="small muted">Loading dataset cases...</p>
+            </div>
+            <div class="actionsInline">
+              <button id="datasetSyncBtn" class="secondary">Use Settings Dataset Dir</button>
+              <button id="datasetRefreshBtn" class="secondary">Refresh</button>
+            </div>
+          </div>
+
+          <div class="caseGrid">
+            <div class="tableWrap">
+              <table id="datasetCasesTable">
+                <thead>
+                  <tr><th>ID</th><th>Title</th><th>Type</th><th class="tightCell">Lines</th><th class="tightCell">Action</th></tr>
+                </thead>
+                <tbody id="datasetCasesBody"></tbody>
+              </table>
+            </div>
+            <div>
+              <label>Fixture Detail</label>
+              <pre id="datasetCaseDetail" class="caseDetail mono">Pick a dataset fixture to inspect it.</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-metrics" class="view hidden">
+        <div class="card">
+          <div class="sectionHeader split">
+            <div>
+              <h2>Metrics</h2>
+              <p class="small muted">Run evaluation/regression and retrain from here. Fixed holdout checks use dataset IDs prefixed with <code>holdout_</code>.</p>
+            </div>
+            <div class="actionsInline">
+              <button id="metricsBtn" class="secondary">Run Metrics</button>
+              <button id="retrainBtn" class="primary">Retrain Model</button>
+            </div>
+          </div>
+          <div id="metricsStatus"></div>
+          <div id="metricsSummaryCards" class="metricsGrid">
+            <div class="metricCard">
+              <div class="metricLabel">Model Status</div>
+              <div id="metricOverall" class="metricValue">No run yet</div>
+              <div id="metricOverallHint" class="metricHint">Run metrics to populate scorecards.</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Macro F1</div>
+              <div id="metricMacroF1" class="metricValue">-</div>
+              <div id="metricMacroF1Hint" class="metricHint">Target: >= 0.88</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Note Recall</div>
+              <div id="metricNoteRecall" class="metricValue">-</div>
+              <div id="metricNoteRecallHint" class="metricHint">Target: >= 0.85</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Ing/Step Confusion</div>
+              <div id="metricConfusion" class="metricValue">-</div>
+              <div id="metricConfusionHint" class="metricHint">Target: <= 8.00%</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Fixed Holdout Macro F1</div>
+              <div id="metricFixedHoldoutF1" class="metricValue">-</div>
+              <div id="metricFixedHoldoutF1Hint" class="metricHint">No holdout fixtures detected.</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Regression Exact Match</div>
+              <div id="metricRegressionExact" class="metricValue">-</div>
+              <div id="metricRegressionExactHint" class="metricHint">Higher is better</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Regression Note Leakage</div>
+              <div id="metricRegressionLeak" class="metricValue">-</div>
+              <div id="metricRegressionLeakHint" class="metricHint">Target: <= 5.00%</div>
+            </div>
+            <div class="metricCard">
+              <div class="metricLabel">Regression Swap Rate</div>
+              <div id="metricRegressionSwap" class="metricValue">-</div>
+              <div id="metricRegressionSwapHint" class="metricHint">Target: <= 8.00%</div>
+            </div>
+          </div>
+          <div class="metricsHistoryWrap">
+            <h3>Progression</h3>
+            <p id="metricsHistorySummary" class="small muted">Newest first. Compare score trends across metric-only runs and retrains.</p>
+            <div class="tableWrap">
+              <table id="metricsHistoryTable">
+                <thead>
+                  <tr><th>When</th><th>Action</th><th>Status</th><th>Macro F1</th><th>Holdout F1</th><th>Note Recall</th><th>Confusion</th><th>Reg Exact</th></tr>
+                </thead>
+                <tbody id="metricsHistoryBody"></tbody>
+              </table>
+            </div>
+            <div id="metricsHistoryPager" class="linesPager hidden">
+              <button id="metricsHistoryPrevBtn" class="secondary smallBtn" type="button">Previous</button>
+              <div id="metricsHistoryPageSummary" class="small muted">Rows 0-0 of 0</div>
+              <button id="metricsHistoryNextBtn" class="secondary smallBtn" type="button">Next</button>
+            </div>
+          </div>
+          <div class="metricsHistoryWrap">
+            <h3>Trend</h3>
+            <p id="metricsTrendSummary" class="small muted">Run metrics to generate trend lines.</p>
+            <div class="metricsTrendLegend">
+              <span class="legendItem"><span class="legendSwatch macro"></span> Macro F1</span>
+              <span class="legendItem"><span class="legendSwatch holdout"></span> Holdout F1</span>
+              <span class="legendItem"><span class="legendSwatch confusion"></span> Confusion (lower is better)</span>
+            </div>
+            <div class="metricsTrendChartWrap">
+              <svg id="metricsTrendChart" viewBox="0 0 760 220" role="img" aria-label="Metrics trend chart"></svg>
+              <div id="metricsTrendEmpty" class="emptyState">Need at least 2 runs to draw trend lines.</div>
+            </div>
+          </div>
+          <div class="metricsHistoryWrap">
+            <h3>Latest Run Details</h3>
+            <div class="tableWrap">
+              <table id="metricsRunDetailsTable">
+                <tbody id="metricsRunDetailsBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="metricsHistoryWrap">
+            <h3>Per-Class Performance</h3>
+            <p class="small muted">Precision/recall/F1 by label for the latest run.</p>
+            <div class="tableWrap">
+              <table id="metricsPerClassTable">
+                <thead>
+                  <tr><th>Label</th><th>Precision</th><th>Recall</th><th>F1</th><th>Support</th></tr>
+                </thead>
+                <tbody id="metricsPerClassBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <details class="rawOutputToggle">
+            <summary>Raw Run Output</summary>
+            <div class="rawOutputActions">
+              <button id="copyMetricsRawBtn" class="secondary smallBtn" type="button">Copy Raw Output</button>
+            </div>
+            <pre id="metricsOutput" class="mono metricsOutput">No metrics run yet.</pre>
+          </details>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view hidden">
+        <div class="card">
+          <div class="sectionHeader">
+            <h2>Settings</h2>
+            <p class="small muted">Configure IDs and dataset paths used by save/append/metrics actions.</p>
+          </div>
+          <div class="row">
+            <div>
+              <label for="caseId">Next Case ID</label>
+              <input id="caseId" type="text" />
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <button id="resetCaseIdBtn" class="secondary">Generate New ID</button>
+            </div>
+            <div class="grow">
+              <label for="datasetDir">Dataset dir (append + metrics)</label>
+              <input id="datasetDir" type="text" />
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    window.APP_CONFIG = {
+      defaultDatasetDir: "__DATASET_DIR__",
+    };
+  </script>
+  <script src="/static/js/state.js"></script>
+  <script src="/static/js/views.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

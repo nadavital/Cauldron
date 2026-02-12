@@ -1,0 +1,60 @@
+{
+  "id": "holdout_003",
+  "source_type": "url_holdout",
+  "source_url": "https://www.inspiredtaste.net/98468/beef-bulgogi-recipe/",
+  "normalized_lines": [
+    "Beef Bulgogi (Korean BBQ Beef)",
+    "Ingredients",
+    "2 pounds top sirloin or ribeye (907g)",
+    "\u00bd cup low-sodium soy sauce or tamari (118ml)",
+    "2 tablespoons brown sugar",
+    "2 tablespoons rice wine vinegar",
+    "1 tablespoon sesame oil",
+    "3 tablespoons honey",
+    "1 teaspoon ground black pepper",
+    "\u00be teaspoon gochugaru (Korean chili powder)",
+    "4 cloves garlic, smashed",
+    "1 \u00bd inch piece fresh ginger, peeled and roughly chopped into \u00bc inch pieces",
+    "1 Asian pear, peeled, cored, and cut into 1-inch pieces",
+    "1 bunch green onions, trimmed and thinly sliced",
+    "1 tablespoon sesame seeds",
+    "3 tablespoons high-heat cooking oil, like avocado oil",
+    "Lettuce leaves, steamed rice, kimchi, and ssamjang (Korean dipping sauce), optional for serving",
+    "Instructions",
+    "Partially freeze the beef: Place the beef in the freezer for 20 to 30 minutes to firm up. This makes thinly slicing it much easier. Do not leave it much longer, or it will become too hard to slice safely.",
+    "Make the marinade: While the beef chills, prepare the marinade. Add the soy sauce, brown sugar, rice wine vinegar, sesame oil, honey, black pepper, gochugaru, smashed garlic cloves, roughly chopped ginger, and chopped pear to the bowl of a food processor. Pulse until you no longer see large bits of garlic, ginger, or pear.",
+    "Slice the beef: Remove the beef from the freezer and thinly slice across the grain, no more than \u00bc inch thick. If some are thinner or more scraggly, it is fine.",
+    "Marinate: Add the sliced beef to a nonreactive bowl (glass or stainless steel) and pour the marinade over it. Toss well, then press a sheet of plastic wrap or parchment paper directly onto the meat to prevent oxidation. Cover the bowl with foil or more plastic wrap and refrigerate for at least 4 hours and up to overnight.",
+    "Cook: Heat a wide, heavy-bottomed skillet over medium-high heat with a tablespoon of oil. Working in batches, lift the beef from the marinade, shaking off any excess liquid, and place it in the pan in a single layer. Sear without moving for 1 to 2 minutes, then flip and cook until caramelized and charred around the edges. Transfer to a plate and repeat with the remaining beef.",
+    "To finish: Once all the beef is cooked, return it all to the pan. Add the green onions and sesame seeds, tossing for about 30 seconds until the onions just begin to wilt. Serve immediately."
+  ],
+  "target_recipe": {
+    "title": "Beef Bulgogi (Korean BBQ Beef)",
+    "ingredients": [
+      "2 pounds top sirloin or ribeye (907g)",
+      "\u00bd cup low-sodium soy sauce or tamari (118ml)",
+      "2 tablespoons brown sugar",
+      "2 tablespoons rice wine vinegar",
+      "1 tablespoon sesame oil",
+      "3 tablespoons honey",
+      "1 teaspoon ground black pepper",
+      "\u00be teaspoon gochugaru (Korean chili powder)",
+      "4 cloves garlic, smashed",
+      "1 \u00bd inch piece fresh ginger, peeled and roughly chopped into \u00bc inch pieces",
+      "1 Asian pear, peeled, cored, and cut into 1-inch pieces",
+      "1 bunch green onions, trimmed and thinly sliced",
+      "1 tablespoon sesame seeds",
+      "3 tablespoons high-heat cooking oil, like avocado oil",
+      "Lettuce leaves, steamed rice, kimchi, and ssamjang (Korean dipping sauce), optional for serving"
+    ],
+    "steps": [
+      "Partially freeze the beef: Place the beef in the freezer for 20 to 30 minutes to firm up. This makes thinly slicing it much easier. Do not leave it much longer, or it will become too hard to slice safely.",
+      "Make the marinade: While the beef chills, prepare the marinade. Add the soy sauce, brown sugar, rice wine vinegar, sesame oil, honey, black pepper, gochugaru, smashed garlic cloves, roughly chopped ginger, and chopped pear to the bowl of a food processor. Pulse until you no longer see large bits of garlic, ginger, or pear.",
+      "Slice the beef: Remove the beef from the freezer and thinly slice across the grain, no more than \u00bc inch thick. If some are thinner or more scraggly, it is fine.",
+      "Marinate: Add the sliced beef to a nonreactive bowl (glass or stainless steel) and pour the marinade over it. Toss well, then press a sheet of plastic wrap or parchment paper directly onto the meat to prevent oxidation. Cover the bowl with foil or more plastic wrap and refrigerate for at least 4 hours and up to overnight.",
+      "Cook: Heat a wide, heavy-bottomed skillet over medium-high heat with a tablespoon of oil. Working in batches, lift the beef from the marinade, shaking off any excess liquid, and place it in the pan in a single layer. Sear without moving for 1 to 2 minutes, then flip and cook until caramelized and charred around the edges. Transfer to a plate and repeat with the remaining beef.",
+      "To finish: Once all the beef is cooked, return it all to the pan. Add the green onions and sesame seeds, tossing for about 30 seconds until the onions just begin to wilt. Serve immediately."
+    ],
+    "notes": []
+  }
+}

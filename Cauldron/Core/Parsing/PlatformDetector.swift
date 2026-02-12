@@ -18,17 +18,17 @@ struct PlatformDetector {
         }
 
         // YouTube detection
-        if host.contains("youtube.com") || host.contains("youtu.be") {
+        if hostMatches(host, domains: ["youtube.com", "youtu.be"]) {
             return .youtube
         }
 
         // TikTok detection
-        if host.contains("tiktok.com") {
+        if hostMatches(host, domains: ["tiktok.com"]) {
             return .tiktok
         }
 
         // Instagram detection
-        if host.contains("instagram.com") {
+        if hostMatches(host, domains: ["instagram.com"]) {
             return .instagram
         }
 
@@ -39,20 +39,27 @@ struct PlatformDetector {
     /// Normalizes YouTube URLs to standard format
     nonisolated static func normalizeYouTubeURL(_ urlString: String) -> String? {
         guard let url = URL(string: urlString) else { return nil }
+        let host = url.host?.lowercased() ?? ""
 
         // Handle youtu.be short links
-        if url.host?.contains("youtu.be") == true {
+        if hostMatches(host, domains: ["youtu.be"]) {
             let videoID = url.pathComponents.last ?? ""
             return "https://www.youtube.com/watch?v=\(videoID)"
         }
 
         // Handle youtube.com/shorts
-        if url.path.contains("/shorts/") {
+        if hostMatches(host, domains: ["youtube.com"]), url.path.contains("/shorts/") {
             let videoID = url.pathComponents.last ?? ""
             return "https://www.youtube.com/watch?v=\(videoID)"
         }
 
         // Already in standard format
         return urlString
+    }
+
+    nonisolated private static func hostMatches(_ host: String, domains: [String]) -> Bool {
+        domains.contains { domain in
+            host == domain || host.hasSuffix(".\(domain)")
+        }
     }
 }

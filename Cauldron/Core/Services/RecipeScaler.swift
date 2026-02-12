@@ -49,28 +49,35 @@ struct RecipeScaler {
     }
     
     // MARK: - Ingredient Scaling with Smart Rounding
-    
-    private static func scaleIngredient(_ ingredient: Ingredient, by factor: Double) -> Ingredient {
-        guard let quantity = ingredient.quantity else {
-            return ingredient
-        }
-        
+
+    private static func scaleQuantity(_ quantity: Quantity, by factor: Double) -> Quantity {
         let rawScaled = quantity.value * factor
         let roundedValue = smartRound(rawScaled, unit: quantity.unit)
-        
-        var scaledQuantity: Quantity
+
         if let upper = quantity.upperValue {
             let rawScaledUpper = upper * factor
             let roundedUpper = smartRound(rawScaledUpper, unit: quantity.unit)
-            scaledQuantity = Quantity(value: roundedValue, upperValue: roundedUpper, unit: quantity.unit)
-        } else {
-            scaledQuantity = Quantity(value: roundedValue, unit: quantity.unit)
+            return Quantity(value: roundedValue, upperValue: roundedUpper, unit: quantity.unit)
         }
-        
+
+        return Quantity(value: roundedValue, unit: quantity.unit)
+    }
+
+    private static func scaleIngredient(_ ingredient: Ingredient, by factor: Double) -> Ingredient {
+        let hasPrimary = ingredient.quantity != nil
+        let hasAdditional = !ingredient.additionalQuantities.isEmpty
+        guard hasPrimary || hasAdditional else {
+            return ingredient
+        }
+
+        let scaledPrimary = ingredient.quantity.map { scaleQuantity($0, by: factor) }
+        let scaledAdditional = ingredient.additionalQuantities.map { scaleQuantity($0, by: factor) }
+
         return Ingredient(
             id: ingredient.id,
             name: ingredient.name,
-            quantity: scaledQuantity,
+            quantity: scaledPrimary,
+            additionalQuantities: scaledAdditional,
             note: ingredient.note,
             section: ingredient.section
         )
@@ -162,33 +169,33 @@ struct RecipeScaler {
         
         // Check for impractical quantities
         for ingredient in ingredients {
-            guard let quantity = ingredient.quantity else { continue }
+            for quantity in ingredient.allQuantities {
+                // Normalize values for threshold comparisons
+                let volumeInMl = normalizeVolumeToMilliliters(quantity)
+                let weightInGrams = normalizeWeightToGrams(quantity)
 
-            // Normalize values for threshold comparisons
-            let volumeInMl = normalizeVolumeToMilliliters(quantity)
-            let weightInGrams = normalizeWeightToGrams(quantity)
+                // Warn about fractional eggs
+                if ingredient.name.lowercased().contains("egg") {
+                    let fractionalPart = quantity.value - floor(quantity.value)
+                    if fractionalPart > 0.01 && fractionalPart < 0.99 {
+                        warnings.append(ScalingWarning(
+                            type: .fractionalEggs,
+                            message: "'\(ingredient.name)' scales to \(quantity.displayString). Round to \(Int(round(quantity.value))) egg(s) or use \(Int(ceil(quantity.value))) for more egg flavor."
+                        ))
+                    }
+                }
 
-            // Warn about fractional eggs
-            if ingredient.name.lowercased().contains("egg") {
-                let fractionalPart = quantity.value - floor(quantity.value)
-                if fractionalPart > 0.01 && fractionalPart < 0.99 {
+                // Warn about very large quantities (using normalized values from above)
+                // Volume threshold: ~5 liters (5000ml) - about 21 cups
+                // Weight threshold: ~5kg (5000g) - about 11 lbs
+                let isVeryLargeVolume = volumeInMl > 5000
+                let isVeryLargeWeight = weightInGrams > 5000
+                if isVeryLargeVolume || isVeryLargeWeight {
                     warnings.append(ScalingWarning(
-                        type: .fractionalEggs,
-                        message: "'\(ingredient.name)' scales to \(quantity.displayString). Round to \(Int(round(quantity.value))) egg(s) or use \(Int(ceil(quantity.value))) for more egg flavor."
+                        type: .veryLargeQuantity,
+                        message: "'\(ingredient.name)' requires a large amount (\(quantity.displayString)). Verify this is practical for your equipment."
                     ))
                 }
-            }
-            
-            // Warn about very large quantities (using normalized values from above)
-            // Volume threshold: ~5 liters (5000ml) - about 21 cups
-            // Weight threshold: ~5kg (5000g) - about 11 lbs
-            let isVeryLargeVolume = volumeInMl > 5000
-            let isVeryLargeWeight = weightInGrams > 5000
-            if isVeryLargeVolume || isVeryLargeWeight {
-                warnings.append(ScalingWarning(
-                    type: .veryLargeQuantity,
-                    message: "'\(ingredient.name)' requires a large amount (\(quantity.displayString)). Verify this is practical for your equipment."
-                ))
             }
         }
         

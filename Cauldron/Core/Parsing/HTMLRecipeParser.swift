@@ -34,7 +34,7 @@ actor HTMLRecipeParser: RecipeParser {
     
     private func parseSchemaOrg(_ html: String, sourceURL: URL) throws -> Recipe? {
         // Look for JSON-LD script tags (there may be multiple)
-        let jsonLDPattern = #"<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>"#
+        let jsonLDPattern = #"<script[^>]*type\s*=\s*(?:[\"']?application/ld\+json[\"']?)[^>]*>(.*?)</script>"#
         let regex = try? NSRegularExpression(pattern: jsonLDPattern, options: [.caseInsensitive, .dotMatchesLineSeparators])
         
         guard let regex = regex else { return nil }
@@ -58,71 +58,172 @@ actor HTMLRecipeParser: RecipeParser {
     }
     
     private func parseJSONLD(_ jsonString: String, sourceURL: URL) throws -> Recipe? {
-        guard let jsonData = jsonString.data(using: .utf8) else { return nil }
-        
-        let json = try? JSONSerialization.jsonObject(with: jsonData)
-        
-        // Handle array of JSON-LD objects
-        if let jsonArray = json as? [[String: Any]] {
-            for item in jsonArray {
-                if let recipe = try? parseRecipeFromJSON(item, sourceURL: sourceURL) {
-                    return recipe
+        for candidate in normalizedJSONLDVariants(from: jsonString) {
+            guard let jsonData = candidate.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) else {
+                continue
+            }
+
+            if let recipe = try? parseRecipeFromJSONLDValue(json, sourceURL: sourceURL) {
+                return recipe
+            }
+        }
+
+        return nil
+    }
+
+    private func parseRecipeFromJSONLDValue(_ value: Any, sourceURL: URL) throws -> Recipe? {
+        let recipeNodes = collectRecipeNodes(from: value)
+        guard !recipeNodes.isEmpty else { return nil }
+
+        var bestRecipe: Recipe?
+        var bestScore = -1
+        for node in recipeNodes {
+            if let recipe = try? parseRecipeFromJSON(node, sourceURL: sourceURL) {
+                let score = recipe.ingredients.count + (recipe.steps.count * 2)
+                if score > bestScore {
+                    bestScore = score
+                    bestRecipe = recipe
                 }
             }
         }
-        
-        // Handle single JSON-LD object
-        if let jsonDict = json as? [String: Any] {
-            return try? parseRecipeFromJSON(jsonDict, sourceURL: sourceURL)
+
+        return bestRecipe
+    }
+
+    private func collectRecipeNodes(from value: Any) -> [[String: Any]] {
+        var out: [[String: Any]] = []
+
+        if let dict = value as? [String: Any] {
+            if isRecipeType(dict["@type"]) {
+                out.append(dict)
+            }
+            for child in dict.values {
+                out.append(contentsOf: collectRecipeNodes(from: child))
+            }
+            return out
         }
-        
-        return nil
+
+        if let array = value as? [Any] {
+            for child in array {
+                out.append(contentsOf: collectRecipeNodes(from: child))
+            }
+        }
+
+        return out
+    }
+
+    private func normalizedJSONLDVariants(from raw: String) -> [String] {
+        let base = raw
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(
+                of: #"^\s*<!--\s*|\s*-->\s*$"#,
+                with: "",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return [] }
+
+        let escaped = escapeControlCharactersInJSONStringLiterals(base)
+        let variants = [
+            base,
+            escaped,
+            removeTrailingCommas(from: base),
+            removeTrailingCommas(from: escaped)
+        ]
+
+        var deduped: [String] = []
+        var seen = Set<String>()
+        for value in variants where !value.isEmpty {
+            if seen.insert(value).inserted {
+                deduped.append(value)
+            }
+        }
+        return deduped
+    }
+
+    private func removeTrailingCommas(from value: String) -> String {
+        value.replacingOccurrences(
+            of: #",\s*([}\]])"#,
+            with: "$1",
+            options: .regularExpression
+        )
+    }
+
+    private func escapeControlCharactersInJSONStringLiterals(_ raw: String) -> String {
+        var out = ""
+        var inString = false
+        var escaped = false
+
+        for ch in raw {
+            if inString {
+                if escaped {
+                    out.append(ch)
+                    escaped = false
+                    continue
+                }
+                if ch == "\\" {
+                    out.append(ch)
+                    escaped = true
+                    continue
+                }
+                if ch == "\"" {
+                    out.append(ch)
+                    inString = false
+                    continue
+                }
+                if ch == "\n" {
+                    out.append("\\n")
+                    continue
+                }
+                if ch == "\r" {
+                    out.append("\\r")
+                    continue
+                }
+                if ch == "\t" {
+                    out.append("\\t")
+                    continue
+                }
+                out.append(ch)
+                continue
+            }
+
+            out.append(ch)
+            if ch == "\"" {
+                inString = true
+                escaped = false
+            }
+        }
+
+        return out
     }
     
     private func parseRecipeFromJSON(_ json: [String: Any], sourceURL: URL) throws -> Recipe? {
         // Check if this is a Recipe type
-        guard let type = json["@type"] as? String,
-              type.lowercased().contains("recipe") else {
+        guard isRecipeType(json["@type"]) else {
             return nil
         }
-        
-        guard let name = json["name"] as? String else { return nil }
+
+        let name = cleanedString(json["name"]) ?? cleanedString(json["headline"])
+        guard let name, !name.isEmpty else { return nil }
         
         // Parse ingredients
         var ingredients: [Ingredient] = []
         if let recipeIngredients = json["recipeIngredient"] as? [String] {
-            ingredients = recipeIngredients.enumerated().map { index, text in
-                parseIngredientText(text)
+            ingredients = recipeIngredients.compactMap { text in
+                let cleaned = cleanText(text)
+                let normalized = normalizeIngredientSourceText(cleaned)
+                guard !normalized.isEmpty else { return nil }
+                return parseIngredientText(normalized)
             }
         }
         
         // Parse steps
-        var steps: [CookStep] = []
-        if let instructionsArray = json["recipeInstructions"] as? [[String: Any]] {
-            // HowToStep format (common in schema.org)
-            steps = instructionsArray.enumerated().compactMap { index, instruction in
-                if let text = instruction["text"] as? String {
-                    let timers = TimerExtractor.extractTimers(from: text)
-                    return CookStep(index: index, text: text, timers: timers)
-                }
-                return nil
-            }
-        } else if let instructionsArray = json["recipeInstructions"] as? [String] {
-            // Simple string array
-            steps = instructionsArray.enumerated().map { index, text in
-                let timers = TimerExtractor.extractTimers(from: text)
-                return CookStep(index: index, text: text, timers: timers)
-            }
-        } else if let instructionText = json["recipeInstructions"] as? String {
-            // Single text block
-            let lines = instructionText.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            
-            steps = lines.enumerated().map { index, text in
-                let timers = TimerExtractor.extractTimers(from: text)
-                return CookStep(index: index, text: text, timers: timers)
-            }
+        let rawInstructions = json["recipeInstructions"] ?? json["instructions"]
+        let stepTexts = rawInstructions.map { extractInstructionTexts(from: $0) } ?? []
+        let steps = stepTexts.enumerated().map { index, text in
+            let timers = TimerExtractor.extractTimers(from: text)
+            return CookStep(index: index, text: text, timers: timers)
         }
         
         guard !ingredients.isEmpty && !steps.isEmpty else { return nil }
@@ -134,18 +235,27 @@ actor HTMLRecipeParser: RecipeParser {
         let totalTime = parseTotalTime(json["totalTime"] as? String, json["cookTime"] as? String, json["prepTime"] as? String)
         
         // Parse image URL
-        let imageURL = parseImageURL(json["image"])
+        let imageURL = parseImageURL(json["image"], baseURL: sourceURL)
         
         // Parse tags/category
         var tags: [Tag] = []
         if let category = json["recipeCategory"] as? String {
-            tags.append(Tag(name: category))
+            let cleanedCategory = cleanText(category)
+            if !cleanedCategory.isEmpty {
+                tags.append(Tag(name: cleanedCategory))
+            }
         }
         if let cuisine = json["recipeCuisine"] as? String {
-            tags.append(Tag(name: cuisine))
+            let cleanedCuisine = cleanText(cuisine)
+            if !cleanedCuisine.isEmpty {
+                tags.append(Tag(name: cleanedCuisine))
+            }
         }
         if let keywords = json["keywords"] as? String {
-            let keywordTags = keywords.split(separator: ",").map { Tag(name: $0.trimmingCharacters(in: .whitespaces)) }
+            let keywordTags = cleanText(keywords)
+                .split(separator: ",")
+                .map { Tag(name: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                .filter { !$0.name.isEmpty }
             tags.append(contentsOf: keywordTags)
         }
         
@@ -164,27 +274,28 @@ actor HTMLRecipeParser: RecipeParser {
     
     private func parseYield(_ yieldValue: Any?) -> String {
         if let yieldString = yieldValue as? String {
-            return yieldString
+            let cleaned = cleanText(yieldString)
+            return cleaned.isEmpty ? "4 servings" : cleaned
         } else if let yieldNumber = yieldValue as? Int {
             return "\(yieldNumber) servings"
         } else if let yieldArray = yieldValue as? [Any], let first = yieldArray.first {
-            return "\(first)"
+            return cleanText("\(first)")
         }
         return "4 servings"
     }
     
-    private func parseImageURL(_ imageValue: Any?) -> URL? {
+    private func parseImageURL(_ imageValue: Any?, baseURL: URL) -> URL? {
         // Image can be a string, array of strings, or object with @type and url
         if let imageString = imageValue as? String {
-            return URL(string: imageString)
+            return normalizeURL(from: imageString, relativeTo: baseURL)
         } else if let imageArray = imageValue as? [Any], let first = imageArray.first {
             if let imageString = first as? String {
-                return URL(string: imageString)
+                return normalizeURL(from: imageString, relativeTo: baseURL)
             } else if let imageDict = first as? [String: Any], let url = imageDict["url"] as? String {
-                return URL(string: url)
+                return normalizeURL(from: url, relativeTo: baseURL)
             }
         } else if let imageDict = imageValue as? [String: Any], let url = imageDict["url"] as? String {
-            return URL(string: url)
+            return normalizeURL(from: url, relativeTo: baseURL)
         }
         return nil
     }
@@ -210,6 +321,49 @@ actor HTMLRecipeParser: RecipeParser {
     private func parseIngredientText(_ text: String) -> Ingredient {
         // Use shared ingredient parser utility
         return IngredientParser.parseIngredientText(text)
+    }
+
+    private func extractInstructionTexts(from value: Any) -> [String] {
+        if let text = value as? String {
+            return splitInstructionString(text)
+        }
+
+        if let array = value as? [Any] {
+            return array.flatMap { extractInstructionTexts(from: $0) }
+        }
+
+        if let dict = value as? [String: Any] {
+            if let text = dict["text"] as? String {
+                return splitInstructionString(text)
+            }
+
+            if let name = dict["name"] as? String {
+                return splitInstructionString(name)
+            }
+
+            if let itemList = dict["itemListElement"] {
+                return extractInstructionTexts(from: itemList)
+            }
+        }
+
+        return []
+    }
+
+    private func splitInstructionString(_ text: String) -> [String] {
+        let cleaned = cleanText(text)
+        let lines = cleaned
+            .components(separatedBy: .newlines)
+            .map { cleanText($0) }
+            .filter { !$0.isEmpty }
+
+        if lines.count > 1 {
+            return lines
+        }
+
+        return cleaned
+            .components(separatedBy: ". ")
+            .map { cleanText($0) }
+            .filter { !$0.isEmpty }
     }
     
     // Note: Parsing methods have been extracted to shared utilities:
@@ -364,6 +518,105 @@ actor HTMLRecipeParser: RecipeParser {
         // Use shared HTML entity decoder utility (which handles tags, entities, and unicode cleanup)
         return HTMLEntityDecoder.decode(text, stripTags: true)
     }
+
+    private func cleanText(_ text: String) -> String {
+        HTMLEntityDecoder.decode(text, stripTags: true)
+            .replacingOccurrences(of: "[^\\S\\n]+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizeIngredientSourceText(_ text: String) -> String {
+        var normalized = cleanText(text)
+        guard !normalized.isEmpty else { return "" }
+
+        // Normalize malformed source variants like:
+        // "5 cloves garlic ((finely minced))" and "(, minced)".
+        normalized = normalized.replacingOccurrences(of: #"\(\s*,\s*"#, with: "(", options: .regularExpression)
+        normalized = normalized.replacingOccurrences(of: #"\(\s*;\s*"#, with: "(", options: .regularExpression)
+
+        while true {
+            let collapsed = normalized.replacingOccurrences(
+                of: #"\(\(\s*([^()]*)\s*\)\)"#,
+                with: "($1)",
+                options: .regularExpression
+            )
+            let flattened = collapsed
+                .replacingOccurrences(of: "((", with: "(")
+                .replacingOccurrences(of: "))", with: ")")
+            if flattened == normalized {
+                break
+            }
+            normalized = flattened
+        }
+
+        normalized = normalized.replacingOccurrences(of: #"\(\s+"#, with: "(", options: .regularExpression)
+        normalized = normalized.replacingOccurrences(of: #"\s+\)"#, with: ")", options: .regularExpression)
+
+        var balanced = ""
+        balanced.reserveCapacity(normalized.count)
+        var depth = 0
+        for ch in normalized {
+            if ch == "(" {
+                depth += 1
+                balanced.append(ch)
+                continue
+            }
+            if ch == ")" {
+                if depth == 0 {
+                    continue
+                }
+                depth -= 1
+                balanced.append(ch)
+                continue
+            }
+            balanced.append(ch)
+        }
+        if depth > 0 {
+            balanced.append(String(repeating: ")", count: depth))
+        }
+        return cleanText(balanced)
+    }
+
+    private func cleanedString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let cleaned = cleanText(string)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private func isRecipeType(_ typeValue: Any?) -> Bool {
+        if let type = typeValue as? String {
+            return type.lowercased().contains("recipe")
+        }
+
+        if let typeArray = typeValue as? [String] {
+            return typeArray.contains { $0.lowercased().contains("recipe") }
+        }
+
+        return false
+    }
+
+    private func normalizeURL(from raw: String, relativeTo baseURL: URL) -> URL? {
+        let cleaned = cleanText(raw)
+        guard !cleaned.isEmpty else { return nil }
+
+        if let absoluteURL = URL(string: cleaned),
+           let scheme = absoluteURL.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return absoluteURL
+        }
+
+        if cleaned.hasPrefix("//"),
+           let url = URL(string: "https:\(cleaned)") {
+            return url
+        }
+
+        if cleaned.hasPrefix("/"),
+           let relative = URL(string: cleaned, relativeTo: baseURL) {
+            return relative.absoluteURL
+        }
+
+        return nil
+    }
     
     private func extractDomain(from url: URL) -> String {
         url.host ?? url.absoluteString
@@ -404,4 +657,3 @@ extension String {
         return matches
     }
 }
-

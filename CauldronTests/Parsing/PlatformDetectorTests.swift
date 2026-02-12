@@ -117,6 +117,12 @@ final class PlatformDetectorTests: XCTestCase {
         XCTAssertEqual(platform, .recipeWebsite)
     }
 
+    func testDetect_SpoofedYouTubeDomain_IsNotYouTube() {
+        let url = "https://notyoutube.com/watch?v=dQw4w9WgXcQ"
+        let platform = PlatformDetector.detect(from: url)
+        XCTAssertEqual(platform, .recipeWebsite)
+    }
+
     // MARK: - Unknown/Invalid URL Tests
 
     func testDetect_InvalidURL() {

@@ -1,0 +1,56 @@
+{
+  "id": "qa_2026_02_10_205815",
+  "source_type": "manual_edge",
+  "normalized_lines": [
+    "SHEET PAN VEGGIE TACOS",
+    "4.6 \u2605 from 73 votes",
+    "Tap to jump to recipe",
+    "What you'll need:",
+    "2 tbsp olive oil",
+    "1 red onion, sliced",
+    "2 bell peppers, sliced",
+    "1 zucchini, sliced",
+    "1 can black beans, rinsed",
+    "1 tsp cumin",
+    "1/2 tsp smoked paprika",
+    "1/2 tsp salt",
+    "8 small tortillas",
+    "Lime wedges, for serving",
+    "Preheat oven to 425F.",
+    "Toss onion, peppers, zucchini, beans, oil, and spices on a sheet pan.",
+    "Roast 20 to 25 minutes, stirring once halfway.",
+    "Warm tortillas.",
+    "Fill tortillas with roasted veggies and beans.",
+    "Serve with lime wedges.",
+    "Total Time: 35 minutes",
+    "Yield: 4",
+    "Chef note - add crumbled feta if desired.",
+    "This post may contain affiliate links."
+  ],
+  "target_recipe": {
+    "title": "SHEET PAN VEGGIE TACOS",
+    "ingredients": [
+      "2 tbsp olive oil",
+      "1 red onion, sliced",
+      "2 bell peppers, sliced",
+      "1 zucchini, sliced",
+      "1 can black beans, rinsed",
+      "1 tsp cumin",
+      "1/2 tsp smoked paprika",
+      "1/2 tsp salt",
+      "8 small tortillas",
+      "Lime wedges, for serving"
+    ],
+    "steps": [
+      "Preheat oven to 425F.",
+      "Toss onion, peppers, zucchini, beans, oil, and spices on a sheet pan.",
+      "Roast 20 to 25 minutes, stirring once halfway.",
+      "Warm tortillas.",
+      "Fill tortillas with roasted veggies and beans.",
+      "Serve with lime wedges."
+    ],
+    "notes": [
+      "Chef note - add crumbled feta if desired."
+    ]
+  }
+}

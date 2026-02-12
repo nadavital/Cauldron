@@ -1,0 +1,31 @@
+{
+  "id": "miso_soup",
+  "source_type": "ocr",
+  "normalized_lines": [
+    "Miso Soup",
+    "• 4 cups dashi",
+    "• 2 tbsp miso paste",
+    "• 1/2 cup tofu",
+    "Heat dashi to a gentle simmer",
+    "Whisk miso into hot broth",
+    "Add tofu and warm for 2 minutes",
+    "Chef's note:",
+    "Do not boil after adding miso"
+  ],
+  "target_recipe": {
+    "title": "Miso Soup",
+    "ingredients": [
+      "4 cups dashi",
+      "2 tbsp miso paste",
+      "1/2 cup tofu"
+    ],
+    "steps": [
+      "Heat dashi to a gentle simmer",
+      "Whisk miso into hot broth",
+      "Add tofu and warm for 2 minutes"
+    ],
+    "notes": [
+      "Do not boil after adding miso"
+    ]
+  }
+}

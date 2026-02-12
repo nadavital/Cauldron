@@ -1,0 +1,51 @@
+{
+  "id": "qa_2026_02_10_213634",
+  "source_type": "url",
+  "normalized_lines": [
+    "Ultimate Chicken Salad Recipe",
+    "Ingredients",
+    "2 pounds boneless skinless chicken breasts",
+    "1 cup red grapes (quartered)",
+    "2 celery ribs (diced)",
+    "3 green onions (green and white parts) (sliced)",
+    "1 cup mayonnaise",
+    "1 tablespoon Dijon mustard",
+    "\u00bd cup sliced raw almonds",
+    "2 tablespoon finely chopped parsley",
+    "1 tablespoon finely chopped tarragon",
+    "1 lemon (juiced (about 3 tablespoons))",
+    "kosher salt and freshly ground black pepper (to taste)",
+    "Instructions",
+    "For the poached chicken:",
+    "Cover the chicken with water. Place the chicken breasts in a wide pot or pan and cover by about an inch with cold water. Season the water with salt. Optionally, you can add aromatics of your choice. Read my poached chicken recipe for more details.",
+    "Simmer the chicken. Turn the heat to medium until it reaches a gentle simmer. Then reduce the heat back to low and cover the pan. Let the chicken simmer for 8 to 12 minutes, or until the internal temperature reaches 160\u00b0F to 165\u00b0F. Remove the chicken and let it rest for a couple of minutes. Then chill in the fridge.",
+    "For the chicken salad recipe:",
+    "Dice the cooled chicken. Transfer the cooled chicken to a cutting board and dice it into \u00bd-inch pieces. Add it to a large mixing bowl.",
+    "Mix together and chill. Add the grapes, celery, green onion, mayonnaise, mustard, almonds, parsley, tarragon, and lemon juice. Season with salt and pepper, then stir together, until well combined. Let it chill covered in the fridge until you're ready to serve.",
+    "Serve. Transfer the salad to a serving bowl and garnish with additional fresh herbs, if you'd like."
+  ],
+  "target_recipe": {
+    "title": "Ultimate Chicken Salad Recipe",
+    "ingredients": [
+      "2 pounds boneless skinless chicken breasts",
+      "1 cup red grapes (quartered)",
+      "2 celery ribs (diced)",
+      "3 green onions (green and white parts) (sliced)",
+      "1 cup mayonnaise",
+      "1 tablespoon Dijon mustard",
+      "\u00bd cup sliced raw almonds",
+      "2 tablespoon finely chopped parsley",
+      "1 tablespoon finely chopped tarragon",
+      "1 lemon (juiced (about 3 tablespoons))",
+      "kosher salt and freshly ground black pepper (to taste)"
+    ],
+    "steps": [
+      "Cover the chicken with water. Place the chicken breasts in a wide pot or pan and cover by about an inch with cold water. Season the water with salt. Optionally, you can add aromatics of your choice. Read my poached chicken recipe for more details.",
+      "Simmer the chicken. Turn the heat to medium until it reaches a gentle simmer. Then reduce the heat back to low and cover the pan. Let the chicken simmer for 8 to 12 minutes, or until the internal temperature reaches 160\u00b0F to 165\u00b0F. Remove the chicken and let it rest for a couple of minutes. Then chill in the fridge.",
+      "Dice the cooled chicken. Transfer the cooled chicken to a cutting board and dice it into \u00bd-inch pieces. Add it to a large mixing bowl.",
+      "Mix together and chill. Add the grapes, celery, green onion, mayonnaise, mustard, almonds, parsley, tarragon, and lemon juice. Season with salt and pepper, then stir together, until well combined. Let it chill covered in the fridge until you're ready to serve.",
+      "Serve. Transfer the salad to a serving bowl and garnish with additional fresh herbs, if you'd like."
+    ],
+    "notes": []
+  }
+}

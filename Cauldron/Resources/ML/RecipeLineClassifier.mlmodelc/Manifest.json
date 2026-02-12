@@ -1,0 +1,7 @@
+{
+  "bundleFormat": "recipe-line-classifier",
+  "bundleVersion": 1,
+  "modelPayload": "line_classifier.pkl",
+  "modelJSONPayload": "line_classifier.json",
+  "sourceModel": "/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_model/artifacts/line_classifier.pkl"
+}

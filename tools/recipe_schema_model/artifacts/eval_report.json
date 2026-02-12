@@ -1,0 +1,93 @@
+{
+  "macro_f1": 1.0,
+  "per_class": {
+    "title": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2.0
+    },
+    "ingredient": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 6.0
+    },
+    "step": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 6.0
+    },
+    "note": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2.0
+    },
+    "header": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 4.0
+    },
+    "junk": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 1.0
+    }
+  },
+  "confusion": {
+    "title": {
+      "title": 2,
+      "ingredient": 0,
+      "step": 0,
+      "note": 0,
+      "header": 0,
+      "junk": 0
+    },
+    "ingredient": {
+      "title": 0,
+      "ingredient": 6,
+      "step": 0,
+      "note": 0,
+      "header": 0,
+      "junk": 0
+    },
+    "step": {
+      "title": 0,
+      "ingredient": 0,
+      "step": 6,
+      "note": 0,
+      "header": 0,
+      "junk": 0
+    },
+    "note": {
+      "title": 0,
+      "ingredient": 0,
+      "step": 0,
+      "note": 2,
+      "header": 0,
+      "junk": 0
+    },
+    "header": {
+      "title": 0,
+      "ingredient": 0,
+      "step": 0,
+      "note": 0,
+      "header": 4,
+      "junk": 0
+    },
+    "junk": {
+      "title": 0,
+      "ingredient": 0,
+      "step": 0,
+      "note": 0,
+      "header": 0,
+      "junk": 1
+    }
+  },
+  "ingredient_step_confusion_rate": 0.0,
+  "prediction_count": 21
+}
