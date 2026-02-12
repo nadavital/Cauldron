@@ -196,8 +196,16 @@ final class TextRecipeParserTests: XCTestCase {
         let recipe = try await parser.parse(from: recipeText)
 
         // Then: Should handle dashes
-        XCTAssertEqual(recipe.ingredients.count, 3)
-        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertEqual(
+            recipe.ingredients.count,
+            3,
+            "title=\(recipe.title) ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text })"
+        )
+        XCTAssertEqual(
+            recipe.steps.count,
+            3,
+            "title=\(recipe.title) ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text })"
+        )
     }
 
     // MARK: - Heuristic Parsing Tests
@@ -480,6 +488,30 @@ final class TextRecipeParserTests: XCTestCase {
         XCTAssertEqual(recipe.totalMinutes, 45)
         XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("total time") })
         XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("serves 4") })
+    }
+
+    func testParseMetadataBeforeTitle_DoesNotDropLeadingMetadata() async throws {
+        let recipeText = """
+        Total time: 45 minutes
+        Weeknight Pasta
+        Serves 4
+
+        Ingredients:
+        1 lb pasta
+        2 cups sauce
+
+        Instructions:
+        Boil pasta for 10 minutes
+        Toss with sauce
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.title, "Weeknight Pasta")
+        XCTAssertEqual(recipe.yields, "4 servings")
+        XCTAssertEqual(recipe.totalMinutes, 45)
+        XCTAssertEqual(recipe.ingredients.count, 2)
+        XCTAssertEqual(recipe.steps.count, 2)
     }
 
     func testParseInstructionStartingWithTimeTo_DoesNotBecomeMetadata() async throws {

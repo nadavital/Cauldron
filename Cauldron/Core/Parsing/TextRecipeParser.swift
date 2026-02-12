@@ -75,8 +75,11 @@ actor TextRecipeParser: RecipeParser {
             throw ParsingError.invalidSource
         }
 
-        var title = selectTitle(from: lines)
-        let bodyLines = Array(lines.dropFirst())
+        let selectedTitle = selectTitle(from: lines)
+        var title = selectedTitle.text
+        let bodyLines = lines.enumerated()
+            .filter { $0.offset != selectedTitle.index }
+            .map(\.element)
         var metadata = ParsedMetadata()
         let contentLines = stripMetadataLines(from: bodyLines, metadata: &metadata)
         let classifications = lineClassifier.classify(lines: contentLines)
@@ -266,14 +269,30 @@ actor TextRecipeParser: RecipeParser {
         return cleaned.isEmpty ? line : cleaned
     }
 
-    private func selectTitle(from lines: [String]) -> String {
-        for rawLine in lines.prefix(12) {
-            let cleaned = cleanTitle(rawLine)
-            if looksLikeTitleCandidate(cleaned) {
-                return cleaned
+    private func selectTitle(from lines: [String]) -> (text: String, index: Int) {
+        let titleScanWindow = 12
+        let candidateRangeEnd: Int
+        if let firstHeaderIndex = lines.prefix(titleScanWindow).firstIndex(where: { line in
+            TextSectionParser.isIngredientSectionHeader(line) ||
+            TextSectionParser.isStepsSectionHeader(line) ||
+            NotesExtractor.looksLikeNotesSectionHeader(line)
+        }) {
+            candidateRangeEnd = firstHeaderIndex
+        } else {
+            candidateRangeEnd = min(lines.count, titleScanWindow)
+        }
+
+        if candidateRangeEnd > 0 {
+            for index in 0..<candidateRangeEnd {
+                let rawLine = lines[index]
+                let cleaned = cleanTitle(rawLine)
+                if looksLikeTitleCandidate(cleaned) {
+                    return (cleaned, index)
+                }
             }
         }
-        return cleanTitle(lines[0])
+
+        return (cleanTitle(lines[0]), 0)
     }
 
     private func looksLikeTitleCandidate(_ line: String) -> Bool {
