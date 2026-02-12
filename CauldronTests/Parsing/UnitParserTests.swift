@@ -24,6 +24,11 @@ final class UnitParserTests: XCTestCase {
         XCTAssertEqual(UnitParser.parse("teaspoons"), .teaspoon)
     }
 
+    func testParse_Teaspoon_CommonMisspelling() {
+        XCTAssertEqual(UnitParser.parse("teapoon"), .teaspoon)
+        XCTAssertEqual(UnitParser.parse("teapoons"), .teaspoon)
+    }
+
     func testParse_Teaspoon_CaseInsensitive() {
         XCTAssertEqual(UnitParser.parse("TSP"), .teaspoon)
         XCTAssertEqual(UnitParser.parse("Teaspoon"), .teaspoon)
@@ -188,6 +193,21 @@ final class UnitParserTests: XCTestCase {
     func testParse_WithSurroundingWhitespace() {
         XCTAssertEqual(UnitParser.parse("  tsp  "), .teaspoon)
         XCTAssertEqual(UnitParser.parse("  tablespoon  "), .tablespoon)
+    }
+
+    // MARK: - Punctuation Handling
+
+    func testParse_DottedAbbreviations() {
+        XCTAssertEqual(UnitParser.parse("c."), .cup)
+        XCTAssertEqual(UnitParser.parse("tsp."), .teaspoon)
+        XCTAssertEqual(UnitParser.parse("tbsp."), .tablespoon)
+        XCTAssertEqual(UnitParser.parse("lb."), .pound)
+    }
+
+    func testParse_OCRNoisyAbbreviations() {
+        XCTAssertEqual(UnitParser.parse("tb5p"), .tablespoon)
+        XCTAssertEqual(UnitParser.parse("t5p"), .teaspoon)
+        XCTAssertEqual(UnitParser.parse("1b"), .pound)
     }
 
     // MARK: - Invalid Input

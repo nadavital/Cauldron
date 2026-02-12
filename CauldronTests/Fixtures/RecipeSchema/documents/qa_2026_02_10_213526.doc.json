@@ -1,0 +1,57 @@
+{
+  "id": "qa_2026_02_10_213526",
+  "source_type": "url",
+  "normalized_lines": [
+    "Easy Pasta Salad",
+    "Ingredients",
+    "3 cups uncooked fusilli pasta",
+    "2 heaping cups halved cherry tomatoes",
+    "1\u00bd cups cooked chickpeas (drained and rinsed)",
+    "2 cups arugula",
+    "1 cup Persian cucumbers (sliced into thin half moons)",
+    "1 cup crumbled feta cheese",
+    "1 cup fresh basil leaves (torn)",
+    "\u00bd cup minced fresh parsley",
+    "\u00bd cup chopped fresh mint leaves",
+    "\u00bc cup toasted pine nuts",
+    "\u00bc cup extra-virgin olive oil (plus more for drizzling)",
+    "3 tablespoons fresh lemon juice",
+    "1 teaspoon Dijon mustard",
+    "3 garlic cloves (minced)",
+    "1 teaspoon herbes de Provence or dried Italian seasoning",
+    "\u00bc teaspoon red pepper flakes",
+    "\u00be teaspoon sea salt",
+    "Instructions",
+    "Bring a large pot of salted water to a boil. Prepare the pasta according to the package directions, or until slightly past al dente.",
+    "Meanwhile, make the dressing. In a small bowl, whisk together the olive oil, lemon juice, mustard, garlic, herbes de Provence, red pepper flakes, and salt. (Note: the dressing will have a strong flavor, it\u2019ll mellow once it coats all of the pasta salad ingredients).",
+    "Drain the pasta, toss it with a little olive oil (so that it doesn\u2019t stick together) and let it cool to room temp. Transfer to a large bowl with the tomatoes, chickpeas, arugula, cucumbers, feta cheese, basil, parsley, mint, and pine nuts. Pour the dressing and toss to coat. Season to taste with more lemon, salt, pepper, and/or a drizzle of olive oil, if desired, and serve."
+  ],
+  "target_recipe": {
+    "title": "Easy Pasta Salad",
+    "ingredients": [
+      "3 cups uncooked fusilli pasta",
+      "2 heaping cups halved cherry tomatoes",
+      "1\u00bd cups cooked chickpeas (drained and rinsed)",
+      "2 cups arugula",
+      "1 cup Persian cucumbers (sliced into thin half moons)",
+      "1 cup crumbled feta cheese",
+      "1 cup fresh basil leaves (torn)",
+      "\u00bd cup minced fresh parsley",
+      "\u00bd cup chopped fresh mint leaves",
+      "\u00bc cup toasted pine nuts",
+      "\u00bc cup extra-virgin olive oil (plus more for drizzling)",
+      "3 tablespoons fresh lemon juice",
+      "1 teaspoon Dijon mustard",
+      "3 garlic cloves (minced)",
+      "1 teaspoon herbes de Provence or dried Italian seasoning",
+      "\u00bc teaspoon red pepper flakes",
+      "\u00be teaspoon sea salt"
+    ],
+    "steps": [
+      "Bring a large pot of salted water to a boil. Prepare the pasta according to the package directions, or until slightly past al dente.",
+      "Meanwhile, make the dressing. In a small bowl, whisk together the olive oil, lemon juice, mustard, garlic, herbes de Provence, red pepper flakes, and salt. (Note: the dressing will have a strong flavor, it\u2019ll mellow once it coats all of the pasta salad ingredients).",
+      "Drain the pasta, toss it with a little olive oil (so that it doesn\u2019t stick together) and let it cool to room temp. Transfer to a large bowl with the tomatoes, chickpeas, arugula, cucumbers, feta cheese, basil, parsley, mint, and pine nuts. Pour the dressing and toss to coat. Season to taste with more lemon, salt, pepper, and/or a drizzle of olive oil, if desired, and serve."
+    ],
+    "notes": []
+  }
+}

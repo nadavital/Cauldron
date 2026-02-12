@@ -1,0 +1,60 @@
+{
+  "id": "holdout_006",
+  "source_type": "url_holdout",
+  "source_url": "https://www.downshiftology.com/recipes/red-lentil-soup/",
+  "normalized_lines": [
+    "Easy Red Lentil Soup",
+    "Ingredients",
+    "2 tablespoons extra-virgin olive oil",
+    "1 large yellow onion (diced)",
+    "2 medium carrots (peeled and diced)",
+    "1 medium potato (Yukon gold) (peeled and diced)",
+    "3 garlic cloves (minced)",
+    "2 tablespoons tomato paste",
+    "1 teaspoon paprika",
+    "1 teaspoon ground cumin",
+    "1 teaspoon kosher salt",
+    "\u00bc teaspoon ground black pepper",
+    "1 cup red lentils (rinsed)",
+    "6 cup low-sodium vegetable broth",
+    "plus lemon wedges, for serving",
+    "3 tablespoons butter or olive oil",
+    "2 teaspoons Aleppo pepper",
+    "Instructions",
+    "Saut\u00e9 the aromatics. Heat the oil in a large pot over medium heat. Add the onion and carrot, and saut\u00e9 for 4 to 5 minutes, until softened. Add the diced potato and cook for 2 minutes more.",
+    "Add the spices. Add the garlic, tomato paste, paprika, cumin, salt, and pepper, and stir for another 30 seconds.",
+    "Simmer the lentils. Add the lentils and broth, bring to a boil, then reduce the heat to low. Cover and simmer for 20 to 25 minutes, until the lentils and potatoes are very soft.",
+    "Blend. Use an immersion blender to blend until smooth. (Note: Turkish home cooks usually blend it completely, though you can make it as smooth or textured as you'd like).",
+    "Make the pepper butter. In a small pan, melt the butter over low heat. Add the Aleppo pepper and stir for 20 to 30 seconds, until fragrant.",
+    "Serve. Ladle the soup into bowls, drizzle with the pepper butter, and serve with lemon wedges on the side."
+  ],
+  "target_recipe": {
+    "title": "Easy Red Lentil Soup",
+    "ingredients": [
+      "2 tablespoons extra-virgin olive oil",
+      "1 large yellow onion (diced)",
+      "2 medium carrots (peeled and diced)",
+      "1 medium potato (Yukon gold) (peeled and diced)",
+      "3 garlic cloves (minced)",
+      "2 tablespoons tomato paste",
+      "1 teaspoon paprika",
+      "1 teaspoon ground cumin",
+      "1 teaspoon kosher salt",
+      "\u00bc teaspoon ground black pepper",
+      "1 cup red lentils (rinsed)",
+      "6 cup low-sodium vegetable broth",
+      "plus lemon wedges, for serving",
+      "3 tablespoons butter or olive oil",
+      "2 teaspoons Aleppo pepper"
+    ],
+    "steps": [
+      "Saut\u00e9 the aromatics. Heat the oil in a large pot over medium heat. Add the onion and carrot, and saut\u00e9 for 4 to 5 minutes, until softened. Add the diced potato and cook for 2 minutes more.",
+      "Add the spices. Add the garlic, tomato paste, paprika, cumin, salt, and pepper, and stir for another 30 seconds.",
+      "Simmer the lentils. Add the lentils and broth, bring to a boil, then reduce the heat to low. Cover and simmer for 20 to 25 minutes, until the lentils and potatoes are very soft.",
+      "Blend. Use an immersion blender to blend until smooth. (Note: Turkish home cooks usually blend it completely, though you can make it as smooth or textured as you'd like).",
+      "Make the pepper butter. In a small pan, melt the butter over low heat. Add the Aleppo pepper and stir for 20 to 30 seconds, until fragrant.",
+      "Serve. Ladle the soup into bowls, drizzle with the pepper butter, and serve with lemon wedges on the side."
+    ],
+    "notes": []
+  }
+}

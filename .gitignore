@@ -133,3 +133,9 @@ Temporary Items
 **/xcshareddata/WorkspaceSettings.xcsettings
 
 appstorescreenshots/
+
+# Python tooling cache / generated artifacts
+**/__pycache__/
+*.pyc
+tools/recipe_schema_model/artifacts/
+.agent/done/

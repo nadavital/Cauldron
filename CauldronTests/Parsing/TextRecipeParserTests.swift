@@ -196,8 +196,16 @@ final class TextRecipeParserTests: XCTestCase {
         let recipe = try await parser.parse(from: recipeText)
 
         // Then: Should handle dashes
-        XCTAssertEqual(recipe.ingredients.count, 3)
-        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertEqual(
+            recipe.ingredients.count,
+            3,
+            "title=\(recipe.title) ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text })"
+        )
+        XCTAssertEqual(
+            recipe.steps.count,
+            3,
+            "title=\(recipe.title) ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text })"
+        )
     }
 
     // MARK: - Heuristic Parsing Tests
@@ -429,5 +437,109 @@ final class TextRecipeParserTests: XCTestCase {
 
         // Verify ingredients cleaned properly
         XCTAssertTrue(recipe.ingredients.allSatisfy { !$0.name.hasPrefix("•") })
+    }
+
+    func testParseMissingInstructionsHeader_RecoversFromIngredientMislabels() async throws {
+        let classifier = StubRecipeLineClassifier(forcedLabel: .ingredient, confidence: 0.99)
+        let parser = TextRecipeParser(
+            lineClassifier: classifier,
+            schemaAssembler: RecipeSchemaAssembler(),
+            modelConfidenceThreshold: 0.72
+        )
+
+        let recipeText = """
+        Cake
+
+        Ingredients:
+        1 cup flour
+        1 cup sugar
+        Preheat your oven to 350°F
+        In a medium-sized bowl, mix flour and sugar together
+        Bake for about 20 minutes
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.ingredients.count, 2)
+        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertTrue(recipe.ingredients.allSatisfy { !$0.name.lowercased().contains("preheat") })
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("preheat") })
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("bake for about 20 minutes") })
+    }
+
+    func testParseMetadataLines_MapToRecipeFieldsAndSkipSteps() async throws {
+        let recipeText = """
+        Weeknight Pasta
+        Serves 4
+        Total time: 45 minutes
+
+        Ingredients:
+        1 lb pasta
+        2 cups sauce
+
+        Instructions:
+        Boil pasta for 10 minutes
+        Toss with sauce
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.yields, "4 servings")
+        XCTAssertEqual(recipe.totalMinutes, 45)
+        XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("total time") })
+        XCTAssertFalse(recipe.steps.contains { $0.text.lowercased().contains("serves 4") })
+    }
+
+    func testParseMetadataBeforeTitle_DoesNotDropLeadingMetadata() async throws {
+        let recipeText = """
+        Total time: 45 minutes
+        Weeknight Pasta
+        Serves 4
+
+        Ingredients:
+        1 lb pasta
+        2 cups sauce
+
+        Instructions:
+        Boil pasta for 10 minutes
+        Toss with sauce
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.title, "Weeknight Pasta")
+        XCTAssertEqual(recipe.yields, "4 servings")
+        XCTAssertEqual(recipe.totalMinutes, 45)
+        XCTAssertEqual(recipe.ingredients.count, 2)
+        XCTAssertEqual(recipe.steps.count, 2)
+    }
+
+    func testParseInstructionStartingWithTimeTo_DoesNotBecomeMetadata() async throws {
+        let recipeText = """
+        Weeknight Eggs
+
+        Ingredients:
+        2 eggs
+
+        Instructions:
+        Time to whisk eggs for 2 minutes
+        Cook in butter until set
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertNil(recipe.totalMinutes)
+        XCTAssertTrue(recipe.steps.contains { $0.text.lowercased().contains("time to whisk eggs") })
+    }
+}
+
+private struct StubRecipeLineClassifier: RecipeLineClassifying, Sendable {
+    let forcedLabel: RecipeLineLabel
+    let confidence: Double
+
+    nonisolated func classify(lines: [String]) -> [RecipeLineClassification] {
+        lines.map { line in
+            RecipeLineClassification(line: line, label: forcedLabel, confidence: confidence)
+        }
     }
 }

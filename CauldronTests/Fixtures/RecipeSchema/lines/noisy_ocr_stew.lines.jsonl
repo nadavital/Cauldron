@@ -1,0 +1,13 @@
+{"line_index":0,"text":"Rustic Stew","label":"title"}
+{"line_index":1,"text":"<div class=\"recipe\">","label":"junk"}
+{"line_index":2,"text":"INGREDIENTS","label":"header"}
+{"line_index":3,"text":"1 lb beef chuck","label":"ingredient"}
+{"line_index":4,"text":"2 carrots, chopped","label":"ingredient"}
+{"line_index":5,"text":"1 onion, diced","label":"ingredient"}
+{"line_index":6,"text":"INSTRUCTIONS","label":"header"}
+{"line_index":7,"text":"Brown beef in a Dutch oven","label":"step"}
+{"line_index":8,"text":"Add vegetables and stir","label":"step"}
+{"line_index":9,"text":"Simmer for 45 minutes","label":"step"}
+{"line_index":10,"text":"</div>","label":"junk"}
+{"line_index":11,"text":"Notes:","label":"header"}
+{"line_index":12,"text":"Skim surface fat before serving","label":"note"}

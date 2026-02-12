@@ -1,0 +1,33 @@
+{
+  "id": "lemon_pasta",
+  "source_type": "url",
+  "normalized_lines": [
+    "Lemon Pasta",
+    "Ingredients:",
+    "8 oz pasta",
+    "2 tbsp butter",
+    "1 lemon",
+    "Instructions:",
+    "Boil pasta until al dente",
+    "Melt butter in a pan",
+    "Toss pasta with lemon juice",
+    "Notes:",
+    "Add pasta water if sauce is too thick"
+  ],
+  "target_recipe": {
+    "title": "Lemon Pasta",
+    "ingredients": [
+      "8 oz pasta",
+      "2 tbsp butter",
+      "1 lemon"
+    ],
+    "steps": [
+      "Boil pasta until al dente",
+      "Melt butter in a pan",
+      "Toss pasta with lemon juice"
+    ],
+    "notes": [
+      "Add pasta water if sauce is too thick"
+    ]
+  }
+}

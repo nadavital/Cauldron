@@ -1,0 +1,61 @@
+{
+  "id": "holdout_qa_2026_02_10_214528",
+  "source_type": "url",
+  "normalized_lines": [
+    "Lentil Soup Recipe",
+    "Ingredients",
+    "3 tablespoons extra-virgin olive oil",
+    "1 medium yellow onion (cut into 1/4-inch dice)",
+    "6 garlic cloves (minced (about 2 tablespoons))",
+    "4 sprigs fresh thyme (tied together with kitchen twine (or 1/2 teaspoon dried))",
+    "1 teaspoon kosher salt",
+    "1/4 teaspoon ground black pepper",
+    "4 medium carrots (scrubbed and cut into 1/2-inch dice (peeling is optional))",
+    "1 (15-ounce) can fire roasted diced tomatoes in their juices",
+    "1 (15-ounce) can crushed tomatoes",
+    "1 cup brown or green lentils (rinsed with any shriveled lentils discarded)",
+    "4 cups low sodium vegetable broth",
+    "2 bay leaves",
+    "1 1/2 cups stemmed and chopped kale",
+    "2 teaspoons sherry vinegar or red wine vinegar",
+    "1 teaspoon honey (or granulated sugar)",
+    "1/8 teaspoon red pepper flakes (optional)",
+    "1/4 cup finely grated fresh Parmesan (plus additional for serving (omit or swap nutritional yeast to make vegan))",
+    "Instructions",
+    "In a Dutch oven or similar large, sturdy soup pot, heat the oil over medium low. Add the onion. Cook, stirring occasionally, until the onion is very soft and turning browned, about 10 minutes.",
+    "Add the garlic, carrots, thyme sprigs, salt, and black pepper. Cook until the carrots are barely soft, 2 to 3 minutes. Add the diced and crushed tomatoes, bring to a simmer over medium-high heat, and let simmer 2 minutes.",
+    "Add the lentils and stir to coat. Add the broth and bay leaves. Increase the heat to high and bring the mixture to a boil, then partially cover the pot and lower the heat to a gentle simmer. Let simmer, adjusting the heat as needed so the lentils simmer gently but do not boil, until the lentils are tender but not mushy, about 25 minutes. Fish out and discard the bay leaves and thyme bundle.",
+    "With an immersion blender, puree the soup briefly to thicken it up a little but leave plenty of the lentils and vegetables intact (or you can transfer about 2 big ladlefuls to a blender, puree, then return to the soup).",
+    "Stir in the kale, vinegar, honey, and red pepper flakes. Partially cover the pot, and let cook over low until the kale is tender, about 5 to 7 minutes. Stir in the Parmesan. Taste and adjust the seasoning as desired. Enjoy hot with a sprinkle of Parmesan."
+  ],
+  "target_recipe": {
+    "title": "Lentil Soup Recipe",
+    "ingredients": [
+      "3 tablespoons extra-virgin olive oil",
+      "1 medium yellow onion (cut into 1/4-inch dice)",
+      "6 garlic cloves (minced (about 2 tablespoons))",
+      "4 sprigs fresh thyme (tied together with kitchen twine (or 1/2 teaspoon dried))",
+      "1 teaspoon kosher salt",
+      "1/4 teaspoon ground black pepper",
+      "4 medium carrots (scrubbed and cut into 1/2-inch dice (peeling is optional))",
+      "1 (15-ounce) can fire roasted diced tomatoes in their juices",
+      "1 (15-ounce) can crushed tomatoes",
+      "1 cup brown or green lentils (rinsed with any shriveled lentils discarded)",
+      "4 cups low sodium vegetable broth",
+      "2 bay leaves",
+      "1 1/2 cups stemmed and chopped kale",
+      "2 teaspoons sherry vinegar or red wine vinegar",
+      "1 teaspoon honey (or granulated sugar)",
+      "1/8 teaspoon red pepper flakes (optional)",
+      "1/4 cup finely grated fresh Parmesan (plus additional for serving (omit or swap nutritional yeast to make vegan))"
+    ],
+    "steps": [
+      "In a Dutch oven or similar large, sturdy soup pot, heat the oil over medium low. Add the onion. Cook, stirring occasionally, until the onion is very soft and turning browned, about 10 minutes.",
+      "Add the garlic, carrots, thyme sprigs, salt, and black pepper. Cook until the carrots are barely soft, 2 to 3 minutes. Add the diced and crushed tomatoes, bring to a simmer over medium-high heat, and let simmer 2 minutes.",
+      "Add the lentils and stir to coat. Add the broth and bay leaves. Increase the heat to high and bring the mixture to a boil, then partially cover the pot and lower the heat to a gentle simmer. Let simmer, adjusting the heat as needed so the lentils simmer gently but do not boil, until the lentils are tender but not mushy, about 25 minutes. Fish out and discard the bay leaves and thyme bundle.",
+      "With an immersion blender, puree the soup briefly to thicken it up a little but leave plenty of the lentils and vegetables intact (or you can transfer about 2 big ladlefuls to a blender, puree, then return to the soup).",
+      "Stir in the kale, vinegar, honey, and red pepper flakes. Partially cover the pot, and let cook over low until the kale is tender, about 5 to 7 minutes. Stir in the Parmesan. Taste and adjust the seasoning as desired. Enjoy hot with a sprinkle of Parmesan."
+    ],
+    "notes": []
+  }
+}

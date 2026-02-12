@@ -1,0 +1,35 @@
+{
+  "id": "noisy_ocr_stew",
+  "source_type": "ocr_failure",
+  "normalized_lines": [
+    "Rustic Stew",
+    "<div class=\"recipe\">",
+    "INGREDIENTS",
+    "1 lb beef chuck",
+    "2 carrots, chopped",
+    "1 onion, diced",
+    "INSTRUCTIONS",
+    "Brown beef in a Dutch oven",
+    "Add vegetables and stir",
+    "Simmer for 45 minutes",
+    "</div>",
+    "Notes:",
+    "Skim surface fat before serving"
+  ],
+  "target_recipe": {
+    "title": "Rustic Stew",
+    "ingredients": [
+      "1 lb beef chuck",
+      "2 carrots, chopped",
+      "1 onion, diced"
+    ],
+    "steps": [
+      "Brown beef in a Dutch oven",
+      "Add vegetables and stir",
+      "Simmer for 45 minutes"
+    ],
+    "notes": [
+      "Skim surface fat before serving"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "id": "holdout_008",
+  "source_type": "url_holdout",
+  "source_url": "https://www.downshiftology.com/recipes/meatloaf/",
+  "normalized_lines": [
+    "Classic Meatloaf Recipe",
+    "Ingredients",
+    "2 pounds ground beef",
+    "1 small onion (finely diced (about 1 cup diced))",
+    "4 garlic cloves (minced)",
+    "2 large eggs",
+    "2 tablespoons ketchup",
+    "1 tablespoon Worcestershire sauce",
+    "\u2154 cup quick-cooking oats",
+    "\u2153 cup milk",
+    "2 tablespoons finely chopped fresh parsley",
+    "1 teaspoon Italian seasoning",
+    "1 teaspoon kosher salt",
+    "\u00bd teaspoon ground black pepper",
+    "\u00bd cup ketchup",
+    "1 tablespoon coconut sugar or brown sugar",
+    "Instructions",
+    "Combine ingredients. Preheat oven to 350\u00b0F (175\u00b0C). In a large mixing bowl, add the ground beef, onion, garlic, eggs, ketchup, Worcestershire sauce, oats, milk, parsley, Italian seasoning, salt, and pepper. Using your hands, mix together the ingredients until well combined, but try not to over-mix.",
+    "Form a loaf. On a casserole pan or rimmed baking sheet, form the mixture into an approximate 9x5-inch loaf. Alternatively, you can add the mixture to a loaf pan.",
+    "Coat with the glaze. In a small bowl, stir together the ketchup, Worcestershire sauce, and sugar. Brush it all over the top of the meatloaf.",
+    "Cook. Place the meatloaf in the oven and cook for 50 to 60 minutes, or until the internal temperature has reached 160\u00b0F (70\u00b0C).",
+    "Slice and serve. Remove the meatloaf from the oven and let it rest for 10 minutes. Then, slice it up and serve!"
+  ],
+  "target_recipe": {
+    "title": "Classic Meatloaf Recipe",
+    "ingredients": [
+      "2 pounds ground beef",
+      "1 small onion (finely diced (about 1 cup diced))",
+      "4 garlic cloves (minced)",
+      "2 large eggs",
+      "2 tablespoons ketchup",
+      "1 tablespoon Worcestershire sauce",
+      "\u2154 cup quick-cooking oats",
+      "\u2153 cup milk",
+      "2 tablespoons finely chopped fresh parsley",
+      "1 teaspoon Italian seasoning",
+      "1 teaspoon kosher salt",
+      "\u00bd teaspoon ground black pepper",
+      "\u00bd cup ketchup",
+      "1 tablespoon coconut sugar or brown sugar"
+    ],
+    "steps": [
+      "Combine ingredients. Preheat oven to 350\u00b0F (175\u00b0C). In a large mixing bowl, add the ground beef, onion, garlic, eggs, ketchup, Worcestershire sauce, oats, milk, parsley, Italian seasoning, salt, and pepper. Using your hands, mix together the ingredients until well combined, but try not to over-mix.",
+      "Form a loaf. On a casserole pan or rimmed baking sheet, form the mixture into an approximate 9x5-inch loaf. Alternatively, you can add the mixture to a loaf pan.",
+      "Coat with the glaze. In a small bowl, stir together the ketchup, Worcestershire sauce, and sugar. Brush it all over the top of the meatloaf.",
+      "Cook. Place the meatloaf in the oven and cook for 50 to 60 minutes, or until the internal temperature has reached 160\u00b0F (70\u00b0C).",
+      "Slice and serve. Remove the meatloaf from the oven and let it rest for 10 minutes. Then, slice it up and serve!"
+    ],
+    "notes": []
+  }
+}

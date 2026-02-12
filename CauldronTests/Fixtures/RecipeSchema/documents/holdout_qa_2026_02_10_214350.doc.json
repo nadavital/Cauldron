@@ -1,0 +1,39 @@
+{
+  "id": "holdout_qa_2026_02_10_214350",
+  "source_type": "url",
+  "normalized_lines": [
+    "Air Fryer Chicken Thighs",
+    "Ingredients",
+    "6 chicken thighs (with bone and skin)",
+    "1 lemon",
+    "1 teaspoon kosher salt",
+    "1/4 teaspoon black pepper",
+    "1 teaspoon garlic powder",
+    "1 teaspoon onion powder",
+    "1/2 teaspoon sweet paprika",
+    "1/2 teaspoon dried herbs (such as herbs de provence or dried oregano)",
+    "Instructions",
+    "Season the chicken with the juice of 1/2 of the lemon, then season with remaining spices on both sides.",
+    "Rub the seasoning well all over the chicken then transfer to the air fryer, skin side down.",
+    "Air fry 400F 12 minutes on each side, until golden and crispy and cooked through in the center."
+  ],
+  "target_recipe": {
+    "title": "Air Fryer Chicken Thighs",
+    "ingredients": [
+      "6 chicken thighs (with bone and skin)",
+      "1 lemon",
+      "1 teaspoon kosher salt",
+      "1/4 teaspoon black pepper",
+      "1 teaspoon garlic powder",
+      "1 teaspoon onion powder",
+      "1/2 teaspoon sweet paprika",
+      "1/2 teaspoon dried herbs (such as herbs de provence or dried oregano)"
+    ],
+    "steps": [
+      "Season the chicken with the juice of 1/2 of the lemon, then season with remaining spices on both sides.",
+      "Rub the seasoning well all over the chicken then transfer to the air fryer, skin side down.",
+      "Air fry 400F 12 minutes on each side, until golden and crispy and cooked through in the center."
+    ],
+    "notes": []
+  }
+}

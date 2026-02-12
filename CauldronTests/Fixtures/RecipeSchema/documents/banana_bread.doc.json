@@ -1,0 +1,33 @@
+{
+  "id": "banana_bread",
+  "source_type": "url",
+  "normalized_lines": [
+    "Banana Bread",
+    "For the batter:",
+    "3 ripe bananas",
+    "2 cups flour",
+    "1 tsp baking soda",
+    "Method:",
+    "Mash bananas in a bowl",
+    "Fold in dry ingredients",
+    "Bake for 55 minutes",
+    "Storage:",
+    "Keeps for 3 days at room temperature"
+  ],
+  "target_recipe": {
+    "title": "Banana Bread",
+    "ingredients": [
+      "3 ripe bananas",
+      "2 cups flour",
+      "1 tsp baking soda"
+    ],
+    "steps": [
+      "Mash bananas in a bowl",
+      "Fold in dry ingredients",
+      "Bake for 55 minutes"
+    ],
+    "notes": [
+      "Keeps for 3 days at room temperature"
+    ]
+  }
+}

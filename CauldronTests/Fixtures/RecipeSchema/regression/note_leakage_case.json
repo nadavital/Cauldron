@@ -1,0 +1,9 @@
+{
+  "name": "note_leakage_case",
+  "text": "Quick Chili\n1 lb ground beef\n1 can tomatoes\nBrown beef in a pot\nAdd tomatoes and simmer 20 minutes\nNotes:\nTastes better the next day",
+  "expected": {
+    "ingredients": ["1 lb ground beef", "1 can tomatoes"],
+    "steps": ["Brown beef in a pot", "Add tomatoes and simmer 20 minutes"],
+    "notes_contains": ["Tastes better the next day"]
+  }
+}

@@ -634,20 +634,65 @@ struct IngredientEditorRow: View {
     let onDelete: () -> Void
     
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            primaryRow
+
+            ForEach(additionalIndices, id: \.self) { index in
+                HStack(spacing: 8) {
+                    Label("Plus", systemImage: "plus.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .foregroundColor(.cauldronOrange)
+                        .frame(width: 16)
+
+                    TextField("Extra Amt", text: additionalQuantityTextBinding(at: index))
+                        .frame(width: 80)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    Picker("Unit", selection: additionalUnitBinding(at: index)) {
+                        ForEach(UnitKind.allCases, id: \.self) { unit in
+                            Text(unit.compactDisplayName).tag(unit)
+                        }
+                    }
+                    .frame(width: 70)
+                    .labelsHidden()
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        withAnimation {
+                            let removeIndex = Int(index)
+                            ingredient.additionalQuantities.remove(at: removeIndex)
+                        }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundColor(.red)
+                            .imageScale(.medium)
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                if index < additionalIndices.count - 1 {
+                    Divider()
+                        .padding(.leading, 24)
+                }
+            }
+        }
+        .font(.body)
+    }
+
+    private var primaryRow: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
-                // Ingredient name
                 TextField("Ingredient", text: $ingredient.name)
                     .frame(minWidth: 100)
             }
-            
-            // Quantity
+
             TextField("Amt", text: $ingredient.quantityText)
                 .frame(width: 60)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            
-            // Unit picker
+
             Picker("Unit", selection: $ingredient.unit) {
                 ForEach(UnitKind.allCases, id: \.self) { unit in
                     Text(unit.compactDisplayName).tag(unit)
@@ -655,16 +700,47 @@ struct IngredientEditorRow: View {
             }
             .frame(width: 70)
             .labelsHidden()
-            
-            // Delete button
-            Button(role: .destructive, action: onDelete) {
-                Image(systemName: "minus.circle.fill")
-                    .foregroundColor(.red)
-                    .imageScale(.medium)
+
+            Menu {
+                Button {
+                    withAnimation {
+                        var additional = AdditionalQuantityInput()
+                        additional.unit = ingredient.unit
+                        ingredient.additionalQuantities.append(additional)
+                    }
+                } label: {
+                    Label("Add Complex Quantity", systemImage: "plus.circle")
+                }
+
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete Ingredient", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundColor(.secondary)
+                    .imageScale(.large)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.borderless)
         }
-        .font(.body)
+    }
+
+    private var additionalIndices: [Int] {
+        Array(ingredient.additionalQuantities.indices)
+    }
+
+    private func additionalQuantityTextBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { ingredient.additionalQuantities[index].quantityText },
+            set: { ingredient.additionalQuantities[index].quantityText = $0 }
+        )
+    }
+
+    private func additionalUnitBinding(at index: Int) -> Binding<UnitKind> {
+        Binding(
+            get: { ingredient.additionalQuantities[index].unit },
+            set: { ingredient.additionalQuantities[index].unit = $0 }
+        )
     }
 }
 

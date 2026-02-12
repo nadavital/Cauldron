@@ -1,0 +1,49 @@
+{
+  "id": "holdout_qa_2026_02_10_214413",
+  "source_type": "url",
+  "normalized_lines": [
+    "Lentil Soup",
+    "Ingredients",
+    "3 slices bacon, (finely chopped)",
+    "1 tablespoon olive oil",
+    "1 large yellow onion, (finely chopped)",
+    "1 stalk celery, (finely chopped)",
+    "2 medium carrots, (diced)",
+    "3 cloves garlic, (chopped)",
+    "1 (14.5-oz) can diced tomatoes",
+    "6 cups chicken broth, (best quality such as Swanson)",
+    "1 cup French lentils, (lentilles du Puy or common brown or green lentils)",
+    "\u00bd teaspoon dried thyme",
+    "2 bay leaves",
+    "1 teaspoon salt",
+    "\u00bc teaspoon freshly ground black pepper",
+    "A few tablespoons chopped fresh parsley, (for garnish (optional))",
+    "Instructions",
+    "Fry the bacon in a large pot over medium heat, stirring frequently, until the fat is rendered and the bacon is crisp, 4 to 5 minutes. Add the olive oil, onions, celery, carrots, and garlic and cook, stirring occasionally, until the onions are soft and translucent, about 5 minutes. Do not brown; reduce heat if necessary. Add the tomatoes (with their juices), broth, lentils, thyme, bay leaves, salt and pepper and bring to a boil. Cover partially, reduce the heat to low, and simmer until the lentils are tender, 45 to 50 minutes (see note on cooking time if using common brown or green lentils). Fish out the bay leaves and discard.",
+    "Use an immersion blender to pur\u00e9e the soup until the broth is slightly thickened, or to desired consistency. (Be careful not to pur\u00e9e too much or the soup will get too thick, and you'll lose the integrity of the lentils.) If you don't have an immersion blender, transfer about 2 cups of the soup to a blender and pur\u00e9e until smooth, then return the blended soup to the pot. Garnish with fresh chopped parsley if desired and serve. (Note: The soup may thicken as it sits; thin with a bit of water if necessary.)"
+  ],
+  "target_recipe": {
+    "title": "Lentil Soup",
+    "ingredients": [
+      "3 slices bacon, (finely chopped)",
+      "1 tablespoon olive oil",
+      "1 large yellow onion, (finely chopped)",
+      "1 stalk celery, (finely chopped)",
+      "2 medium carrots, (diced)",
+      "3 cloves garlic, (chopped)",
+      "1 (14.5-oz) can diced tomatoes",
+      "6 cups chicken broth, (best quality such as Swanson)",
+      "1 cup French lentils, (lentilles du Puy or common brown or green lentils)",
+      "\u00bd teaspoon dried thyme",
+      "2 bay leaves",
+      "1 teaspoon salt",
+      "\u00bc teaspoon freshly ground black pepper",
+      "A few tablespoons chopped fresh parsley, (for garnish (optional))"
+    ],
+    "steps": [
+      "Fry the bacon in a large pot over medium heat, stirring frequently, until the fat is rendered and the bacon is crisp, 4 to 5 minutes. Add the olive oil, onions, celery, carrots, and garlic and cook, stirring occasionally, until the onions are soft and translucent, about 5 minutes. Do not brown; reduce heat if necessary. Add the tomatoes (with their juices), broth, lentils, thyme, bay leaves, salt and pepper and bring to a boil. Cover partially, reduce the heat to low, and simmer until the lentils are tender, 45 to 50 minutes (see note on cooking time if using common brown or green lentils). Fish out the bay leaves and discard.",
+      "Use an immersion blender to pur\u00e9e the soup until the broth is slightly thickened, or to desired consistency. (Be careful not to pur\u00e9e too much or the soup will get too thick, and you'll lose the integrity of the lentils.) If you don't have an immersion blender, transfer about 2 cups of the soup to a blender and pur\u00e9e until smooth, then return the blended soup to the pot. Garnish with fresh chopped parsley if desired and serve. (Note: The soup may thicken as it sits; thin with a bit of water if necessary.)"
+    ],
+    "notes": []
+  }
+}

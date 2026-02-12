@@ -1,0 +1,9 @@
+{
+  "name": "noisy_header_case",
+  "text": "Baked Oats\n<div>ads</div>\nINGREDIENTS\n1 cup oats\n1 banana\nMETHOD\nMash banana with oats\nBake for 20 minutes\nTip:\nTop with yogurt",
+  "expected": {
+    "ingredients": ["1 cup oats", "1 banana"],
+    "steps": ["Mash banana with oats", "Bake for 20 minutes"],
+    "notes_contains": ["Top with yogurt"]
+  }
+}

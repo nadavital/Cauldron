@@ -21,6 +21,9 @@ struct UnitParser {
         "tsps": .teaspoon,
         "teaspoon": .teaspoon,
         "teaspoons": .teaspoon,
+        // Common typo seen in some recipe publishers.
+        "teapoon": .teaspoon,
+        "teapoons": .teaspoon,
 
         // Tablespoon (note: both "t" and "T" lowercase to "t", so we need context or longer form)
         // Since we lowercase everything, we can't distinguish "T" from "t"
@@ -42,6 +45,8 @@ struct UnitParser {
 
         // Pound
         "lb": .pound,
+        "1b": .pound,
+        "ib": .pound,
         "lbs": .pound,
         "pound": .pound,
         "pounds": .pound,
@@ -107,13 +112,15 @@ struct UnitParser {
     /// ```
     static func parse(_ text: String) -> UnitKind? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let punctuation = CharacterSet(charactersIn: ".,:;()[]{}\"'")
+        let cleaned = normalizeOCRUnitText(trimmed.trimmingCharacters(in: punctuation))
 
         // Special case: "T" (capital) means tablespoon, "t" (lowercase) means teaspoon
-        if trimmed == "T" {
+        if cleaned == "T" {
             return .tablespoon
         }
 
-        let normalized = trimmed.lowercased()
+        let normalized = cleaned.lowercased()
 
         // Try exact matches against UnitKind enum cases
         for unit in UnitKind.allCases {
@@ -126,5 +133,28 @@ struct UnitParser {
 
         // Try abbreviation map
         return abbreviationMap[normalized]
+    }
+
+    private static func normalizeOCRUnitText(_ text: String) -> String {
+        if text.isEmpty {
+            return text
+        }
+
+        var normalized = text
+            .replacingOccurrences(of: "$", with: "s")
+            .replacingOccurrences(of: "5", with: "s")
+            .replacingOccurrences(of: "0", with: "o")
+
+        let directReplacements: [String: String] = [
+            "tb5p": "tbsp",
+            "t5p": "tsp",
+            "1b": "lb",
+            "ib": "lb"
+        ]
+        let lower = normalized.lowercased()
+        if let replacement = directReplacements[lower] {
+            normalized = replacement
+        }
+        return normalized
     }
 }

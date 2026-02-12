@@ -1,0 +1,60 @@
+{
+  "id": "qa_2026_02_10_205310",
+  "source_type": "manual_edge",
+  "normalized_lines": [
+    "Chocolate Orange Olive Oil Cake",
+    "By Nadav Test Kitchen",
+    "Leave a comment",
+    "Total Time: 1 hr 5 min",
+    "Yield: 8 slices",
+    "Subscribe to our newsletter for weekly recipes",
+    "Ingredients:",
+    "1 3/4 cups all-purpose flour",
+    "1/2 cup cocoa powder",
+    "1 1/2 tsp baking powder",
+    "1/2 tsp fine salt",
+    "3/4 cup sugar",
+    "2/3 cup olive oil",
+    "2 eggs",
+    "1 cup milk",
+    "1 tbsp orange zest",
+    "1 tsp vanilla extract",
+    "Grease an 8-inch round pan and heat oven to 350\u00b0F.",
+    "Whisk flour, cocoa, baking powder, and salt in a medium bowl.",
+    "In another bowl, whisk sugar, oil, eggs, milk, zest, and vanilla.",
+    "Fold dry ingredients into wet just until no dry streaks remain.",
+    "Pour batter into pan and bake 30 to 36 minutes.",
+    "Cool 15 minutes in pan, then move to a rack to cool fully.",
+    "Storage: keeps 3 days covered at room temperature.",
+    "For cleaner slices, chill 20 minutes before cutting.",
+    "Nutritional information provided as a courtesy only.",
+    "\u00a9 2026 Test Kitchen Media. All rights reserved."
+  ],
+  "target_recipe": {
+    "title": "Chocolate Orange Olive Oil Cake",
+    "ingredients": [
+      "1 3/4 cups all-purpose flour",
+      "1/2 cup cocoa powder",
+      "1 1/2 tsp baking powder",
+      "1/2 tsp fine salt",
+      "3/4 cup sugar",
+      "2/3 cup olive oil",
+      "2 eggs",
+      "1 cup milk",
+      "1 tbsp orange zest",
+      "1 tsp vanilla extract"
+    ],
+    "steps": [
+      "Grease an 8-inch round pan and heat oven to 350\u00b0F.",
+      "Whisk flour, cocoa, baking powder, and salt in a medium bowl.",
+      "In another bowl, whisk sugar, oil, eggs, milk, zest, and vanilla.",
+      "Fold dry ingredients into wet just until no dry streaks remain.",
+      "Pour batter into pan and bake 30 to 36 minutes.",
+      "Cool 15 minutes in pan, then move to a rack to cool fully."
+    ],
+    "notes": [
+      "Storage: keeps 3 days covered at room temperature.",
+      "For cleaner slices, chill 20 minutes before cutting."
+    ]
+  }
+}

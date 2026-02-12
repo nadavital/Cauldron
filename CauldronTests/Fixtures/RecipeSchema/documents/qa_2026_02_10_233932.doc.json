@@ -1,0 +1,63 @@
+{
+  "id": "qa_2026_02_10_233932",
+  "source_type": "ocr",
+  "normalized_lines": [
+    "Prep Time: 15 minutes",
+    "Cook Time: 35-40 minutes",
+    "Total Time: 55 minutes",
+    "Serves 4",
+    "Ingredients:",
+    "11/2 Ib chicken thighs, cut into",
+    "1-inch pieces",
+    "1/3 c. reduced-sodium soy sauce",
+    "1/2 c. low-sodium chicken broth",
+    "3 tbsp. honey",
+    "1 tbsp. cornstarch",
+    "2 tsp. toasted sesame oil",
+    "3 to 4 garlic cloves, finely minced",
+    "1 tbsp plus 1/2 cup sugar",
+    "800g/1lb 12oz canned chickpeas (drained)",
+    "1/4 tsp black pepper",
+    "Cooked rice, for serving",
+    "Notes:",
+    "- Optional: add",
+    "ONE-PAN HONEY GARLIC CHICKEN",
+    "Method:",
+    "1. Preheat oven to 425\u00b0F.",
+    "2. In a bowl, whisk soy sauce, broth,",
+    "honey, cornstarch, and sesame oil.",
+    "3. Toss chicken with garlic and pepper.",
+    "4. Bake 20-25 minutes, then add sauce",
+    "and bake 8-10 minutes more.",
+    "5. Rest 5 minutes before serving over rice."
+  ],
+  "target_recipe": {
+    "title": "Prep Time: 15 minutes",
+    "ingredients": [
+      "11/2 Ib chicken thighs, cut into",
+      "1-inch pieces",
+      "1/3 c. reduced-sodium soy sauce",
+      "1/2 c. low-sodium chicken broth",
+      "3 tbsp. honey",
+      "1 tbsp. cornstarch",
+      "2 tsp. toasted sesame oil",
+      "3 to 4 garlic cloves, finely minced",
+      "1 tbsp plus 1/2 cup sugar",
+      "800g/1lb 12oz canned chickpeas (drained)",
+      "1/4 tsp black pepper",
+      "Cooked rice, for serving"
+    ],
+    "steps": [
+      "1. Preheat oven to 425\u00b0F.",
+      "2. In a bowl, whisk soy sauce, broth,",
+      "honey, cornstarch, and sesame oil.",
+      "3. Toss chicken with garlic and pepper.",
+      "4. Bake 20-25 minutes, then add sauce",
+      "and bake 8-10 minutes more.",
+      "5. Rest 5 minutes before serving over rice."
+    ],
+    "notes": [
+      "- Optional: add"
+    ]
+  }
+}

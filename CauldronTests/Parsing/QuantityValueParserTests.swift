@@ -53,6 +53,21 @@ final class QuantityValueParserTests: XCTestCase {
         XCTAssertEqual(QuantityValueParser.parse("2   1/4"), 2.25)
     }
 
+    func testParse_OCRMergedMixedFraction() {
+        XCTAssertEqual(QuantityValueParser.parse("11/2"), 1.5)
+        XCTAssertEqual(QuantityValueParser.parse("13/4"), 1.75)
+    }
+
+    func testParse_OCRFractionNoise() {
+        XCTAssertEqual(QuantityValueParser.parse("/½"), 0.5)
+        XCTAssertEqual(QuantityValueParser.parse("/1/2"), 0.5)
+        guard let parsed = QuantityValueParser.parse("2¼4") else {
+            XCTFail("Expected parser to recover OCR-noisy mixed fraction")
+            return
+        }
+        XCTAssertEqual(parsed, 2.25, accuracy: 0.001)
+    }
+
     // MARK: - Unicode Fraction Parsing
 
     func testParse_UnicodeFractionHalf() {

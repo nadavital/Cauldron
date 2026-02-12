@@ -1,0 +1,46 @@
+{
+  "id": "holdout_004",
+  "source_type": "url_holdout",
+  "source_url": "https://www.inspiredtaste.net/64999/glazed-salmon/",
+  "normalized_lines": [
+    "Maple Soy Glazed Salmon",
+    "Ingredients",
+    "4 salmon fillets, 6 ounces each, preferably skin on",
+    "2 tablespoons hoisin sauce, try our homemade hoisin sauce",
+    "2 tablespoons maple syrup",
+    "1 tablespoon brown sugar",
+    "2 teaspoons soy sauce",
+    "1 teaspoon Dijon mustard",
+    "1 clove garlic, finely grated or minced",
+    "1/4 teaspoon fine sea salt",
+    "Sliced green onion for garnish, optional",
+    "Instructions",
+    "Make the glaze: In a small bowl, whisk together the hoisin sauce, maple syrup, brown sugar, soy sauce, Dijon mustard, garlic, and a pinch of salt until smooth.",
+    "Marinate (optional): Place the salmon fillets in a shallow dish, zip-top bag, or airtight container. Pour the glaze over the salmon, making sure each piece is well coated. Cover and refrigerate for at least 30 minutes and up to 8 hours.",
+    "Preheat the oven: When you\u2019re ready to cook, preheat your oven to 400\u00b0F (204\u00b0C).",
+    "Bake: Arrange the salmon fillets, skin-side down, in a baking dish. Pour or spoon any remaining marinade over the top. Bake until the salmon flakes easily with a fork, 15 to 20 minutes, depending on thickness. We cook to 125\u00b0F (51\u00b0C), which means it will be soft, tender, and slightly pink in the center. For a visual cue, look for the flesh to be somewhat opaque.",
+    "Glaze as it bakes: Every 3 to 5 minutes, tilt the dish slightly to gather the glaze that\u2019s pooled at the bottom and spoon it back over the salmon. This step helps you achieve that beautifully sticky, caramelized finish. Top with sliced green onions and serve."
+  ],
+  "target_recipe": {
+    "title": "Maple Soy Glazed Salmon",
+    "ingredients": [
+      "4 salmon fillets, 6 ounces each, preferably skin on",
+      "2 tablespoons hoisin sauce, try our homemade hoisin sauce",
+      "2 tablespoons maple syrup",
+      "1 tablespoon brown sugar",
+      "2 teaspoons soy sauce",
+      "1 teaspoon Dijon mustard",
+      "1 clove garlic, finely grated or minced",
+      "1/4 teaspoon fine sea salt",
+      "Sliced green onion for garnish, optional"
+    ],
+    "steps": [
+      "Make the glaze: In a small bowl, whisk together the hoisin sauce, maple syrup, brown sugar, soy sauce, Dijon mustard, garlic, and a pinch of salt until smooth.",
+      "Marinate (optional): Place the salmon fillets in a shallow dish, zip-top bag, or airtight container. Pour the glaze over the salmon, making sure each piece is well coated. Cover and refrigerate for at least 30 minutes and up to 8 hours.",
+      "Preheat the oven: When you\u2019re ready to cook, preheat your oven to 400\u00b0F (204\u00b0C).",
+      "Bake: Arrange the salmon fillets, skin-side down, in a baking dish. Pour or spoon any remaining marinade over the top. Bake until the salmon flakes easily with a fork, 15 to 20 minutes, depending on thickness. We cook to 125\u00b0F (51\u00b0C), which means it will be soft, tender, and slightly pink in the center. For a visual cue, look for the flesh to be somewhat opaque.",
+      "Glaze as it bakes: Every 3 to 5 minutes, tilt the dish slightly to gather the glaze that\u2019s pooled at the bottom and spoon it back over the salmon. This step helps you achieve that beautifully sticky, caramelized finish. Top with sliced green onions and serve."
+    ],
+    "notes": []
+  }
+}

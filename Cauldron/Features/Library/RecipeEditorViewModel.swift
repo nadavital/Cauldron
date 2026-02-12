@@ -30,33 +30,50 @@ struct IngredientInput: Identifiable {
     var name: String = ""
     var quantityText: String = ""  // Supports fractions like "1/2", decimals "1.5", and ranges "1-2"
     var unit: UnitKind = .cup
+    var additionalQuantities: [AdditionalQuantityInput] = []
     // Section is now handled by the parent container
     
     // Parse quantity text to handle fractions, decimals, and ranges
     var parsedValues: (value: Double, upperValue: Double?)? {
-        guard !quantityText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        
-        let trimmed = quantityText.trimmingCharacters(in: .whitespaces)
-        
+        QuantityTextParser.parse(quantityText)
+    }
+}
+
+struct AdditionalQuantityInput: Identifiable {
+    let id = UUID()
+    var quantityText: String = ""
+    var unit: UnitKind = .cup
+
+    var parsedValues: (value: Double, upperValue: Double?)? {
+        QuantityTextParser.parse(quantityText)
+    }
+}
+
+private enum QuantityTextParser {
+    static func parse(_ rawText: String) -> (value: Double, upperValue: Double?)? {
+        guard !rawText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+
+        let trimmed = rawText.trimmingCharacters(in: .whitespaces)
+
         // Handle Range: "1-2" or "1 - 2"
         if trimmed.contains("-") {
-             let components = trimmed.components(separatedBy: "-")
-             if components.count == 2,
-                let lower = parseSingleValue(components[0]),
-                let upper = parseSingleValue(components[1]) {
-                 return (lower, upper)
-             }
+            let components = trimmed.components(separatedBy: "-")
+            if components.count == 2,
+               let lower = parseSingleValue(components[0]),
+               let upper = parseSingleValue(components[1]) {
+                return (lower, upper)
+            }
         }
-        
+
         // Handle Single Value
         if let val = parseSingleValue(trimmed) {
             return (val, nil)
         }
-        
+
         return nil
     }
-    
-    private func parseSingleValue(_ text: String) -> Double? {
+
+    private static func parseSingleValue(_ text: String) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return nil }
         
@@ -268,16 +285,15 @@ struct NutritionInput {
                 input.name = ingredient.name
                 
                 if let quantity = ingredient.quantity {
-                    let lowerFormatted = String(format: "%.2f", quantity.value).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
-                    
-                    if let upper = quantity.upperValue {
-                        let upperFormatted = String(format: "%.2f", upper).replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
-                        input.quantityText = "\(lowerFormatted)-\(upperFormatted)"
-                    } else {
-                         input.quantityText = lowerFormatted
-                    }
-                    
+                    input.quantityText = formatQuantityText(quantity)
                     input.unit = quantity.unit
+                }
+
+                input.additionalQuantities = ingredient.additionalQuantities.map { quantity in
+                    var additional = AdditionalQuantityInput()
+                    additional.quantityText = formatQuantityText(quantity)
+                    additional.unit = quantity.unit
+                    return additional
                 }
                 return input
             }
@@ -574,10 +590,16 @@ struct NutritionInput {
                 } else {
                     quantity = nil
                 }
+
+                let additionalQuantities: [Quantity] = input.additionalQuantities.compactMap { additional in
+                    guard let parsed = additional.parsedValues else { return nil }
+                    return Quantity(value: parsed.value, upperValue: parsed.upperValue, unit: additional.unit)
+                }
                 
                 recipeIngredients.append(Ingredient(
                     name: input.name,
                     quantity: quantity,
+                    additionalQuantities: additionalQuantities,
                     note: nil,
                     section: sectionName
                 ))
@@ -674,6 +696,19 @@ struct NutritionInput {
             )
         }
     }
+
+    private func formatQuantityText(_ quantity: Quantity) -> String {
+        let lowerFormatted = String(format: "%.2f", quantity.value)
+            .replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
+
+        if let upper = quantity.upperValue {
+            let upperFormatted = String(format: "%.2f", upper)
+                .replacingOccurrences(of: "\\.?0+$", with: "", options: .regularExpression)
+            return "\(lowerFormatted)-\(upperFormatted)"
+        }
+
+        return lowerFormatted
+    }
 }
 
 enum RecipeEditorError: LocalizedError {
@@ -689,4 +724,3 @@ enum RecipeEditorError: LocalizedError {
         }
     }
 }
-
