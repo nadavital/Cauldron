@@ -60,6 +60,123 @@ struct PreparedSharedRecipe {
     let sourceInfo: String
 }
 
+extension PreparedSharedRecipe {
+    func recipeParserInputText() -> String {
+        recipe.recipeParserInputText()
+    }
+
+    func recipeMergedWithParsedContent(_ parsedRecipe: Recipe) -> Recipe {
+        recipe.mergedWithParsedContent(parsedRecipe)
+    }
+}
+
+extension Recipe {
+    fileprivate func recipeParserInputText() -> String {
+        var lines: [String] = [title]
+
+        if let yields = yields.nonEmpty {
+            lines.append("Servings: \(yields)")
+        }
+
+        if let totalMinutes {
+            lines.append("Total Time: \(totalMinutes) minutes")
+        }
+
+        lines.append("")
+        lines.append("Ingredients:")
+        lines.append(contentsOf: parserInputIngredientLines())
+
+        lines.append("")
+        lines.append("Instructions:")
+        lines.append(contentsOf: parserInputStepLines())
+
+        if let notes = notes?.nonEmpty {
+            lines.append("")
+            lines.append("Notes:")
+            lines.append(
+                contentsOf: notes
+                    .components(separatedBy: .newlines)
+                    .map(\.trimmed)
+                    .filter { !$0.isEmpty }
+            )
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    fileprivate func mergedWithParsedContent(_ parsed: Recipe) -> Recipe {
+        let mergedTitle = parsed.title.nonEmpty ?? title
+        let mergedYields = parsed.yields.nonEmpty ?? yields
+        let mergedNotes = parsed.notes?.nonEmpty ?? notes?.nonEmpty
+
+        return Recipe(
+            id: id,
+            title: mergedTitle,
+            ingredients: parsed.ingredients,
+            steps: parsed.steps,
+            yields: mergedYields,
+            totalMinutes: parsed.totalMinutes ?? totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL ?? parsed.sourceURL,
+            sourceTitle: sourceTitle ?? parsed.sourceTitle,
+            notes: mergedNotes,
+            imageURL: imageURL ?? parsed.imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: Date(),
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
+    private func parserInputIngredientLines() -> [String] {
+        var lines: [String] = []
+        var currentSection: String?
+
+        for ingredient in ingredients {
+            let section = ingredient.section?.nonEmpty
+            if section != currentSection {
+                currentSection = section
+                if let section {
+                    lines.append("\(section):")
+                }
+            }
+            lines.append(ingredient.displayString)
+        }
+
+        return lines
+    }
+
+    private func parserInputStepLines() -> [String] {
+        var lines: [String] = []
+        var currentSection: String?
+
+        for step in steps.sorted(by: { $0.index < $1.index }) {
+            let section = step.section?.nonEmpty
+            if section != currentSection {
+                currentSection = section
+                if let section {
+                    lines.append("\(section):")
+                }
+            }
+
+            lines.append("\(step.index + 1). \(step.text.trimmed)")
+        }
+
+        return lines
+    }
+}
+
 private struct PreparedSharedRecipePayload: Codable {
     let title: String
     let ingredients: [String]
