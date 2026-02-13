@@ -3,7 +3,7 @@
 ## Project Overview
 Cauldron is a modern iOS recipe management and social sharing platform built with SwiftUI and CloudKit. Users can import recipes from multiple sources (web, YouTube, TikTok, Instagram), cook with interactive timers, share recipes with friends, and generate new recipes using Apple Intelligence.
 
-**Current Version:** 1.1.4
+**Current Version:** 1.2
 **Deployment Target:** iOS 18.0+
 **App Store:** Live on the App Store
 **TestFlight:** https://testflight.apple.com/join/Zk5WuCcE
