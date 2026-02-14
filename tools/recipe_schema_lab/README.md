@@ -1,69 +1,34 @@
-# Cauldron Model Lab (Local-only)
+# Cauldron Recipe Schema Lab
 
-This tool runs outside the repo so you can test/correct model behavior without committing anything.
+Interactive local UI for testing recipe import parsing and dataset corrections.
 
 ## Run
 
-From repo root:
+From repository root:
 
 ```bash
 ./tools/recipe_schema_lab/run.sh
 ```
 
-Then open:
+Open: http://127.0.0.1:8765
 
-- http://127.0.0.1:8765
+## Pipeline behavior
 
-Model artifacts used by this lab are in-repo:
+- `/predict` and `/assemble_recipe` use the Swift-backed parser pipeline by default (via `tools/recipe_schema_model/swift_pipeline_bridge.py`).
+- Set `CAULDRON_LAB_USE_PYTHON_FALLBACK=1` only if you need temporary fallback to legacy Python predictor/assembler behavior.
 
-- `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_model/artifacts/line_classifier.pkl`
-- `/Users/nadav/.codex/worktrees/b2d8/Cauldron/Cauldron/Resources/ML/RecipeLineClassifier.mlmodelc/line_classifier.pkl`
+## What the lab supports
 
-## What it does
+- Input modes: `text`, `url`, `image` (OCR)
+- Per-line labels + confidence
+- Manual label edits
+- Assembled recipe preview (`ingredients`, `steps`, `notes`, grouped sections)
+- Save local correction cases
+- Append corrections into `CauldronTests/Fixtures/RecipeSchema`
+- Run metrics/evaluation scripts from the UI
 
-- Input modes: `text`, `url`, `image` (OCR via Apple Vision on macOS, with local `tesseract` fallback)
-- Shows per-line predicted label + confidence
-- Lets you edit labels manually
-- Shows an **App Save Preview** panel that assembles your corrected labels into an app-like recipe shape:
-  - `ingredients[]` with parsed `quantity`/`unit` (best-effort) and `section`
-  - `steps[]` with `section` and extracted `timers`
-  - grouped `ingredientSections[]` / `stepSections[]`
-- `Save Local JSON`: writes correction files to:
-  - `/Users/nadav/.codex/local/recipe_schema_lab/cases/`
-- `Append To Dataset`: writes directly into repo fixtures via:
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_model/export_corrections.py`
-- `Run Metrics`: runs evaluation + regression scripts and shows output inline
-- Fixed holdout eval: any dataset fixture with ID prefix `holdout_` is excluded from retraining and evaluated separately in Metrics
+## Key files
 
-## Layout
-
-- Backend entrypoint: `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/app.py`
-- Backend modules:
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/lab_server.py`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/lab_handler.py`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/lab_recipe.py`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/lab_predictor.py`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/lab_config.py`
-- Frontend files:
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/static/index.html`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/static/js/*.js`
-  - `/Users/nadav/.codex/worktrees/b2d8/Cauldron/tools/recipe_schema_lab/static/css/*.css`
-
-## Optional: point to a different repo checkout
-
-```bash
-CAULDRON_REPO=/absolute/path/to/Cauldron ./tools/recipe_schema_lab/run.sh
-```
-
-To override where local QA cases/tmp are stored:
-
-```bash
-CAULDRON_QA_LOCAL_ROOT=/absolute/path ./tools/recipe_schema_lab/run.sh
-```
-
-Optional OCR engine override:
-
-```bash
-# one of: apple | tesseract | auto
-CAULDRON_LAB_OCR_ENGINE=apple ./tools/recipe_schema_lab/run.sh
-```
+- Backend: `tools/recipe_schema_lab/lab_handler.py`
+- Frontend: `tools/recipe_schema_lab/static/index.html`
+- Swift bridge: `tools/recipe_schema_model/swift_pipeline_bridge.py`

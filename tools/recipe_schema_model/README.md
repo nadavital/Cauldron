@@ -31,6 +31,15 @@ python3 tools/recipe_schema_model/export_coreml.py --model tools/recipe_schema_m
 python3 tools/recipe_schema_model/regression_metrics.py --model tools/recipe_schema_model/artifacts/line_classifier.pkl --regression-dir CauldronTests/Fixtures/RecipeSchema/regression --report tools/recipe_schema_model/artifacts/regression_report.json
 ```
 
+Parity reporting and gates:
+
+```bash
+python3 tools/recipe_schema_model/compare_swift_python_labels.py --out tools/recipe_schema_model/artifacts/parity_labels.json
+python3 tools/recipe_schema_model/compare_swift_python_assembly.py --out tools/recipe_schema_model/artifacts/parity_assembly.json
+python3 tools/recipe_schema_model/compare_swift_python_labels.py --gate
+python3 tools/recipe_schema_model/compare_swift_python_assembly.py --gate
+```
+
 ## Acceptance Thresholds
 
 - Macro F1 (present labels) >= 0.88
@@ -72,3 +81,4 @@ python3 tools/recipe_schema_model/evaluate_line_classifier.py \
 
 - The baseline model is a deterministic n-gram Naive Bayes implementation in pure Python stdlib.
 - `export_coreml.py` emits a bundled `.mlmodelc`-style artifact directory with manifest and payload for on-device packaging.
+- `swift_pipeline_bridge.py` compiles a small Swift harness that runs the production classifier + `ModelRecipeAssembler`, and is used by parity scripts and the lab backend.

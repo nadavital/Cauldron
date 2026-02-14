@@ -211,11 +211,20 @@ class DependencyContainer: ObservableObject {
         // ============================================================
 
         // Parsers
-        self.htmlParser = HTMLRecipeParser()
         self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
-        self.youtubeParser = YouTubeRecipeParser(foundationModelsService: foundationModelsService)
-        self.instagramParser = InstagramRecipeParser(foundationModelsService: foundationModelsService)
-        self.tiktokParser = TikTokRecipeParser(foundationModelsService: foundationModelsService)
+        self.htmlParser = HTMLRecipeParser(textParser: textParser)
+        self.youtubeParser = YouTubeRecipeParser(
+            foundationModelsService: foundationModelsService,
+            textParser: textParser
+        )
+        self.instagramParser = InstagramRecipeParser(
+            foundationModelsService: foundationModelsService,
+            textParser: textParser
+        )
+        self.tiktokParser = TikTokRecipeParser(
+            foundationModelsService: foundationModelsService,
+            textParser: textParser
+        )
 
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(imageManager: tempImageManager)
