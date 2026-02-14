@@ -4,24 +4,9 @@ import XCTest
 final class ModelParityBaselineTests: XCTestCase {
 
     private func repositoryRoot() throws -> URL {
-        var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let fileManager = FileManager.default
-
-        while true {
-            if fileManager.fileExists(atPath: candidate.appendingPathComponent("Cauldron.xcodeproj").path) {
-                return candidate
-            }
-            let parent = candidate.deletingLastPathComponent()
-            if parent.path == candidate.path {
-                break
-            }
-            candidate = parent
-        }
-
-        throw NSError(
-            domain: "ModelParityBaselineTests",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Unable to locate repository root from #filePath"]
+        try TestRepositoryLocator.findRepositoryRoot(
+            startingAt: #filePath,
+            requiredEntries: ["CauldronTests", "tools/recipe_schema_model"]
         )
     }
 
