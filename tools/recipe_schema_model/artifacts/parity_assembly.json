@@ -1,6 +1,6 @@
 {
   "report_type": "swift_python_assembly_parity",
-  "generated_at_utc": "2026-02-13T23:55:53.398578+00:00",
+  "generated_at_utc": "2026-02-14T07:44:10.152488+00:00",
   "fixtures_dir": "/Users/nadav/Desktop/Cauldron/CauldronTests/Fixtures/RecipeSchema/documents",
   "total_fixtures": 67,
   "mismatch_docs": 1,

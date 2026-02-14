@@ -3,15 +3,30 @@ import XCTest
 
 final class ModelParityBaselineTests: XCTestCase {
 
-    private func repositoryRoot() -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // Parsing
-            .deletingLastPathComponent() // CauldronTests
-            .deletingLastPathComponent() // repo root
+    private func repositoryRoot() throws -> URL {
+        var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileManager = FileManager.default
+
+        while true {
+            if fileManager.fileExists(atPath: candidate.appendingPathComponent("Cauldron.xcodeproj").path) {
+                return candidate
+            }
+            let parent = candidate.deletingLastPathComponent()
+            if parent.path == candidate.path {
+                break
+            }
+            candidate = parent
+        }
+
+        throw NSError(
+            domain: "ModelParityBaselineTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Unable to locate repository root from #filePath"]
+        )
     }
 
     private func loadJSON(at relativePath: String) throws -> [String: Any] {
-        let url = repositoryRoot().appendingPathComponent(relativePath)
+        let url = try repositoryRoot().appendingPathComponent(relativePath)
         let data = try Data(contentsOf: url)
         let value = try JSONSerialization.jsonObject(with: data, options: [])
         guard let payload = value as? [String: Any] else {

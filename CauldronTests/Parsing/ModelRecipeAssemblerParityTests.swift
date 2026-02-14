@@ -4,11 +4,31 @@ import XCTest
 
 final class ModelRecipeAssemblerParityTests: XCTestCase {
 
+    private func repositoryRoot() throws -> URL {
+        var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let fileManager = FileManager.default
+
+        while true {
+            if fileManager.fileExists(atPath: candidate.appendingPathComponent("Cauldron.xcodeproj").path) {
+                return candidate
+            }
+            let parent = candidate.deletingLastPathComponent()
+            if parent.path == candidate.path {
+                break
+            }
+            candidate = parent
+        }
+
+        throw NSError(
+            domain: "ModelRecipeAssemblerParityTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Unable to locate repository root from #filePath"]
+        )
+    }
+
     func testBananaBreadFixtureMatchesPythonAssemblyShape() throws {
-        let fixtureURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/RecipeSchema/lines/banana_bread.lines.jsonl")
+        let fixtureURL = try repositoryRoot()
+            .appendingPathComponent("CauldronTests/Fixtures/RecipeSchema/lines/banana_bread.lines.jsonl")
 
         let raw = try String(contentsOf: fixtureURL, encoding: .utf8)
         let rows = raw

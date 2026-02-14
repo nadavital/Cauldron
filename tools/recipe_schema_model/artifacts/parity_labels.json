@@ -1,6 +1,6 @@
 {
   "report_type": "swift_python_label_parity",
-  "generated_at_utc": "2026-02-13T23:55:57.860895+00:00",
+  "generated_at_utc": "2026-02-14T07:44:01.126557+00:00",
   "fixtures_dir": "/Users/nadav/Desktop/Cauldron/CauldronTests/Fixtures/RecipeSchema/lines",
   "total_fixtures": 67,
   "total_lines": 1518,
