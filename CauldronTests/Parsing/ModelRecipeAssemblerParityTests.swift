@@ -7,7 +7,7 @@ final class ModelRecipeAssemblerParityTests: XCTestCase {
     private func repositoryRoot() throws -> URL {
         try TestRepositoryLocator.findRepositoryRoot(
             startingAt: #filePath,
-            requiredEntries: ["CauldronTests/Fixtures/RecipeSchema/lines", "tools/recipe_schema_model"]
+            requiredEntries: ["CauldronTests/Fixtures/RecipeSchema/lines"]
         )
     }
 

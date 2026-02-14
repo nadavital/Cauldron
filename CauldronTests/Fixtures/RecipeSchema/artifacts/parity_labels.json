@@ -1,0 +1,550 @@
+{
+  "report_type": "swift_python_label_parity",
+  "generated_at_utc": "2026-02-14T07:44:01.126557+00:00",
+  "fixtures_dir": "/Users/nadav/Desktop/Cauldron/CauldronTests/Fixtures/RecipeSchema/lines",
+  "total_fixtures": 67,
+  "total_lines": 1518,
+  "mismatch_lines": 0,
+  "mismatch_rate": 0.0,
+  "threshold": 0.005,
+  "passes_threshold": true,
+  "top_confusions": [],
+  "fixtures": [
+    {
+      "fixture": "avocado_toast.lines.jsonl",
+      "line_count": 8,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "banana_bread.lines.jsonl",
+      "line_count": 11,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "garlic_shrimp.lines.jsonl",
+      "line_count": 10,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_001.lines.jsonl",
+      "line_count": 25,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_002.lines.jsonl",
+      "line_count": 26,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_003.lines.jsonl",
+      "line_count": 24,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_004.lines.jsonl",
+      "line_count": 17,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_005.lines.jsonl",
+      "line_count": 14,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_006.lines.jsonl",
+      "line_count": 24,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_007.lines.jsonl",
+      "line_count": 28,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_008.lines.jsonl",
+      "line_count": 22,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_009.lines.jsonl",
+      "line_count": 31,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_010.lines.jsonl",
+      "line_count": 26,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_011.lines.jsonl",
+      "line_count": 26,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_012.lines.jsonl",
+      "line_count": 21,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_013.lines.jsonl",
+      "line_count": 22,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_014.lines.jsonl",
+      "line_count": 26,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_015.lines.jsonl",
+      "line_count": 18,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_016.lines.jsonl",
+      "line_count": 48,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_017.lines.jsonl",
+      "line_count": 47,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_018.lines.jsonl",
+      "line_count": 16,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_019.lines.jsonl",
+      "line_count": 24,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_020.lines.jsonl",
+      "line_count": 25,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214350.lines.jsonl",
+      "line_count": 14,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214413.lines.jsonl",
+      "line_count": 19,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214446.lines.jsonl",
+      "line_count": 32,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214512.lines.jsonl",
+      "line_count": 13,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214528.lines.jsonl",
+      "line_count": 25,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "lemon_pasta.lines.jsonl",
+      "line_count": 11,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "miso_soup.lines.jsonl",
+      "line_count": 9,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "noisy_ocr_stew.lines.jsonl",
+      "line_count": 13,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "overnight_oats.lines.jsonl",
+      "line_count": 10,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_115942.lines.jsonl",
+      "line_count": 20,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_132931.lines.jsonl",
+      "line_count": 17,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_134940.lines.jsonl",
+      "line_count": 25,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_150025.lines.jsonl",
+      "line_count": 19,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_150654.lines.jsonl",
+      "line_count": 17,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_151051.lines.jsonl",
+      "line_count": 16,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_151526.lines.jsonl",
+      "line_count": 18,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_152153.lines.jsonl",
+      "line_count": 21,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_154101.lines.jsonl",
+      "line_count": 18,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_154130.lines.jsonl",
+      "line_count": 14,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_162923.lines.jsonl",
+      "line_count": 31,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_163122.lines.jsonl",
+      "line_count": 38,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_204747.lines.jsonl",
+      "line_count": 36,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_205310.lines.jsonl",
+      "line_count": 27,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_205507.lines.jsonl",
+      "line_count": 29,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_205649.lines.jsonl",
+      "line_count": 36,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_205815.lines.jsonl",
+      "line_count": 24,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_205942.lines.jsonl",
+      "line_count": 22,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211133.lines.jsonl",
+      "line_count": 26,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211146.lines.jsonl",
+      "line_count": 31,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211443.lines.jsonl",
+      "line_count": 16,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211516.lines.jsonl",
+      "line_count": 41,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211549.lines.jsonl",
+      "line_count": 21,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_211942.lines.jsonl",
+      "line_count": 23,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213108.lines.jsonl",
+      "line_count": 22,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213457.lines.jsonl",
+      "line_count": 29,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213526.lines.jsonl",
+      "line_count": 23,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213554.lines.jsonl",
+      "line_count": 27,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213634.lines.jsonl",
+      "line_count": 21,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213736.lines.jsonl",
+      "line_count": 19,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_213755.lines.jsonl",
+      "line_count": 21,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_233932.lines.jsonl",
+      "line_count": 28,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_234220.lines.jsonl",
+      "line_count": 18,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "qa_2026_02_10_234345.lines.jsonl",
+      "line_count": 28,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    },
+    {
+      "fixture": "sheet_pan_chicken.lines.jsonl",
+      "line_count": 11,
+      "mismatch_count": 0,
+      "mismatch_rate": 0.0,
+      "mismatches": [],
+      "confusions": []
+    }
+  ]
+}
