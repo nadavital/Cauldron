@@ -1,0 +1,59 @@
+{
+  "description": "Golden URL cases for Swift-vs-Python parser parity validation.",
+  "report_paths": {
+    "labels": "tools/recipe_schema_model/artifacts/parity_labels.json",
+    "assembly": "tools/recipe_schema_model/artifacts/parity_assembly.json",
+    "golden": "tools/recipe_schema_model/artifacts/parity_golden_urls_report.json"
+  },
+  "cases": [
+    {
+      "id": "bon_appetit_cookies",
+      "url": "https://www.bonappetit.com/recipe/bas-best-chocolate-chip-cookies?srsltid=AfmBOoqOyMF1favw4Q6w9eph8wo301SDAu4Q2wvvM7k20RpKuraew-Lx",
+      "checks": {
+        "min_ingredients": 8,
+        "max_steps": 8,
+        "expect_title_contains": "Chocolate Chip"
+      }
+    },
+    {
+      "id": "smitten_kitchen_blueberry_muffins",
+      "url": "https://smittenkitchen.com/2010/08/perfect-blueberry-muffins/",
+      "checks": {
+        "min_ingredients": 8,
+        "min_steps": 4
+      }
+    },
+    {
+      "id": "serious_eats_chocolate_chip_cookies",
+      "url": "https://www.seriouseats.com/the-food-lab-best-chocolate-chip-cookie-recipe",
+      "checks": {
+        "min_ingredients": 8,
+        "min_steps": 5
+      }
+    },
+    {
+      "id": "allrecipes_banana_bread",
+      "url": "https://www.allrecipes.com/recipe/20144/banana-banana-bread/",
+      "checks": {
+        "min_ingredients": 8,
+        "min_steps": 4
+      }
+    },
+    {
+      "id": "king_arthur_focaccia",
+      "url": "https://www.kingarthurbaking.com/recipes/golden-focaccia-recipe",
+      "checks": {
+        "min_ingredients": 6,
+        "min_steps": 4
+      }
+    },
+    {
+      "id": "bbc_shakshuka",
+      "url": "https://www.bbcgoodfood.com/recipes/shakshuka",
+      "checks": {
+        "min_ingredients": 8,
+        "min_steps": 4
+      }
+    }
+  ]
+}

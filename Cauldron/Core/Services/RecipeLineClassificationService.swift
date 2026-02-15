@@ -382,39 +382,28 @@ final class RecipeLineClassificationService: RecipeLineClassifying, @unchecked S
         var results: [RecipeLineClassification] = []
         results.reserveCapacity(lines.count)
 
-        var previousLine = ""
         var currentSection: RuntimeSection?
 
         for (index, line) in lines.enumerated() {
             var prediction = model.predict(text: line)
-            let normalized = FeatureTextUtils.normalizeForFeatures(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            let sectionFromHeader = headerSection(from: line)
+            let looksLikeHeader = looksLikeStandaloneHeaderCandidate(line)
 
-            if looksLikeNoteHeader(previousLine), prediction.label != .header {
+            if looksLikeTitleLine(line, index: index) {
+                prediction = RuntimePrediction(label: .title, confidence: max(prediction.confidence, 0.96))
+            }
+
+            if let sectionFromHeader {
+                prediction = RuntimePrediction(label: .header, confidence: max(prediction.confidence, 0.98))
+                currentSection = sectionFromHeader
+            } else if looksLikeHeader {
+                prediction = RuntimePrediction(label: .header, confidence: max(prediction.confidence, 0.93))
+            } else if currentSection == .notes, prediction.label != .header {
                 prediction = RuntimePrediction(label: .note, confidence: max(prediction.confidence, 0.90))
-            }
-
-            if prediction.label == .header {
-                if let section = headerSection(from: line) {
-                    currentSection = section
-                } else if currentSection == .steps, !normalized.hasSuffix(":") {
-                    prediction = RuntimePrediction(label: .step, confidence: max(prediction.confidence, 0.82))
-                } else if currentSection == .ingredients, !normalized.hasSuffix(":") {
-                    prediction = RuntimePrediction(label: .ingredient, confidence: max(prediction.confidence, 0.82))
-                }
-            }
-
-            if currentSection == .ingredients,
-               index > 0,
-               [.step, .title, .junk].contains(prediction.label),
-               !isActionPrefixed(normalized) {
-                prediction = RuntimePrediction(label: .ingredient, confidence: max(prediction.confidence, 0.82))
-            }
-
-            if currentSection == .steps,
-               index > 0,
-               [.title, .ingredient].contains(prediction.label),
-               isActionPrefixed(normalized) {
-                prediction = RuntimePrediction(label: .step, confidence: max(prediction.confidence, 0.82))
+            } else if currentSection == .ingredients, ![.header, .title].contains(prediction.label) {
+                prediction = RuntimePrediction(label: .ingredient, confidence: max(prediction.confidence, 0.90))
+            } else if currentSection == .steps, prediction.label != .header {
+                prediction = RuntimePrediction(label: .step, confidence: max(prediction.confidence, 0.90))
             }
 
             results.append(
@@ -424,7 +413,6 @@ final class RecipeLineClassificationService: RecipeLineClassifying, @unchecked S
                     confidence: prediction.confidence
                 )
             )
-            previousLine = line
         }
 
         return results
@@ -495,29 +483,60 @@ final class RecipeLineClassificationService: RecipeLineClassifying, @unchecked S
     }
 
     nonisolated private func headerSection(from text: String) -> RuntimeSection? {
-        var normalized = FeatureTextUtils.normalizeForFeatures(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.hasSuffix(":") {
-            normalized = String(normalized.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        if ingredientHeaderKeywords.contains(normalized) {
+        let key = runtimeHeaderKey(text)
+        if ingredientHeaderKeywords.contains(key) {
             return .ingredients
         }
-        if stepHeaderKeywords.contains(normalized) {
+        if stepHeaderKeywords.contains(key) {
             return .steps
         }
-        if notePrefixes.contains(where: { normalized.hasPrefix($0) }) {
+        if notePrefixes.contains(where: { key == $0 }) {
             return .notes
         }
         return nil
     }
 
-    nonisolated private func looksLikeNoteHeader(_ text: String) -> Bool {
-        var normalized = FeatureTextUtils.normalizeForFeatures(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.hasSuffix(":") {
-            normalized = String(normalized.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+    nonisolated private func runtimeHeaderKey(_ text: String) -> String {
+        var lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        lowered = FeatureTextUtils.regexReplacing(pattern: #"^[\W_]+|[\W_]+$"#, in: lowered, with: "")
+        if lowered.hasSuffix(":") {
+            lowered = String(lowered.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return notePrefixes.contains(where: { normalized.hasPrefix($0) })
+        return lowered
+    }
+
+    nonisolated private func looksLikeNoteHeader(_ text: String) -> Bool {
+        let normalized = runtimeHeaderKey(text)
+        return notePrefixes.contains(where: { normalized == $0 })
+    }
+
+    nonisolated private func looksLikeStandaloneHeaderCandidate(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(":") else { return false }
+        let withoutColon = String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = withoutColon.split(whereSeparator: \.isWhitespace)
+        return !words.isEmpty && words.count <= 7 && trimmed.count <= 90
+    }
+
+    nonisolated private func looksLikeTitleLine(_ text: String, index: Int) -> Bool {
+        guard index == 0 else { return false }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasSuffix(":"), trimmed.count <= 110 else {
+            return false
+        }
+        let words = trimmed.split(whereSeparator: \.isWhitespace)
+        guard (1...14).contains(words.count) else {
+            return false
+        }
+        let lowered = trimmed.lowercased()
+        for token in ["ingredient", "instruction", "direction", "method", "step"] where lowered.contains(token) {
+            return false
+        }
+        if trimmed.contains(".") {
+            return false
+        }
+        return true
     }
 
     nonisolated private func isActionPrefixed(_ normalized: String) -> Bool {

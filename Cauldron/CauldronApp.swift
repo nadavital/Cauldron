@@ -15,10 +15,16 @@ import UserNotifications
 @main
 struct CauldronApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if isRunningUnitTests {
+                // Keep unit-test host lightweight to avoid unrelated SwiftUI teardown crashes.
+                Color.clear
+            } else {
+                ContentView()
+            }
         }
     }
 }

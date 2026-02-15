@@ -3,9 +3,14 @@ import Foundation
 /// Parser for extracting recipes from YouTube video descriptions
 actor YouTubeRecipeParser: RecipeParser {
     private let foundationModelsService: FoundationModelsService
+    private let textParser: any ModelRecipeTextParsing
 
-    init(foundationModelsService: FoundationModelsService) {
+    init(
+        foundationModelsService: FoundationModelsService,
+        textParser: any ModelRecipeTextParsing = TextRecipeParser()
+    ) {
         self.foundationModelsService = foundationModelsService
+        self.textParser = textParser
     }
 
     func parse(from urlString: String) async throws -> Recipe {
@@ -31,35 +36,21 @@ actor YouTubeRecipeParser: RecipeParser {
             throw ParsingError.noRecipeFound
         }
 
-        // Parse the description text to extract ingredients and steps
-        // Use the same logic-based approach as the HTML parser (no AI)
-        let (ingredients, steps) = parseRecipeFromDescription(description)
+        let normalizedDescription = description.replacingOccurrences(of: "\\n", with: "\n")
+        let lines = normalizedDescription
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
-        print("📝 YouTube Parser: Parsed \(ingredients.count) ingredients and \(steps.count) steps")
-
-        // If we didn't find ingredients or steps, throw an error
-        guard !ingredients.isEmpty else {
-            print("❌ YouTube Parser: No ingredients found in description")
-            throw ParsingError.noIngredientsFound
-        }
-
-        guard !steps.isEmpty else {
-            print("❌ YouTube Parser: No steps found in description")
-            throw ParsingError.noStepsFound
-        }
-
-        let recipe = Recipe(
-            title: videoTitle,
-            ingredients: ingredients,
-            steps: steps,
-            yields: "4 servings", // Default yields
-            totalMinutes: nil,
-            tags: [],
-            nutrition: nil,
+        let recipe = try await textParser.parse(
+            lines: lines,
             sourceURL: URL(string: urlString),
             sourceTitle: videoTitle,
-            notes: nil,
-            imageURL: thumbnailURL.flatMap { URL(string: $0) }
+            imageURL: thumbnailURL.flatMap { URL(string: $0) },
+            tags: [],
+            preferredTitle: videoTitle,
+            yieldsOverride: nil,
+            totalMinutesOverride: nil
         )
 
         return recipe

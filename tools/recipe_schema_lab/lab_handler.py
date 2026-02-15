@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -33,6 +35,13 @@ from lab_config import (
 )
 from lab_predictor import PREDICTOR
 from lab_recipe import _assemble_app_recipe, _fetch_url_text, _normalize_lines, _run_image_ocr
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RECIPE_SCHEMA_MODEL_DIR = REPO_ROOT / "tools" / "recipe_schema_model"
+if str(RECIPE_SCHEMA_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(RECIPE_SCHEMA_MODEL_DIR))
+
+from swift_pipeline_bridge import run_swift_pipeline
 
 
 # UI is served from tools/recipe_schema_lab/static.
@@ -100,6 +109,115 @@ def _effective_case_id(case_id: str, source_type: str, save_kind: str) -> str:
     if requires_holdout and not normalized_id.startswith(HOLDOUT_DOC_PREFIX):
         return f"{HOLDOUT_DOC_PREFIX}{normalized_id}"
     return normalized_id
+
+
+def _use_python_fallback() -> bool:
+    return str(os.environ.get("CAULDRON_LAB_USE_PYTHON_FALLBACK", "")).strip() == "1"
+
+
+def _swift_predictions_and_recipe(
+    *,
+    lines: list[str],
+    source_url: str = "",
+    source_title: str = "",
+    labels: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    swift = run_swift_pipeline(
+        lines,
+        repo_root=REPO_ROOT,
+        labels=labels,
+        source_url=source_url or None,
+        source_title=source_title or None,
+    )
+
+    swift_labels = [str(label) for label in (swift.get("labels") or [])]
+    swift_confidences = [float(value) for value in (swift.get("confidences") or [])]
+
+    predictions: list[dict[str, Any]] = []
+    for idx, line in enumerate(lines):
+        label = swift_labels[idx] if idx < len(swift_labels) else "junk"
+        confidence = swift_confidences[idx] if idx < len(swift_confidences) else 0.0
+        predictions.append(
+            {
+                "index": idx,
+                "text": line,
+                "predicted_label": label,
+                "label": label,
+                "confidence": round(float(confidence), 4),
+            }
+        )
+
+    ingredient_names = [str(item).strip() for item in (swift.get("ingredients") or [])]
+    ingredient_sections_raw = swift.get("ingredientSectionNames") or []
+    ingredient_sections: list[str | None] = [
+        str(value).strip() if value not in (None, "") else None for value in ingredient_sections_raw
+    ]
+    if len(ingredient_sections) < len(ingredient_names):
+        ingredient_sections.extend([None] * (len(ingredient_names) - len(ingredient_sections)))
+
+    step_texts = [str(item).strip() for item in (swift.get("steps") or [])]
+    step_sections_raw = swift.get("stepSectionNames") or []
+    step_sections: list[str | None] = [str(value).strip() if value not in (None, "") else None for value in step_sections_raw]
+    if len(step_sections) < len(step_texts):
+        step_sections.extend([None] * (len(step_texts) - len(step_sections)))
+
+    notes_lines = [str(item).strip() for item in (swift.get("notes") or []) if str(item).strip()]
+    notes_text = str(swift.get("notesText") or "").strip()
+    if not notes_text and notes_lines:
+        notes_text = "\n".join(notes_lines)
+
+    ingredient_items = [
+        {
+            "name": name,
+            "quantity": None,
+            "additionalQuantities": [],
+            "note": None,
+            "section": ingredient_sections[idx] if idx < len(ingredient_sections) else None,
+        }
+        for idx, name in enumerate(ingredient_names)
+    ]
+    step_items = [
+        {
+            "index": idx,
+            "text": text,
+            "timers": [],
+            "section": step_sections[idx] if idx < len(step_sections) else None,
+        }
+        for idx, text in enumerate(step_texts)
+    ]
+
+    ingredient_sections_out = swift.get("ingredientSections")
+    if not isinstance(ingredient_sections_out, list):
+        ingredient_sections_out = [{"name": None, "items": ingredient_names}] if ingredient_names else []
+
+    step_sections_out = swift.get("stepSections")
+    if not isinstance(step_sections_out, list):
+        step_sections_out = [{"name": None, "items": step_texts}] if step_texts else []
+
+    total_minutes_raw = swift.get("totalMinutes")
+    total_minutes = int(total_minutes_raw) if total_minutes_raw is not None else None
+
+    recipe = {
+        "title": str(swift.get("title") or "Untitled Recipe"),
+        "sourceURL": str(swift.get("sourceURL") or source_url).strip() or None,
+        "sourceTitle": str(swift.get("sourceTitle") or source_title).strip() or None,
+        "yields": str(swift.get("yields") or "4 servings"),
+        "totalMinutes": total_minutes,
+        "ingredients": ingredient_items,
+        "steps": step_items,
+        "notes": notes_text or None,
+        "ingredientSections": ingredient_sections_out,
+        "stepSections": step_sections_out,
+        "_debug": {
+            "ingredient_count": len(ingredient_items),
+            "step_count": len(step_items),
+            "note_count": len(notes_lines),
+            "ingredient_section_count": len(ingredient_sections_out),
+            "step_section_count": len(step_sections_out),
+        },
+    }
+
+    return predictions, recipe
 
 
 def _load_metrics_history() -> list[dict[str, Any]]:
@@ -732,19 +850,28 @@ class LabHandler(BaseHTTPRequestHandler):
             if not lines:
                 raise ValueError("No lines extracted from input")
 
-            predictions = PREDICTOR.predict(lines)
-            assembled_recipe = _assemble_app_recipe(
-                [
-                    {
-                        "index": int(item.get("index", 0)),
-                        "text": str(item.get("text", "")),
-                        "label": str(item.get("label", item.get("predicted_label", "junk"))),
-                    }
-                    for item in predictions
-                ],
-                source_url=source_url,
-                source_title=source_title,
-            )
+            if _use_python_fallback():
+                predictions = PREDICTOR.predict(lines)
+                assembled_recipe = _assemble_app_recipe(
+                    [
+                        {
+                            "index": int(item.get("index", 0)),
+                            "text": str(item.get("text", "")),
+                            "label": str(item.get("label", item.get("predicted_label", "junk"))),
+                        }
+                        for item in predictions
+                    ],
+                    source_url=source_url,
+                    source_title=source_title,
+                )
+                backend = "python"
+            else:
+                predictions, assembled_recipe = _swift_predictions_and_recipe(
+                    lines=lines,
+                    source_url=source_url,
+                    source_title=source_title,
+                )
+                backend = "swift"
             _json_response(
                 self,
                 {
@@ -752,6 +879,7 @@ class LabHandler(BaseHTTPRequestHandler):
                     "truncated": truncated,
                     "source_preview": source_preview,
                     "extract_method": extract_method,
+                    "pipeline_backend": backend,
                     "assembled_recipe": assembled_recipe,
                 },
             )
@@ -779,12 +907,28 @@ class LabHandler(BaseHTTPRequestHandler):
                     }
                 )
 
-            recipe = _assemble_app_recipe(
-                normalized_rows,
-                source_url=str(payload.get("source_url", "")).strip(),
-                source_title=str(payload.get("source_title", "")).strip(),
-            )
-            _json_response(self, {"recipe": recipe})
+            source_url = str(payload.get("source_url", "")).strip()
+            source_title = str(payload.get("source_title", "")).strip()
+
+            if _use_python_fallback():
+                recipe = _assemble_app_recipe(
+                    normalized_rows,
+                    source_url=source_url,
+                    source_title=source_title,
+                )
+                backend = "python"
+            else:
+                lines = [str(item["text"]) for item in normalized_rows]
+                labels = [str(item["label"]) for item in normalized_rows]
+                _, recipe = _swift_predictions_and_recipe(
+                    lines=lines,
+                    labels=labels,
+                    source_url=source_url,
+                    source_title=source_title,
+                )
+                backend = "swift"
+
+            _json_response(self, {"recipe": recipe, "pipeline_backend": backend})
         except Exception as exc:  # noqa: BLE001
             _json_response(self, {"error": str(exc)}, status=400)
 

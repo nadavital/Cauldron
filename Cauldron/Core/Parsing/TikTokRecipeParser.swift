@@ -3,9 +3,14 @@ import Foundation
 /// Parser for extracting recipes from TikTok videos
 actor TikTokRecipeParser: RecipeParser {
     private let foundationModelsService: FoundationModelsService
+    private let textParser: any ModelRecipeTextParsing
 
-    init(foundationModelsService: FoundationModelsService) {
+    init(
+        foundationModelsService: FoundationModelsService,
+        textParser: any ModelRecipeTextParsing = TextRecipeParser()
+    ) {
         self.foundationModelsService = foundationModelsService
+        self.textParser = textParser
     }
 
     func parse(from urlString: String) async throws -> Recipe {
@@ -31,30 +36,20 @@ actor TikTokRecipeParser: RecipeParser {
             throw ParsingError.noRecipeFound
         }
 
-        // Parse the description text to extract ingredients and steps
-        let (ingredients, steps) = parseRecipeFromDescription(description)
+        let lines = description
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
-        // If we didn't find ingredients or steps, throw an error
-        guard !ingredients.isEmpty else {
-            throw ParsingError.noIngredientsFound
-        }
-
-        guard !steps.isEmpty else {
-            throw ParsingError.noStepsFound
-        }
-
-        let recipe = Recipe(
-            title: videoTitle,
-            ingredients: ingredients,
-            steps: steps,
-            yields: "4 servings", // Default yields
-            totalMinutes: nil,
-            tags: [],
-            nutrition: nil,
+        let recipe = try await textParser.parse(
+            lines: lines,
             sourceURL: URL(string: urlString),
             sourceTitle: videoTitle,
-            notes: nil,
-            imageURL: thumbnailURL.flatMap { URL(string: $0) }
+            imageURL: thumbnailURL.flatMap { URL(string: $0) },
+            tags: [],
+            preferredTitle: videoTitle,
+            yieldsOverride: nil,
+            totalMinutesOverride: nil
         )
 
         return recipe

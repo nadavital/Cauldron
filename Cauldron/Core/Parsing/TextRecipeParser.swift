@@ -7,8 +7,24 @@
 
 import Foundation
 
-/// Parser for extracting recipes from plain text
-actor TextRecipeParser: RecipeParser {
+protocol ModelRecipeTextParsing: Sendable {
+    func parse(
+        lines: [String],
+        sourceURL: URL?,
+        sourceTitle: String?,
+        imageURL: URL?,
+        tags: [Tag],
+        preferredTitle: String?,
+        yieldsOverride: String?,
+        totalMinutesOverride: Int?
+    ) async throws -> Recipe
+}
+
+/// Parser for extracting recipes from freeform text.
+///
+/// `parse(from:)` preserves the legacy heuristic behavior used by existing text-parser tests.
+/// `parse(lines:...)` is the model-first import path used by URL/social import flows.
+actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
     private struct ParsedMetadata {
         var yields: String?
         var prepMinutes: Int?
@@ -33,18 +49,18 @@ actor TextRecipeParser: RecipeParser {
         case notes
     }
 
-    private let instructionKeywords = [
+    private let instructionKeywords: [String] = [
         "add", "bake", "beat", "blend", "boil", "combine", "cook", "cool",
         "drain", "fold", "fry", "grill", "heat", "knead", "let", "marinate",
         "mix", "place", "pour", "preheat", "reduce", "rest", "roast", "saute",
         "season", "serve", "simmer", "stir", "transfer", "whisk"
     ]
 
-    private let ingredientHints = [
+    private let ingredientHints: [String] = [
         "to taste", "for garnish", "optional", "divided", "room temperature", "melted"
     ]
 
-    private let notePrefixes = [
+    private let notePrefixes: [String] = [
         "note:", "notes:", "tip:", "tips:", "pro tip:", "variation:", "variations:",
         "substitution:", "substitutions:", "storage:", "make ahead", "make-ahead",
         "serving suggestion", "chef's note", "recipe note"
@@ -52,16 +68,19 @@ actor TextRecipeParser: RecipeParser {
 
     private let lineClassifier: RecipeLineClassifying
     private let schemaAssembler: RecipeSchemaAssembler
+    private let modelAssembler: ModelRecipeAssembler
     private let modelConfidenceThreshold: Double
 
     init(
         lineClassifier: RecipeLineClassifying = RecipeLineClassificationService(),
         schemaAssembler: RecipeSchemaAssembler = RecipeSchemaAssembler(),
-        modelConfidenceThreshold: Double = 0.72
+        modelConfidenceThreshold: Double = 0.72,
+        modelAssembler: ModelRecipeAssembler = ModelRecipeAssembler()
     ) {
         self.lineClassifier = lineClassifier
         self.schemaAssembler = schemaAssembler
         self.modelConfidenceThreshold = modelConfidenceThreshold
+        self.modelAssembler = modelAssembler
     }
 
     func parse(from text: String) async throws -> Recipe {
@@ -186,7 +205,6 @@ actor TextRecipeParser: RecipeParser {
 
             switch currentSection {
             case .ingredients:
-                // OCR can interleave columns; route obvious action lines to steps.
                 if looksLikeInstructionSentence(line) {
                     let timers = TimerExtractor.extractTimers(from: cleanedLine)
                     steps.append(CookStep(index: steps.count, text: cleanedLine, timers: timers, section: currentStepSection))
@@ -196,7 +214,6 @@ actor TextRecipeParser: RecipeParser {
                 }
 
             case .steps:
-                // OCR can interleave columns; route obvious ingredient lines back.
                 if TextSectionParser.looksLikeIngredient(cleanedLine) {
                     ingredients.append(parseIngredient(cleanedLine, section: currentIngredientSection))
                 } else {
@@ -208,13 +225,37 @@ actor TextRecipeParser: RecipeParser {
                 noteCandidates.append(cleanedLine)
 
             case .unknown:
-                // Delay to heuristic pass.
                 continue
             }
         }
 
-        let schemaAssembly = parseHeuristic(lines: contentLines)
-        if !foundExplicitSection || ingredients.isEmpty || steps.isEmpty {
+        let schemaAssembly = parseHeuristic(lines: contentLines, confidenceThreshold: 0.99)
+        if !foundExplicitSection {
+            let schemaHasCoreContent = !schemaAssembly.ingredients.isEmpty && !schemaAssembly.steps.isEmpty
+            let schemaLooksMoreComplete = schemaAssembly.ingredients.count > ingredients.count
+                || schemaAssembly.steps.count > steps.count
+                || shouldPreferSchemaAssembly(
+                    currentIngredients: ingredients,
+                    currentSteps: steps,
+                    currentNotes: noteCandidates,
+                    schema: schemaAssembly
+                )
+
+            if schemaHasCoreContent && schemaLooksMoreComplete {
+                ingredients = schemaAssembly.ingredients
+                steps = schemaAssembly.steps
+            } else {
+                if ingredients.isEmpty {
+                    ingredients = schemaAssembly.ingredients
+                }
+
+                if steps.isEmpty {
+                    steps = schemaAssembly.steps
+                }
+            }
+
+            noteCandidates.append(contentsOf: schemaAssembly.notes)
+        } else if ingredients.isEmpty || steps.isEmpty {
             if ingredients.isEmpty {
                 ingredients = schemaAssembly.ingredients
             }
@@ -261,6 +302,86 @@ actor TextRecipeParser: RecipeParser {
             yields: metadata.yields ?? "4 servings",
             totalMinutes: metadata.bestTotalMinutes,
             notes: notes
+        )
+    }
+
+    func parse(
+        lines: [String],
+        sourceURL: URL?,
+        sourceTitle: String?,
+        imageURL: URL?,
+        tags: [Tag] = [],
+        preferredTitle: String? = nil,
+        yieldsOverride: String? = nil,
+        totalMinutesOverride: Int? = nil
+    ) async throws -> Recipe {
+        let normalizedLines = lines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalizedLines.isEmpty else {
+            throw ParsingError.invalidSource
+        }
+
+        let classifications = lineClassifier.classify(lines: normalizedLines)
+        let rows: [ModelRecipeAssembler.Row] = normalizedLines.enumerated().map { index, line in
+            if index < classifications.count, classifications[index].confidence >= modelConfidenceThreshold {
+                return ModelRecipeAssembler.Row(index: index, text: line, label: classifications[index].label)
+            }
+            return ModelRecipeAssembler.Row(index: index, text: line, label: fallbackHeuristicLabel(for: line))
+        }
+
+        let assembled = modelAssembler.assemble(
+            rows: rows,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle
+        )
+
+        var title = assembled.title
+        var ingredients = assembled.ingredients
+        var steps = assembled.steps
+        var noteLines = assembled.noteLines
+
+        if ingredients.isEmpty || steps.isEmpty {
+            let schema = parseHeuristic(lines: normalizedLines)
+            if ingredients.isEmpty {
+                ingredients = schema.ingredients
+            }
+            if steps.isEmpty {
+                steps = schema.steps
+            }
+            noteLines.append(contentsOf: schema.notes)
+        }
+
+        if let preferredTitle {
+            let trimmed = preferredTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if title == "Untitled Recipe", !trimmed.isEmpty {
+                title = trimmed
+            }
+        }
+
+        guard !ingredients.isEmpty else {
+            throw ParsingError.noIngredientsFound
+        }
+        guard !steps.isEmpty else {
+            throw ParsingError.noStepsFound
+        }
+
+        let noteText = extractNotes(from: noteLines)
+
+        let yields = yieldsOverride ?? assembled.yields
+        let totalMinutes = totalMinutesOverride ?? assembled.totalMinutes
+
+        return Recipe(
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            sourceURL: assembled.sourceURL,
+            sourceTitle: assembled.sourceTitle,
+            notes: noteText,
+            imageURL: imageURL
         )
     }
 
@@ -334,12 +455,15 @@ actor TextRecipeParser: RecipeParser {
         )
     }
 
-    private func parseHeuristic(lines: [String]) -> (ingredients: [Ingredient], steps: [CookStep], notes: [String]) {
+    private func parseHeuristic(
+        lines: [String],
+        confidenceThreshold: Double? = nil
+    ) -> (ingredients: [Ingredient], steps: [CookStep], notes: [String]) {
         let classifications = lineClassifier.classify(lines: lines)
         let assembly = schemaAssembler.assemble(
             lines: lines,
             classifications: classifications,
-            confidenceThreshold: modelConfidenceThreshold,
+            confidenceThreshold: confidenceThreshold ?? modelConfidenceThreshold,
             fallbackLabel: fallbackHeuristicLabel(for:)
         )
 

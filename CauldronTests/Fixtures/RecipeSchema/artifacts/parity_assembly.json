@@ -1,0 +1,1354 @@
+{
+  "report_type": "swift_python_assembly_parity",
+  "generated_at_utc": "2026-02-14T07:44:10.152488+00:00",
+  "fixtures_dir": "/Users/nadav/Desktop/Cauldron/CauldronTests/Fixtures/RecipeSchema/documents",
+  "total_fixtures": 67,
+  "mismatch_docs": 1,
+  "ingredient_mismatch_docs": 1,
+  "step_mismatch_docs": 0,
+  "note_mismatch_docs": 0,
+  "max_mismatch_docs": 2,
+  "passes_threshold": true,
+  "fixtures": [
+    {
+      "fixture": "avocado_toast.doc.json",
+      "line_count": 8,
+      "python_counts": {
+        "ingredients": 2,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 2,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "banana_bread.doc.json",
+      "line_count": 11,
+      "python_counts": {
+        "ingredients": 2,
+        "steps": 3,
+        "notes": 1
+      },
+      "swift_counts": {
+        "ingredients": 2,
+        "steps": 3,
+        "notes": 1
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "garlic_shrimp.doc.json",
+      "line_count": 10,
+      "python_counts": {
+        "ingredients": 1,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 1,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_001.doc.json",
+      "line_count": 25,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_002.doc.json",
+      "line_count": 26,
+      "python_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_003.doc.json",
+      "line_count": 24,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 6,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 6,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_004.doc.json",
+      "line_count": 17,
+      "python_counts": {
+        "ingredients": 7,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 7,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_005.doc.json",
+      "line_count": 14,
+      "python_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_006.doc.json",
+      "line_count": 24,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 6,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 6,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_007.doc.json",
+      "line_count": 28,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_008.doc.json",
+      "line_count": 22,
+      "python_counts": {
+        "ingredients": 13,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 13,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_009.doc.json",
+      "line_count": 31,
+      "python_counts": {
+        "ingredients": 18,
+        "steps": 9,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 18,
+        "steps": 9,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_010.doc.json",
+      "line_count": 26,
+      "python_counts": {
+        "ingredients": 18,
+        "steps": 5,
+        "notes": 1
+      },
+      "swift_counts": {
+        "ingredients": 18,
+        "steps": 5,
+        "notes": 1
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_011.doc.json",
+      "line_count": 26,
+      "python_counts": {
+        "ingredients": 16,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 16,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_012.doc.json",
+      "line_count": 21,
+      "python_counts": {
+        "ingredients": 4,
+        "steps": 14,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 4,
+        "steps": 14,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_013.doc.json",
+      "line_count": 22,
+      "python_counts": {
+        "ingredients": 9,
+        "steps": 10,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 9,
+        "steps": 10,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_014.doc.json",
+      "line_count": 26,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_015.doc.json",
+      "line_count": 18,
+      "python_counts": {
+        "ingredients": 8,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 8,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_016.doc.json",
+      "line_count": 48,
+      "python_counts": {
+        "ingredients": 35,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 35,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_017.doc.json",
+      "line_count": 47,
+      "python_counts": {
+        "ingredients": 21,
+        "steps": 16,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 21,
+        "steps": 16,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_018.doc.json",
+      "line_count": 16,
+      "python_counts": {
+        "ingredients": 7,
+        "steps": 6,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 7,
+        "steps": 6,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_019.doc.json",
+      "line_count": 24,
+      "python_counts": {
+        "ingredients": 15,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 16,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": -1,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": true
+    },
+    {
+      "fixture": "holdout_020.doc.json",
+      "line_count": 25,
+      "python_counts": {
+        "ingredients": 15,
+        "steps": 6,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 15,
+        "steps": 6,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214350.doc.json",
+      "line_count": 14,
+      "python_counts": {
+        "ingredients": 7,
+        "steps": 3,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 7,
+        "steps": 3,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214413.doc.json",
+      "line_count": 19,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 2,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 2,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214446.doc.json",
+      "line_count": 32,
+      "python_counts": {
+        "ingredients": 21,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 21,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214512.doc.json",
+      "line_count": 13,
+      "python_counts": {
+        "ingredients": 8,
+        "steps": 2,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 8,
+        "steps": 2,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "holdout_qa_2026_02_10_214528.doc.json",
+      "line_count": 25,
+      "python_counts": {
+        "ingredients": 17,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 17,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "lemon_pasta.doc.json",
+      "line_count": 11,
+      "python_counts": {
+        "ingredients": 0,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 0,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "miso_soup.doc.json",
+      "line_count": 9,
+      "python_counts": {
+        "ingredients": 1,
+        "steps": 3,
+        "notes": 1
+      },
+      "swift_counts": {
+        "ingredients": 1,
+        "steps": 3,
+        "notes": 1
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "noisy_ocr_stew.doc.json",
+      "line_count": 13,
+      "python_counts": {
+        "ingredients": 3,
+        "steps": 4,
+        "notes": 1
+      },
+      "swift_counts": {
+        "ingredients": 3,
+        "steps": 4,
+        "notes": 1
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "overnight_oats.doc.json",
+      "line_count": 10,
+      "python_counts": {
+        "ingredients": 2,
+        "steps": 2,
+        "notes": 1
+      },
+      "swift_counts": {
+        "ingredients": 2,
+        "steps": 2,
+        "notes": 1
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_115942.doc.json",
+      "line_count": 20,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_132931.doc.json",
+      "line_count": 17,
+      "python_counts": {
+        "ingredients": 6,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 6,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_134940.doc.json",
+      "line_count": 25,
+      "python_counts": {
+        "ingredients": 16,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 16,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_150025.doc.json",
+      "line_count": 19,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_150654.doc.json",
+      "line_count": 17,
+      "python_counts": {
+        "ingredients": 9,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 9,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_151051.doc.json",
+      "line_count": 16,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 3,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 3,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_151526.doc.json",
+      "line_count": 18,
+      "python_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_152153.doc.json",
+      "line_count": 21,
+      "python_counts": {
+        "ingredients": 9,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 9,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_154101.doc.json",
+      "line_count": 18,
+      "python_counts": {
+        "ingredients": 11,
+        "steps": 3,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 11,
+        "steps": 3,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_154130.doc.json",
+      "line_count": 14,
+      "python_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 6,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_162923.doc.json",
+      "line_count": 31,
+      "python_counts": {
+        "ingredients": 13,
+        "steps": 5,
+        "notes": 2
+      },
+      "swift_counts": {
+        "ingredients": 13,
+        "steps": 5,
+        "notes": 2
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_163122.doc.json",
+      "line_count": 38,
+      "python_counts": {
+        "ingredients": 19,
+        "steps": 9,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 19,
+        "steps": 9,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_204747.doc.json",
+      "line_count": 36,
+      "python_counts": {
+        "ingredients": 11,
+        "steps": 10,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 11,
+        "steps": 10,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_205310.doc.json",
+      "line_count": 27,
+      "python_counts": {
+        "ingredients": 9,
+        "steps": 9,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 9,
+        "steps": 9,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_205507.doc.json",
+      "line_count": 29,
+      "python_counts": {
+        "ingredients": 22,
+        "steps": 0,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 22,
+        "steps": 0,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_205649.doc.json",
+      "line_count": 36,
+      "python_counts": {
+        "ingredients": 11,
+        "steps": 11,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 11,
+        "steps": 11,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_205815.doc.json",
+      "line_count": 24,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_205942.doc.json",
+      "line_count": 22,
+      "python_counts": {
+        "ingredients": 11,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 11,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211133.doc.json",
+      "line_count": 26,
+      "python_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 14,
+        "steps": 7,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211146.doc.json",
+      "line_count": 31,
+      "python_counts": {
+        "ingredients": 18,
+        "steps": 10,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 18,
+        "steps": 10,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211443.doc.json",
+      "line_count": 16,
+      "python_counts": {
+        "ingredients": 8,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 8,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211516.doc.json",
+      "line_count": 41,
+      "python_counts": {
+        "ingredients": 17,
+        "steps": 21,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 17,
+        "steps": 21,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211549.doc.json",
+      "line_count": 21,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_211942.doc.json",
+      "line_count": 23,
+      "python_counts": {
+        "ingredients": 11,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 11,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213108.doc.json",
+      "line_count": 22,
+      "python_counts": {
+        "ingredients": 12,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 12,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213457.doc.json",
+      "line_count": 29,
+      "python_counts": {
+        "ingredients": 16,
+        "steps": 6,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 16,
+        "steps": 6,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213526.doc.json",
+      "line_count": 23,
+      "python_counts": {
+        "ingredients": 17,
+        "steps": 3,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 17,
+        "steps": 3,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213554.doc.json",
+      "line_count": 27,
+      "python_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213634.doc.json",
+      "line_count": 21,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213736.doc.json",
+      "line_count": 19,
+      "python_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 10,
+        "steps": 5,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_213755.doc.json",
+      "line_count": 21,
+      "python_counts": {
+        "ingredients": 13,
+        "steps": 3,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 13,
+        "steps": 3,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_233932.doc.json",
+      "line_count": 28,
+      "python_counts": {
+        "ingredients": 9,
+        "steps": 5,
+        "notes": 2
+      },
+      "swift_counts": {
+        "ingredients": 9,
+        "steps": 5,
+        "notes": 2
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_234220.doc.json",
+      "line_count": 18,
+      "python_counts": {
+        "ingredients": 5,
+        "steps": 10,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 5,
+        "steps": 10,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "qa_2026_02_10_234345.doc.json",
+      "line_count": 28,
+      "python_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 15,
+        "steps": 8,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    },
+    {
+      "fixture": "sheet_pan_chicken.doc.json",
+      "line_count": 11,
+      "python_counts": {
+        "ingredients": 3,
+        "steps": 4,
+        "notes": 0
+      },
+      "swift_counts": {
+        "ingredients": 3,
+        "steps": 4,
+        "notes": 0
+      },
+      "count_deltas": {
+        "ingredients": 0,
+        "steps": 0,
+        "notes": 0
+      },
+      "has_count_mismatch": false
+    }
+  ]
+}
