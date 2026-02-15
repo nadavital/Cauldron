@@ -3,19 +3,28 @@ import XCTest
 
 final class LabParityGateTests: XCTestCase {
 
-    private func repositoryRoot() throws -> URL {
-        try TestRepositoryLocator.findRepositoryRoot(
-            startingAt: #filePath,
-            requiredEntries: ["CauldronTests"]
-        )
-    }
-
-    private func loadJSON(atAny relativePaths: [String]) throws -> [String: Any] {
-        let root = try repositoryRoot()
+    private func loadJSON(resourceName: String) throws -> [String: Any] {
         let fileManager = FileManager.default
+        let bundle = Bundle(for: Self.self)
 
-        for relativePath in relativePaths {
-            let url = root.appendingPathComponent(relativePath)
+        if let bundledURL = bundle.url(forResource: resourceName, withExtension: "json") {
+            let data = try Data(contentsOf: bundledURL)
+            let value = try JSONSerialization.jsonObject(with: data, options: [])
+            guard let payload = value as? [String: Any] else {
+                XCTFail("Expected dictionary payload in bundled resource \(resourceName).json")
+                return [:]
+            }
+            return payload
+        }
+
+        let fallbackPaths = [
+            "CauldronTests/Fixtures/RecipeSchema/artifacts/\(resourceName).json",
+            "tools/recipe_schema_model/artifacts/\(resourceName).json"
+        ]
+        let cwd = URL(fileURLWithPath: fileManager.currentDirectoryPath)
+
+        for relativePath in fallbackPaths {
+            let url = cwd.appendingPathComponent(relativePath)
             guard fileManager.fileExists(atPath: url.path) else {
                 continue
             }
@@ -31,15 +40,12 @@ final class LabParityGateTests: XCTestCase {
         throw NSError(
             domain: "LabParityGateTests",
             code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Could not locate parity report in any expected path: \(relativePaths.joined(separator: ", "))"]
+            userInfo: [NSLocalizedDescriptionKey: "Could not locate \(resourceName).json in bundle or fallback paths"]
         )
     }
 
     func testLabelParityGatePassesThreshold() throws {
-        let payload = try loadJSON(atAny: [
-            "tools/recipe_schema_model/artifacts/parity_labels.json",
-            "CauldronTests/Fixtures/RecipeSchema/artifacts/parity_labels.json"
-        ])
+        let payload = try loadJSON(resourceName: "parity_labels")
         let mismatchRate = payload["mismatch_rate"] as? Double ?? 1.0
         let threshold = payload["threshold"] as? Double ?? 0.005
         XCTAssertLessThanOrEqual(
@@ -50,10 +56,7 @@ final class LabParityGateTests: XCTestCase {
     }
 
     func testAssemblyParityGatePassesThreshold() throws {
-        let payload = try loadJSON(atAny: [
-            "tools/recipe_schema_model/artifacts/parity_assembly.json",
-            "CauldronTests/Fixtures/RecipeSchema/artifacts/parity_assembly.json"
-        ])
+        let payload = try loadJSON(resourceName: "parity_assembly")
         let mismatchDocs = payload["mismatch_docs"] as? Int ?? Int.max
         let maxMismatchDocs = payload["max_mismatch_docs"] as? Int ?? 2
         XCTAssertLessThanOrEqual(

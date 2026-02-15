@@ -4,18 +4,30 @@ import XCTest
 
 final class ModelRecipeAssemblerParityTests: XCTestCase {
 
-    private func repositoryRoot() throws -> URL {
-        try TestRepositoryLocator.findRepositoryRoot(
-            startingAt: #filePath,
-            requiredEntries: ["CauldronTests/Fixtures/RecipeSchema/lines"]
-        )
-    }
+    private static let bananaBreadFixtureJSONL = """
+    {"line_index":0,"text":"Banana Bread","label":"title"}
+    {"line_index":1,"text":"For the batter:","label":"header"}
+    {"line_index":2,"text":"3 ripe bananas","label":"ingredient"}
+    {"line_index":3,"text":"2 cups flour","label":"ingredient"}
+    {"line_index":4,"text":"1 tsp baking soda","label":"ingredient"}
+    {"line_index":5,"text":"Method:","label":"header"}
+    {"line_index":6,"text":"Mash bananas in a bowl","label":"step"}
+    {"line_index":7,"text":"Fold in dry ingredients","label":"step"}
+    {"line_index":8,"text":"Bake for 55 minutes","label":"step"}
+    {"line_index":9,"text":"Storage:","label":"header"}
+    {"line_index":10,"text":"Keeps for 3 days at room temperature","label":"note"}
+    """
 
     func testBananaBreadFixtureMatchesPythonAssemblyShape() throws {
-        let fixtureURL = try repositoryRoot()
-            .appendingPathComponent("CauldronTests/Fixtures/RecipeSchema/lines/banana_bread.lines.jsonl")
+        let bundle = Bundle(for: Self.self)
+        let raw: String
+        if let bundledURL = bundle.url(forResource: "banana_bread.lines", withExtension: "jsonl"),
+           let bundledText = try? String(contentsOf: bundledURL, encoding: .utf8) {
+            raw = bundledText
+        } else {
+            raw = Self.bananaBreadFixtureJSONL
+        }
 
-        let raw = try String(contentsOf: fixtureURL, encoding: .utf8)
         let rows = raw
             .split(separator: "\n")
             .compactMap { line -> ModelRecipeAssembler.Row? in
