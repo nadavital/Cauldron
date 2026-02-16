@@ -44,8 +44,9 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
     private let instructionKeywords: [String] = [
         "add", "bake", "beat", "blend", "boil", "combine", "cook", "cool",
         "drain", "fold", "fry", "grill", "heat", "knead", "let", "marinate",
-        "mix", "place", "pour", "preheat", "reduce", "rest", "roast", "saute",
-        "season", "serve", "simmer", "stir", "transfer", "whisk"
+        "mash", "mix", "place", "pour", "preheat", "reduce", "rest", "roast",
+        "saute", "season", "serve", "simmer", "stir", "transfer", "whisk",
+        "chop", "dice", "slice", "toss"
     ]
 
     private let ingredientHints: [String] = [
@@ -111,16 +112,35 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
         yieldsOverride: String? = nil,
         totalMinutesOverride: Int? = nil
     ) async throws -> Recipe {
-        let normalizedLines = lines
+        let normalizedInputLines = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard !normalizedLines.isEmpty else {
+        guard !normalizedInputLines.isEmpty else {
             throw ParsingError.invalidSource
         }
 
-        let classifications = lineClassifier.classify(lines: normalizedLines)
-        let rows: [ModelRecipeAssembler.Row] = normalizedLines.enumerated().map { index, line in
-            if index < classifications.count, classifications[index].confidence >= modelConfidenceThreshold {
+        var effectiveLines = normalizedInputLines
+        var effectivePreferredTitle = preferredTitle
+        var effectiveYieldsOverride = yieldsOverride
+        var effectiveTotalMinutesOverride = totalMinutesOverride
+
+        if sourceURL == nil, sourceTitle == nil {
+            if effectivePreferredTitle == nil, !effectiveLines.isEmpty {
+                let selectedTitle = selectTitle(from: effectiveLines)
+                effectivePreferredTitle = selectedTitle.text
+                effectiveLines.remove(at: selectedTitle.index)
+            }
+
+            var extractedMetadata = ParsedMetadata()
+            effectiveLines = stripMetadataLines(from: effectiveLines, metadata: &extractedMetadata)
+            effectiveYieldsOverride = effectiveYieldsOverride ?? extractedMetadata.yields
+            effectiveTotalMinutesOverride = effectiveTotalMinutesOverride ?? extractedMetadata.bestTotalMinutes
+        }
+
+        let classifierConfidenceThreshold: Double = (sourceURL == nil && sourceTitle == nil) ? 1.01 : modelConfidenceThreshold
+        let classifications = lineClassifier.classify(lines: effectiveLines)
+        let rows: [ModelRecipeAssembler.Row] = effectiveLines.enumerated().map { index, line in
+            if index < classifications.count, classifications[index].confidence >= classifierConfidenceThreshold {
                 return ModelRecipeAssembler.Row(index: index, text: line, label: classifications[index].label)
             }
             return ModelRecipeAssembler.Row(index: index, text: line, label: fallbackHeuristicLabel(for: line))
@@ -139,28 +159,33 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
         var fallbackAssembly: ModelRecipeAssembler.AssembledRecipe?
 
         if ingredients.isEmpty || steps.isEmpty {
-            let schema = assembleWithFallbackLabels(
-                lines: normalizedLines,
+            let fallback = assembleWithFallbackLabels(
+                lines: effectiveLines,
                 sourceURL: sourceURL,
                 sourceTitle: sourceTitle
             )
-            fallbackAssembly = schema
+            fallbackAssembly = fallback
             if ingredients.isEmpty {
-                ingredients = schema.ingredients
+                ingredients = fallback.ingredients
             }
             if steps.isEmpty {
-                steps = schema.steps
+                steps = fallback.steps
             }
-            noteLines.append(contentsOf: schema.noteLines)
-            if title == "Untitled Recipe", schema.title != "Untitled Recipe" {
-                title = schema.title
+            noteLines.append(contentsOf: fallback.noteLines)
+            if title == "Untitled Recipe", fallback.title != "Untitled Recipe" {
+                title = fallback.title
             }
         }
 
-        if let preferredTitle {
-            let trimmed = preferredTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if title == "Untitled Recipe", !trimmed.isEmpty {
+        if let effectivePreferredTitle {
+            let trimmed = effectivePreferredTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, (title == "Untitled Recipe" || (sourceURL == nil && sourceTitle == nil)) {
                 title = trimmed
+            }
+        } else if title.isEmpty || title.lowercased().contains("time") {
+            if let promotedTitle = noteLines.first(where: looksLikeTitleCandidate) {
+                title = promotedTitle
+                noteLines.removeAll { $0.caseInsensitiveCompare(promotedTitle) == .orderedSame }
             }
         }
 
@@ -173,8 +198,8 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
 
         let noteText = extractNotes(from: noteLines)
 
-        let yields = yieldsOverride ?? fallbackAssembly?.yields ?? assembled.yields
-        let totalMinutes = totalMinutesOverride ?? assembled.totalMinutes ?? fallbackAssembly?.totalMinutes
+        let yields = effectiveYieldsOverride ?? fallbackAssembly?.yields ?? assembled.yields
+        let totalMinutes = effectiveTotalMinutesOverride ?? assembled.totalMinutes ?? fallbackAssembly?.totalMinutes
 
         return Recipe(
             title: title,
@@ -327,27 +352,35 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
     }
 
     private func fallbackHeuristicLabel(for line: String) -> RecipeLineLabel {
-        if looksLikeHTMLArtifact(line) {
+        let cleaned = cleanListMarkers(line)
+
+        if looksLikeHTMLArtifact(line) || looksLikeHTMLArtifact(cleaned) {
             return .junk
         }
 
-        if line.hasSuffix(":") {
+        if line.hasSuffix(":")
+            || TextSectionParser.isIngredientSectionHeader(line)
+            || TextSectionParser.isStepsSectionHeader(line)
+            || NotesExtractor.looksLikeNotesSectionHeader(line)
+            || TextSectionParser.isIngredientSectionHeader(cleaned)
+            || TextSectionParser.isStepsSectionHeader(cleaned)
+            || NotesExtractor.looksLikeNotesSectionHeader(cleaned) {
             return .header
         }
 
-        if isLikelyInlineNoteLine(line) {
+        if isLikelyInlineNoteLine(line) || isLikelyInlineNoteLine(cleaned) {
             return .note
         }
 
-        if TextSectionParser.looksLikeNumberedStep(line) || looksLikeInstructionSentence(line) {
-            return .step
-        }
-
-        if TextSectionParser.looksLikeIngredient(line) || looksLikeIngredientPhrase(line) {
+        if TextSectionParser.looksLikeIngredient(cleaned) || looksLikeIngredientPhrase(cleaned) {
             return .ingredient
         }
 
-        return line.count > 18 ? .step : .ingredient
+        if TextSectionParser.looksLikeNumberedStep(line) || looksLikeInstructionSentence(cleaned) {
+            return .step
+        }
+
+        return cleaned.count > 18 ? .step : .ingredient
     }
 
     private func stripMetadataLines(from lines: [String], metadata: inout ParsedMetadata) -> [String] {

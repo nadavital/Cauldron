@@ -38,8 +38,8 @@ struct ModelRecipeAssembler: Sendable {
     ]
     private let instructionKeywords: Set<String> = [
         "add", "bake", "beat", "blend", "boil", "combine", "cook", "cool", "drain", "fold", "fry", "grill",
-        "heat", "knead", "let", "marinate", "mix", "place", "pour", "preheat", "reduce", "rest", "roast",
-        "saute", "season", "serve", "simmer", "stir", "transfer", "whisk"
+        "heat", "knead", "let", "marinate", "mash", "mix", "place", "pour", "preheat", "reduce", "rest", "roast",
+        "saute", "season", "serve", "simmer", "stir", "transfer", "whisk", "chop", "dice", "slice", "toss"
     ]
 
     nonisolated func assemble(
@@ -62,7 +62,10 @@ struct ModelRecipeAssembler: Sendable {
         var totalMinutes: Int?
 
         func addIngredient(_ text: String, sectionName: String?) {
-            var parsed = IngredientParser.parseIngredientText(text)
+            let ingredientText = stripStepNumberPrefix(text)
+            guard !ingredientText.isEmpty else { return }
+
+            var parsed = IngredientParser.parseIngredientText(ingredientText)
             let sanitized = sanitizeIngredientName(parsed.name)
             if shouldDropIngredientEntry(name: sanitized, quantity: parsed.quantity) {
                 return
@@ -125,12 +128,30 @@ struct ModelRecipeAssembler: Sendable {
                 continue
             }
 
-            if currentSection == "notes",
-               [.ingredient, .step, .note].contains(row.label),
-               looksLikeNoteFragment(text) {
-                let noteLine = normalizeNoteText(text)
-                if !noteLine.isEmpty {
-                    notes.append(noteLine)
+            if let sectionType = headerSectionType(for: text) {
+                if sectionType == "ingredients" {
+                    currentSection = "ingredients"
+                    currentIngredientSection = nil
+                } else if sectionType == "steps" {
+                    currentSection = "steps"
+                    currentStepSection = nil
+                } else {
+                    currentSection = "notes"
+                }
+                continue
+            }
+
+            if currentSection == "notes", [.ingredient, .step, .note].contains(row.label) {
+                if TextSectionParser.looksLikeNumberedStep(text) {
+                    currentSection = "steps"
+                    for stepLine in splitNumberedSteps(text) {
+                        addStep(stepLine, sectionName: currentStepSection)
+                    }
+                } else {
+                    let noteLine = normalizeNoteText(text)
+                    if !noteLine.isEmpty {
+                        notes.append(noteLine)
+                    }
                 }
                 continue
             }
@@ -145,22 +166,6 @@ struct ModelRecipeAssembler: Sendable {
             }
 
             if row.label == .header {
-                let sectionType = headerSectionType(for: text)
-                if sectionType == "ingredients" {
-                    currentSection = "ingredients"
-                    currentIngredientSection = nil
-                    continue
-                }
-                if sectionType == "steps" {
-                    currentSection = "steps"
-                    currentStepSection = nil
-                    continue
-                }
-                if sectionType == "notes" {
-                    currentSection = "notes"
-                    continue
-                }
-
                 if looksLikeSubsectionHeader(text) {
                     let subsection = cleanText(String(text.dropLast()))
                     if currentSection == "steps" {
@@ -201,8 +206,13 @@ struct ModelRecipeAssembler: Sendable {
                 if currentSection == "ingredients" && looksLikeHeaderlessInstruction(text) {
                     currentSection = "steps"
                     addStep(text, sectionName: currentStepSection)
-                } else if currentSection == "steps" && !looksLikeIngredientLine(text) {
-                    addStep(text, sectionName: currentStepSection)
+                } else if currentSection == "steps" {
+                    if TextSectionParser.looksLikeNumberedStep(text) || looksLikeStepFragment(text) || !looksLikeIngredientLine(text) {
+                        addStep(text, sectionName: currentStepSection)
+                    } else {
+                        currentSection = "ingredients"
+                        addIngredient(text, sectionName: currentIngredientSection)
+                    }
                 } else {
                     currentSection = "ingredients"
                     addIngredient(text, sectionName: currentIngredientSection)
@@ -216,6 +226,10 @@ struct ModelRecipeAssembler: Sendable {
                     if !noteLine.isEmpty {
                         notes.append(noteLine)
                     }
+                    continue
+                }
+                if currentSection == "ingredients" && !looksLikeStepFragment(text) {
+                    addIngredient(text, sectionName: currentIngredientSection)
                     continue
                 }
                 currentSection = "steps"
@@ -381,6 +395,9 @@ struct ModelRecipeAssembler: Sendable {
         let cleaned = cleanText(text)
         if cleaned.isEmpty { return true }
         let lowered = cleaned.lowercased()
+        if isBoilerplateNoiseLine(lowered) {
+            return true
+        }
         if lowered.contains("templatelab") || lowered.contains("created by") || lowered == "reated b" {
             return true
         }
@@ -394,13 +411,22 @@ struct ModelRecipeAssembler: Sendable {
         if alphaCount <= 1 {
             return true
         }
-        if cleaned.range(of: #"^[A-Za-z]{1,6}$"#, options: .regularExpression) != nil {
-            let keep = Set(["salt", "zest", "oil", "rice", "egg", "eggs"])
+        if cleaned.range(of: #"^[A-Za-z]{1,2}$"#, options: .regularExpression) != nil {
+            let keep = Set(["oil", "egg", "eggs"])
             if !keep.contains(lowered) {
                 return true
             }
         }
         return false
+    }
+
+    private func isBoilerplateNoiseLine(_ loweredLine: String) -> Bool {
+        switch loweredLine {
+        case "ad", "ads", "advertisement", "sponsored":
+            return true
+        default:
+            return false
+        }
     }
 
     private func extractTipsRemainder(_ text: String) -> String? {
@@ -430,9 +456,20 @@ struct ModelRecipeAssembler: Sendable {
         return cleanText(trimmed)
     }
 
+    private func hasExplicitNotePrefix(_ text: String) -> Bool {
+        let cleaned = cleanText(text)
+        return cleaned.range(
+            of: #"^(?:note|notes|tip|tips|pro tip|variation|variations|chef's note|substitution|substitutions)\b[:\-\s]*"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
     private func looksLikeNoteFragment(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return false }
+        if hasExplicitNotePrefix(cleaned) {
+            return true
+        }
         if looksLikeIngredientLine(cleaned) || looksLikeHeaderlessInstruction(cleaned) {
             return false
         }
@@ -449,6 +486,7 @@ struct ModelRecipeAssembler: Sendable {
     private func looksLikeStepFragment(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return false }
+        if hasExplicitNotePrefix(cleaned) { return false }
         if isOCRArtifactLine(cleaned) { return false }
         if extractTipsRemainder(cleaned) != nil { return false }
         if looksLikeIngredientLine(cleaned) { return false }
@@ -477,10 +515,6 @@ struct ModelRecipeAssembler: Sendable {
             (#"\bto\s+taste\s+salt(?:\s+and)?\b.*$"#, "to taste"),
             (#"\bto\s+taste\b.*$"#, "to taste"),
             (#"\bfor serving\b.*$"#, "for serving"),
-            (#"\band\s+red\b(?:\s+[A-Za-z]{1,4})?\s*$"#, ""),
-            (#"\bsauce\b.*$"#, ""),
-            (#"\bchopped\s+immediat\w*\b.*$"#, ""),
-            (#"\blemon\s+z[e3](?:st)?\s+(?=fresh parsley\b)"#, ""),
             (#"\bto\s+taste\s+and\s*$"#, "to taste")
         ]
         for (pattern, replacement) in replacements {
@@ -688,6 +722,7 @@ struct ModelRecipeAssembler: Sendable {
         let prev = cleanText(previous)
         let curr = cleanText(current)
         guard !prev.isEmpty, !curr.isEmpty else { return false }
+        if curr.range(of: #"^[-•*]\s+"#, options: .regularExpression) != nil { return false }
         if curr.range(of: #"^\d+\s*[.)]\s+"#, options: .regularExpression) != nil { return false }
         if looksLikeSubsectionHeader(curr) { return false }
         if [".", "!", "?"].contains(String(prev.last ?? " ")) { return false }

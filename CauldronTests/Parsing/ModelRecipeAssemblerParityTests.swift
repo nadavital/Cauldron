@@ -45,7 +45,7 @@ final class ModelRecipeAssemblerParityTests: XCTestCase {
         let assembler = ModelRecipeAssembler()
         let assembled = assembler.assemble(rows: rows)
 
-        XCTAssertEqual(assembled.ingredients.count, 2)
+        XCTAssertEqual(assembled.ingredients.count, 3)
         XCTAssertEqual(assembled.steps.count, 3)
         XCTAssertEqual(assembled.noteLines.count, 1)
         XCTAssertEqual(assembled.title, "Banana Bread")
