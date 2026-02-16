@@ -443,7 +443,6 @@ final class TextRecipeParserTests: XCTestCase {
         let classifier = StubRecipeLineClassifier(forcedLabel: .ingredient, confidence: 0.99)
         let parser = TextRecipeParser(
             lineClassifier: classifier,
-            schemaAssembler: RecipeSchemaAssembler(),
             modelConfidenceThreshold: 0.72
         )
 
