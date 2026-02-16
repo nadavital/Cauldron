@@ -143,16 +143,22 @@ import os
 
         switch platform {
         case .youtube:
-            // Use YouTube-specific parser for video descriptions
-            recipe = try await dependencies.youtubeParser.parse(from: normalizedURLString)
+            recipe = try await dependencies.socialParser.parse(
+                from: normalizedURLString,
+                platform: .youtube
+            )
 
         case .instagram:
-            // Use Instagram-specific parser for post captions
-            recipe = try await dependencies.instagramParser.parse(from: normalizedURLString)
+            recipe = try await dependencies.socialParser.parse(
+                from: normalizedURLString,
+                platform: .instagram
+            )
 
         case .tiktok:
-            // Use TikTok-specific parser for video descriptions
-            recipe = try await dependencies.tiktokParser.parse(from: normalizedURLString)
+            recipe = try await dependencies.socialParser.parse(
+                from: normalizedURLString,
+                platform: .tiktok
+            )
 
         case .recipeWebsite, .unknown:
             // Use HTML parser for structured recipe sites

@@ -29,12 +29,8 @@ final class SocialImportModelPipelineTests: XCTestCase {
         """
 
         let spy = SpySocialModelRecipeTextParser()
-        let parser = YouTubeRecipeParser(
-            foundationModelsService: FoundationModelsService(),
-            textParser: spy
-        )
-
-        _ = try await parser.parse(from: url)
+        let parser = SocialRecipeParser(textParser: spy)
+        _ = try await parser.parse(from: url, platform: .youtube)
 
         let callCount = await spy.callCount
         let lines = await spy.lastLines
@@ -52,12 +48,8 @@ final class SocialImportModelPipelineTests: XCTestCase {
         """
 
         let spy = SpySocialModelRecipeTextParser()
-        let parser = InstagramRecipeParser(
-            foundationModelsService: FoundationModelsService(),
-            textParser: spy
-        )
-
-        _ = try await parser.parse(from: url)
+        let parser = SocialRecipeParser(textParser: spy)
+        _ = try await parser.parse(from: url, platform: .instagram)
 
         let callCount = await spy.callCount
         let lines = await spy.lastLines
@@ -76,12 +68,8 @@ final class SocialImportModelPipelineTests: XCTestCase {
         """
 
         let spy = SpySocialModelRecipeTextParser()
-        let parser = TikTokRecipeParser(
-            foundationModelsService: FoundationModelsService(),
-            textParser: spy
-        )
-
-        _ = try await parser.parse(from: url)
+        let parser = SocialRecipeParser(textParser: spy)
+        _ = try await parser.parse(from: url, platform: .tiktok)
 
         let callCount = await spy.callCount
         let lines = await spy.lastLines

@@ -100,9 +100,7 @@ class DependencyContainer: ObservableObject {
     // Parsers
     let htmlParser: HTMLRecipeParser
     let textParser: TextRecipeParser
-    let youtubeParser: YouTubeRecipeParser
-    let instagramParser: InstagramRecipeParser
-    let tiktokParser: TikTokRecipeParser
+    let socialParser: SocialRecipeParser
 
     // Background task for image migration (retained to prevent premature cancellation)
     private var migrationTask: Task<Void, Never>?
@@ -213,18 +211,7 @@ class DependencyContainer: ObservableObject {
         // Parsers
         self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
         self.htmlParser = HTMLRecipeParser(textParser: textParser)
-        self.youtubeParser = YouTubeRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
-        self.instagramParser = InstagramRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
-        self.tiktokParser = TikTokRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
+        self.socialParser = SocialRecipeParser(textParser: textParser)
 
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(imageManager: tempImageManager)
