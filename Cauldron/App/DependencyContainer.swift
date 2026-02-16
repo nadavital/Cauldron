@@ -42,10 +42,6 @@ class DependencyContainer: ObservableObject {
     /// Friend connection cloud operations
     let connectionCloudService: ConnectionCloudService
 
-    /// Search cloud operations
-    let searchCloudService: SearchCloudService
-
-
     // MARK: - Layer 3: Local Persistence (Repositories)
 
     let recipeRepository: RecipeRepository
@@ -120,9 +116,6 @@ class DependencyContainer: ObservableObject {
         self.userCloudService = UserCloudService(core: cloudKitCore)
         self.collectionCloudService = CollectionCloudService(core: cloudKitCore)
         self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
-        self.searchCloudService = SearchCloudService(core: cloudKitCore)
-
-
         // Image managers using unified EntityImageManager with domain-specific services
         self.imageManager = createRecipeImageManager(recipeService: recipeCloudService)
         self.profileImageManager = createProfileImageManager(userService: userCloudService)

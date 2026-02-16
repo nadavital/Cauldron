@@ -302,11 +302,8 @@ import os
         isLoading = true
 
         do {
-            // Perform server-side search
-            let results = try await dependencies.searchCloudService.searchPublicRecipes(
-                query: normalizedQuery,
-                categories: categoryTags.isEmpty ? nil : categoryTags
-            )
+            // Fetch discoverable public recipes and apply richer filtering/ranking client-side.
+            let results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
 
             // Cache the results
             cachedSearchResults[cacheKey] = results
