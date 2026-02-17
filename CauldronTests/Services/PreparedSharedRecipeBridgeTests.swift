@@ -81,4 +81,28 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
         XCTAssertEqual(merged.imageURL, imageURL)
         XCTAssertEqual(merged.notes, "Parsed note.")
     }
+
+    func testPreparedShareRecipeParserInput_ReparseProducesIngredientsAndSteps() async throws {
+        let recipe = Recipe(
+            title: "Shared Noodles",
+            ingredients: [
+                Ingredient(name: "8 oz noodles"),
+                Ingredient(name: "2 tbsp soy sauce")
+            ],
+            steps: [
+                CookStep(index: 0, text: "Boil noodles for 6 minutes."),
+                CookStep(index: 1, text: "Toss with soy sauce.")
+            ],
+            yields: "2 servings",
+            totalMinutes: 15,
+            notes: "Serve warm."
+        )
+        let prepared = PreparedSharedRecipe(recipe: recipe, sourceInfo: "Imported from shared webpage")
+
+        let parser = TextRecipeParser()
+        let reparsed = try await parser.parse(from: prepared.recipeParserInputText())
+
+        XCTAssertFalse(reparsed.ingredients.isEmpty)
+        XCTAssertFalse(reparsed.steps.isEmpty)
+    }
 }

@@ -279,7 +279,11 @@ actor RecipeCloudService {
     }
 
     /// Query shared recipes by visibility and optional owner IDs
-    func querySharedRecipes(ownerIds: [UUID]?, visibility: RecipeVisibility) async throws -> [Recipe] {
+    func querySharedRecipes(
+        ownerIds: [UUID]?,
+        visibility: RecipeVisibility,
+        limit: Int = 100
+    ) async throws -> [Recipe] {
         let db = try await core.getPublicDatabase()
 
         let predicate: NSPredicate
@@ -297,7 +301,7 @@ actor RecipeCloudService {
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
 
-        let results = try await db.records(matching: query, resultsLimit: 100)
+        let results = try await db.records(matching: query, resultsLimit: limit)
 
         var recipes: [Recipe] = []
         for (_, result) in results.matchResults {
@@ -308,6 +312,18 @@ actor RecipeCloudService {
         }
 
         return recipes
+    }
+
+    /// Fetch discoverable public recipes for Search tab results.
+    ///
+    /// Text and category filtering intentionally remain client-side in
+    /// `RecipeGroupingService` for richer matching/ranking semantics.
+    func fetchDiscoverablePublicRecipes(limit: Int = 50) async throws -> [Recipe] {
+        try await querySharedRecipes(
+            ownerIds: nil,
+            visibility: .publicRecipe,
+            limit: limit
+        )
     }
 
     /// Delete recipe from PUBLIC database
@@ -492,47 +508,6 @@ actor RecipeCloudService {
             }
             throw error
         }
-    }
-
-    // MARK: - Search
-
-    /// Search public recipes by query and/or categories
-    func searchPublicRecipes(query: String, categories: [String]?, limit: Int = 50) async throws -> [Recipe] {
-        let db = try await core.getPublicDatabase()
-        var predicates: [NSPredicate] = []
-
-        // 1. Visibility Predicate
-        predicates.append(NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue))
-
-        // 2. Text Search Predicate
-        if !query.isEmpty {
-            let textPredicate = NSPredicate(format: "title BEGINSWITH %@ OR searchableTags CONTAINS %@", query, query)
-            predicates.append(textPredicate)
-        }
-
-        // 3. Category Filter Predicate
-        if let categories = categories, !categories.isEmpty {
-            for category in categories {
-                let categoryPredicate = NSPredicate(format: "searchableTags CONTAINS %@", category)
-                predicates.append(categoryPredicate)
-            }
-        }
-
-        let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        let queryObj = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: compoundPredicate)
-        queryObj.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
-
-        let results = try await db.records(matching: queryObj, resultsLimit: limit)
-
-        var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
-            }
-        }
-
-        return recipes
     }
 
     // MARK: - Private Helpers

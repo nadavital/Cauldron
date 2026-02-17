@@ -75,8 +75,16 @@ final class RecipeSchemaRegressionTests: XCTestCase {
 
         let recipe = try await parser.parse(from: text)
 
-        XCTAssertEqual(recipe.ingredients.count, 2)
-        XCTAssertEqual(recipe.steps.count, 2)
+        XCTAssertEqual(
+            recipe.ingredients.count,
+            2,
+            "ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text }) notes=\(recipe.notes ?? "nil")"
+        )
+        XCTAssertEqual(
+            recipe.steps.count,
+            2,
+            "ingredients=\(recipe.ingredients.map { $0.name }) steps=\(recipe.steps.map { $0.text }) notes=\(recipe.notes ?? "nil")"
+        )
         XCTAssertTrue(recipe.notes?.lowercased().contains("top with yogurt") ?? false)
     }
 }

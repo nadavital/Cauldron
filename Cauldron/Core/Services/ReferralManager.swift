@@ -210,7 +210,14 @@ final class ReferralManager: ObservableObject {
         }
 
         // Look up the referrer by code
-        let referrer = try? await userCloudService.lookupUserByReferralCode(normalizedCode)
+        let referrer: User?
+        do {
+            referrer = try await userCloudService.lookupUserByReferralCode(normalizedCode)
+        } catch {
+            AppLogger.general.error("Referral lookup failed: \(error.localizedDescription)")
+            return nil
+        }
+
         guard let referrer = referrer else {
             AppLogger.general.warning("Referral code not found: \(normalizedCode)")
             return nil

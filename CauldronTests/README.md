@@ -71,7 +71,7 @@ xcodebuild test \
   -project Cauldron.xcodeproj \
   -scheme Cauldron \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-  -only-testing:CauldronTests/YouTubeRecipeParserTests
+  -only-testing:CauldronTests/SocialRecipeParserArchitectureTests
 ```
 
 ### Run Specific Test Method
@@ -80,7 +80,7 @@ xcodebuild test \
   -project Cauldron.xcodeproj \
   -scheme Cauldron \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-  -only-testing:CauldronTests/YouTubeRecipeParserTests/testParseQuantityValue_Decimal
+  -only-testing:CauldronTests/SocialRecipeParserArchitectureTests/testSocialParserExists
 ```
 
 ## Current Test Coverage
@@ -88,7 +88,7 @@ xcodebuild test \
 ### ✅ Completed (Phase 1 - Partial)
 
 #### Parsing Tests
-- **YouTubeRecipeParserTests** (50+ tests)
+- **SocialRecipeParserArchitectureTests** (architecture coverage)
   - ✅ Quantity parsing (decimal, fractions, mixed, unicode)
   - ✅ Unit parsing (all standard units + abbreviations)
   - ✅ Ingredient text parsing
@@ -126,7 +126,7 @@ CauldronTests/
 │   ├── MockCloudKitService.swift   🔜 Todo
 │   └── MockModelContainer.swift    🔜 Todo
 ├── Parsing/
-│   ├── YouTubeRecipeParserTests.swift  ✅ Complete
+│   ├── SocialRecipeParserArchitectureTests.swift  ✅ Complete
 │   ├── PlatformDetectorTests.swift     ✅ Complete
 │   ├── QuantityParserTests.swift       🔜 Todo
 │   └── TimerExtractorTests.swift       🔜 Todo

@@ -485,14 +485,27 @@ actor UserCloudService {
         let db = try await core.getPublicDatabase()
         let predicate = NSPredicate(format: "referralCode == %@", normalizedCode)
         let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: predicate)
-        let results = try await db.records(matching: query, resultsLimit: 1)
 
-        for (_, result) in results.matchResults {
-            if let record = try? result.get() {
-                let user = try userFromRecord(record)
-                logger.info("Found user for referral code: \(user.displayName)")
-                return user
+        do {
+            let results = try await db.records(matching: query, resultsLimit: 1)
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get() {
+                    let user = try userFromRecord(record)
+                    logger.info("Found user for referral code: \(user.displayName)")
+                    return user
+                }
             }
+        } catch {
+            if !isReferralSchemaQueryError(error) {
+                throw error
+            }
+
+            logger.warning("Referral code index query unavailable (\(error.localizedDescription)); falling back to full scan")
+        }
+
+        if let fallbackUser = try await lookupUserByReferralCodeViaScan(normalizedCode) {
+            return fallbackUser
         }
 
         logger.info("No user found for referral code: \(normalizedCode)")
@@ -536,10 +549,11 @@ actor UserCloudService {
             logger.info("Fetched referral count for \(userId): \(count)")
             return count
         } catch {
-            if error.localizedDescription.contains("Unknown field") ||
-               error.localizedDescription.contains("didn't match") {
-                logger.info("ReferralSignup records not found for user: \(userId) (may not exist yet)")
-                return 0
+            if isReferralSchemaQueryError(error) {
+                logger.warning("Referral count index query unavailable (\(error.localizedDescription)); falling back to full scan")
+                let count = try await fetchReferralCountViaScan(for: userId)
+                logger.info("Fetched referral count via full scan for \(userId): \(count)")
+                return count
             }
             throw error
         }
@@ -574,12 +588,99 @@ actor UserCloudService {
             let results = try await db.records(matching: query, resultsLimit: 1)
             return results.matchResults.isEmpty
         } catch {
-            if error.localizedDescription.contains("Unknown field") {
-                logger.info("referralCode field not in schema yet - assuming code is available")
-                return true
+            if isReferralSchemaQueryError(error) {
+                logger.warning("Referral code availability query unavailable (\(error.localizedDescription)); using full scan fallback")
+                return try await isReferralCodeAvailableViaScan(normalizedCode)
             }
             throw error
         }
+    }
+
+    private func lookupUserByReferralCodeViaScan(_ normalizedCode: String) async throws -> User? {
+        let db = try await core.getPublicDatabase()
+        let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: NSPredicate(value: true))
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor = cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let user = try? userFromRecord(record) else {
+                    continue
+                }
+
+                let storedCode = normalizeReferralCode(user.referralCode ?? "")
+                let legacyCode = deriveReferralCodeFromRecordName(for: user)
+                if storedCode == normalizedCode || legacyCode == normalizedCode {
+                    logger.info("Found user for referral code via full scan: \(user.displayName)")
+                    return user
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return nil
+    }
+
+    private func fetchReferralCountViaScan(for userId: UUID) async throws -> Int {
+        let db = try await core.getPublicDatabase()
+        let query = CKQuery(recordType: CloudKitCore.RecordType.referralSignup, predicate: NSPredicate(value: true))
+        let userIdString = userId.uuidString
+        var cursor: CKQueryOperation.Cursor?
+        var count = 0
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor = cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let referrerId = record["referrerId"] as? String else {
+                    continue
+                }
+
+                if referrerId == userIdString {
+                    count += 1
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return count
+    }
+
+    private func isReferralCodeAvailableViaScan(_ normalizedCode: String) async throws -> Bool {
+        return try await lookupUserByReferralCodeViaScan(normalizedCode) == nil
+    }
+
+    private func isReferralSchemaQueryError(_ error: Error) -> Bool {
+        if let ckError = error as? CKError {
+            switch ckError.code {
+            case .invalidArguments, .unknownItem:
+                return true
+            default:
+                break
+            }
+        }
+
+        let message = error.localizedDescription.lowercased()
+        return message.contains("unknown field")
+            || message.contains("didn't match")
+            || message.contains("not marked queryable")
+            || message.contains("queryable")
+            || message.contains("unknown record type")
     }
 
     private func generateUniqueReferralCode(preferred: String? = nil) async throws -> String {

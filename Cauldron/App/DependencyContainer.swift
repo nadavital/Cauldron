@@ -42,10 +42,6 @@ class DependencyContainer: ObservableObject {
     /// Friend connection cloud operations
     let connectionCloudService: ConnectionCloudService
 
-    /// Search cloud operations
-    let searchCloudService: SearchCloudService
-
-
     // MARK: - Layer 3: Local Persistence (Repositories)
 
     let recipeRepository: RecipeRepository
@@ -100,9 +96,7 @@ class DependencyContainer: ObservableObject {
     // Parsers
     let htmlParser: HTMLRecipeParser
     let textParser: TextRecipeParser
-    let youtubeParser: YouTubeRecipeParser
-    let instagramParser: InstagramRecipeParser
-    let tiktokParser: TikTokRecipeParser
+    let socialParser: SocialRecipeParser
 
     // Background task for image migration (retained to prevent premature cancellation)
     private var migrationTask: Task<Void, Never>?
@@ -122,9 +116,6 @@ class DependencyContainer: ObservableObject {
         self.userCloudService = UserCloudService(core: cloudKitCore)
         self.collectionCloudService = CollectionCloudService(core: cloudKitCore)
         self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
-        self.searchCloudService = SearchCloudService(core: cloudKitCore)
-
-
         // Image managers using unified EntityImageManager with domain-specific services
         self.imageManager = createRecipeImageManager(recipeService: recipeCloudService)
         self.profileImageManager = createProfileImageManager(userService: userCloudService)
@@ -213,18 +204,7 @@ class DependencyContainer: ObservableObject {
         // Parsers
         self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
         self.htmlParser = HTMLRecipeParser(textParser: textParser)
-        self.youtubeParser = YouTubeRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
-        self.instagramParser = InstagramRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
-        self.tiktokParser = TikTokRecipeParser(
-            foundationModelsService: foundationModelsService,
-            textParser: textParser
-        )
+        self.socialParser = SocialRecipeParser(textParser: textParser)
 
         self.recipeImageService = MainActor.assumeIsolated {
             RecipeImageService(imageManager: tempImageManager)
