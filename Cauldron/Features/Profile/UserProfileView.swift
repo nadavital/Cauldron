@@ -10,6 +10,7 @@ import SwiftUI
 /// User profile view - displays user information and manages connections
 struct UserProfileView: View {
     let user: User
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: UserProfileViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
     @Environment(\.dismiss) private var dismiss
@@ -29,9 +30,6 @@ struct UserProfileView: View {
     // Referral
     @StateObject private var referralManager = ReferralManager.shared
     @State private var codeCopied = false
-    @State private var redeemCode = ""
-    @State private var redeemMessage: String?
-    @State private var isRedeemingCode = false
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -55,12 +53,6 @@ struct UserProfileView: View {
             VStack(spacing: 20) {
                 // Profile Header
                 profileHeader
-
-                if viewModel.isCurrentUser,
-                   referralManager.getUsedReferralCode() == nil,
-                   isReferralTestingEnabled {
-                    redeemSection
-                }
 
                 // Rewards & Progress Section (only for current user)
                 if viewModel.isCurrentUser {
@@ -86,11 +78,13 @@ struct UserProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
         .refreshable {
+            collectionImageCache.removeAll()
             await viewModel.refreshProfile()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             // Only refresh if viewing own profile
             if viewModel.isCurrentUser {
+                collectionImageCache.removeAll()
                 Task {
                     await viewModel.loadUserRecipes()
                 }
@@ -388,46 +382,6 @@ struct UserProfileView: View {
         }
     }
 
-    private var redeemSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "tag.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text("Redeem a Code")
-                    .font(.headline)
-            }
-
-            HStack(spacing: 8) {
-                TextField("Enter code", text: $redeemCode)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-
-                Button {
-                    Task { await redeemReferralCode() }
-                } label: {
-                    if isRedeemingCode {
-                        ProgressView()
-                    } else {
-                        Text("Apply")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
-                }
-                .disabled(isRedeemingCode || redeemCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            if let redeemMessage = redeemMessage {
-                Text(redeemMessage)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
-    }
-
     private func iconPreviewAssetName(for theme: AppIconTheme) -> String {
         switch theme.id {
         case "default":
@@ -455,37 +409,6 @@ struct UserProfileView: View {
         default:
             return "BrandMarks/CauldronIcon"
         }
-    }
-
-    private var isReferralTestingEnabled: Bool {
-        Bundle.main.object(forInfoDictionaryKey: "ReferralTestingEnabled") as? Bool == true
-    }
-
-    @MainActor
-    private func redeemReferralCode() async {
-        guard let user = currentUserSession.currentUser else { return }
-
-        let trimmedCode = redeemCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCode.isEmpty else { return }
-
-        ReferralManager.shared.configure(userCloudService: viewModel.dependencies.userCloudService, connectionCloudService: viewModel.dependencies.connectionCloudService)
-        isRedeemingCode = true
-        redeemMessage = nil
-
-        let referrer = await referralManager.redeemReferralCode(
-            trimmedCode,
-            currentUser: displayUser,
-            displayName: displayUser.displayName
-        )
-
-        if referrer != nil {
-            redeemCode = ""
-            redeemMessage = "Referral code applied."
-        } else {
-            redeemMessage = "Could not apply that code."
-        }
-
-        isRedeemingCode = false
     }
 
     // MARK: - Connection Action Badge (interactive)
@@ -698,9 +621,18 @@ struct UserProfileView: View {
                                 collection: collection,
                                 dependencies: viewModel.dependencies
                             )) {
-                                CollectionCardCompact(collection: collection)
+                                CollectionCardView(
+                                    collection: collection,
+                                    recipeImages: collectionImageCache[collection.id] ?? []
+                                )
                             }
                             .buttonStyle(.plain)
+                            .task(id: collection.id) {
+                                if collectionImageCache[collection.id] == nil {
+                                    let images = await viewModel.getRecipeImages(for: collection)
+                                    collectionImageCache[collection.id] = images
+                                }
+                            }
                         }
                     }
                 }
@@ -781,41 +713,63 @@ struct UserProfileView: View {
             } else if viewModel.filteredRecipes.isEmpty {
                 emptyRecipesState
             } else {
-                // Horizontal scroll for normal view, grid for search
-                if viewModel.searchText.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(viewModel.filteredRecipes.prefix(10), id: \.id) { sharedRecipe in
-                                NavigationLink(destination: RecipeDetailView(
-                                    recipe: sharedRecipe.recipe,
-                                    dependencies: viewModel.dependencies,
-                                    sharedBy: sharedRecipe.sharedBy,
-                                    sharedAt: sharedRecipe.sharedAt
-                                )) {
-                                    ProfileRecipeCard(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                } else {
-                    // List view for search results (matches Search tab style)
-                    VStack(spacing: 12) {
-                        ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
+                if horizontalSizeClass == .regular {
+                    LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                        ForEach(displayedRecipes, id: \.id) { sharedRecipe in
                             NavigationLink(destination: RecipeDetailView(
                                 recipe: sharedRecipe.recipe,
                                 dependencies: viewModel.dependencies,
                                 sharedBy: sharedRecipe.sharedBy,
                                 sharedAt: sharedRecipe.sharedAt
                             )) {
-                                RecipeRowView(recipe: sharedRecipe.recipe, dependencies: viewModel.dependencies)
+                                RecipeCardView(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
                             }
                             .buttonStyle(.plain)
+                        }
+                    }
+                } else {
+                    if viewModel.searchText.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(displayedRecipes, id: \.id) { sharedRecipe in
+                                    NavigationLink(destination: RecipeDetailView(
+                                        recipe: sharedRecipe.recipe,
+                                        dependencies: viewModel.dependencies,
+                                        sharedBy: sharedRecipe.sharedBy,
+                                        sharedAt: sharedRecipe.sharedAt
+                                    )) {
+                                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    } else {
+                        // List view for search results (matches Search tab style)
+                        VStack(spacing: 12) {
+                            ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
+                                NavigationLink(destination: RecipeDetailView(
+                                    recipe: sharedRecipe.recipe,
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: sharedRecipe.sharedBy,
+                                    sharedAt: sharedRecipe.sharedAt
+                                )) {
+                                    RecipeRowView(recipe: sharedRecipe.recipe, dependencies: viewModel.dependencies)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private var displayedRecipes: [SharedRecipe] {
+        if viewModel.searchText.isEmpty {
+            return Array(viewModel.filteredRecipes.prefix(10))
+        }
+        return viewModel.filteredRecipes
     }
 
     private var emptyRecipesState: some View {
@@ -888,85 +842,6 @@ struct UserProfileView: View {
             viewModel.errorMessage = "Failed to generate share link: \(error.localizedDescription)"
             viewModel.showError = true
         }
-    }
-}
-
-// MARK: - Profile Recipe Card (horizontal scroll)
-
-struct ProfileRecipeCard: View {
-    let sharedRecipe: SharedRecipe
-    let dependencies: DependencyContainer
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Image
-            RecipeImageView(recipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
-                .frame(width: 240, height: 160)
-
-            // Title
-            Text(sharedRecipe.recipe.title)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
-
-            // Time
-            HStack(spacing: 6) {
-                if let time = sharedRecipe.recipe.displayTime {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.caption2)
-                        Text(time)
-                            .font(.caption)
-                    }
-                    .foregroundColor(.cauldronOrange)
-                }
-
-                Spacer()
-            }
-            .frame(width: 240, height: 20)
-        }
-        .frame(width: 240)
-    }
-}
-
-// MARK: - Collection Card Compact
-
-struct CollectionCardCompact: View {
-    let collection: Collection
-
-    var body: some View {
-        VStack(spacing: 8) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(selectedColor.opacity(0.15))
-                    .frame(width: 80, height: 80)
-
-                Image(systemName: collection.symbolName ?? "folder.fill")
-                    .font(.system(size: 36))
-                    .foregroundColor(selectedColor)
-            }
-
-            // Collection name
-            Text(collection.name)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .lineLimit(1)
-                .frame(width: 100, alignment: .center)
-
-            // Recipe count
-            Text("\(collection.recipeCount) recipes")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .frame(width: 100)
-    }
-
-    private var selectedColor: Color {
-        if let colorHex = collection.color {
-            return Color(hex: colorHex) ?? .purple
-        }
-        return .purple
     }
 }
 

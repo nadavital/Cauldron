@@ -20,6 +20,7 @@ struct FriendsTabView: View {
     @State private var navigationPath = NavigationPath()
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
+    @State private var collectionImageCache: [UUID: [URL?]] = [:]
 
     let dependencies: DependencyContainer
 
@@ -103,6 +104,8 @@ struct FriendsTabView: View {
     }
 
     private func refreshFriendsContent() async {
+        collectionImageCache.removeAll()
+
         // Force refresh shared recipes from CloudKit
         await viewModel.loadSharedRecipes(forceRefresh: true)
 
@@ -148,6 +151,10 @@ struct FriendsTabView: View {
 
                     // All Friends' Recipes Section (horizontal scroll)
                     allRecipesSection
+                }
+
+                if !viewModel.isLoading && !viewModel.sharedCollections.isEmpty {
+                    allCollectionsSection
                 }
             }
         }
@@ -317,6 +324,54 @@ struct FriendsTabView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private var allCollectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "folder.fill")
+                    .foregroundColor(.purple)
+                Text("Friends' Collections")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+
+                NavigationLink(destination: AllFriendsCollectionsListView(
+                    collections: viewModel.sharedCollections,
+                    dependencies: dependencies
+                )) {
+                    Text("See All")
+                        .font(.subheadline)
+                        .foregroundColor(.cauldronOrange)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(viewModel.sharedCollections.prefix(10), id: \.id) { collection in
+                        NavigationLink(destination: SharedCollectionDetailView(
+                            collection: collection,
+                            dependencies: dependencies
+                        )) {
+                            CollectionCardView(
+                                collection: collection,
+                                recipeImages: collectionImageCache[collection.id] ?? []
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .task(id: collection.id) {
+                            if collectionImageCache[collection.id] == nil {
+                                let images = await viewModel.getRecipeImages(for: collection)
+                                collectionImageCache[collection.id] = images
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -601,6 +656,64 @@ struct AllFriendsRecipesListView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+    }
+}
+
+struct AllFriendsCollectionsListView: View {
+    let collections: [Collection]
+    let dependencies: DependencyContainer
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var collectionImageCache: [UUID: [URL?]] = [:]
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: gridColumns, spacing: 12) {
+                ForEach(collections, id: \.id) { collection in
+                    NavigationLink(destination: SharedCollectionDetailView(
+                        collection: collection,
+                        dependencies: dependencies
+                    )) {
+                        CollectionCardView(
+                            collection: collection,
+                            recipeImages: collectionImageCache[collection.id] ?? [],
+                            preferredWidth: nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .task(id: collection.id) {
+                        if collectionImageCache[collection.id] == nil {
+                            let images = await loadRecipeImages(for: collection)
+                            collectionImageCache[collection.id] = images
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .navigationTitle("Friends' Collections")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var gridColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: 12)]
+        }
+        return [
+            GridItem(.flexible(minimum: 150), spacing: 12),
+            GridItem(.flexible(minimum: 150), spacing: 12)
+        ]
+    }
+
+    @MainActor
+    private func loadRecipeImages(for collection: Collection) async -> [URL?] {
+        let loader = SharedCollectionLoader(dependencies: dependencies)
+        let loadResult = await loader.loadRecipes(
+            from: collection,
+            viewerId: CurrentUserSession.shared.userId
+        )
+        return Array(loadResult.visibleRecipes.prefix(4).map(\.imageURL))
     }
 }
 

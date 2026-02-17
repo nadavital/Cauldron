@@ -15,6 +15,7 @@ final class FriendsTabViewModel {
     static let shared = FriendsTabViewModel()
 
     var sharedRecipes: [SharedRecipe] = []
+    var sharedCollections: [Collection] = []
     var isLoading = false
     var showSuccessAlert = false
     var showErrorAlert = false
@@ -60,6 +61,7 @@ final class FriendsTabViewModel {
 
                 // Fetch tiers in background
                 await fetchSharerTiers()
+                await loadSharedCollections()
                 return
             }
             // No cache, show loading indicator
@@ -77,6 +79,9 @@ final class FriendsTabViewModel {
             // Fetch tier information for sharers
             await fetchSharerTiers()
 
+            // Load friends' shared collections
+            await loadSharedCollections()
+
             // Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
 
@@ -87,6 +92,63 @@ final class FriendsTabViewModel {
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
             showErrorAlert = true
         }
+    }
+
+    private func loadSharedCollections() async {
+        guard let dependencies = dependencies else { return }
+
+        guard let currentUser = CurrentUserSession.shared.currentUser else {
+            sharedCollections = []
+            return
+        }
+
+        do {
+            let connections = try await dependencies.connectionCloudService.fetchConnections(forUserId: currentUser.id)
+            let acceptedConnections = connections.filter { $0.isAccepted }
+
+            let friendIds = Set(acceptedConnections.flatMap { connection -> [UUID] in
+                var ids: [UUID] = []
+                if connection.fromUserId != currentUser.id {
+                    ids.append(connection.fromUserId)
+                }
+                if connection.toUserId != currentUser.id {
+                    ids.append(connection.toUserId)
+                }
+                return ids
+            })
+
+            guard !friendIds.isEmpty else {
+                sharedCollections = []
+                return
+            }
+
+            let collections = try await dependencies.collectionCloudService.fetchSharedCollections(friendIds: Array(friendIds))
+            var deduped: [UUID: Collection] = [:]
+            for collection in collections {
+                deduped[collection.id] = collection
+            }
+            sharedCollections = Array(deduped.values).sorted { $0.updatedAt > $1.updatedAt }
+        } catch {
+            AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
+            sharedCollections = []
+        }
+    }
+
+    /// Get first 4 visible recipe image URLs for a shared collection card.
+    func getRecipeImages(for collection: Collection) async -> [URL?] {
+        guard let dependencies = dependencies else { return [] }
+        guard !collection.recipeIds.isEmpty else { return [] }
+
+        var imageURLs: [URL?] = []
+        for recipeId in collection.recipeIds.prefix(4) {
+            do {
+                let recipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId)
+                imageURLs.append(recipe?.imageURL)
+            } catch {
+                imageURLs.append(nil)
+            }
+        }
+        return imageURLs
     }
 
     /// Organize shared recipes into curated sections
