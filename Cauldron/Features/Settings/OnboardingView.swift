@@ -23,6 +23,7 @@ struct OnboardingView: View {
     @State private var showingImagePicker = false
     @State private var imagePickerSourceType: UIImagePickerController.SourceType = .photoLibrary
     @State private var referralCode = ""
+    @State private var didAutoApplyReferralCode = false
 
     // Track if user has selected a photo (to show different preview)
     private var hasPhoto: Bool { profileImage != nil }
@@ -247,6 +248,12 @@ struct OnboardingView: View {
                             Text("Got a code from a friend? Enter it to unlock an exclusive icon and connect instantly!")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+
+                            if didAutoApplyReferralCode {
+                                Text("Invite code applied from your link.")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
                         }
 
                         if let error = errorMessage {
@@ -302,6 +309,15 @@ struct OnboardingView: View {
                 ImagePicker(image: $profileImage, sourceType: imagePickerSourceType)
                     .ignoresSafeArea()
             }
+            .task {
+                if let pendingCode = await PendingReferralManager.shared.consumePendingCode() {
+                    applyIncomingReferralCode(pendingCode)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openReferralInvite)) { notification in
+                guard let code = notification.object as? String else { return }
+                applyIncomingReferralCode(code)
+            }
         }
     }
     
@@ -355,6 +371,15 @@ struct OnboardingView: View {
             currentUser: currentUser,
             displayName: displayName
         )
+    }
+
+    @MainActor
+    private func applyIncomingReferralCode(_ code: String) {
+        let normalizedCode = code.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCode.isEmpty else { return }
+
+        referralCode = normalizedCode
+        didAutoApplyReferralCode = true
     }
 }
 

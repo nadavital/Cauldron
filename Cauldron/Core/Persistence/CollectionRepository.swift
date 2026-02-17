@@ -86,6 +86,14 @@ actor CollectionRepository {
         try context.save()
 
         // Created collection locally
+        NotificationCenter.default.post(
+            name: NSNotification.Name("CollectionAdded"),
+            object: nil,
+            userInfo: [
+                "collectionId": collection.id,
+                "collection": collection
+            ]
+        )
 
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
@@ -171,6 +179,7 @@ actor CollectionRepository {
         let oldRecipeIds = (try? JSONDecoder().decode([UUID].self, from: existingModel.recipeIdsBlob)) ?? []
         let oldName = existingModel.name
         let oldEmoji = existingModel.emoji
+        let oldSymbolName = existingModel.symbolName
         let oldColor = existingModel.color
         let oldDescription = existingModel.descriptionText
         let oldCoverImageType = existingModel.coverImageType
@@ -186,6 +195,7 @@ actor CollectionRepository {
         existingModel.recipeIdsBlob = updatedModel.recipeIdsBlob
         existingModel.visibility = updatedModel.visibility
         existingModel.emoji = updatedModel.emoji
+        existingModel.symbolName = updatedModel.symbolName
         existingModel.color = updatedModel.color
         existingModel.coverImageType = updatedModel.coverImageType
         // Only update timestamp for user actions, not sync operations
@@ -227,6 +237,7 @@ actor CollectionRepository {
         // Post notification for metadata changes (name, emoji, color, description, cover image)
         let metadataChanged = oldName != collection.name ||
                               oldEmoji != collection.emoji ||
+                              oldSymbolName != collection.symbolName ||
                               oldColor != collection.color ||
                               oldDescription != collection.description ||
                               oldCoverImageType != collection.coverImageType.rawValue
@@ -388,12 +399,15 @@ actor CollectionRepository {
         }
 
         do {
+            // Always sync the freshest local state to reduce stale change-tag conflicts.
+            let collectionToSync = (try? await fetch(id: collection.id)) ?? collection
+
             // Syncing collection to CloudKit
-            try await collectionCloudService.saveCollection(collection)
+            try await collectionCloudService.saveCollection(collectionToSync)
             // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
-            pendingSyncCollections.remove(collection.id)
+            pendingSyncCollections.remove(collectionToSync.id)
         } catch {
             logger.error("❌ CloudKit sync failed for collection '\(collection.name)': \(error.localizedDescription)")
             logger.error("❌ Error details: \(error)")

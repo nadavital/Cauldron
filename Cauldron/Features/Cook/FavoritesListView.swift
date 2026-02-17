@@ -13,7 +13,9 @@ struct FavoritesListView: View {
     let recipes: [Recipe]
     let dependencies: DependencyContainer
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var localRecipes: [Recipe]
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     init(recipes: [Recipe], dependencies: DependencyContainer) {
         self.recipes = recipes
@@ -21,41 +23,17 @@ struct FavoritesListView: View {
         self._localRecipes = State(initialValue: recipes)
     }
 
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
+
     var body: some View {
-        List {
-            Section {
-                Text("Recipes you've marked as favorites")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            ForEach(localRecipes) { recipe in
-                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                    RecipeRowView(recipe: recipe, dependencies: dependencies)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        Task {
-                            await deleteRecipe(recipe)
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .tint(.red)
-
-                    Button {
-                        Task {
-                            try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
-                            // Remove from local list since this is favorites view
-                            localRecipes.removeAll { $0.id == recipe.id }
-                        }
-                    } label: {
-                        Label("Unfavorite", systemImage: "star.slash")
-                    }
-                    .tint(.yellow)
-                }
-            }
-        }
+        contentView
         .navigationTitle("Favorites")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
@@ -69,6 +47,98 @@ struct FavoritesListView: View {
                 localRecipes.removeAll { $0.id == deletedRecipeId }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                recipeLayoutMenu
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
+        List {
+            Section {
+                Text("Recipes you've marked as favorites")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(localRecipes) { recipe in
+                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    deleteButton(for: recipe)
+                    unfavoriteButton(for: recipe)
+                }
+            }
+        }
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Recipes you've marked as favorites")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+                    ForEach(localRecipes) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            deleteButton(for: recipe)
+                            unfavoriteButton(for: recipe)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var recipeLayoutMenu: some View {
+        RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+            storedRecipeLayoutMode = mode.rawValue
+        }
+    }
+
+    private func deleteButton(for recipe: Recipe) -> some View {
+        Button(role: .destructive) {
+            Task {
+                await deleteRecipe(recipe)
+            }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .tint(.red)
+    }
+
+    private func unfavoriteButton(for recipe: Recipe) -> some View {
+        Button {
+            Task {
+                try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
+                localRecipes.removeAll { $0.id == recipe.id }
+            }
+        } label: {
+            Label("Unfavorite", systemImage: "star.slash")
+        }
+        .tint(.yellow)
+    }
+
+    private var recipeGridColumns: [GridItem] {
+        RecipeLayoutMode.defaultGridColumns
     }
 
     private func deleteRecipe(_ recipe: Recipe) async {

@@ -125,18 +125,22 @@ final class ReferralManager: ObservableObject {
         return code
     }
 
-    /// App Store URL for Cauldron
-    private let appStoreURL = URL(string: "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943")!
+    /// Universal invite link base (must match AASA allowed paths)
+    private let inviteBaseURL = URL(string: "https://cauldron-f900a.web.app")!
 
-    /// Get the App Store URL for sharing
+    /// Get the invite URL for sharing.
+    /// The referral code is embedded so recipients can join without manual entry.
     func getShareURL(for user: User) -> URL {
-        return appStoreURL
+        let code = generateReferralCode(for: user)
+        var components = URLComponents(url: inviteBaseURL, resolvingAgainstBaseURL: false)
+        components?.path = "/invite/\(code)"
+        return components?.url ?? inviteBaseURL
     }
 
     /// Get share text with the referral code
     func getShareText(for user: User) -> String {
         let code = generateReferralCode(for: user)
-        return "Join me on Cauldron! 🧙‍♀️✨ Use my referral code \(code) when you sign up to unlock an exclusive app icon and we'll be connected as friends instantly!"
+        return "Join me on Cauldron! Tap my invite link to join instantly. If prompted, enter code \(code) to unlock rewards and auto-connect as friends."
     }
 
     /// Check if a referral code is valid (not the user's own code)
@@ -322,4 +326,67 @@ final class ReferralManager: ObservableObject {
         UserDefaults.standard.set(count, forKey: referralCountKey)
     }
     #endif
+}
+
+/// Helpers for parsing referral invite links.
+enum ReferralInviteLink {
+    static func referralCode(from url: URL) -> String? {
+        let host = url.host?.lowercased() ?? ""
+        let isSupportedHost = host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app"
+
+        if url.scheme?.lowercased() == "cauldron" {
+            // Supports: cauldron://invite?code=ABC123 and cauldron://invite/ABC123
+            if url.host?.lowercased() == "invite" {
+                if let queryCode = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name.lowercased() == "code" })?
+                    .value {
+                    return normalizedReferralCode(from: queryCode)
+                }
+
+                let pathCode = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                return normalizedReferralCode(from: pathCode)
+            }
+            return nil
+        }
+
+        guard isSupportedHost else { return nil }
+
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        if let queryCode = components?
+            .queryItems?
+            .first(where: { $0.name.lowercased() == "code" })?
+            .value {
+            return normalizedReferralCode(from: queryCode)
+        }
+
+        // Supports: https://.../invite/ABC123
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+        guard pathComponents.count >= 2, pathComponents[0].lowercased() == "invite" else { return nil }
+        return normalizedReferralCode(from: pathComponents[1])
+    }
+
+    private static func normalizedReferralCode(from rawCode: String) -> String? {
+        let normalized = rawCode.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = "^[A-Z0-9]{6}$"
+        guard normalized.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        return normalized
+    }
+}
+
+/// Thread-safe handoff store for referral codes extracted from invite links.
+actor PendingReferralManager {
+    static let shared = PendingReferralManager()
+    private var pendingCode: String?
+
+    private init() {}
+
+    func setPendingCode(_ code: String) {
+        pendingCode = code
+    }
+
+    func consumePendingCode() -> String? {
+        defer { pendingCode = nil }
+        return pendingCode
+    }
 }

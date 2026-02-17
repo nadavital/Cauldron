@@ -559,6 +559,45 @@ actor UserCloudService {
         }
     }
 
+    /// Fetch users who joined using a referrer's code.
+    /// Ordered by most recent signup first.
+    func fetchReferredUsers(for userId: UUID, limit: Int = 50) async throws -> [User] {
+        let db = try await core.getPublicDatabase()
+        let userIdString = userId.uuidString
+
+        let orderedUserIds: [UUID]
+        do {
+            let predicate = NSPredicate(format: "referrerId == %@", userIdString)
+            let query = CKQuery(recordType: CloudKitCore.RecordType.referralSignup, predicate: predicate)
+            query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+            let results = try await db.records(matching: query, resultsLimit: limit)
+            orderedUserIds = results.matchResults.compactMap { _, result in
+                guard let record = try? result.get(),
+                      let newUserIdString = record["newUserId"] as? String else {
+                    return nil
+                }
+                return UUID(uuidString: newUserIdString)
+            }
+        } catch {
+            if isReferralSchemaQueryError(error) {
+                logger.warning("Referral list query unavailable (\(error.localizedDescription)); falling back to full scan")
+                orderedUserIds = try await fetchReferredUserIDsViaScan(for: userId, limit: limit)
+            } else {
+                throw error
+            }
+        }
+
+        guard !orderedUserIds.isEmpty else { return [] }
+
+        var seen = Set<UUID>()
+        let dedupedOrderedIds = orderedUserIds.filter { seen.insert($0).inserted }
+        let fetchedUsers = try await fetchUsers(byUserIds: dedupedOrderedIds)
+        let usersById = Dictionary(uniqueKeysWithValues: fetchedUsers.map { ($0.id, $0) })
+
+        return dedupedOrderedIds.compactMap { usersById[$0] }
+    }
+
     // MARK: - Private Helpers
 
     private func deriveReferralCodeFromRecordName(for user: User) -> String {
@@ -659,6 +698,52 @@ actor UserCloudService {
         } while cursor != nil
 
         return count
+    }
+
+    private func fetchReferredUserIDsViaScan(for userId: UUID, limit: Int) async throws -> [UUID] {
+        let db = try await core.getPublicDatabase()
+        let query = CKQuery(recordType: CloudKitCore.RecordType.referralSignup, predicate: NSPredicate(value: true))
+        let userIdString = userId.uuidString
+
+        var cursor: CKQueryOperation.Cursor?
+        var matches: [(id: UUID, createdAt: Date)] = []
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor = cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let referrerId = record["referrerId"] as? String,
+                      referrerId == userIdString,
+                      let newUserIdString = record["newUserId"] as? String,
+                      let newUserId = UUID(uuidString: newUserIdString) else {
+                    continue
+                }
+
+                let createdAt = record["createdAt"] as? Date ?? .distantPast
+                matches.append((id: newUserId, createdAt: createdAt))
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        let sorted = matches.sorted { $0.createdAt > $1.createdAt }
+        var seen = Set<UUID>()
+        var orderedIds: [UUID] = []
+
+        for match in sorted where seen.insert(match.id).inserted {
+            orderedIds.append(match.id)
+            if orderedIds.count >= limit {
+                break
+            }
+        }
+
+        return orderedIds
     }
 
     private func isReferralCodeAvailableViaScan(_ normalizedCode: String) async throws -> Bool {

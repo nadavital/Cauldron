@@ -424,6 +424,261 @@ function generatePreviewHtml(title: string, description: string, imageURL: strin
     `;
 }
 
+type InviteRequestLike = {
+    query?: Record<string, unknown>;
+    path?: string;
+};
+
+function normalizeReferralCode(rawCode: unknown): string | null {
+    if (typeof rawCode !== "string") {
+        return null;
+    }
+
+    const normalized = rawCode.toUpperCase().trim();
+    if (!/^[A-Z0-9]{6}$/.test(normalized)) {
+        return null;
+    }
+
+    return normalized;
+}
+
+function extractReferralCodeFromRequest(req: InviteRequestLike): string | null {
+    const rawQueryCode = Array.isArray(req.query?.code) ? req.query?.code[0] : req.query?.code;
+    const queryCode = normalizeReferralCode(rawQueryCode);
+    if (queryCode) {
+        return queryCode;
+    }
+
+    const pathParts = (req.path ?? "").split("/").filter(Boolean);
+    if (pathParts.length >= 2 && pathParts[0].toLowerCase() === "invite") {
+        return normalizeReferralCode(pathParts[1]);
+    }
+
+    if (pathParts.length === 1 && pathParts[0].toLowerCase() !== "invite") {
+        return normalizeReferralCode(pathParts[0]);
+    }
+
+    return null;
+}
+
+function generateInvitePreviewHtml(inviteCode: string | null): string {
+    const hasValidCode = inviteCode !== null;
+    const universalURL = hasValidCode
+        ? `https://cauldron-f900a.web.app/invite/${inviteCode}`
+        : "https://cauldron-f900a.web.app/invite";
+    const appURL = hasValidCode
+        ? `cauldron://invite?code=${inviteCode}`
+        : "cauldron://invite";
+    const appStoreURL = "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943";
+    const title = hasValidCode ? "You were invited to Cauldron" : "Cauldron Invite";
+    const description = hasValidCode
+        ? `Join Cauldron with invite code ${inviteCode} to connect with your friend instantly.`
+        : "This invite link is invalid or expired. Ask your friend to send a new one.";
+    const statusLine = hasValidCode
+        ? "Use this code during sign up if needed:"
+        : "Invite code could not be read from this link.";
+
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="${title}">
+    <meta property="og:description" content="${description}">
+    <meta property="og:image" content="https://cauldron-f900a.web.app/icon-light.svg">
+    <meta property="og:url" content="${universalURL}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="${title}">
+    <meta name="twitter:description" content="${description}">
+    <meta name="twitter:image" content="https://cauldron-f900a.web.app/icon-light.svg">
+    <meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${universalURL}">
+    <style>
+        :root {
+            --orange: #ff9933;
+            --bg: #f5f5f7;
+            --card: #ffffff;
+            --text: #1d1d1f;
+            --subtext: #6e6e73;
+            --border: rgba(0, 0, 0, 0.08);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #000000;
+                --card: #1c1c1e;
+                --text: #f5f5f7;
+                --subtext: #a1a1a6;
+                --border: rgba(255, 255, 255, 0.12);
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at top, rgba(255, 153, 51, 0.22), transparent 48%), var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 480px;
+            border-radius: 24px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+            padding: 28px;
+            text-align: center;
+        }
+
+        .logo {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            border-radius: 16px;
+            background: rgba(255, 153, 51, 0.12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo img {
+            width: 44px;
+            height: 44px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            line-height: 1.2;
+        }
+
+        p {
+            margin: 10px 0 0;
+            color: var(--subtext);
+            line-height: 1.45;
+        }
+
+        .code-label {
+            margin-top: 22px;
+            color: var(--subtext);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .code-chip {
+            margin-top: 8px;
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            background: rgba(255, 153, 51, 0.12);
+            color: var(--orange);
+            border-radius: 14px;
+            padding: 10px 14px;
+            display: inline-block;
+            min-width: 180px;
+        }
+
+        .button {
+            margin-top: 14px;
+            width: 100%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            text-decoration: none;
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-weight: 600;
+            border: 0;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .button-primary {
+            margin-top: 24px;
+            background: var(--orange);
+            color: white;
+        }
+
+        .button-secondary {
+            background: rgba(255, 153, 51, 0.16);
+            color: var(--orange);
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="logo">
+            <img src="https://cauldron-f900a.web.app/icon-light.svg" alt="Cauldron">
+        </div>
+        <h1>${title}</h1>
+        <p>${description}</p>
+
+        <div class="code-label">${statusLine}</div>
+        ${hasValidCode ? `<div class="code-chip" id="inviteCode">${inviteCode}</div>` : ""}
+        ${hasValidCode ? `<button class="button button-secondary" id="copyCodeButton" type="button">Copy Code</button>` : ""}
+
+        <button class="button button-primary" id="openAppButton" type="button">Open in Cauldron</button>
+        <a class="button button-secondary" href="${appStoreURL}">Download Cauldron</a>
+    </main>
+    <script>
+        (function() {
+            var deepLink = ${JSON.stringify(appURL)};
+            var appStoreURL = ${JSON.stringify(appStoreURL)};
+            var inviteCode = ${JSON.stringify(inviteCode)};
+
+            var openButton = document.getElementById("openAppButton");
+            if (openButton) {
+                openButton.addEventListener("click", function() {
+                    var start = Date.now();
+                    window.location.href = deepLink;
+                    setTimeout(function() {
+                        if (Date.now() - start < 2200) {
+                            window.location.href = appStoreURL;
+                        }
+                    }, 1300);
+                });
+            }
+
+            var copyButton = document.getElementById("copyCodeButton");
+            if (copyButton && inviteCode) {
+                copyButton.addEventListener("click", async function() {
+                    try {
+                        await navigator.clipboard.writeText(inviteCode);
+                        copyButton.textContent = "Copied";
+                    } catch {
+                        copyButton.textContent = "Copy Failed";
+                    }
+                });
+            }
+        })();
+    </script>
+</body>
+</html>
+    `;
+}
+
+export const previewInvite = onRequest({ cors: true, invoker: "public" }, async (req, res) => {
+    const inviteCode = extractReferralCodeFromRequest({
+        query: req.query as Record<string, unknown>,
+        path: req.path,
+    });
+
+    res.set("Cache-Control", "public, max-age=300");
+    res.send(generateInvitePreviewHtml(inviteCode));
+});
+
 export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
     const pathParts = req.path.split('/');
     const shareId = pathParts[pathParts.length - 1]; // Last part of path

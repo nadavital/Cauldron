@@ -11,6 +11,7 @@ struct RecipeDetailView: View {
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var recipe: Recipe
     @State private var showingEditSheet = false
     @State var showSessionConflictAlert = false
@@ -84,65 +85,130 @@ struct RecipeDetailView: View {
         scaledResult.recipe
     }
 
+    private var shouldApplyBackgroundExtensionEffect: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private var hasHeroImage: Bool {
+        recipe.imageURL != nil || recipe.cloudImageRecordName != nil
+    }
+
+    private var recipeHeaderSection: some View {
+        RecipeHeaderSection(
+            recipe: recipe,
+            scaledRecipe: scaledRecipe,
+            scaledResult: scaledResult,
+            scaleFactor: $scaleFactor,
+            currentVisibility: $currentVisibility,
+            localIsFavorite: $localIsFavorite,
+            hasOwnedCopy: hasOwnedCopy,
+            isSavingRecipe: isSavingRecipe,
+            isCheckingDuplicates: isCheckingDuplicates,
+            hasUpdates: hasUpdates,
+            isUpdatingRecipe: isUpdatingRecipe,
+            isLoadingCreator: isLoadingCreator,
+            sharedBy: sharedBy,
+            recipeOwner: recipeOwner,
+            originalCreator: originalCreator,
+            dependencies: dependencies,
+            onToggleFavorite: toggleFavorite,
+            onChangeVisibility: changeVisibility,
+            onSaveRecipe: saveRecipeToLibrary,
+            onUpdateRecipe: updateRecipeCopy
+        )
+        .padding(.top, hasHeroImage ? -80 : 0)
+    }
+
+    @ViewBuilder
+    private var notesSection: some View {
+        if let notes = recipe.notes, !notes.isEmpty {
+            RecipeNotesSection(notes: notes)
+        }
+    }
+
+    private var ingredientsSection: some View {
+        RecipeIngredientsSection(ingredients: scaledRecipe.ingredients)
+    }
+
+    private var stepsSection: some View {
+        RecipeStepsSection(
+            steps: scaledRecipe.steps,
+            highlightedStepIndex: highlightedStepIndex,
+            onTimerTap: startTimer
+        )
+    }
+
+    @ViewBuilder
+    private var nutritionSection: some View {
+        if let nutrition = recipe.nutrition, nutrition.hasData {
+            RecipeNutritionSection(nutrition: nutrition)
+        }
+    }
+
+    @ViewBuilder
+    private var relatedSection: some View {
+        if !relatedRecipes.isEmpty {
+            RecipeRelatedSection(relatedRecipes: relatedRecipes, dependencies: dependencies)
+        }
+    }
+
+    @ViewBuilder
+    private var compactRecipeContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            recipeHeaderSection
+            notesSection
+            ingredientsSection
+            stepsSection
+            nutritionSection
+            relatedSection
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, hasHeroImage ? 0 : 20)
+        .padding(.bottom, 100)
+    }
+
+    @ViewBuilder
+    private var regularRecipeContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            recipeHeaderSection
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 20) {
+                    ingredientsSection
+                    notesSection
+                }
+                .frame(maxWidth: 430, alignment: .leading)
+
+                stepsSection
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            nutritionSection
+            relatedSection
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, hasHeroImage ? 0 : 20)
+        .padding(.bottom, 100)
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        if recipe.imageURL != nil || recipe.cloudImageRecordName != nil {
+                        if hasHeroImage {
                             HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                                .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
                                 .ignoresSafeArea(edges: .top)
                                 .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
                         }
 
-                        VStack(alignment: .leading, spacing: 20) {
-                            RecipeHeaderSection(
-                                recipe: recipe,
-                                scaledRecipe: scaledRecipe,
-                                scaledResult: scaledResult,
-                                scaleFactor: $scaleFactor,
-                                currentVisibility: $currentVisibility,
-                                localIsFavorite: $localIsFavorite,
-                                hasOwnedCopy: hasOwnedCopy,
-                                isSavingRecipe: isSavingRecipe,
-                                isCheckingDuplicates: isCheckingDuplicates,
-                                hasUpdates: hasUpdates,
-                                isUpdatingRecipe: isUpdatingRecipe,
-                                isLoadingCreator: isLoadingCreator,
-                                sharedBy: sharedBy,
-                                recipeOwner: recipeOwner,
-                                originalCreator: originalCreator,
-                                dependencies: dependencies,
-                                onToggleFavorite: toggleFavorite,
-                                onChangeVisibility: changeVisibility,
-                                onSaveRecipe: saveRecipeToLibrary,
-                                onUpdateRecipe: updateRecipeCopy
-                            )
-                            .padding(.top, (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? -80 : 0)
-
-                            if let notes = recipe.notes, !notes.isEmpty {
-                                RecipeNotesSection(notes: notes)
-                            }
-
-                            RecipeIngredientsSection(ingredients: scaledRecipe.ingredients)
-
-                            RecipeStepsSection(
-                                steps: scaledRecipe.steps,
-                                highlightedStepIndex: highlightedStepIndex,
-                                onTimerTap: startTimer
-                            )
-
-                            if let nutrition = recipe.nutrition, nutrition.hasData {
-                                RecipeNutritionSection(nutrition: nutrition)
-                            }
-
-                            if !relatedRecipes.isEmpty {
-                                RecipeRelatedSection(relatedRecipes: relatedRecipes, dependencies: dependencies)
-                            }
+                        if horizontalSizeClass == .regular {
+                            regularRecipeContent
+                        } else {
+                            compactRecipeContent
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, recipe.imageURL != nil ? 0 : 20)
-                        .padding(.bottom, 100)
                     }
                 }
                 .onAppear {
@@ -155,7 +221,7 @@ struct RecipeDetailView: View {
                     }
                 }
             }
-            .ignoresSafeArea(edges: (recipe.imageURL != nil || recipe.cloudImageRecordName != nil) ? .top : [])
+            .ignoresSafeArea(edges: hasHeroImage ? .top : [])
 
             HStack {
                 Spacer()

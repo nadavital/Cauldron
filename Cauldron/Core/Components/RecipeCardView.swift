@@ -26,6 +26,8 @@ import SwiftUI
 /// RecipeCardView(sharedRecipe: sharedRecipe, creatorTier: tier, dependencies: deps)
 /// ```
 struct RecipeCardView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let recipe: Recipe
     let dependencies: DependencyContainer
     var sharedBy: User?
@@ -78,12 +80,24 @@ struct RecipeCardView: View {
         sharedBy != nil
     }
 
+    private var cardWidth: CGFloat {
+        horizontalSizeClass == .regular ? 252 : 240
+    }
+
+    private var cardHeight: CGFloat {
+        horizontalSizeClass == .regular ? 168 : 160
+    }
+
+    private var metadataTagMaxWidth: CGFloat {
+        horizontalSizeClass == .regular ? 120 : 100
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Image with contextual overlays
             ZStack {
                 RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-                    .frame(width: 240, height: 160)
+                    .frame(width: cardWidth, height: cardHeight)
 
                 if isSharedRecipe {
                     // Shared recipe: show creator overlay
@@ -93,18 +107,18 @@ struct RecipeCardView: View {
                     ownRecipeOverlay
                 }
             }
-            .frame(width: 240, height: 160)
+            .frame(width: cardWidth, height: cardHeight)
 
             // Title - single line for clean look
             Text(recipe.title)
                 .font(.headline)
                 .lineLimit(1)
-                .frame(width: 240, height: 20, alignment: .leading)
+                .frame(width: cardWidth, height: 20, alignment: .leading)
 
             // Metadata row - time and tag
             metadataRow
         }
-        .frame(width: 240)
+        .frame(width: cardWidth)
     }
 
     // MARK: - Overlay Views
@@ -187,7 +201,7 @@ struct RecipeCardView: View {
             if let firstTag = recipe.tags.first {
                 TagView(firstTag)
                     .scaleEffect(0.9)
-                    .frame(maxWidth: 100, alignment: .trailing)
+                    .frame(maxWidth: metadataTagMaxWidth, alignment: .trailing)
                     .onTapGesture {
                         onTagTap?(firstTag)
                     }
@@ -197,7 +211,7 @@ struct RecipeCardView: View {
                     .frame(width: 60)
             }
         }
-        .frame(width: 240, height: 20)
+        .frame(width: cardWidth, height: 20)
     }
 }
 

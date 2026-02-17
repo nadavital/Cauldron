@@ -15,9 +15,11 @@ struct CookModeView: View {
     let dependencies: DependencyContainer
 
     @ObservedObject private var timerManager: TimerManager
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
+    @State private var checkedIngredientIDs: Set<UUID> = []
 
     init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -32,20 +34,11 @@ struct CookModeView: View {
             ProgressView(value: coordinator.progress)
                 .tint(Color.cauldronOrange)
 
-            // Current step
-            ScrollView {
-                VStack(spacing: 24) {
-                    stepHeader
-                    stepContent
-                    timersSection
-                }
-                .padding()
+            if isRegularWidthLayout {
+                regularWidthContent
+            } else {
+                compactContent
             }
-
-            Spacer()
-
-            // Navigation controls
-            navigationControls
         }
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -123,18 +116,116 @@ struct CookModeView: View {
         }
     }
 
-    private var stepHeader: some View {
-        VStack(spacing: 8) {
-            Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
-                .font(.headline)
-                .foregroundColor(.cauldronOrange)
+    private var isRegularWidthLayout: Bool {
+        horizontalSizeClass == .regular
+    }
 
-            if let currentStep = coordinator.currentStep {
-                Text(currentStep.displayIndex)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+    private var compactContent: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    recipeVisualHeader
+                        .overlay(alignment: .bottom) {
+                            stepProgressBadge
+                                .padding(.horizontal, 16)
+                                .offset(y: 20)
+                        }
+                    VStack(spacing: 24) {
+                        stepContent
+                        timersSection
+                    }
+                    .padding(.top, 34)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
             }
+
+            Spacer()
+
+            navigationControls
         }
+    }
+
+    private var regularWidthContent: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        recipeVisualHeader
+                            .overlay(alignment: .bottom) {
+                                stepProgressBadge
+                                    .padding(.horizontal, 24)
+                                    .offset(y: 22)
+                            }
+                        VStack(spacing: 28) {
+                            stepContent
+                        }
+                        .padding(.top, 38)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
+                    }
+                }
+
+                Spacer(minLength: 0)
+                navigationControls
+            }
+
+            Divider()
+
+            workbenchPanel
+                .frame(width: 360)
+                .background(Color.cauldronSecondaryBackground)
+        }
+    }
+
+    private var stepProgressBadge: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "list.number")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(Color.cauldronOrange)
+                .frame(width: 34, height: 34)
+                .background(Color.cauldronOrange.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
+                    .font(isRegularWidthLayout ? .title3.weight(.bold) : .headline.weight(.semibold))
+                    .foregroundStyle(Color.cauldronOrange)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.cauldronSecondaryBackground, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
+    }
+
+    private var recipeVisualHeader: some View {
+        RecipeImageView(
+            imageURL: recipe.imageURL,
+            size: .preview,
+            showPlaceholderText: false,
+            recipeImageService: dependencies.recipeImageService,
+            recipeId: recipe.id,
+            ownerId: recipe.ownerId
+        )
+        .frame(height: isRegularWidthLayout ? 300 : 230)
+        .overlay(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    Color(uiColor: .systemBackground).opacity(0),
+                    Color(uiColor: .systemBackground).opacity(0.5),
+                    Color(uiColor: .systemBackground)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 200)
+            .allowsHitTesting(false)
+        }
+        .backgroundExtensionEffect(isEnabled: isRegularWidthLayout)
+        .ignoresSafeArea(edges: .top)
+        .clipped()
     }
 
     private var stepContent: some View {
@@ -229,6 +320,152 @@ struct CookModeView: View {
                     stepIndex: coordinator.currentStepIndex
                 )
             }
+        }
+    }
+
+    private var workbenchPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                ingredientChecklistSection
+                timerWorkbenchSection
+            }
+            .padding(20)
+        }
+    }
+
+    private var ingredientChecklistSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Ingredients")
+                    .font(.headline)
+                Spacer()
+                Text("\(checkedIngredientIDs.count)/\(recipe.ingredients.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if recipe.ingredients.isEmpty {
+                Text("No ingredients available")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(recipe.ingredients) { ingredient in
+                    let isChecked = checkedIngredientIDs.contains(ingredient.id)
+
+                    Button {
+                        toggleIngredientCheck(ingredient.id)
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(isChecked ? Color.cauldronOrange : .secondary)
+                                .font(.body)
+
+                            Text(ingredient.displayString)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.leading)
+                                .foregroundStyle(isChecked ? .secondary : .primary)
+                                .strikethrough(isChecked)
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var timerWorkbenchSection: some View {
+        let pendingTimers = unstartedCurrentStepTimers
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Timers")
+                    .font(.headline)
+                Spacer()
+                if !timerManager.activeTimers.isEmpty {
+                    Text("\(timerManager.activeTimers.count) active")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if timerManager.activeTimers.isEmpty && pendingTimers.isEmpty {
+                Text("No active timers")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !timerManager.activeTimers.isEmpty {
+                ForEach(timerManager.activeTimers) { activeTimer in
+                    ImprovedTimerRowView(timer: activeTimer, timerManager: timerManager)
+                }
+            }
+
+            if !pendingTimers.isEmpty {
+                Text("Current Step Timers")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .padding(.top, timerManager.activeTimers.isEmpty ? 0 : 4)
+
+                ForEach(Array(pendingTimers.enumerated()), id: \.element.id) { _, timerSpec in
+                    Button {
+                        timerManager.startTimer(
+                            spec: timerSpec,
+                            stepIndex: coordinator.currentStepIndex,
+                            recipeName: recipe.title
+                        )
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(timerSpec.label)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text(timerSpec.displayDuration)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "play.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.cauldronOrange)
+                        }
+                        .padding(12)
+                        .background(Color.cauldronBackground, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            QuickTimerButton(
+                timerManager: timerManager,
+                recipeName: recipe.title,
+                stepIndex: coordinator.currentStepIndex
+            )
+            .padding(.top, 2)
+        }
+    }
+
+    private var unstartedCurrentStepTimers: [TimerSpec] {
+        guard let currentStep = coordinator.currentStep else { return [] }
+        let stepActiveTimers = timerManager.activeTimers.filter { $0.stepIndex == coordinator.currentStepIndex }
+
+        return currentStep.timers.filter { timerSpec in
+            !stepActiveTimers.contains { activeTimer in
+                activeTimer.spec.seconds == timerSpec.seconds &&
+                activeTimer.spec.label == timerSpec.label
+            }
+        }
+    }
+
+    private func toggleIngredientCheck(_ ingredientID: UUID) {
+        if checkedIngredientIDs.contains(ingredientID) {
+            checkedIngredientIDs.remove(ingredientID)
+        } else {
+            checkedIngredientIDs.insert(ingredientID)
         }
     }
 

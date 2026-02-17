@@ -377,6 +377,11 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
            let url = userActivity.webpageURL {
             AppLogger.general.info("🟣 SceneDelegate: Got web URL: \(url.absoluteString)")
 
+            if routeReferralInviteIfNeeded(url) {
+                AppLogger.general.info("🟣 SceneDelegate: Detected referral invite URL")
+                return
+            }
+
             // Check if it's an external share URL (from Firebase)
             // Matches: https://YOUR-PROJECT.web.app/recipe/abc123
             // Or: https://cauldron.app/recipe/abc123
@@ -452,6 +457,11 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
     private func handleURL(_ url: URL) {
         AppLogger.general.info("🟣 SceneDelegate: handleURL: \(url.absoluteString)")
 
+        if routeReferralInviteIfNeeded(url) {
+            AppLogger.general.info("🟣 SceneDelegate: Detected referral invite deep link")
+            return
+        }
+
         // Share Extension handoff for recipe import URLs from Safari.
         if url.scheme == "cauldron" && url.host == "import-recipe" {
             if let pendingURL = ShareExtensionImportStore.pendingRecipeURL() {
@@ -480,5 +490,24 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
             name: .testOpenURL,
             object: url
         )
+    }
+
+    /// Parse referral invite links and post them into the app flow.
+    /// Returns true when the URL was recognized as an invite link.
+    private func routeReferralInviteIfNeeded(_ url: URL) -> Bool {
+        guard let referralCode = ReferralInviteLink.referralCode(from: url) else {
+            return false
+        }
+
+        Task {
+            await PendingReferralManager.shared.setPendingCode(referralCode)
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .openReferralInvite,
+                    object: referralCode
+                )
+            }
+        }
+        return true
     }
 }

@@ -23,6 +23,7 @@ final class CollectionModel {
 
     // Presentation
     var emoji: String?
+    var symbolName: String?
     var color: String?
     var coverImageType: String = "recipeGrid"  // CoverImageType rawValue
     var coverImagePath: String?  // Store URL path as string for SwiftData
@@ -42,6 +43,7 @@ final class CollectionModel {
         userId: UUID,
         recipeIdsBlob: Data = Data(),
         emoji: String? = nil,
+        symbolName: String? = nil,
         color: String? = nil,
         coverImageType: String = "recipeGrid",
         coverImagePath: String? = nil,
@@ -58,6 +60,7 @@ final class CollectionModel {
         self.userId = userId
         self.recipeIdsBlob = recipeIdsBlob
         self.emoji = emoji
+        self.symbolName = symbolName
         self.color = color
         self.coverImageType = coverImageType
         self.coverImagePath = coverImagePath
@@ -81,6 +84,7 @@ final class CollectionModel {
             userId: collection.userId,
             recipeIdsBlob: recipeIdsData,
             emoji: collection.emoji,
+            symbolName: collection.symbolName,
             color: collection.color,
             coverImageType: collection.coverImageType.rawValue,
             coverImagePath: collection.coverImageURL?.absoluteString,
@@ -106,6 +110,7 @@ final class CollectionModel {
             recipeIds: recipeIds,
             visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
             emoji: emoji,
+            symbolName: symbolName,
             color: color,
             coverImageType: CoverImageType(rawValue: coverImageType) ?? .recipeGrid,
             coverImageURL: coverImagePath.flatMap { URL(string: $0) },

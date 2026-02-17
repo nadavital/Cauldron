@@ -19,9 +19,10 @@ struct CollectionDetailView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var errorMessage: String?
     @State private var showError = false
-    @State private var customCoverImage: UIImage?
     @State private var recipeImages: [URL?] = []  // For recipe grid display
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     // External sharing
     @State private var showShareSheet = false
@@ -71,6 +72,21 @@ struct CollectionDetailView: View {
         }
     }
 
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
+
+    private var recipeLayoutToolbarMenu: some View {
+        RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+            storedRecipeLayoutMode = mode.rawValue
+        }
+    }
+
     var body: some View {
         List {
             headerSection
@@ -100,12 +116,6 @@ struct CollectionDetailView: View {
         .task {
             await loadRecipes()
         }
-        .task {
-            // Load custom cover image if present
-            if collection.coverImageType == .customImage {
-                customCoverImage = await dependencies.collectionImageManager.loadImage(collectionId: collection.id)
-            }
-        }
         .refreshable {
             await loadRecipes()
         }
@@ -120,6 +130,12 @@ struct CollectionDetailView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !recipes.isEmpty {
+                    recipeLayoutToolbarMenu
+                }
+            }
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Only allow sharing if collection is public
                 if collection.visibility == .publicRecipe {
@@ -264,10 +280,8 @@ struct CollectionDetailView: View {
                 AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes from CloudKit")
             }
 
-            // Load recipe images for grid display
-            if collection.coverImageType == .recipeGrid {
-                recipeImages = Array(recipes.prefix(4).map { $0.imageURL })
-            }
+            // Load recipe images for cover grid display
+            recipeImages = Array(recipes.prefix(4).map { $0.imageURL })
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
         } catch {
@@ -334,12 +348,17 @@ struct CollectionDetailView: View {
                         Button {
                             activeSheet = .addRecipes
                         } label: {
-                            Label("Add Recipes", systemImage: "plus.circle.fill")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Add Recipes")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.cauldronOrange)
+                        .foregroundStyle(.white)
                         .padding(.top, 8)
                     }
                 }
@@ -349,28 +368,68 @@ struct CollectionDetailView: View {
             .listRowBackground(Color.clear)
         } else {
             Section {
-                ForEach(filteredRecipes) { recipe in
-                    NavigationLink {
-                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                if usesGridRecipeLayout {
+                    recipesGridContent
+                } else {
+                    recipesCompactContent
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recipesCompactContent: some View {
+        ForEach(filteredRecipes) { recipe in
+            NavigationLink {
+                RecipeDetailView(recipe: recipe, dependencies: dependencies)
+            } label: {
+                RecipeRowView(recipe: recipe, dependencies: dependencies)
+            }
+            // Only allow removal for owner
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if isOwned {
+                    Button(role: .destructive) {
+                        Task {
+                            await removeRecipe(recipe)
+                        }
                     } label: {
-                        RecipeRowView(recipe: recipe, dependencies: dependencies)
+                        Label("Remove", systemImage: "trash")
                     }
-                    // Only allow removal for owner
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if isOwned {
-                            Button(role: .destructive) {
-                                Task {
-                                    await removeRecipe(recipe)
-                                }
-                            } label: {
-                                Label("Remove", systemImage: "trash")
+                    .tint(.red)
+                }
+            }
+        }
+    }
+
+    private var recipesGridContent: some View {
+        LazyVGrid(columns: recipeGridColumns, spacing: 12) {
+            ForEach(filteredRecipes) { recipe in
+                NavigationLink {
+                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                } label: {
+                    RecipeCardView(recipe: recipe, dependencies: dependencies)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if isOwned {
+                        Button(role: .destructive) {
+                            Task {
+                                await removeRecipe(recipe)
                             }
-                            .tint(.red)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
                         }
                     }
                 }
             }
         }
+        .padding(.vertical, 8)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+    }
+
+    private var recipeGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 12)]
     }
 
     private var headerSection: some View {
@@ -379,14 +438,22 @@ struct CollectionDetailView: View {
                 // Cover Image
                 coverImageView
                     .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(.rect(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(collectionColor.opacity(0.2), lineWidth: 1)
+                    )
 
                 // Name and count
                 VStack(spacing: 4) {
-                    Text(collection.name)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.center)
+                    HStack(spacing: 8) {
+                        Image(systemName: collection.symbolName ?? "folder.fill")
+                            .foregroundStyle(collectionColor)
+                        Text(collection.name)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .multilineTextAlignment(.center)
+                    }
 
                     Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
                         .font(.subheadline)
@@ -464,48 +531,7 @@ struct CollectionDetailView: View {
 
     @ViewBuilder
     private var coverImageView: some View {
-        switch collection.coverImageType {
-        case .customImage:
-            if let customCoverImage = customCoverImage {
-                Image(uiImage: customCoverImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                // Loading or fallback
-                collectionColor
-                    .overlay(
-                        ProgressView()
-                            .tint(.white)
-                    )
-            }
-        case .emoji:
-            if let emoji = collection.emoji {
-                ZStack {
-                    Circle()
-                        .fill(collectionColor.opacity(0.15))
-                    Text(emoji)
-                        .font(.system(size: 50))
-                }
-            } else {
-                Circle()
-                    .fill(collectionColor.opacity(0.15))
-                    .overlay(
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(collectionColor)
-                    )
-            }
-        case .color:
-            ZStack {
-                Circle()
-                    .fill(collectionColor.opacity(0.15))
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 40))
-                    .foregroundColor(collectionColor)
-            }
-        case .recipeGrid:
-            recipeGridView
-        }
+        recipeGridView
     }
 
     private var recipeGridView: some View {
@@ -514,17 +540,16 @@ struct CollectionDetailView: View {
 
             if collection.recipeCount == 0 || recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
                 // Show placeholder
-                Circle()
-                    .fill(collectionColor.opacity(0.15))
+                collectionColor
                     .overlay(
                         VStack(spacing: 4) {
                             Image(systemName: "photo.stack")
                                 .font(.system(size: 30))
-                                .foregroundColor(collectionColor.opacity(0.6))
+                                .foregroundStyle(.white.opacity(0.7))
                             if collection.recipeCount > 0 {
                                 Text("\(collection.recipeCount)")
                                     .font(.caption2)
-                                    .foregroundColor(collectionColor.opacity(0.8))
+                                    .foregroundStyle(.white.opacity(0.85))
                             }
                         }
                     )
@@ -540,7 +565,6 @@ struct CollectionDetailView: View {
                         recipeImageTile(at: 3, size: size)
                     }
                 }
-                .clipShape(Circle())
             }
         }
     }
