@@ -388,8 +388,41 @@ struct TagRecipesListView: View {
     let recipes: [Recipe]
     let dependencies: DependencyContainer
     let color: Color
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
 
     var body: some View {
+        contentView
+        .navigationTitle("All Recipes")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+                    storedRecipeLayoutMode = mode.rawValue
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
         List {
             ForEach(recipes) { recipe in
                 NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
@@ -397,8 +430,21 @@ struct TagRecipesListView: View {
                 }
             }
         }
-        .navigationTitle("All Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                ForEach(recipes) { recipe in
+                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                        RecipeCardView(recipe: recipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
     }
 }
 
@@ -407,8 +453,41 @@ struct TagFriendRecipesListView: View {
     let sharedRecipes: [SharedRecipe]
     let dependencies: DependencyContainer
     let color: Color
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
 
     var body: some View {
+        contentView
+        .navigationTitle("From Friends")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+                    storedRecipeLayoutMode = mode.rawValue
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
         List {
             ForEach(sharedRecipes) { sharedRecipe in
                 NavigationLink(destination: RecipeDetailView(
@@ -421,8 +500,26 @@ struct TagFriendRecipesListView: View {
                 }
             }
         }
-        .navigationTitle("From Friends")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                ForEach(sharedRecipes) { sharedRecipe in
+                    NavigationLink(destination: RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
+                        dependencies: dependencies,
+                        sharedBy: sharedRecipe.sharedBy,
+                        sharedAt: sharedRecipe.sharedAt
+                    )) {
+                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
     }
 }
 
@@ -431,8 +528,41 @@ struct TagPublicRecipesListView: View {
     let recipes: [SharedRecipe]
     let dependencies: DependencyContainer
     let color: Color
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
 
     var body: some View {
+        contentView
+        .navigationTitle("Community Recipes")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+                    storedRecipeLayoutMode = mode.rawValue
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
         List {
             ForEach(recipes) { sharedRecipe in
                 NavigationLink(destination: RecipeDetailView(
@@ -444,8 +574,25 @@ struct TagPublicRecipesListView: View {
                 }
             }
         }
-        .navigationTitle("Community Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                ForEach(recipes) { sharedRecipe in
+                    NavigationLink(destination: RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
+                        dependencies: dependencies,
+                        sharedBy: sharedRecipe.sharedBy
+                    )) {
+                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
     }
 }
 

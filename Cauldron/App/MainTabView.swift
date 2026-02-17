@@ -213,6 +213,24 @@ struct MainTabView: View {
                 CookTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
 
+            Tab("Groceries", systemImage: "cart.fill", value: .groceries) {
+                GroceriesView(dependencies: dependencies)
+            }
+
+            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
+                FriendsTabView(dependencies: dependencies)
+            }
+            .badge(connectionManager.pendingRequestsCount)
+
+            if isRegularWidthLayout {
+                Tab("Collections", systemImage: "folder.fill", value: .collections) {
+                    NavigationStack {
+                        CollectionsListView(dependencies: dependencies)
+                    }
+                }
+                .defaultVisibility(.hidden, for: .sidebar)
+            }
+
             if isRegularWidthLayout {
                 if !featuredSidebarCollections.isEmpty {
                     TabSection {
@@ -230,17 +248,9 @@ struct MainTabView: View {
                     } header: {
                         Text("Collections")
                     }
+                    .defaultVisibility(.hidden, for: .tabBar)
                 }
             }
-
-            Tab("Groceries", systemImage: "cart.fill", value: .groceries) {
-                GroceriesView(dependencies: dependencies)
-            }
-
-            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                FriendsTabView(dependencies: dependencies)
-            }
-            .badge(connectionManager.pendingRequestsCount)
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
                 SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
@@ -343,10 +353,6 @@ struct MainTabView: View {
             }
 
             sidebarCollections = ownedCollections.sorted { $0.updatedAt > $1.updatedAt }
-
-            if selectedTab == .collections {
-                selectedTab = .cook
-            }
 
             if case let .collection(collectionID) = selectedTab,
                !sidebarCollections.contains(where: { $0.id == collectionID }) {

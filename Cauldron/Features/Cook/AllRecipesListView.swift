@@ -10,12 +10,6 @@ import os
 
 /// Full list view for all recipes with filtering options
 struct AllRecipesListView: View {
-    private enum RecipeLayoutMode: String {
-        case auto
-        case compact
-        case grid
-    }
-
     let recipes: [Recipe]
     let dependencies: DependencyContainer
     
@@ -29,7 +23,7 @@ struct AllRecipesListView: View {
     @State private var showingAIGenerator = false
     @State private var showingCollectionForm = false
     @State private var selectedRecipe: Recipe?
-    @AppStorage("recipes.layoutMode") private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
     
     init(recipes: [Recipe], dependencies: DependencyContainer) {
         self.recipes = recipes
@@ -95,10 +89,7 @@ struct AllRecipesListView: View {
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
-        if storedMode == .auto {
-            return horizontalSizeClass == .regular ? .grid : .compact
-        }
-        return storedMode
+        return storedMode.resolved(for: horizontalSizeClass)
     }
 
     private var usesGridRecipeLayout: Bool {
@@ -225,30 +216,8 @@ struct AllRecipesListView: View {
     }
 
     private var recipeLayoutMenu: some View {
-        Menu {
-            Button {
-                storedRecipeLayoutMode = RecipeLayoutMode.grid.rawValue
-            } label: {
-                HStack {
-                    Label("Grid", systemImage: "square.grid.2x2")
-                    if resolvedRecipeLayoutMode == .grid {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-
-            Button {
-                storedRecipeLayoutMode = RecipeLayoutMode.compact.rawValue
-            } label: {
-                HStack {
-                    Label("Compact", systemImage: "list.bullet")
-                    if resolvedRecipeLayoutMode == .compact {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: resolvedRecipeLayoutMode == .grid ? "square.grid.2x2" : "list.bullet")
+        RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+            storedRecipeLayoutMode = mode.rawValue
         }
     }
 
@@ -314,7 +283,7 @@ struct AllRecipesListView: View {
     }
 
     private var recipeGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
+        RecipeLayoutMode.defaultGridColumns
     }
     
     private func deleteRecipe(_ recipe: Recipe) async {

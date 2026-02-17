@@ -9,12 +9,6 @@ import SwiftUI
 import os
 
 struct SharedCollectionDetailView: View {
-    private enum RecipeLayoutMode: String {
-        case auto
-        case compact
-        case grid
-    }
-
     let collection: Collection
     let dependencies: DependencyContainer
 
@@ -27,7 +21,7 @@ struct SharedCollectionDetailView: View {
     @State private var collectionOwner: User?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @AppStorage("recipes.layoutMode") private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     private var loader: SharedCollectionLoader {
         SharedCollectionLoader(dependencies: dependencies)
@@ -35,10 +29,7 @@ struct SharedCollectionDetailView: View {
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
-        if storedMode == .auto {
-            return horizontalSizeClass == .regular ? .grid : .compact
-        }
-        return storedMode
+        return storedMode.resolved(for: horizontalSizeClass)
     }
 
     private var usesGridRecipeLayout: Bool {
@@ -46,30 +37,8 @@ struct SharedCollectionDetailView: View {
     }
 
     private var recipeLayoutMenu: some View {
-        Menu {
-            Button {
-                storedRecipeLayoutMode = RecipeLayoutMode.grid.rawValue
-            } label: {
-                HStack {
-                    Label("Grid", systemImage: "square.grid.2x2")
-                    if resolvedRecipeLayoutMode == .grid {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-
-            Button {
-                storedRecipeLayoutMode = RecipeLayoutMode.compact.rawValue
-            } label: {
-                HStack {
-                    Label("Compact", systemImage: "list.bullet")
-                    if resolvedRecipeLayoutMode == .compact {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: resolvedRecipeLayoutMode == .grid ? "square.grid.2x2" : "list.bullet")
+        RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+            storedRecipeLayoutMode = mode.rawValue
         }
     }
 

@@ -534,8 +534,41 @@ struct AllFriendsRecipesListView: View {
     let recipes: [SharedRecipe]
     let title: String
     let dependencies: DependencyContainer
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        return storedMode.resolved(for: horizontalSizeClass)
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
 
     var body: some View {
+        contentView
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
+                    storedRecipeLayoutMode = mode.rawValue
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
         List {
             ForEach(recipes) { sharedRecipe in
                 NavigationLink(destination: RecipeDetailView(
@@ -548,8 +581,26 @@ struct AllFriendsRecipesListView: View {
                 }
             }
         }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                ForEach(recipes) { sharedRecipe in
+                    NavigationLink(destination: RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
+                        dependencies: dependencies,
+                        sharedBy: sharedRecipe.sharedBy,
+                        sharedAt: sharedRecipe.sharedAt
+                    )) {
+                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
     }
 }
 
