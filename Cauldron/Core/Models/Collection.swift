@@ -17,7 +17,7 @@ import Foundation
 /// - Can contain both owned recipes and referenced recipes
 /// - Support visibility levels (private/public) for sharing
 /// - Stored in CloudKit PUBLIC database to enable sharing
-/// - Custom presentation with emoji/color theme
+/// - Custom presentation with symbol/color theme
 ///
 /// Collections follow the same sharing pattern as recipes:
 /// - Private collections: only visible to owner
@@ -33,7 +33,8 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     let visibility: RecipeVisibility
 
     // Presentation metadata
-    let emoji: String?  // Optional emoji icon (e.g., "🎄", "⚡")
+    let emoji: String?  // Legacy optional emoji icon
+    let symbolName: String?  // Optional SF Symbol for navigation/sidebar icon
     let color: String?  // Optional hex color (e.g., "#FF5733")
     let coverImageType: CoverImageType  // How to display the collection card
     let coverImageURL: URL?  // Local file URL for custom cover image
@@ -55,7 +56,8 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         recipeIds: [UUID] = [],
         visibility: RecipeVisibility = .publicRecipe,
         emoji: String? = nil,
-        color: String? = nil,
+        symbolName: String? = "folder.fill",
+        color: String? = "#FF9933",
         coverImageType: CoverImageType = .recipeGrid,
         coverImageURL: URL? = nil,
         cloudCoverImageRecordName: String? = nil,
@@ -71,6 +73,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         self.recipeIds = recipeIds
         self.visibility = visibility
         self.emoji = emoji
+        self.symbolName = symbolName
         self.color = color
         self.coverImageType = coverImageType
         self.coverImageURL = coverImageURL
@@ -97,6 +100,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         recipeIds: [UUID]? = nil,
         visibility: RecipeVisibility? = nil,
         emoji: String? = nil,
+        symbolName: String? = nil,
         color: String? = nil,
         coverImageType: CoverImageType? = nil,
         coverImageURL: URL? = nil,
@@ -111,6 +115,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
             recipeIds: recipeIds ?? self.recipeIds,
             visibility: visibility ?? self.visibility,
             emoji: emoji ?? self.emoji,
+            symbolName: symbolName ?? self.symbolName,
             color: color ?? self.color,
             coverImageType: coverImageType ?? self.coverImageType,
             coverImageURL: coverImageURL ?? self.coverImageURL,

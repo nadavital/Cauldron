@@ -10,8 +10,10 @@ import Combine
 import os
 
 /// Tab identifiers for MainTabView
-enum AppTab: String, Hashable {
+enum AppTab: Hashable {
     case cook
+    case collections
+    case collection(UUID)
     case groceries
     case sharing
     case search
@@ -20,9 +22,11 @@ enum AppTab: String, Hashable {
 /// Main tab-based navigation view
 struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
     @State private var selectedTab: AppTab = .cook
+    @State private var sidebarCollections: [Collection] = []
     @State private var sharedImportRequest: SharedImportRequest?
     @State private var didCheckInitialPendingImport = false
     @State private var isSavingPreparedSharedRecipe = false
@@ -42,6 +46,21 @@ struct MainTabView: View {
         dependencies.cookModeCoordinator.isActive
     }
 
+    private var isRegularWidthLayout: Bool {
+        horizontalSizeClass == .regular
+    }
+
+    private var featuredSidebarCollections: [Collection] {
+        Array(sidebarCollections.prefix(4))
+    }
+
+    private var selectedTabBinding: Binding<AppTab?> {
+        Binding(
+            get: { selectedTab },
+            set: { selectedTab = $0 ?? .cook }
+        )
+    }
+
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
         self.preloadedData = preloadedData
@@ -49,24 +68,10 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab("Cook", systemImage: "flame.fill", value: .cook) {
-                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
-            }
-
-            Tab("Groceries", systemImage: "cart", value: .groceries) {
-                GroceriesView(dependencies: dependencies)
-            }
-
-            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
-                FriendsTabView(dependencies: dependencies)
-            }
-            .badge(connectionManager.pendingRequestsCount)
-
-            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
-            }
-        }
+        tabScaffold
+        // On iPad, this enables the native sidebar-based tab presentation.
+        // On iPhone, it keeps standard tab bar behavior.
+        .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
         .tabViewBottomAccessory(isEnabled: isCookModeActive) {
             CookModeBanner(coordinator: dependencies.cookModeCoordinator)
@@ -75,7 +80,7 @@ struct MainTabView: View {
                     dependencies.cookModeCoordinator.expandToFullScreen()
                 }
         }
-        .sheet(isPresented: Binding(
+        .fullScreenCover(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
             set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
         )) {
@@ -138,9 +143,54 @@ struct MainTabView: View {
             didCheckInitialPendingImport = true
             openPendingImporterIfNeeded()
         }
+        .task {
+            await refreshSidebarCollections()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             openPendingImporterIfNeeded()
+            Task {
+                await refreshSidebarCollections()
+            }
+        }
+        .onChange(of: horizontalSizeClass) {
+            Task {
+                await refreshSidebarCollections()
+            }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            guard isRegularWidthLayout else { return }
+
+            switch newTab {
+            case .collection:
+                Task {
+                    await refreshSidebarCollections()
+                }
+            default:
+                break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionMetadataChanged)) { notification in
+            applyOptimisticSidebarCollectionUpdate(notification)
+            Task {
+                await refreshSidebarCollections()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionUpdated)) { _ in
+            Task {
+                await refreshSidebarCollections()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { _ in
+            Task {
+                await refreshSidebarCollections()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { notification in
+            applyOptimisticSidebarCollectionInsert(notification)
+            Task {
+                await refreshSidebarCollections()
+            }
         }
         .toast(
             isShowing: Binding(
@@ -155,6 +205,47 @@ struct MainTabView: View {
             icon: "checkmark.circle.fill",
             message: "Recipe imported from share sheet"
         )
+    }
+
+    private var tabScaffold: some View {
+        TabView(selection: selectedTabBinding) {
+            Tab("Cook", systemImage: "flame.fill", value: .cook) {
+                CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+            }
+
+            if isRegularWidthLayout {
+                if !featuredSidebarCollections.isEmpty {
+                    TabSection {
+                        ForEach(featuredSidebarCollections, id: \.id) { collection in
+                            Tab(
+                                collectionSidebarLabel(for: collection),
+                                systemImage: collectionSidebarSystemImage(for: collection),
+                                value: Optional(AppTab.collection(collection.id))
+                            ) {
+                                NavigationStack {
+                                    CollectionDetailView(collection: collection, dependencies: dependencies)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Collections")
+                    }
+                }
+            }
+
+            Tab("Groceries", systemImage: "cart.fill", value: .groceries) {
+                GroceriesView(dependencies: dependencies)
+            }
+
+            Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
+                FriendsTabView(dependencies: dependencies)
+            }
+            .badge(connectionManager.pendingRequestsCount)
+
+            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
+            }
+        }
     }
 
     private func openPendingImporterIfNeeded() {
@@ -227,6 +318,90 @@ struct MainTabView: View {
             AppLogger.general.error("❌ Failed to auto-save prepared share recipe: \(error.localizedDescription)")
             openPreparedImporter(recipe: recipeForImport, sourceInfo: prepared.sourceInfo)
         }
+    }
+
+    @MainActor
+    private func refreshSidebarCollections() async {
+        guard isRegularWidthLayout else {
+            sidebarCollections = []
+            if case .collection = selectedTab {
+                selectedTab = .cook
+            } else if selectedTab == .collections {
+                selectedTab = .cook
+            }
+            return
+        }
+
+        do {
+            let allCollections = try await dependencies.collectionRepository.fetchAll()
+            let ownedCollections: [Collection]
+
+            if let currentUserID = CurrentUserSession.shared.userId {
+                ownedCollections = allCollections.filter { $0.userId == currentUserID }
+            } else {
+                ownedCollections = allCollections
+            }
+
+            sidebarCollections = ownedCollections.sorted { $0.updatedAt > $1.updatedAt }
+
+            if selectedTab == .collections {
+                selectedTab = .cook
+            }
+
+            if case let .collection(collectionID) = selectedTab,
+               !sidebarCollections.contains(where: { $0.id == collectionID }) {
+                selectedTab = .cook
+            }
+        } catch {
+            AppLogger.general.warning("⚠️ Failed to refresh sidebar collections: \(error.localizedDescription)")
+        }
+    }
+
+    private func collectionSidebarLabel(for collection: Collection) -> String {
+        collection.name
+    }
+
+    private func collectionSidebarSystemImage(for collection: Collection) -> String {
+        collection.symbolName ?? "folder.fill"
+    }
+
+    @MainActor
+    private func applyOptimisticSidebarCollectionUpdate(_ notification: Notification) {
+        guard isRegularWidthLayout,
+              let updatedCollection = notification.userInfo?["collection"] as? Collection else {
+            return
+        }
+
+        if let currentUserID = CurrentUserSession.shared.userId,
+           updatedCollection.userId != currentUserID {
+            return
+        }
+
+        if let existingIndex = sidebarCollections.firstIndex(where: { $0.id == updatedCollection.id }) {
+            sidebarCollections[existingIndex] = updatedCollection
+        }
+
+        sidebarCollections.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    @MainActor
+    private func applyOptimisticSidebarCollectionInsert(_ notification: Notification) {
+        guard isRegularWidthLayout,
+              let insertedCollection = notification.userInfo?["collection"] as? Collection else {
+            return
+        }
+
+        if let currentUserID = CurrentUserSession.shared.userId,
+           insertedCollection.userId != currentUserID {
+            return
+        }
+
+        guard !sidebarCollections.contains(where: { $0.id == insertedCollection.id }) else {
+            return
+        }
+
+        sidebarCollections.insert(insertedCollection, at: 0)
+        sidebarCollections.sort { $0.updatedAt > $1.updatedAt }
     }
 }
 

@@ -13,18 +13,11 @@ enum FriendsTabDestination: Hashable {
     case connections
 }
 
-/// Sections in the Friends tab
-enum FriendsTabSection: String, CaseIterable {
-    case recipes = "Recipes"
-    case connections = "Connections"
-}
-
 /// Friends tab - showing shared recipes and connections
 struct FriendsTabView: View {
     @Bindable private var viewModel = FriendsTabViewModel.shared
     @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
-    @State private var selectedSection: FriendsTabSection = .recipes
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
 
@@ -35,76 +28,91 @@ struct FriendsTabView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            combinedFeedSection
-            .navigationTitle("Friends")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if let user = userSession.currentUser {
-                        Button {
-                            showingProfileSheet = true
-                        } label: {
-                            ProfileAvatar(user: user, size: 32, dependencies: dependencies)
-                        }
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingPeopleSearch = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingProfileSheet) {
-                NavigationStack {
-                    if let user = userSession.currentUser {
-                        UserProfileView(user: user, dependencies: dependencies)
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { showingProfileSheet = false }
-                                }
+        compactView
+        .sheet(isPresented: $showingProfileSheet) {
+            NavigationStack {
+                if let user = userSession.currentUser {
+                    UserProfileView(user: user, dependencies: dependencies)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showingProfileSheet = false }
                             }
-                    }
+                        }
                 }
-            }
-            .sheet(isPresented: $showingPeopleSearch) {
-                PeopleSearchSheet(dependencies: dependencies)
-            }
-            .task {
-                // Configure dependencies if not already done
-                viewModel.configure(dependencies: dependencies)
-                await viewModel.loadSharedRecipes()
-            }
-            .refreshable {
-                // Force refresh shared recipes from CloudKit
-                await viewModel.loadSharedRecipes(forceRefresh: true)
-
-                // Also refresh friends list by posting notification
-                NotificationCenter.default.post(name: .refreshConnections, object: nil)
-            }
-            .alert("Success", isPresented: $viewModel.showSuccessAlert) {
-                Button("OK") { }
-            } message: {
-                Text(viewModel.alertMessage)
-            }
-            .alert("Error", isPresented: $viewModel.showErrorAlert) {
-                Button("OK") { }
-            } message: {
-                Text(viewModel.alertMessage)
-            }
-            .navigationDestination(for: FriendsTabDestination.self) { destination in
-                switch destination {
-                case .connections:
-                    ConnectionsView(dependencies: dependencies)
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
-                // Navigate to connections when notification is tapped
-                AppLogger.general.info("📍 Navigating to Connections from notification")
-                selectedSection = .connections
             }
         }
+        .sheet(isPresented: $showingPeopleSearch) {
+            PeopleSearchSheet(dependencies: dependencies)
+        }
+        .task {
+            // Configure dependencies if not already done
+            viewModel.configure(dependencies: dependencies)
+            await viewModel.loadSharedRecipes()
+        }
+        .alert("Success", isPresented: $viewModel.showSuccessAlert) {
+            Button("OK") { }
+        } message: {
+            Text(viewModel.alertMessage)
+        }
+        .alert("Error", isPresented: $viewModel.showErrorAlert) {
+            Button("OK") { }
+        } message: {
+            Text(viewModel.alertMessage)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
+            AppLogger.general.info("📍 Navigating to Connections from notification")
+            handleConnectionsNavigation()
+        }
+    }
+
+    private var compactView: some View {
+        NavigationStack(path: $navigationPath) {
+            combinedFeedSection
+                .navigationTitle("Friends")
+                .toolbar { friendsToolbar }
+                .refreshable {
+                    await refreshFriendsContent()
+                }
+                .navigationDestination(for: FriendsTabDestination.self) { destination in
+                    switch destination {
+                    case .connections:
+                        ConnectionsView(dependencies: dependencies)
+                    }
+                }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var friendsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            if let user = userSession.currentUser {
+                Button {
+                    showingProfileSheet = true
+                } label: {
+                    ProfileAvatar(user: user, size: 32, dependencies: dependencies)
+                }
+            }
+        }
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                showingPeopleSearch = true
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+    }
+
+    private func refreshFriendsContent() async {
+        // Force refresh shared recipes from CloudKit
+        await viewModel.loadSharedRecipes(forceRefresh: true)
+
+        // Also refresh friends list by posting notification
+        NotificationCenter.default.post(name: .refreshConnections, object: nil)
+    }
+
+    private func handleConnectionsNavigation() {
+        navigationPath = NavigationPath()
+        navigationPath.append(FriendsTabDestination.connections)
     }
 
     private var combinedFeedSection: some View {

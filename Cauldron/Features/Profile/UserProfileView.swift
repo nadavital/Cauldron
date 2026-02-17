@@ -942,14 +942,9 @@ struct CollectionCardCompact: View {
                     .fill(selectedColor.opacity(0.15))
                     .frame(width: 80, height: 80)
 
-                if let emoji = collection.emoji {
-                    Text(emoji)
-                        .font(.system(size: 40))
-                } else {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 36))
-                        .foregroundColor(selectedColor)
-                }
+                Image(systemName: collection.symbolName ?? "folder.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(selectedColor)
             }
 
             // Collection name

@@ -11,6 +11,7 @@ struct RecipeDetailView: View {
     let dependencies: DependencyContainer
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var recipe: Recipe
     @State private var showingEditSheet = false
     @State var showSessionConflictAlert = false
@@ -84,6 +85,10 @@ struct RecipeDetailView: View {
         scaledResult.recipe
     }
 
+    private var shouldApplyBackgroundExtensionEffect: Bool {
+        horizontalSizeClass == .regular
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { scrollProxy in
@@ -91,6 +96,7 @@ struct RecipeDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if recipe.imageURL != nil || recipe.cloudImageRecordName != nil {
                             HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                                .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
                                 .ignoresSafeArea(edges: .top)
                                 .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
                         }

@@ -10,9 +10,16 @@ import os
 
 /// Full list view for all recipes with filtering options
 struct AllRecipesListView: View {
+    private enum RecipeLayoutMode: String {
+        case auto
+        case compact
+        case grid
+    }
+
     let recipes: [Recipe]
     let dependencies: DependencyContainer
     
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var searchText = ""
     @State private var selectedTag: String?
     @State private var sortOption: SortOption = .recent
@@ -22,6 +29,7 @@ struct AllRecipesListView: View {
     @State private var showingAIGenerator = false
     @State private var showingCollectionForm = false
     @State private var selectedRecipe: Recipe?
+    @AppStorage("recipes.layoutMode") private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
     
     init(recipes: [Recipe], dependencies: DependencyContainer) {
         self.recipes = recipes
@@ -84,9 +92,21 @@ struct AllRecipesListView: View {
         
         return filtered
     }
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        if storedMode == .auto {
+            return horizontalSizeClass == .regular ? .grid : .compact
+        }
+        return storedMode
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
     
     var body: some View {
-        listContent
+        contentView
             .navigationTitle("All Recipes")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: "Search recipes")
@@ -100,35 +120,65 @@ struct AllRecipesListView: View {
             .toolbar { toolbarContent }
     }
 
-    private var listContent: some View {
-        List {
-            activeFiltersSection
-            recipesForEach
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
         }
     }
 
-    @ViewBuilder
-    private var activeFiltersSection: some View {
-        if let tag = selectedTag {
-            Section {
-                HStack {
-                    Text("Tag: \(tag)")
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.cauldronOrange.opacity(0.2))
-                        .cornerRadius(6)
-                    Spacer()
-                    Button("Clear") { selectedTag = nil }
-                        .font(.caption)
+    private var listContent: some View {
+        List {
+            if let tag = selectedTag {
+                Section {
+                    activeTagChip(tag: tag)
                 }
+            }
+
+            ForEach(filteredAndSortedRecipes) { recipe in
+                recipeRow(for: recipe)
             }
         }
     }
 
-    private var recipesForEach: some View {
-        ForEach(filteredAndSortedRecipes) { recipe in
-            recipeRow(for: recipe)
+    private var gridContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let tag = selectedTag {
+                    activeTagChip(tag: tag)
+                }
+
+                LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+                    ForEach(filteredAndSortedRecipes) { recipe in
+                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                            RecipeCardView(recipe: recipe, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            deleteButton(for: recipe)
+                            favoriteButton(for: recipe)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func activeTagChip(tag: String) -> some View {
+        HStack {
+            Text("Tag: \(tag)")
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.cauldronOrange.opacity(0.2))
+                .cornerRadius(6)
+            Spacer()
+            Button("Clear") { selectedTag = nil }
+                .font(.caption)
         }
     }
 
@@ -163,6 +213,7 @@ struct AllRecipesListView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) { recipeLayoutMenu }
         ToolbarItem(placement: .navigationBarTrailing) { filterSortMenu }
         ToolbarItem(placement: .navigationBarTrailing) { addRecipeMenu }
     }
@@ -170,6 +221,34 @@ struct AllRecipesListView: View {
     private func handleRecipeDeleted(_ notification: Notification) {
         if let deletedRecipeId = notification.object as? UUID {
             localRecipes.removeAll { $0.id == deletedRecipeId }
+        }
+    }
+
+    private var recipeLayoutMenu: some View {
+        Menu {
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.grid.rawValue
+            } label: {
+                HStack {
+                    Label("Grid", systemImage: "square.grid.2x2")
+                    if resolvedRecipeLayoutMode == .grid {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.compact.rawValue
+            } label: {
+                HStack {
+                    Label("Compact", systemImage: "list.bullet")
+                    if resolvedRecipeLayoutMode == .compact {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: resolvedRecipeLayoutMode == .grid ? "square.grid.2x2" : "list.bullet")
         }
     }
 
@@ -232,6 +311,10 @@ struct AllRecipesListView: View {
             showingImporter: $showingImporter,
             showingCollectionForm: $showingCollectionForm
         )
+    }
+
+    private var recipeGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
     }
     
     private func deleteRecipe(_ recipe: Recipe) async {

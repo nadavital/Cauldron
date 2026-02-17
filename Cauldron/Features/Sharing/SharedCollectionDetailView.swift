@@ -9,6 +9,12 @@ import SwiftUI
 import os
 
 struct SharedCollectionDetailView: View {
+    private enum RecipeLayoutMode: String {
+        case auto
+        case compact
+        case grid
+    }
+
     let collection: Collection
     let dependencies: DependencyContainer
 
@@ -20,9 +26,51 @@ struct SharedCollectionDetailView: View {
     @State private var isFriendWithOwner = false
     @State private var collectionOwner: User?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("recipes.layoutMode") private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     private var loader: SharedCollectionLoader {
         SharedCollectionLoader(dependencies: dependencies)
+    }
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        if storedMode == .auto {
+            return horizontalSizeClass == .regular ? .grid : .compact
+        }
+        return storedMode
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
+
+    private var recipeLayoutMenu: some View {
+        Menu {
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.grid.rawValue
+            } label: {
+                HStack {
+                    Label("Grid", systemImage: "square.grid.2x2")
+                    if resolvedRecipeLayoutMode == .grid {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.compact.rawValue
+            } label: {
+                HStack {
+                    Label("Compact", systemImage: "list.bullet")
+                    if resolvedRecipeLayoutMode == .compact {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: resolvedRecipeLayoutMode == .grid ? "square.grid.2x2" : "list.bullet")
+        }
     }
 
     var body: some View {
@@ -54,6 +102,13 @@ struct SharedCollectionDetailView: View {
         }
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !recipes.isEmpty {
+                    recipeLayoutMenu
+                }
+            }
+        }
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -192,26 +247,57 @@ struct SharedCollectionDetailView: View {
                 }
             }
 
-            ForEach(recipes) { recipe in
-                NavigationLink {
-                    // Navigate to RecipeDetailView
-                    // Since these are recipes from a shared collection, we provide shared context
-                    if let sharedRecipe = createSharedRecipe(from: recipe) {
-                        RecipeDetailView(
-                            recipe: recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )
-                    } else {
-                        // Fallback to regular recipe detail
-                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+            if usesGridRecipeLayout {
+                LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+                    ForEach(recipes) { recipe in
+                        NavigationLink {
+                            if let sharedRecipe = createSharedRecipe(from: recipe) {
+                                RecipeDetailView(
+                                    recipe: recipe,
+                                    dependencies: dependencies,
+                                    sharedBy: sharedRecipe.sharedBy,
+                                    sharedAt: sharedRecipe.sharedAt
+                                )
+                            } else {
+                                RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                            }
+                        } label: {
+                            recipeCard(for: recipe)
+                        }
+                        .buttonStyle(.plain)
                     }
-                } label: {
-                    RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
-                .buttonStyle(.plain)
+            } else {
+                ForEach(recipes) { recipe in
+                    NavigationLink {
+                        // Navigate to RecipeDetailView
+                        // Since these are recipes from a shared collection, we provide shared context
+                        if let sharedRecipe = createSharedRecipe(from: recipe) {
+                            RecipeDetailView(
+                                recipe: recipe,
+                                dependencies: dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )
+                        } else {
+                            // Fallback to regular recipe detail
+                            RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                        }
+                    } label: {
+                        RecipeRowView(recipe: recipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func recipeCard(for recipe: Recipe) -> some View {
+        if let owner = collectionOwner {
+            RecipeCardView(recipe: recipe, dependencies: dependencies, sharedBy: owner)
+        } else {
+            RecipeCardView(recipe: recipe, dependencies: dependencies)
         }
     }
 
@@ -303,6 +389,10 @@ struct SharedCollectionDetailView: View {
             return Color(hex: colorHex) ?? .cauldronOrange
         }
         return .cauldronOrange
+    }
+
+    private var recipeGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
     }
 }
 

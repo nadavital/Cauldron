@@ -9,6 +9,7 @@ import SwiftUI
 
 struct CollectionsListView: View {
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
     @State private var recipeImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
@@ -19,20 +20,17 @@ struct CollectionsListView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 16) {
                 // My Collections Section
                 if !viewModel.filteredOwnedCollections.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        LazyVGrid(columns: [
-                            GridItem(.flexible(), spacing: 16),
-                            GridItem(.flexible(), spacing: 16)
-                        ], spacing: 20) {
+                        LazyVGrid(columns: gridColumns, spacing: 12) {
                             ForEach(viewModel.filteredOwnedCollections) { collection in
                                 NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                                     CollectionCardView(
                                         collection: collection,
                                         recipeImages: recipeImageCache[collection.id] ?? [],
-                                        dependencies: dependencies
+                                        preferredWidth: nil
                                     )
                                 }
                                 .buttonStyle(PlainButtonStyle())
@@ -128,6 +126,16 @@ struct CollectionsListView: View {
                 await viewModel.loadCollections()
             }
         }
+    }
+
+    private var gridColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: 12)]
+        }
+        return [
+            GridItem(.flexible(minimum: 150), spacing: 12),
+            GridItem(.flexible(minimum: 150), spacing: 12)
+        ]
     }
 }
 

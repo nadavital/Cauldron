@@ -10,66 +10,39 @@ import os
 
 /// Full list view for recently cooked recipes
 struct RecentlyCookedListView: View {
+    private enum RecipeLayoutMode: String {
+        case auto
+        case compact
+        case grid
+    }
+
     let recipes: [Recipe]
     let dependencies: DependencyContainer
     
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var localRecipes: [Recipe]
+    @AppStorage("recipes.layoutMode") private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     init(recipes: [Recipe], dependencies: DependencyContainer) {
         self.recipes = recipes
         self.dependencies = dependencies
         self._localRecipes = State(initialValue: recipes)
     }
+
+    private var resolvedRecipeLayoutMode: RecipeLayoutMode {
+        let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
+        if storedMode == .auto {
+            return horizontalSizeClass == .regular ? .grid : .compact
+        }
+        return storedMode
+    }
+
+    private var usesGridRecipeLayout: Bool {
+        resolvedRecipeLayoutMode == .grid
+    }
     
     var body: some View {
-        List {
-            ForEach(localRecipes) { recipe in
-                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                    RecipeRowView(recipe: recipe, dependencies: dependencies)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        Task {
-                            await deleteRecipe(recipe)
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .tint(.red)
-                    
-                    Button {
-                        Task {
-                            try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
-                            // Update the local recipe in the list
-                            if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
-                                var updatedRecipe = localRecipes[index]
-                                updatedRecipe = Recipe(
-                                    id: updatedRecipe.id,
-                                    title: updatedRecipe.title,
-                                    ingredients: updatedRecipe.ingredients,
-                                    steps: updatedRecipe.steps,
-                                    yields: updatedRecipe.yields,
-                                    totalMinutes: updatedRecipe.totalMinutes,
-                                    tags: updatedRecipe.tags,
-                                    nutrition: updatedRecipe.nutrition,
-                                    sourceURL: updatedRecipe.sourceURL,
-                                    sourceTitle: updatedRecipe.sourceTitle,
-                                    notes: updatedRecipe.notes,
-                                    imageURL: updatedRecipe.imageURL,
-                                    isFavorite: !updatedRecipe.isFavorite,
-                                    createdAt: updatedRecipe.createdAt,
-                                    updatedAt: updatedRecipe.updatedAt
-                                )
-                                localRecipes[index] = updatedRecipe
-                            }
-                        }
-                    } label: {
-                        Label(recipe.isFavorite ? "Unfavorite" : "Favorite", systemImage: recipe.isFavorite ? "star.slash" : "star.fill")
-                    }
-                    .tint(.yellow)
-                }
-            }
-        }
+        contentView
         .navigationTitle("Recently Cooked")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
@@ -83,6 +56,128 @@ struct RecentlyCookedListView: View {
                 localRecipes.removeAll { $0.id == deletedRecipeId }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                recipeLayoutMenu
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if usesGridRecipeLayout {
+            gridContent
+        } else {
+            listContent
+        }
+    }
+
+    private var listContent: some View {
+        List {
+            ForEach(localRecipes) { recipe in
+                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    deleteButton(for: recipe)
+                    favoriteButton(for: recipe)
+                }
+            }
+        }
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+                ForEach(localRecipes) { recipe in
+                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                        RecipeCardView(recipe: recipe, dependencies: dependencies)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        deleteButton(for: recipe)
+                        favoriteButton(for: recipe)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var recipeLayoutMenu: some View {
+        Menu {
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.grid.rawValue
+            } label: {
+                HStack {
+                    Label("Grid", systemImage: "square.grid.2x2")
+                    if resolvedRecipeLayoutMode == .grid {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Button {
+                storedRecipeLayoutMode = RecipeLayoutMode.compact.rawValue
+            } label: {
+                HStack {
+                    Label("Compact", systemImage: "list.bullet")
+                    if resolvedRecipeLayoutMode == .compact {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: resolvedRecipeLayoutMode == .grid ? "square.grid.2x2" : "list.bullet")
+        }
+    }
+
+    private func deleteButton(for recipe: Recipe) -> some View {
+        Button(role: .destructive) {
+            Task {
+                await deleteRecipe(recipe)
+            }
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+        .tint(.red)
+    }
+
+    private func favoriteButton(for recipe: Recipe) -> some View {
+        Button {
+            Task {
+                try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
+                if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
+                    var updatedRecipe = localRecipes[index]
+                    updatedRecipe = Recipe(
+                        id: updatedRecipe.id,
+                        title: updatedRecipe.title,
+                        ingredients: updatedRecipe.ingredients,
+                        steps: updatedRecipe.steps,
+                        yields: updatedRecipe.yields,
+                        totalMinutes: updatedRecipe.totalMinutes,
+                        tags: updatedRecipe.tags,
+                        nutrition: updatedRecipe.nutrition,
+                        sourceURL: updatedRecipe.sourceURL,
+                        sourceTitle: updatedRecipe.sourceTitle,
+                        notes: updatedRecipe.notes,
+                        imageURL: updatedRecipe.imageURL,
+                        isFavorite: !updatedRecipe.isFavorite,
+                        createdAt: updatedRecipe.createdAt,
+                        updatedAt: updatedRecipe.updatedAt
+                    )
+                    localRecipes[index] = updatedRecipe
+                }
+            }
+        } label: {
+            Label(recipe.isFavorite ? "Unfavorite" : "Favorite", systemImage: recipe.isFavorite ? "star.slash" : "star.fill")
+        }
+        .tint(.yellow)
+    }
+
+    private var recipeGridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
     }
 
     private func deleteRecipe(_ recipe: Recipe) async {

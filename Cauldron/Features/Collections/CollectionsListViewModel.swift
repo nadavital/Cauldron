@@ -20,7 +20,7 @@ final class CollectionsListViewModel {
     var showError = false
 
     let dependencies: DependencyContainer
-    @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var notificationObservers: [any NSObjectProtocol] = []
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
@@ -35,7 +35,7 @@ final class CollectionsListViewModel {
 
     /// Setup observer for collection metadata changes to update UI immediately
     private func setupCollectionNotificationObserver() {
-        notificationObserver = NotificationCenter.default.addObserver(
+        let metadataObserver = NotificationCenter.default.addObserver(
             forName: .collectionMetadataChanged,
             object: nil,
             queue: .main
@@ -52,6 +52,33 @@ final class CollectionsListViewModel {
                 }
             }
         }
+
+        let addedObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CollectionAdded"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let addedCollection = notification.userInfo?["collection"] as? Collection else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+
+                if let currentUserID = CurrentUserSession.shared.userId,
+                   addedCollection.userId != currentUserID {
+                    return
+                }
+
+                guard !self.ownedCollections.contains(where: { $0.id == addedCollection.id }) else {
+                    return
+                }
+
+                self.ownedCollections.insert(addedCollection, at: 0)
+                self.ownedCollections.sort { $0.updatedAt > $1.updatedAt }
+            }
+        }
+
+        notificationObservers = [metadataObserver, addedObserver]
     }
 
     /// Load all collections

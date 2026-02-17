@@ -279,6 +279,7 @@ struct HeroRecipeImageView: View {
 
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
+    @State private var containerWidth: CGFloat = 0
 
     init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
         self.imageURL = imageURL
@@ -298,7 +299,7 @@ struct HeroRecipeImageView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(maxWidth: UIScreen.main.bounds.width)
+                    .frame(maxWidth: .infinity)
                     .frame(height: imageHeight(for: image))
                     .clipped()
                     .overlay(alignment: .bottom) {
@@ -320,6 +321,16 @@ struct HeroRecipeImageView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: HeroImageWidthPreferenceKey.self, value: proxy.size.width)
+            }
+        }
+        .onPreferenceChange(HeroImageWidthPreferenceKey.self) { width in
+            guard width > 0 else { return }
+            containerWidth = width
+        }
         .task(id: recipeId) {
             await loadImage()
         }
@@ -353,7 +364,7 @@ struct HeroRecipeImageView: View {
 
     private func imageHeight(for image: UIImage) -> CGFloat {
         let aspectRatio = image.size.width / image.size.height
-        let estimatedWidth: CGFloat = UIScreen.main.bounds.width
+        let estimatedWidth: CGFloat = max(containerWidth, 1)
 
         // Calculate height based on aspect ratio
         let calculatedHeight = estimatedWidth / aspectRatio
@@ -380,6 +391,14 @@ struct HeroRecipeImageView: View {
         case .failure:
             break
         }
+    }
+}
+
+private struct HeroImageWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

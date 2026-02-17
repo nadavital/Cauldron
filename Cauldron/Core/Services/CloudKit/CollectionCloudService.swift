@@ -18,6 +18,7 @@ import os
 actor CollectionCloudService {
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionCloudService")
+    private let maxSaveAttempts = 3
 
     init(core: CloudKitCore) {
         self.core = core
@@ -41,44 +42,38 @@ actor CollectionCloudService {
 
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collection.id.uuidString)
+        var conflictCandidate: CKRecord?
 
-        let record: CKRecord
-        do {
-            record = try await db.record(for: recordID)
-            logger.info("Updating existing collection record")
-        } catch let error as CKError where error.code == .unknownItem {
-            record = CKRecord(recordType: CloudKitCore.RecordType.collection, recordID: recordID)
-            logger.info("Creating new collection record")
+        for attempt in 1...maxSaveAttempts {
+            let record: CKRecord
+            if let conflictCandidate {
+                record = conflictCandidate
+            } else {
+                record = try await fetchOrCreateCollectionRecord(recordID: recordID, in: db)
+            }
+
+            populateCollectionRecord(record, from: collection)
+
+            do {
+                _ = try await db.save(record)
+                logger.info("✅ Saved collection to PUBLIC database")
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord
+                guard let serverRecord else {
+                    logger.error("❌ Conflict without server record payload for collection: \(collection.name)")
+                    throw error
+                }
+
+                logger.warning("⚠️ Save conflict for collection '\(collection.name)', retrying (\(attempt)/\(self.maxSaveAttempts))")
+                conflictCandidate = makeConflictResolvedRecord(serverRecord: serverRecord, localCollection: collection)
+            } catch {
+                throw error
+            }
         }
 
-        // Core fields
-        record["collectionId"] = collection.id.uuidString as CKRecordValue
-        record["name"] = collection.name as CKRecordValue
-        record["userId"] = collection.userId.uuidString as CKRecordValue
-        record["visibility"] = collection.visibility.rawValue as CKRecordValue
-        record["createdAt"] = collection.createdAt as CKRecordValue
-        record["updatedAt"] = collection.updatedAt as CKRecordValue
-
-        // Optional fields
-        if let description = collection.description {
-            record["description"] = description as CKRecordValue
-        }
-        if let emoji = collection.emoji {
-            record["emoji"] = emoji as CKRecordValue
-        }
-        if let color = collection.color {
-            record["color"] = color as CKRecordValue
-        }
-        record["coverImageType"] = collection.coverImageType.rawValue as CKRecordValue
-
-        // Recipe IDs stored as JSON string
-        if let recipeIdsJSON = try? JSONEncoder().encode(collection.recipeIds),
-           let recipeIdsString = String(data: recipeIdsJSON, encoding: .utf8) {
-            record["recipeIds"] = recipeIdsString as CKRecordValue
-        }
-
-        _ = try await db.save(record)
-        logger.info("✅ Saved collection to PUBLIC database")
+        logger.error("❌ Exhausted conflict retries for collection '\(collection.name)'")
+        throw CloudKitError.syncConflict
     }
 
     /// Fetch user's own collections
@@ -292,6 +287,66 @@ actor CollectionCloudService {
 
     // MARK: - Private Helpers
 
+    private func fetchOrCreateCollectionRecord(recordID: CKRecord.ID, in db: CKDatabase) async throws -> CKRecord {
+        do {
+            let record = try await db.record(for: recordID)
+            logger.info("Updating existing collection record")
+            return record
+        } catch let error as CKError where error.code == .unknownItem {
+            logger.info("Creating new collection record")
+            return CKRecord(recordType: CloudKitCore.RecordType.collection, recordID: recordID)
+        }
+    }
+
+    private func makeConflictResolvedRecord(serverRecord: CKRecord, localCollection: Collection) -> CKRecord {
+        populateCollectionRecord(serverRecord, from: localCollection)
+        return serverRecord
+    }
+
+    private func populateCollectionRecord(_ record: CKRecord, from collection: Collection) {
+        // Core fields
+        record["collectionId"] = collection.id.uuidString as CKRecordValue
+        record["name"] = collection.name as CKRecordValue
+        record["userId"] = collection.userId.uuidString as CKRecordValue
+        record["visibility"] = collection.visibility.rawValue as CKRecordValue
+        record["createdAt"] = collection.createdAt as CKRecordValue
+        record["updatedAt"] = collection.updatedAt as CKRecordValue
+        record["coverImageType"] = collection.coverImageType.rawValue as CKRecordValue
+
+        // Optional fields (clear field when local value is nil)
+        if let description = collection.description {
+            record["description"] = description as CKRecordValue
+        } else {
+            record["description"] = nil
+        }
+
+        if let emoji = collection.emoji {
+            record["emoji"] = emoji as CKRecordValue
+        } else {
+            record["emoji"] = nil
+        }
+
+        if let symbolName = collection.symbolName {
+            record["symbolName"] = symbolName as CKRecordValue
+        } else {
+            record["symbolName"] = nil
+        }
+
+        if let color = collection.color {
+            record["color"] = color as CKRecordValue
+        } else {
+            record["color"] = nil
+        }
+
+        if let recipeIdsJSON = try? JSONEncoder().encode(collection.recipeIds),
+           let recipeIdsString = String(data: recipeIdsJSON, encoding: .utf8) {
+            record["recipeIds"] = recipeIdsString as CKRecordValue
+        } else {
+            logger.error("❌ Failed to encode recipe IDs for collection: \(collection.name)")
+            record["recipeIds"] = "[]" as CKRecordValue
+        }
+    }
+
     func collectionFromRecord(_ record: CKRecord) throws -> Collection {
         guard let collectionIdString = record["collectionId"] as? String,
               let collectionId = UUID(uuidString: collectionIdString),
@@ -317,6 +372,7 @@ actor CollectionCloudService {
 
         let description = record["description"] as? String
         let emoji = record["emoji"] as? String
+        let symbolName = record["symbolName"] as? String
         let color = record["color"] as? String
         let coverImageTypeString = record["coverImageType"] as? String
         let coverImageType = coverImageTypeString.flatMap { CoverImageType(rawValue: $0) } ?? .recipeGrid
@@ -329,6 +385,7 @@ actor CollectionCloudService {
             recipeIds: recipeIds,
             visibility: visibility,
             emoji: emoji,
+            symbolName: symbolName,
             color: color,
             coverImageType: coverImageType,
             cloudRecordName: record.recordID.recordName,
