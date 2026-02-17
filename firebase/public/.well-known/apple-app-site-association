@@ -6,6 +6,8 @@
                 "appID": "C4MRP56MF5.Nadav.Cauldron",
                 "paths": [
                     "/recipe/*",
+                    "/invite",
+                    "/invite/*",
                     "/profile/*",
                     "/collection/*"
                 ]
@@ -14,6 +16,8 @@
                 "appID": "C4MRP56MF5.Nadav.Cauldron.dev",
                 "paths": [
                     "/recipe/*",
+                    "/invite",
+                    "/invite/*",
                     "/profile/*",
                     "/collection/*"
                 ]

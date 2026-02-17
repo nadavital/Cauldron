@@ -19,6 +19,9 @@ extension Notification.Name {
     /// Posted when recipe import URL arrives from Share Extension handoff
     static let openRecipeImportURL = Notification.Name("OpenRecipeImportURL")
 
+    /// Posted when a referral invite link is opened and a code is extracted
+    static let openReferralInvite = Notification.Name("OpenReferralInvite")
+
     // MARK: - CloudKit Share Notifications
 
     /// Posted when a CloudKit share should be accepted

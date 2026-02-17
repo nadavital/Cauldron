@@ -47,6 +47,14 @@
                 "function": "previewCollection"
             },
             {
+                "source": "/invite",
+                "function": "previewInvite"
+            },
+            {
+                "source": "/invite/**",
+                "function": "previewInvite"
+            },
+            {
                 "source": "/api/**",
                 "function": "api"
             }
