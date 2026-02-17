@@ -105,7 +105,8 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         coverImageType: CoverImageType? = nil,
         coverImageURL: URL? = nil,
         cloudCoverImageRecordName: String? = nil,
-        coverImageModifiedAt: Date? = nil
+        coverImageModifiedAt: Date? = nil,
+        clearCoverImageMetadata: Bool = false
     ) -> Collection {
         Collection(
             id: self.id,
@@ -118,9 +119,9 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
             symbolName: symbolName ?? self.symbolName,
             color: color ?? self.color,
             coverImageType: coverImageType ?? self.coverImageType,
-            coverImageURL: coverImageURL ?? self.coverImageURL,
-            cloudCoverImageRecordName: cloudCoverImageRecordName ?? self.cloudCoverImageRecordName,
-            coverImageModifiedAt: coverImageModifiedAt ?? self.coverImageModifiedAt,
+            coverImageURL: clearCoverImageMetadata ? nil : (coverImageURL ?? self.coverImageURL),
+            cloudCoverImageRecordName: clearCoverImageMetadata ? nil : (cloudCoverImageRecordName ?? self.cloudCoverImageRecordName),
+            coverImageModifiedAt: clearCoverImageMetadata ? nil : (coverImageModifiedAt ?? self.coverImageModifiedAt),
             cloudRecordName: self.cloudRecordName,
             createdAt: self.createdAt,
             updatedAt: Date()

@@ -311,9 +311,7 @@ struct CollectionFormView: View {
                     symbolName: resolvedSymbolName,
                     color: resolvedColor,
                     coverImageType: .recipeGrid,
-                    coverImageURL: nil,
-                    cloudCoverImageRecordName: nil,
-                    coverImageModifiedAt: nil
+                    clearCoverImageMetadata: true
                 )
                 try await dependencies.collectionRepository.update(updated)
                 AppLogger.general.info("✅ Updated collection: \(trimmedName)")

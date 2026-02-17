@@ -52,7 +52,12 @@ actor CollectionCloudService {
                 record = try await fetchOrCreateCollectionRecord(recordID: recordID, in: db)
             }
 
-            populateCollectionRecord(record, from: collection)
+            let shouldClearMissingOptionalFields = conflictCandidate == nil
+            populateCollectionRecord(
+                record,
+                from: collection,
+                clearingMissingOptionalFields: shouldClearMissingOptionalFields
+            )
 
             do {
                 _ = try await db.save(record)
@@ -299,11 +304,19 @@ actor CollectionCloudService {
     }
 
     private func makeConflictResolvedRecord(serverRecord: CKRecord, localCollection: Collection) -> CKRecord {
-        populateCollectionRecord(serverRecord, from: localCollection)
+        populateCollectionRecord(
+            serverRecord,
+            from: localCollection,
+            clearingMissingOptionalFields: false
+        )
         return serverRecord
     }
 
-    private func populateCollectionRecord(_ record: CKRecord, from collection: Collection) {
+    private func populateCollectionRecord(
+        _ record: CKRecord,
+        from collection: Collection,
+        clearingMissingOptionalFields: Bool = true
+    ) {
         // Core fields
         record["collectionId"] = collection.id.uuidString as CKRecordValue
         record["name"] = collection.name as CKRecordValue
@@ -313,28 +326,30 @@ actor CollectionCloudService {
         record["updatedAt"] = collection.updatedAt as CKRecordValue
         record["coverImageType"] = collection.coverImageType.rawValue as CKRecordValue
 
-        // Optional fields (clear field when local value is nil)
+        // Optional fields.
+        // On first save attempt, clear missing local fields so explicit user clears persist.
+        // During conflict retry, preserve server values when local optionals are absent.
         if let description = collection.description {
             record["description"] = description as CKRecordValue
-        } else {
+        } else if clearingMissingOptionalFields {
             record["description"] = nil
         }
 
         if let emoji = collection.emoji {
             record["emoji"] = emoji as CKRecordValue
-        } else {
+        } else if clearingMissingOptionalFields {
             record["emoji"] = nil
         }
 
         if let symbolName = collection.symbolName {
             record["symbolName"] = symbolName as CKRecordValue
-        } else {
+        } else if clearingMissingOptionalFields {
             record["symbolName"] = nil
         }
 
         if let color = collection.color {
             record["color"] = color as CKRecordValue
-        } else {
+        } else if clearingMissingOptionalFields {
             record["color"] = nil
         }
 
