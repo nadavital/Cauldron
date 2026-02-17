@@ -27,9 +27,9 @@ struct ContentView: View {
     // MARK: - What's New Content Versioning
     // Only update this when you have NEW FEATURES to announce.
     // This is separate from the build number - the app can have multiple builds without triggering What's New.
-    // When you ship a feature update, set this to match that version (e.g., "1.1.2").
+    // When you ship a feature update, set this to match that version (e.g., "1.3").
     // When you ship a bug fix, leave this unchanged so no splash appears.
-    private static let whatsNewContentVersion = "1.1.2"
+    private static let whatsNewContentVersion = "1.3"
 
     @Environment(\.dependencies) private var dependencies
     @StateObject private var userSession = CurrentUserSession.shared
