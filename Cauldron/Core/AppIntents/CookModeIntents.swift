@@ -8,6 +8,7 @@
 import AppIntents
 import Foundation
 
+#if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
 /// App Intent to navigate to the next step in cook mode
 struct NextStepIntent: LiveActivityIntent {
     static var title: LocalizedStringResource = "Next Step"
@@ -78,3 +79,4 @@ struct PreviousStepIntent: LiveActivityIntent {
         return .result()
     }
 }
+#endif

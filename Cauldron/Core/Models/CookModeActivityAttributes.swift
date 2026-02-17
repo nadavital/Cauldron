@@ -5,8 +5,10 @@
 //  Created for Live Activities support
 //
 
-import ActivityKit
 import Foundation
+
+#if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+import ActivityKit
 
 /// Attributes for the Cook Mode Live Activity
 /// Defines the static and dynamic content shown on lock screen and Dynamic Island
@@ -50,3 +52,4 @@ struct CookModeActivityAttributes: ActivityAttributes {
     /// Time when cooking session started
     var sessionStartTime: Date
 }
+#endif

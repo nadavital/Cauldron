@@ -7,8 +7,11 @@
 
 import Foundation
 import SwiftUI
-import ActivityKit
 import os
+
+#if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+import ActivityKit
+#endif
 
 /// Coordinates the persistent cook mode session across the app
 @MainActor
@@ -48,7 +51,9 @@ class CookModeCoordinator {
     private let storageKey = "activeCookSession"
 
     // Live Activity support
+    #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
     private var currentActivity: Activity<CookModeActivityAttributes>?
+    #endif
 
     // Shared UserDefaults for App Group communication
     private let sharedDefaults = UserDefaults(suiteName: "group.Nadav.Cauldron")
@@ -348,6 +353,7 @@ class CookModeCoordinator {
     // MARK: - Live Activity Methods
 
     private func startLiveActivity() async {
+        #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard let recipe = currentRecipe,
               ActivityAuthorizationInfo().areActivitiesEnabled else {
             return
@@ -385,9 +391,11 @@ class CookModeCoordinator {
         } catch {
             AppLogger.general.error("❌ Failed to start Live Activity: \(error.localizedDescription)")
         }
+        #endif
     }
 
     private func updateLiveActivity() async {
+        #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard let activity = currentActivity,
               let _ = currentRecipe else {
             return
@@ -428,9 +436,11 @@ class CookModeCoordinator {
         } catch {
             AppLogger.general.error("❌ Failed to update Live Activity: \(error.localizedDescription)")
         }
+        #endif
     }
 
     private func endLiveActivity() async {
+        #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard let activity = currentActivity else { return }
 
         await activity.end(
@@ -440,6 +450,7 @@ class CookModeCoordinator {
 
         currentActivity = nil
         AppLogger.general.info("🛑 Ended Live Activity")
+        #endif
     }
 
     /// Update Live Activity when timers change

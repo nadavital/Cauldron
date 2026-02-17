@@ -30,7 +30,7 @@ struct WhatsNewView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
 
-                        Text("Fresh upgrades for your kitchen ritual.")
+                        Text("Major upgrades just dropped!")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,22 +38,28 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         FeatureRow(
-                            symbol: "app.badge.fill",
+                            symbol: "wand.and.stars.inverse",
                             color: .orange,
-                            title: "New App Icons",
-                            detail: "Invite friends to unlock new looks, then pick your favorite in Profile."
+                            title: "Model-Based Recipe Parser",
+                            detail: "Imports now use a model-backed parser for more reliable ingredient, step, and metadata extraction."
                         )
                         FeatureRow(
-                            symbol: "tag.fill",
-                            color: .pink,
-                            title: "Referral Codes",
-                            detail: "Share your code to connect instantly and earn rewards together."
+                            symbol: "person.3.fill",
+                            color: .green,
+                            title: "Invite Links and Better Referrals",
+                            detail: "Invite behavior was improved with more reliable link handling and smoother referral onboarding."
                         )
                         FeatureRow(
-                            symbol: "crown.fill",
-                            color: .yellow,
-                            title: "Cauldron Tiers",
-                            detail: "Cook more recipes to level up and unlock perks over time."
+                            symbol: "ipad",
+                            color: .indigo,
+                            title: "New iPad and Mac Apps",
+                            detail: "The brand new Cauldron iPad and Mac app is out, with layout and navigation optimizations across core recipe and collection screens."
+                        )
+                        FeatureRow(
+                            symbol: "square.and.arrow.up.fill",
+                            color: .red,
+                            title: "New Share Extension",
+                            detail: "Click share then Cauldron while browsing the web or any app to send your recipes right to Cauldron!"
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
