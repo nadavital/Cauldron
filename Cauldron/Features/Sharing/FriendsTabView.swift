@@ -11,6 +11,7 @@ import os
 /// Navigation destinations for FriendsTab
 enum FriendsTabDestination: Hashable {
     case connections
+    case profile(User)
 }
 
 /// Friends tab - showing shared recipes and connections
@@ -64,9 +65,16 @@ struct FriendsTabView: View {
         } message: {
             Text(viewModel.alertMessage)
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToConnections)) { _ in
             AppLogger.general.info("📍 Navigating to Connections from notification")
             handleConnectionsNavigation()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToReferralProfile)) { notification in
+            guard let userId = notification.object as? UUID else { return }
+            AppLogger.general.info("📍 Navigating to referral friend's profile from notification: \(userId)")
+            Task {
+                await handleReferralProfileNavigation(userId: userId)
+            }
         }
     }
 
@@ -82,6 +90,8 @@ struct FriendsTabView: View {
                     switch destination {
                     case .connections:
                         ConnectionsView(dependencies: dependencies)
+                    case .profile(let user):
+                        UserProfileView(user: user, dependencies: dependencies)
                     }
                 }
         }
@@ -126,6 +136,30 @@ struct FriendsTabView: View {
     private func handleConnectionsNavigation() {
         navigationPath = NavigationPath()
         navigationPath.append(FriendsTabDestination.connections)
+    }
+
+    private func handleReferralProfileNavigation(userId: UUID) async {
+        // First try local cache for immediate navigation.
+        if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+            navigationPath = NavigationPath()
+            navigationPath.append(FriendsTabDestination.profile(cachedUser))
+            return
+        }
+
+        // Fall back to CloudKit if user details aren't cached yet.
+        do {
+            if let cloudUser = try await dependencies.userCloudService.fetchUser(byUserId: userId) {
+                try? await dependencies.sharingRepository.save(cloudUser)
+                navigationPath = NavigationPath()
+                navigationPath.append(FriendsTabDestination.profile(cloudUser))
+                return
+            }
+        } catch {
+            AppLogger.general.warning("⚠️ Failed to load referral friend profile: \(error.localizedDescription)")
+        }
+
+        // If profile data isn't available yet, still open Connections.
+        handleConnectionsNavigation()
     }
 
     private var combinedFeedSection: some View {

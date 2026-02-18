@@ -210,14 +210,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         AppLogger.general.info("📬 User tapped notification")
-        handleNotification(response.notification.request.content.userInfo)
+        let userInfo = response.notification.request.content.userInfo
+        let referralFriendUserId = extractReferralFriendUserId(from: userInfo)
 
-        // Post notification to navigate to Connections view
+        handleNotification(userInfo)
+
+        // Route referral notifications directly to the joined friend's profile.
+        // Keep existing behavior for all other notification types.
         DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .navigateToConnections,
-                object: nil
-            )
+            if let referralFriendUserId {
+                NotificationCenter.default.post(
+                    name: .navigateToReferralProfile,
+                    object: referralFriendUserId
+                )
+            } else {
+                NotificationCenter.default.post(
+                    name: .navigateToConnections,
+                    object: nil
+                )
+            }
         }
 
         completionHandler()
@@ -275,6 +286,52 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             }
         }
+    }
+
+    private func extractReferralFriendUserId(from userInfo: [AnyHashable: Any]) -> UUID? {
+        guard isReferralNotification(userInfo) else {
+            return nil
+        }
+
+        guard let toUserIdString = stringValue(forKey: "toUserId", in: userInfo),
+              let toUserId = UUID(uuidString: toUserIdString) else {
+            return nil
+        }
+
+        // Safety guard: referral friend should never be the currently signed-in user.
+        if let currentUserId = CurrentUserSession.shared.userId, toUserId == currentUserId {
+            return nil
+        }
+
+        return toUserId
+    }
+
+    private func isReferralNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+        if let isReferral = userInfo["isReferral"] as? NSNumber {
+            return isReferral.intValue == 1
+        }
+
+        if let isReferral = userInfo["isReferral"] as? Int {
+            return isReferral == 1
+        }
+
+        if let isReferral = userInfo["isReferral"] as? String {
+            return isReferral == "1" || isReferral.lowercased() == "true"
+        }
+
+        return false
+    }
+
+    private func stringValue(forKey key: String, in userInfo: [AnyHashable: Any]) -> String? {
+        if let value = userInfo[key] as? String {
+            return value
+        }
+
+        if let value = userInfo[key] as? NSString {
+            return value as String
+        }
+
+        return nil
     }
 
     func application(

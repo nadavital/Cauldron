@@ -40,6 +40,9 @@ extension Notification.Name {
     /// Posted when navigating to the connections/friends view
     static let navigateToConnections = Notification.Name("NavigateToConnections")
 
+    /// Posted when a referral notification should open the newly joined friend's profile
+    static let navigateToReferralProfile = Notification.Name("NavigateToReferralProfile")
+
     // MARK: - Testing/Legacy Notifications
 
     /// Legacy test notification for URL handling

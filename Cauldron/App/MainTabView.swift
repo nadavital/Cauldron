@@ -103,9 +103,13 @@ struct MainTabView: View {
             )
         }
         .tint(.cauldronOrange)
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConnections"))) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToConnections)) { _ in
             // Switch to Friends tab when connection notification is tapped
             AppLogger.general.info("📍 Switching to Friends tab from notification")
+            selectedTab = .sharing
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToReferralProfile)) { _ in
+            AppLogger.general.info("📍 Switching to Friends tab for referral profile navigation")
             selectedTab = .sharing
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToSharedContent"))) { notification in

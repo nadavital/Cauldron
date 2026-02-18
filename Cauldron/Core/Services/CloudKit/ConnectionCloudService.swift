@@ -343,7 +343,14 @@ actor ConnectionCloudService {
     }
 
     /// Create an auto-accepted friend connection between two users (from referral)
-    func createAutoFriendConnection(referrerId: UUID, newUserId: UUID, referrerDisplayName: String?, newUserDisplayName: String?) async throws {
+    func createAutoFriendConnection(
+        referrerId: UUID,
+        newUserId: UUID,
+        referrerUsername: String?,
+        referrerDisplayName: String?,
+        newUserUsername: String?,
+        newUserDisplayName: String?
+    ) async throws {
         guard referrerId != newUserId else {
             logger.warning("Skipping auto-friend connection for self referral: \(referrerId)")
             return
@@ -370,8 +377,14 @@ actor ConnectionCloudService {
         if let referrerName = referrerDisplayName {
             record["fromDisplayName"] = referrerName as CKRecordValue
         }
+        if let referrerUsername {
+            record["fromUsername"] = referrerUsername as CKRecordValue
+        }
         if let newUserName = newUserDisplayName {
             record["toDisplayName"] = newUserName as CKRecordValue
+        }
+        if let newUserUsername {
+            record["toUsername"] = newUserUsername as CKRecordValue
         }
 
         record["isReferral"] = 1 as CKRecordValue
@@ -497,7 +510,7 @@ actor ConnectionCloudService {
             // Subscription doesn't exist yet
         }
 
-        let predicate = NSPredicate(format: "fromUserId == %@", userId.uuidString)
+        let predicate = NSPredicate(format: "fromUserId == %@ AND isReferral == 1", userId.uuidString)
 
         let subscription = CKQuerySubscription(
             recordType: CloudKitCore.RecordType.connection,
@@ -507,11 +520,19 @@ actor ConnectionCloudService {
         )
 
         let notification = CKSubscription.NotificationInfo()
-        notification.alertBody = "Someone joined Cauldron using your referral code! You're now friends. 🎉"
+        notification.alertLocalizationKey = "REFERRAL_SIGNUP_ALERT"
+        notification.alertLocalizationArgs = ["toDisplayName", "toUsername"]
+        notification.alertBody = "Someone joined Cauldron using your referral code! You're now friends."
         notification.soundName = "default"
         notification.shouldBadge = false
         notification.shouldSendContentAvailable = true
-        notification.desiredKeys = ["connectionId", "toUserId"]
+        notification.desiredKeys = [
+            "connectionId",
+            "toUserId",
+            "toDisplayName",
+            "toUsername",
+            "isReferral"
+        ]
 
         subscription.notificationInfo = notification
 
