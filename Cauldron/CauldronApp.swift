@@ -289,11 +289,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func extractReferralFriendUserId(from userInfo: [AnyHashable: Any]) -> UUID? {
-        guard isReferralNotification(userInfo) else {
+        let payload = referralPayload(from: userInfo)
+
+        guard payload.isReferral else {
             return nil
         }
 
-        guard let toUserIdString = stringValue(forKey: "toUserId", in: userInfo),
+        guard let toUserIdString = payload.toUserIdString,
               let toUserId = UUID(uuidString: toUserIdString) else {
             return nil
         }
@@ -306,20 +308,61 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return toUserId
     }
 
+    private func referralPayload(from userInfo: [AnyHashable: Any]) -> (isReferral: Bool, toUserIdString: String?) {
+        let topLevelIsReferral = isReferralNotification(userInfo)
+        let topLevelToUserId = stringValue(forKey: "toUserId", in: userInfo)
+
+        guard let queryNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification else {
+            return (topLevelIsReferral, topLevelToUserId)
+        }
+
+        let recordFields = queryNotification.recordFields ?? [:]
+        let isReferral = boolValue(forKey: "isReferral", in: recordFields) ?? topLevelIsReferral
+        let toUserIdString = stringValue(forKey: "toUserId", in: recordFields) ?? topLevelToUserId
+        return (isReferral, toUserIdString)
+    }
+
     private func isReferralNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
-        if let isReferral = userInfo["isReferral"] as? NSNumber {
-            return isReferral.intValue == 1
+        boolValue(forKey: "isReferral", in: userInfo) ?? false
+    }
+
+    private func boolValue(forKey key: String, in userInfo: [AnyHashable: Any]) -> Bool? {
+        guard let value = userInfo[key] else {
+            return nil
+        }
+        return boolValue(from: value)
+    }
+
+    private func boolValue(forKey key: String, in recordFields: [String: Any]) -> Bool? {
+        guard let value = recordFields[key] else {
+            return nil
+        }
+        return boolValue(from: value)
+    }
+
+    private func boolValue(from rawValue: Any) -> Bool? {
+        if let value = rawValue as? Bool {
+            return value
         }
 
-        if let isReferral = userInfo["isReferral"] as? Int {
-            return isReferral == 1
+        if let value = rawValue as? NSNumber {
+            return value.intValue == 1
         }
 
-        if let isReferral = userInfo["isReferral"] as? String {
-            return isReferral == "1" || isReferral.lowercased() == "true"
+        if let value = rawValue as? Int {
+            return value == 1
         }
 
-        return false
+        if let value = rawValue as? String {
+            return value == "1" || value.lowercased() == "true"
+        }
+
+        if let value = rawValue as? NSString {
+            let normalized = (value as String).lowercased()
+            return normalized == "1" || normalized == "true"
+        }
+
+        return nil
     }
 
     private func stringValue(forKey key: String, in userInfo: [AnyHashable: Any]) -> String? {
@@ -328,6 +371,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         if let value = userInfo[key] as? NSString {
+            return value as String
+        }
+
+        return nil
+    }
+
+    private func stringValue(forKey key: String, in recordFields: [String: Any]) -> String? {
+        if let value = recordFields[key] as? String {
+            return value
+        }
+
+        if let value = recordFields[key] as? NSString {
             return value as String
         }
 

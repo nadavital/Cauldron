@@ -256,9 +256,15 @@ struct MainTabView: View {
                 }
             }
 
+            #if targetEnvironment(macCatalyst)
+            Tab("Search", systemImage: "magnifyingglass", value: .search) {
+                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
+            }
+            #else
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
                 SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
             }
+            #endif
         }
     }
 
