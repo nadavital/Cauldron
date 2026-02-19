@@ -105,4 +105,27 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
         XCTAssertFalse(reparsed.ingredients.isEmpty)
         XCTAssertFalse(reparsed.steps.isEmpty)
     }
+
+    func testPreparedSharePayload_DecodeViaStoreConversionPath() throws {
+        let payload = PreparedShareRecipePayload(
+            title: "Share Sheet Pasta",
+            ingredients: ["8 oz pasta", "2 tbsp butter"],
+            steps: ["Boil pasta", "Stir in butter"],
+            yields: "2 servings",
+            totalMinutes: 12,
+            sourceURL: "https://example.com/pasta",
+            sourceTitle: "Example Pasta",
+            imageURL: "https://example.com/pasta.jpg"
+        )
+
+        let data = try JSONEncoder().encode(payload)
+        let prepared = ShareExtensionImportStore.preparedRecipe(from: data)
+
+        XCTAssertEqual(prepared?.recipe.title, "Share Sheet Pasta")
+        XCTAssertEqual(prepared?.recipe.ingredients.map(\.name), ["8 oz pasta", "2 tbsp butter"])
+        XCTAssertEqual(prepared?.recipe.steps.map(\.text), ["Boil pasta", "Stir in butter"])
+        XCTAssertEqual(prepared?.recipe.totalMinutes, 12)
+        XCTAssertEqual(prepared?.recipe.sourceURL?.absoluteString, "https://example.com/pasta")
+        XCTAssertEqual(prepared?.sourceInfo, "Imported from https://example.com/pasta")
+    }
 }

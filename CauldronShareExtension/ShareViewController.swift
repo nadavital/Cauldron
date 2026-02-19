@@ -9,10 +9,6 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
-    private let appGroupID = "group.Nadav.Cauldron"
-    private let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
-    private let preparedRecipePayloadKey = "shareExtension.preparedRecipePayload"
-
     private var hasProcessedShare = false
     private var sharedURL: URL?
     private var preparedPayload: PreparedShareRecipePayload?
@@ -561,22 +557,22 @@ final class ShareViewController: UIViewController {
     }
 
     private func persistPendingURL(_ url: URL) {
-        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
-        defaults.set(url.absoluteString, forKey: pendingRecipeURLKey)
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        defaults.set(url.absoluteString, forKey: ShareExtensionImportContract.pendingRecipeURLKey)
     }
 
     private func persistPreparedRecipePayload(_ payload: PreparedShareRecipePayload) {
-        guard let defaults = UserDefaults(suiteName: appGroupID),
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
               let data = try? JSONEncoder().encode(payload) else {
             return
         }
 
-        defaults.set(data, forKey: preparedRecipePayloadKey)
+        defaults.set(data, forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
     }
 
     private func clearPreparedRecipePayload() {
-        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
-        defaults.removeObject(forKey: preparedRecipePayloadKey)
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
     }
 
     private func completeRequest(after delay: TimeInterval) {

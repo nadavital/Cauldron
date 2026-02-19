@@ -8,48 +8,47 @@
 import Foundation
 
 enum ShareExtensionImportStore {
-    static let appGroupID = "group.Nadav.Cauldron"
-    static let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
-    static let preparedRecipePayloadKey = "shareExtension.preparedRecipePayload"
-
     static func pendingRecipeURL() -> URL? {
-        guard let defaults = UserDefaults(suiteName: appGroupID),
-              let urlString = defaults.string(forKey: pendingRecipeURLKey) else {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
+              let urlString = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) else {
             return nil
         }
         return URL(string: urlString)
     }
 
     static func consumePendingRecipeURL() -> URL? {
-        guard let defaults = UserDefaults(suiteName: appGroupID),
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
               let url = pendingRecipeURL() else {
             return nil
         }
 
-        defaults.removeObject(forKey: pendingRecipeURLKey)
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
         return url
     }
 
     static func consumePreparedRecipe() -> PreparedSharedRecipe? {
-        guard let defaults = UserDefaults(suiteName: appGroupID),
-              let payloadData = defaults.data(forKey: preparedRecipePayloadKey) else {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
+              let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
             return nil
         }
 
-        do {
-            let payload = try JSONDecoder().decode(PreparedSharedRecipePayload.self, from: payloadData)
-            guard let preparedRecipe = payload.toPreparedRecipe() else {
-                defaults.removeObject(forKey: preparedRecipePayloadKey)
-                return nil
-            }
+        guard let preparedRecipe = preparedRecipe(from: payloadData) else {
+            defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+            return nil
+        }
 
-            defaults.removeObject(forKey: preparedRecipePayloadKey)
-            // Prepared payload supersedes a plain pending URL.
-            defaults.removeObject(forKey: pendingRecipeURLKey)
-            return preparedRecipe
+        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+        // Prepared payload supersedes a plain pending URL.
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+        return preparedRecipe
+    }
+
+    static func preparedRecipe(from payloadData: Data) -> PreparedSharedRecipe? {
+        do {
+            let payload = try JSONDecoder().decode(PreparedShareRecipePayload.self, from: payloadData)
+            return payload.toPreparedRecipe()
         } catch {
             AppLogger.general.error("❌ Failed to decode prepared share payload: \(error.localizedDescription)")
-            defaults.removeObject(forKey: preparedRecipePayloadKey)
             return nil
         }
     }
@@ -177,16 +176,7 @@ extension Recipe {
     }
 }
 
-private struct PreparedSharedRecipePayload: Codable {
-    let title: String
-    let ingredients: [String]
-    let steps: [String]
-    let yields: String?
-    let totalMinutes: Int?
-    let sourceURL: String?
-    let sourceTitle: String?
-    let imageURL: String?
-
+extension PreparedShareRecipePayload {
     func toPreparedRecipe() -> PreparedSharedRecipe? {
         let cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedIngredients = ingredients

@@ -1,16 +1,5 @@
 import Foundation
 
-struct PreparedShareRecipePayload: Codable {
-    let title: String
-    let ingredients: [String]
-    let steps: [String]
-    let yields: String?
-    let totalMinutes: Int?
-    let sourceURL: String?
-    let sourceTitle: String?
-    let imageURL: String?
-}
-
 enum SharedRecipePreprocessor {
     private static let extractor = RecipeWebExtractionCore()
 
