@@ -160,8 +160,13 @@ final class CollectionsListViewModel {
     func getRecipeImages(for collection: Collection) async -> [URL?] {
         do {
             let recipes = try await getRecipes(for: collection)
-            // Take first 4 recipes and get their image URLs
-            return Array(recipes.prefix(4).map { $0.imageURL })
+            let imagePairs: [(UUID, URL)] = recipes.compactMap { recipe in
+                guard let imageURL = recipe.imageURL else { return nil }
+                return (recipe.id, imageURL)
+            }
+            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
+
+            return Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
         } catch {
             AppLogger.general.error("Failed to fetch recipe images for collection: \(error.localizedDescription)")
             return []

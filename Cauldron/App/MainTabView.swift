@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import os
+import UIKit
 
 /// Tab identifiers for MainTabView
 enum AppTab: Hashable {
@@ -152,6 +153,9 @@ struct MainTabView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            #if targetEnvironment(macCatalyst)
+            resetCatalystWindowTitle()
+            #endif
             openPendingImporterIfNeeded()
             Task {
                 await refreshSidebarCollections()
@@ -163,6 +167,9 @@ struct MainTabView: View {
             }
         }
         .onChange(of: selectedTab) { _, newTab in
+            #if targetEnvironment(macCatalyst)
+            resetCatalystWindowTitle()
+            #endif
             guard isRegularWidthLayout else { return }
 
             switch newTab {
@@ -209,6 +216,11 @@ struct MainTabView: View {
             icon: "checkmark.circle.fill",
             message: "Recipe imported from share sheet"
         )
+        .onAppear {
+            #if targetEnvironment(macCatalyst)
+            resetCatalystWindowTitle()
+            #endif
+        }
     }
 
     private var tabScaffold: some View {
@@ -289,6 +301,19 @@ struct MainTabView: View {
         AppLogger.general.info("📥 Consumed pending Share Extension URL: \(pendingURL.absoluteString)")
         openImporter(with: pendingURL)
     }
+
+    #if targetEnvironment(macCatalyst)
+    private func resetCatalystWindowTitle() {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) else {
+            return
+        }
+
+        // nil restores the default app name ("Cauldron") instead of a dynamic tab/view title.
+        windowScene.title = nil
+    }
+    #endif
 
     private func openImporter(with url: URL) {
         selectedTab = .cook

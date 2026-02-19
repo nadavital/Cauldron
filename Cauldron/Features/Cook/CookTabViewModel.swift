@@ -310,9 +310,13 @@ import os
         let collectionRecipes = allRecipes.filter { recipe in
             collection.recipeIds.contains(recipe.id)
         }
+        let imagePairs: [(UUID, URL)] = collectionRecipes.compactMap { recipe in
+            guard let imageURL = recipe.imageURL else { return nil }
+            return (recipe.id, imageURL)
+        }
+        let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
 
-        // Take first 4 recipes and get their image URLs
-        return Array(collectionRecipes.prefix(4).map { $0.imageURL })
+        return Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
     }
     
     private func updateSmartRecommendations() {

@@ -18,6 +18,10 @@ struct CollectionCardView: View {
         self.preferredWidth = preferredWidth
     }
 
+    private var additionalRecipeCount: Int {
+        max(0, collection.recipeCount - 4)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             recipeGridView
@@ -101,6 +105,17 @@ struct CollectionCardView: View {
                 }
             } else {
                 placeholderTile(size: size)
+            }
+        }
+        .overlay {
+            if index == 3, additionalRecipeCount > 0 {
+                ZStack {
+                    Rectangle()
+                        .fill(.black.opacity(0.45))
+                    Text("+\(additionalRecipeCount)")
+                        .font(.system(size: size * 0.22, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
             }
         }
     }

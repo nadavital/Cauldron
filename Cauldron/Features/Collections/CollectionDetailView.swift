@@ -280,8 +280,13 @@ struct CollectionDetailView: View {
                 AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes from CloudKit")
             }
 
-            // Load recipe images for cover grid display
-            recipeImages = Array(recipes.prefix(4).map { $0.imageURL })
+            // Load up to 4 available recipe images for cover grid display.
+            let imagePairs: [(UUID, URL)] = recipes.compactMap { recipe in
+                guard let imageURL = recipe.imageURL else { return nil }
+                return (recipe.id, imageURL)
+            }
+            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
+            recipeImages = Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
         } catch {

@@ -110,7 +110,9 @@ struct SearchTabView: View {
                     ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
                 }
         }
+        #if !targetEnvironment(macCatalyst)
         .searchable(text: $searchText, prompt: searchMode == .recipes ? "Search recipes" : "Search people")
+        #endif
     }
 
     private var splitView: some View {
@@ -140,15 +142,31 @@ struct SearchTabView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        #if !targetEnvironment(macCatalyst)
         .searchable(
             text: $searchText,
             placement: .sidebar,
             prompt: searchMode == .recipes ? "Search recipes" : "Search people"
         )
+        #endif
     }
 
     private var searchContent: some View {
         VStack(spacing: 0) {
+            #if targetEnvironment(macCatalyst)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(
+                    searchMode == .recipes ? "Search recipes" : "Search people",
+                    text: $searchText
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+            #endif
+
             // Search mode picker
             Picker("Search Mode", selection: $searchMode) {
                 ForEach(SearchMode.allCases, id: \.self) { mode in
