@@ -3,12 +3,20 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
-ROOT = Path('/Users/nadav/Desktop/Cauldron/appstorescreenshots')
+# Defaults to the repository's appstorescreenshots directory; can be overridden
+# for custom checkouts or alternate asset locations.
+ROOT = Path(
+    os.environ.get(
+        'CAULDRON_SCREENSHOTS_ROOT',
+        str(Path(__file__).resolve().parent.parent),
+    )
+).expanduser().resolve()
 OUT_ROOT = ROOT / 'output' / 'continuous_story_v3_appstore_continuous'
 
 IPHONE_SOURCE = ROOT / 'appscreenshots' / 'iPhone' / '1.3'
