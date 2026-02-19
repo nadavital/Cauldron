@@ -812,7 +812,7 @@ struct AllFriendsCollectionsListView: View {
             from: collection,
             viewerId: CurrentUserSession.shared.userId
         )
-        return Array(loadResult.visibleRecipes.prefix(4).map(\.imageURL))
+        return Array(loadResult.visibleRecipes.compactMap(\.imageURL).prefix(4).map(Optional.some))
     }
 }
 

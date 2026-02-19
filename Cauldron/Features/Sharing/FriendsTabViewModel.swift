@@ -140,12 +140,17 @@ final class FriendsTabViewModel {
         guard !collection.recipeIds.isEmpty else { return [] }
 
         var imageURLs: [URL?] = []
-        for recipeId in collection.recipeIds.prefix(4) {
+        for recipeId in collection.recipeIds.prefix(12) {
             do {
                 let recipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId)
-                imageURLs.append(recipe?.imageURL)
+                if let imageURL = recipe?.imageURL {
+                    imageURLs.append(imageURL)
+                    if imageURLs.count == 4 {
+                        break
+                    }
+                }
             } catch {
-                imageURLs.append(nil)
+                continue
             }
         }
         return imageURLs
