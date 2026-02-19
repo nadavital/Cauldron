@@ -132,7 +132,10 @@ Temporary Items
 /*.gcno
 **/xcshareddata/WorkspaceSettings.xcsettings
 
-appstorescreenshots/
+# Keep screenshot generator scripts in git, but ignore screenshot assets/outputs.
+appstorescreenshots/*
+!appstorescreenshots/scripts/
+!appstorescreenshots/scripts/**
 
 # Python tooling cache / generated artifacts
 **/__pycache__/
