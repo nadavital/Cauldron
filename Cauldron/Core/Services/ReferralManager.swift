@@ -239,7 +239,9 @@ final class ReferralManager: ObservableObject {
                     try await connectionCloudService.createAutoFriendConnection(
                         referrerId: referrer.id,
                         newUserId: currentUser.id,
+                        referrerUsername: referrer.username,
                         referrerDisplayName: referrer.displayName,
+                        newUserUsername: currentUser.username,
                         newUserDisplayName: displayName
                     )
 
