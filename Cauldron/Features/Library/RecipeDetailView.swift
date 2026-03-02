@@ -210,6 +210,7 @@ struct RecipeDetailView: View {
                             compactRecipeContent
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onAppear {
                     if let stepIndex = highlightedStepIndex {
