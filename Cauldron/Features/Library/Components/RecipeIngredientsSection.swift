@@ -67,6 +67,9 @@ private struct IngredientRow: View {
                 .font(.body)
                 .lineLimit(nil)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
