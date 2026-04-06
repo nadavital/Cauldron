@@ -41,4 +41,4 @@ struct CookStep: Sendable, Hashable, Identifiable {
     }
 }
 
-extension CookStep: @preconcurrency Codable {}
+extension CookStep: Codable {}

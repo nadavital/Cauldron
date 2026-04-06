@@ -101,7 +101,7 @@ import os
             collections.sort { $0.updatedAt > $1.updatedAt }
 
             // Load recently cooked
-            let recentIds = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
+            let recentIds = try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
             let recentIdSet = Set(recentIds)
             recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
 
@@ -180,7 +180,7 @@ import os
             collections.sort { $0.updatedAt > $1.updatedAt }
 
             // Load recently cooked
-            let recentIds = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
+            let recentIds = try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
             let recentIdSet = Set(recentIds)
             recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
             
@@ -376,7 +376,7 @@ import os
         // 3. On Rotation & Forgotten Favorites
         Task {
             do {
-                let stats = try await dependencies.cookingHistoryRepository.fetchCookingStats()
+                let stats = try dependencies.cookingHistoryRepository.fetchCookingStats()
                 let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
                 
                 // On Rotation: Most cooked in last 30 days

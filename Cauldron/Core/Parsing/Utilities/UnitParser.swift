@@ -135,7 +135,7 @@ struct UnitParser {
         return abbreviationMap[normalized]
     }
 
-    private static func normalizeOCRUnitText(_ text: String) -> String {
+    nonisolated private static func normalizeOCRUnitText(_ text: String) -> String {
         if text.isEmpty {
             return text
         }

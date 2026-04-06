@@ -17,7 +17,9 @@ struct ModelImportTextExtractor: Sendable {
 
     private let core = RecipeWebExtractionCore()
 
-    func extract(fromHTML html: String, sourceURL: URL? = nil) -> Extraction? {
+    nonisolated init() {}
+
+    nonisolated func extract(fromHTML html: String, sourceURL: URL? = nil) -> Extraction? {
         guard let extraction = core.extract(fromHTML: html, sourceURL: sourceURL) else {
             return nil
         }

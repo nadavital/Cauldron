@@ -389,7 +389,7 @@ extension RecipeRepository {
         )
 
         // 4. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
+        Task.detached { [weak self, recipe, recipeCloudService] in
             guard let self = self else { return }
 
             // Sync to CloudKit
@@ -553,15 +553,13 @@ extension RecipeRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
+        Task.detached { [weak self, recipe, recipeCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             var privateDeleteSucceeded = true
-            var publicDeleteSucceeded = true
-
             // Delete image from CloudKit if exists
             // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
             if recipe.imageURL != nil && !recipe.isPreview {
@@ -593,7 +591,6 @@ extension RecipeRepository {
                 do {
                     try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
                 } catch {
-                    publicDeleteSucceeded = false
                     // Only mark failed if private also failed (public deletion is best-effort)
                     if !privateDeleteSucceeded {
                         await self.operationQueueService.markFailed(

@@ -8,18 +8,18 @@
 import Foundation
 
 /// Account status for iCloud/CloudKit
-enum CloudKitAccountStatus: CustomStringConvertible, Equatable {
+enum CloudKitAccountStatus: Sendable, CustomStringConvertible, Equatable {
     case available
     case noAccount
     case restricted
     case temporarilyUnavailable
     case couldNotDetermine
 
-    var isAvailable: Bool {
+    nonisolated var isAvailable: Bool {
         return self == .available
     }
 
-    var description: String {
+    nonisolated var description: String {
         switch self {
         case .available:
             return "available"
@@ -33,11 +33,24 @@ enum CloudKitAccountStatus: CustomStringConvertible, Equatable {
             return "temporarilyUnavailable"
         }
     }
+
+    nonisolated static func == (lhs: CloudKitAccountStatus, rhs: CloudKitAccountStatus) -> Bool {
+        switch (lhs, rhs) {
+        case (.available, .available),
+             (.noAccount, .noAccount),
+             (.restricted, .restricted),
+             (.temporarilyUnavailable, .temporarilyUnavailable),
+             (.couldNotDetermine, .couldNotDetermine):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 // MARK: - Errors
 
-enum CloudKitError: LocalizedError, Equatable {
+enum CloudKitError: Sendable, LocalizedError, Equatable {
     case invalidRecord
     case notAuthenticated
     case permissionDenied
@@ -51,7 +64,7 @@ enum CloudKitError: LocalizedError, Equatable {
     case compressionFailed
     case userNotFound
 
-    var errorDescription: String? {
+    nonisolated var errorDescription: String? {
         switch self {
         case .invalidRecord:
             return "Invalid CloudKit record"
@@ -89,7 +102,7 @@ enum CloudKitError: LocalizedError, Equatable {
         }
     }
 
-    var recoverySuggestion: String? {
+    nonisolated var recoverySuggestion: String? {
         switch self {
         case .accountNotAvailable(.noAccount):
             return "Go to Settings > [Your Name] > iCloud to sign in"
@@ -103,6 +116,27 @@ enum CloudKitError: LocalizedError, Equatable {
             return "Check your Wi-Fi or cellular connection"
         default:
             return nil
+        }
+    }
+
+    nonisolated static func == (lhs: CloudKitError, rhs: CloudKitError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidRecord, .invalidRecord),
+             (.notAuthenticated, .notAuthenticated),
+             (.permissionDenied, .permissionDenied),
+             (.notEnabled, .notEnabled),
+             (.networkError, .networkError),
+             (.quotaExceeded, .quotaExceeded),
+             (.syncConflict, .syncConflict),
+             (.assetNotFound, .assetNotFound),
+             (.assetTooLarge, .assetTooLarge),
+             (.compressionFailed, .compressionFailed),
+             (.userNotFound, .userNotFound):
+            return true
+        case let (.accountNotAvailable(lhsStatus), .accountNotAvailable(rhsStatus)):
+            return lhsStatus == rhsStatus
+        default:
+            return false
         }
     }
 }

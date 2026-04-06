@@ -55,4 +55,4 @@ enum RecipeVisibility: String, Sendable, CaseIterable {
     }
 }
 
-extension RecipeVisibility: @preconcurrency Codable {}
+extension RecipeVisibility: Codable {}

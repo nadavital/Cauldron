@@ -16,14 +16,16 @@ struct RecipeWebExtractionCore: Sendable {
         let rawTagNames: [String]
     }
 
-    func extract(fromHTML html: String, sourceURL: URL? = nil) -> Extraction? {
+    nonisolated init() {}
+
+    nonisolated func extract(fromHTML html: String, sourceURL: URL? = nil) -> Extraction? {
         if let jsonLD = extractFromJSONLD(html, sourceURL: sourceURL) {
             return jsonLD
         }
         return extractFromVisibleHTML(html, sourceURL: sourceURL)
     }
 
-    private func extractFromJSONLD(_ html: String, sourceURL: URL?) -> Extraction? {
+    nonisolated private func extractFromJSONLD(_ html: String, sourceURL: URL?) -> Extraction? {
         var recipes: [[String: Any]] = []
         for block in jsonLDBlocks(in: html) {
             let raw = block.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,7 +85,7 @@ struct RecipeWebExtractionCore: Sendable {
         )
     }
 
-    private func extractFromVisibleHTML(_ html: String, sourceURL: URL?) -> Extraction? {
+    nonisolated private func extractFromVisibleHTML(_ html: String, sourceURL: URL?) -> Extraction? {
         let main = extractMainFragment(from: html)
         var text = stripHiddenContent(from: main)
         text = text.replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
@@ -117,7 +119,7 @@ struct RecipeWebExtractionCore: Sendable {
         )
     }
 
-    private func jsonLDBlocks(in html: String) -> [String] {
+    nonisolated private func jsonLDBlocks(in html: String) -> [String] {
         guard let regex = try? NSRegularExpression(
             pattern: #"<script[^>]*type\s*=\s*(?:[\"']?application/ld\+json[\"']?)[^>]*>(.*?)</script>"#,
             options: [.caseInsensitive, .dotMatchesLineSeparators]
@@ -133,7 +135,7 @@ struct RecipeWebExtractionCore: Sendable {
         }
     }
 
-    private func parseJSONLDPayloads(raw: String) -> [Any] {
+    nonisolated private func parseJSONLDPayloads(raw: String) -> [Any] {
         var base = raw
             .replacingOccurrences(of: "\u{FEFF}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -164,7 +166,7 @@ struct RecipeWebExtractionCore: Sendable {
         return []
     }
 
-    private func decodeMultipleJSONValues(raw: String) -> [Any]? {
+    nonisolated private func decodeMultipleJSONValues(raw: String) -> [Any]? {
         let parts = raw
             .replacingOccurrences(of: "}{", with: "}\n{")
             .components(separatedBy: "\n")
@@ -183,7 +185,7 @@ struct RecipeWebExtractionCore: Sendable {
         return values
     }
 
-    private func collectRecipeNodes(from value: Any, into out: inout [[String: Any]]) {
+    nonisolated private func collectRecipeNodes(from value: Any, into out: inout [[String: Any]]) {
         if let dict = value as? [String: Any] {
             if isRecipeType(dict["@type"]) {
                 out.append(dict)
@@ -201,7 +203,7 @@ struct RecipeWebExtractionCore: Sendable {
         }
     }
 
-    private func isRecipeType(_ value: Any?) -> Bool {
+    nonisolated private func isRecipeType(_ value: Any?) -> Bool {
         if let text = value as? String {
             let lowered = text.lowercased()
             if lowered.split(separator: "/").last == "recipe" {
@@ -217,14 +219,14 @@ struct RecipeWebExtractionCore: Sendable {
         return false
     }
 
-    private func recipeScore(_ recipe: [String: Any]) -> Int {
+    nonisolated private func recipeScore(_ recipe: [String: Any]) -> Int {
         let titleScore = cleanText(stringValue(recipe["name"])).isEmpty ? 0 : 3
         let ingredientScore = extractIngredients(from: recipe).count
         let stepScore = extractInstructionLines(from: recipe).count * 2
         return titleScore + ingredientScore + stepScore
     }
 
-    private func extractIngredients(from recipe: [String: Any]) -> [String] {
+    nonisolated private func extractIngredients(from recipe: [String: Any]) -> [String] {
         let value = recipe["recipeIngredient"] ?? recipe["ingredients"]
         var out: [String] = []
         for item in asArray(value) {
@@ -243,7 +245,7 @@ struct RecipeWebExtractionCore: Sendable {
         return uniqueCaseInsensitive(out)
     }
 
-    private func extractInstructionLines(from recipe: [String: Any]) -> [String] {
+    nonisolated private func extractInstructionLines(from recipe: [String: Any]) -> [String] {
         var out: [String] = []
 
         func walk(_ node: Any?) {
@@ -296,7 +298,7 @@ struct RecipeWebExtractionCore: Sendable {
         return uniqueCaseInsensitive(out)
     }
 
-    private func splitNumberedSteps(_ text: String) -> [String] {
+    nonisolated private func splitNumberedSteps(_ text: String) -> [String] {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return [] }
 
@@ -323,7 +325,7 @@ struct RecipeWebExtractionCore: Sendable {
         return parts.isEmpty ? [cleaned] : parts
     }
 
-    private func normalizeIngredientSourceText(_ value: String) -> String {
+    nonisolated private func normalizeIngredientSourceText(_ value: String) -> String {
         var text = cleanText(value)
         guard !text.isEmpty else { return "" }
 
@@ -372,7 +374,7 @@ struct RecipeWebExtractionCore: Sendable {
         return cleanText(balanced)
     }
 
-    private func extractMainFragment(from html: String) -> String {
+    nonisolated private func extractMainFragment(from html: String) -> String {
         let patterns = [
             #"<article[^>]*>(.*?)</article>"#,
             #"<main[^>]*>(.*?)</main>"#
@@ -392,7 +394,7 @@ struct RecipeWebExtractionCore: Sendable {
         return candidates.max(by: { $0.count < $1.count }) ?? html
     }
 
-    private func stripHiddenContent(from html: String) -> String {
+    nonisolated private func stripHiddenContent(from html: String) -> String {
         var output = html
         let patterns = [
             #"<script\b[^>]*>.*?</script>"#,
@@ -407,7 +409,7 @@ struct RecipeWebExtractionCore: Sendable {
         return output
     }
 
-    private func extractTitle(from html: String) -> String? {
+    nonisolated private func extractTitle(from html: String) -> String? {
         let patterns = [
             #"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)[\"']"#,
             #"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:title[\"']"#,
@@ -436,7 +438,7 @@ struct RecipeWebExtractionCore: Sendable {
         return nil
     }
 
-    private func parseYield(_ value: Any?) -> String? {
+    nonisolated private func parseYield(_ value: Any?) -> String? {
         if let string = value as? String {
             let cleaned = cleanText(string)
             return cleaned.isEmpty ? nil : cleaned
@@ -450,7 +452,7 @@ struct RecipeWebExtractionCore: Sendable {
         return nil
     }
 
-    private func parseTotalMinutes(totalTime: String, cookTime: String, prepTime: String) -> Int? {
+    nonisolated private func parseTotalMinutes(totalTime: String, cookTime: String, prepTime: String) -> Int? {
         if let total = parseDuration(totalTime) {
             return total
         }
@@ -460,7 +462,7 @@ struct RecipeWebExtractionCore: Sendable {
         return combined > 0 ? combined : nil
     }
 
-    private func parseDuration(_ value: String) -> Int? {
+    nonisolated private func parseDuration(_ value: String) -> Int? {
         let cleaned = cleanText(value)
         guard !cleaned.isEmpty else { return nil }
 
@@ -483,7 +485,7 @@ struct RecipeWebExtractionCore: Sendable {
         return parseLooseTime(cleaned)
     }
 
-    private func parseLooseTime(_ text: String) -> Int? {
+    nonisolated private func parseLooseTime(_ text: String) -> Int? {
         let cleaned = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let colon = firstMatch(pattern: #"(\d+):(\d+)"#, in: cleaned),
@@ -515,7 +517,7 @@ struct RecipeWebExtractionCore: Sendable {
         return nil
     }
 
-    private func firstMatch(pattern: String, in text: String) -> [String]? {
+    nonisolated private func firstMatch(pattern: String, in text: String) -> [String]? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return nil
         }
@@ -537,7 +539,7 @@ struct RecipeWebExtractionCore: Sendable {
         return captures
     }
 
-    private func parseImageURL(_ value: Any?, baseURL: URL?) -> URL? {
+    nonisolated private func parseImageURL(_ value: Any?, baseURL: URL?) -> URL? {
         if let string = value as? String {
             return normalizeURL(from: string, relativeTo: baseURL)
         }
@@ -550,7 +552,7 @@ struct RecipeWebExtractionCore: Sendable {
         return nil
     }
 
-    private func parseRawTagNames(from recipe: [String: Any]) -> [String] {
+    nonisolated private func parseRawTagNames(from recipe: [String: Any]) -> [String] {
         var tags: [String] = []
 
         for key in ["recipeCategory", "recipeCuisine", "keywords"] {
@@ -568,7 +570,7 @@ struct RecipeWebExtractionCore: Sendable {
         return uniqueCaseInsensitive(tags)
     }
 
-    private func normalizeURL(from raw: String, relativeTo baseURL: URL?) -> URL? {
+    nonisolated private func normalizeURL(from raw: String, relativeTo baseURL: URL?) -> URL? {
         let cleaned = cleanText(raw)
         guard !cleaned.isEmpty else { return nil }
 
@@ -591,7 +593,7 @@ struct RecipeWebExtractionCore: Sendable {
         return nil
     }
 
-    private func asArray(_ value: Any?) -> [Any] {
+    nonisolated private func asArray(_ value: Any?) -> [Any] {
         guard let value else { return [] }
         if let array = value as? [Any] {
             return array
@@ -599,20 +601,20 @@ struct RecipeWebExtractionCore: Sendable {
         return [value]
     }
 
-    private func stringValue(_ value: Any?) -> String {
+    nonisolated private func stringValue(_ value: Any?) -> String {
         if let string = value as? String {
             return string
         }
         return ""
     }
 
-    private func cleanText(_ value: String) -> String {
+    nonisolated private func cleanText(_ value: String) -> String {
         decodeHTMLEntities(value, stripTags: true)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func unique(_ values: [String]) -> [String] {
+    nonisolated private func unique(_ values: [String]) -> [String] {
         var out: [String] = []
         var seen = Set<String>()
         for value in values where !value.isEmpty {
@@ -623,7 +625,7 @@ struct RecipeWebExtractionCore: Sendable {
         return out
     }
 
-    private func uniqueCaseInsensitive(_ values: [String]) -> [String] {
+    nonisolated private func uniqueCaseInsensitive(_ values: [String]) -> [String] {
         var out: [String] = []
         var seen = Set<String>()
         for value in values {
@@ -635,7 +637,7 @@ struct RecipeWebExtractionCore: Sendable {
         return out
     }
 
-    private func escapeControlCharactersInJSONStringLiterals(_ raw: String) -> String {
+    nonisolated private func escapeControlCharactersInJSONStringLiterals(_ raw: String) -> String {
         var out = ""
         var inString = false
         var escaped = false
@@ -683,7 +685,7 @@ struct RecipeWebExtractionCore: Sendable {
         return out
     }
 
-    private func decodeHTMLEntities(_ text: String, stripTags: Bool) -> String {
+    nonisolated private func decodeHTMLEntities(_ text: String, stripTags: Bool) -> String {
         var result = text
 
         if stripTags {
@@ -727,7 +729,7 @@ struct RecipeWebExtractionCore: Sendable {
         return result
     }
 
-    private func decodeNumericEntities(_ text: String, pattern: String, decoder: (String) -> String?) -> String {
+    nonisolated private func decodeNumericEntities(_ text: String, pattern: String, decoder: (String) -> String?) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return text
         }

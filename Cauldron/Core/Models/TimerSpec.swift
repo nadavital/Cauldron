@@ -64,4 +64,4 @@ struct TimerSpec: Sendable, Hashable, Identifiable {
     }
 }
 
-extension TimerSpec: @preconcurrency Codable {}
+extension TimerSpec: Codable {}

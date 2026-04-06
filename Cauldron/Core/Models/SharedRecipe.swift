@@ -35,4 +35,4 @@ struct SharedRecipe: Sendable, Hashable, Identifiable {
     }
 }
 
-extension SharedRecipe: @preconcurrency Codable {}
+extension SharedRecipe: Codable {}

@@ -203,7 +203,10 @@ class DependencyContainer: ObservableObject {
 
         // Parsers
         self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
-        self.htmlParser = HTMLRecipeParser(textParser: textParser)
+        self.htmlParser = HTMLRecipeParser(
+            extractor: ModelImportTextExtractor(),
+            textParser: textParser
+        )
         self.socialParser = SocialRecipeParser(textParser: textParser)
 
         self.recipeImageService = MainActor.assumeIsolated {

@@ -174,16 +174,16 @@ struct ContentView: View {
 
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.isInitialized) { _ in
+        .onChange(of: userSession.isInitialized) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.needsOnboarding) { _ in
+        .onChange(of: userSession.needsOnboarding) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.needsiCloudSignIn) { _ in
+        .onChange(of: userSession.needsiCloudSignIn) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: isDataReady) { _ in
+        .onChange(of: isDataReady) { _, _ in
             maybeShowSplashScreen()
         }
     }
@@ -443,7 +443,7 @@ struct ContentView: View {
                         for await (userId, image) in group {
                             if let image = image {
                                 let cacheKey = ImageCache.profileImageKey(userId: userId)
-                                await ImageCache.shared.set(cacheKey, image: image)
+                                ImageCache.shared.set(cacheKey, image: image)
                             }
                         }
                     }

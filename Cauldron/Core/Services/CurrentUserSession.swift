@@ -274,7 +274,7 @@ class CurrentUserSession: ObservableObject {
             logger.info("User created in CloudKit")
 
             // Upload profile image to CloudKit if provided
-            if let profileImage = profileImage, let cloudUser = cloudUser {
+            if profileImage != nil, let cloudUser = cloudUser {
                 do {
                     let recordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: cloudUser.id)
                     logger.info("Uploaded profile image to CloudKit: \(recordName)")

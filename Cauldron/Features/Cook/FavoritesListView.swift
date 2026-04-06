@@ -39,7 +39,7 @@ struct FavoritesListView: View {
         .onAppear {
             localRecipes = recipes
         }
-        .onChange(of: recipes) { newRecipes in
+        .onChange(of: recipes) { _, newRecipes in
             localRecipes = newRecipes
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in

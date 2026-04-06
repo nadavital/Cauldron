@@ -139,13 +139,16 @@ class RecipeImageService {
         )
 
         if let cachedImage = ImageCache.shared.get(recipeCacheKey) {
-            return .success(cachedImage)
+            if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
+                return .success(cachedImage)
+            }
+            ImageCache.shared.remove(recipeCacheKey)
         }
 
         // Try loading from local URL first
         if let url = url {
             // For non-owned recipes, verify file exists before attempting load
-            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            let currentUserId = CurrentUserSession.shared.currentUser?.id
             if let ownerId = ownerId, ownerId != currentUserId {
                 // This is a friend's recipe - check if file exists
                 if !FileManager.default.fileExists(atPath: url.path) {
@@ -172,7 +175,7 @@ class RecipeImageService {
         // Strategy: Try both databases - public first (for shared recipes), then private
         do {
             // Determine which database to try first based on ownership
-            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            let currentUserId = CurrentUserSession.shared.currentUser?.id
             let isOwnRecipe = (ownerId == currentUserId) || (ownerId == nil)
 
             // Try private database first for own recipes, public first for shared recipes
@@ -248,6 +251,22 @@ class RecipeImageService {
         }
 
         return "full"
+    }
+
+    private func cachedImageSatisfiesRequest(_ image: UIImage, targetPixelSize: CGFloat?) -> Bool {
+        guard let targetPixelSize, targetPixelSize > 0 else {
+            return true
+        }
+
+        let pixelWidth = image.cgImage.map { CGFloat($0.width) } ?? (image.size.width * image.scale)
+        let pixelHeight = image.cgImage.map { CGFloat($0.height) } ?? (image.size.height * image.scale)
+        let longestEdge = max(pixelWidth, pixelHeight)
+
+        guard longestEdge > 0 else {
+            return true
+        }
+
+        return longestEdge + 1 >= targetPixelSize
     }
 }
 

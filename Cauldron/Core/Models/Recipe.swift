@@ -37,6 +37,35 @@ struct Recipe: Sendable, Hashable, Identifiable {
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
     let relatedRecipeIds: [UUID] // IDs of related recipes
     let isPreview: Bool  // true = saved locally but not owned (invisible in library), false = owned recipe
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case ingredients
+        case steps
+        case yields
+        case totalMinutes
+        case tags
+        case nutrition
+        case sourceURL
+        case sourceTitle
+        case notes
+        case imageURL
+        case isFavorite
+        case visibility
+        case ownerId
+        case cloudRecordName
+        case cloudImageRecordName
+        case imageModifiedAt
+        case createdAt
+        case updatedAt
+        case originalRecipeId
+        case originalCreatorId
+        case originalCreatorName
+        case savedAt
+        case relatedRecipeIds
+        case isPreview
+    }
     
     nonisolated init(
         id: UUID = UUID(),
@@ -317,6 +346,66 @@ struct Recipe: Sendable, Hashable, Identifiable {
         // Upload if local is newer than cloud
         return localModified > cloudModified
     }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+        self.ingredients = try container.decodeIfPresent([Ingredient].self, forKey: .ingredients) ?? []
+        self.steps = try container.decodeIfPresent([CookStep].self, forKey: .steps) ?? []
+        self.yields = try container.decodeIfPresent(String.self, forKey: .yields) ?? "4 servings"
+        self.totalMinutes = try container.decodeIfPresent(Int.self, forKey: .totalMinutes)
+        self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
+        self.nutrition = try container.decodeIfPresent(Nutrition.self, forKey: .nutrition)
+        self.sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
+        self.sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
+        self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        self.imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
+        self.isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        self.visibility = try container.decodeIfPresent(RecipeVisibility.self, forKey: .visibility) ?? .publicRecipe
+        self.ownerId = try container.decodeIfPresent(UUID.self, forKey: .ownerId)
+        self.cloudRecordName = try container.decodeIfPresent(String.self, forKey: .cloudRecordName)
+        self.cloudImageRecordName = try container.decodeIfPresent(String.self, forKey: .cloudImageRecordName)
+        self.imageModifiedAt = try container.decodeIfPresent(Date.self, forKey: .imageModifiedAt)
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        self.originalRecipeId = try container.decodeIfPresent(UUID.self, forKey: .originalRecipeId)
+        self.originalCreatorId = try container.decodeIfPresent(UUID.self, forKey: .originalCreatorId)
+        self.originalCreatorName = try container.decodeIfPresent(String.self, forKey: .originalCreatorName)
+        self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
+        self.relatedRecipeIds = try container.decodeIfPresent([UUID].self, forKey: .relatedRecipeIds) ?? []
+        self.isPreview = try container.decodeIfPresent(Bool.self, forKey: .isPreview) ?? false
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(ingredients, forKey: .ingredients)
+        try container.encode(steps, forKey: .steps)
+        try container.encode(yields, forKey: .yields)
+        try container.encodeIfPresent(totalMinutes, forKey: .totalMinutes)
+        try container.encode(tags, forKey: .tags)
+        try container.encodeIfPresent(nutrition, forKey: .nutrition)
+        try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try container.encodeIfPresent(sourceTitle, forKey: .sourceTitle)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encodeIfPresent(imageURL, forKey: .imageURL)
+        try container.encode(isFavorite, forKey: .isFavorite)
+        try container.encode(visibility, forKey: .visibility)
+        try container.encodeIfPresent(ownerId, forKey: .ownerId)
+        try container.encodeIfPresent(cloudRecordName, forKey: .cloudRecordName)
+        try container.encodeIfPresent(cloudImageRecordName, forKey: .cloudImageRecordName)
+        try container.encodeIfPresent(imageModifiedAt, forKey: .imageModifiedAt)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(originalRecipeId, forKey: .originalRecipeId)
+        try container.encodeIfPresent(originalCreatorId, forKey: .originalCreatorId)
+        try container.encodeIfPresent(originalCreatorName, forKey: .originalCreatorName)
+        try container.encodeIfPresent(savedAt, forKey: .savedAt)
+        try container.encode(relatedRecipeIds, forKey: .relatedRecipeIds)
+        try container.encode(isPreview, forKey: .isPreview)
+    }
 }
 
-extension Recipe: @preconcurrency Codable {}
+extension Recipe: Codable {}

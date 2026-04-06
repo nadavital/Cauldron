@@ -12,6 +12,12 @@ struct Quantity: Sendable, Hashable {
     let value: Double
     let upperValue: Double? // For ranges like "2-3 cups"
     let unit: UnitKind
+
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case upperValue
+        case unit
+    }
     
     nonisolated init(value: Double, upperValue: Double? = nil, unit: UnitKind) {
         self.value = value
@@ -67,6 +73,20 @@ struct Quantity: Sendable, Hashable {
         }
         return Quantity(value: value * factor, unit: unit)
     }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.value = try container.decodeIfPresent(Double.self, forKey: .value) ?? 0
+        self.upperValue = try container.decodeIfPresent(Double.self, forKey: .upperValue)
+        self.unit = try container.decodeIfPresent(UnitKind.self, forKey: .unit) ?? .whole
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encodeIfPresent(upperValue, forKey: .upperValue)
+        try container.encode(unit, forKey: .unit)
+    }
 }
 
-extension Quantity: @preconcurrency Codable {}
+extension Quantity: Codable {}

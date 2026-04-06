@@ -40,7 +40,7 @@ struct Tag: Sendable, Hashable, Identifiable {
     ]
 }
 
-extension Tag: @preconcurrency Codable {}
+extension Tag: Codable {}
 
 extension Tag: Comparable {
     nonisolated static func < (lhs: Tag, rhs: Tag) -> Bool {

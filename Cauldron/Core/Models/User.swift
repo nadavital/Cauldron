@@ -22,6 +22,21 @@ struct User: Sendable, Hashable, Identifiable {
     let cloudProfileImageRecordName: String?  // CloudKit record name for profile image asset
     let profileImageModifiedAt: Date?  // Last modified date for sync tracking
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case username
+        case displayName
+        case email
+        case cloudRecordName
+        case referralCode
+        case createdAt
+        case profileEmoji
+        case profileColor
+        case profileImageURL
+        case cloudProfileImageRecordName
+        case profileImageModifiedAt
+    }
+
     nonisolated init(
         id: UUID = UUID(),
         username: String,
@@ -107,6 +122,38 @@ struct User: Sendable, Hashable, Identifiable {
         // Upload if local is newer than cloud
         return localModified > cloudModified
     }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
+        self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        self.email = try container.decodeIfPresent(String.self, forKey: .email)
+        self.cloudRecordName = try container.decodeIfPresent(String.self, forKey: .cloudRecordName)
+        self.referralCode = try container.decodeIfPresent(String.self, forKey: .referralCode)
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        self.profileEmoji = try container.decodeIfPresent(String.self, forKey: .profileEmoji)
+        self.profileColor = try container.decodeIfPresent(String.self, forKey: .profileColor)
+        self.profileImageURL = try container.decodeIfPresent(URL.self, forKey: .profileImageURL)
+        self.cloudProfileImageRecordName = try container.decodeIfPresent(String.self, forKey: .cloudProfileImageRecordName)
+        self.profileImageModifiedAt = try container.decodeIfPresent(Date.self, forKey: .profileImageModifiedAt)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(username, forKey: .username)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encodeIfPresent(email, forKey: .email)
+        try container.encodeIfPresent(cloudRecordName, forKey: .cloudRecordName)
+        try container.encodeIfPresent(referralCode, forKey: .referralCode)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(profileEmoji, forKey: .profileEmoji)
+        try container.encodeIfPresent(profileColor, forKey: .profileColor)
+        try container.encodeIfPresent(profileImageURL, forKey: .profileImageURL)
+        try container.encodeIfPresent(cloudProfileImageRecordName, forKey: .cloudProfileImageRecordName)
+        try container.encodeIfPresent(profileImageModifiedAt, forKey: .profileImageModifiedAt)
+    }
 }
 
-extension User: @preconcurrency Codable {}
+extension User: Codable {}

@@ -41,7 +41,7 @@ final class CookModeViewModel {
     func startSession() async {
         await dependencies.cookSessionManager.startSession(recipe: recipe)
         // Record in cooking history
-        try? await dependencies.cookingHistoryRepository.recordCooked(recipeId: recipe.id, recipeTitle: recipe.title)
+        try? dependencies.cookingHistoryRepository.recordCooked(recipeId: recipe.id, recipeTitle: recipe.title)
     }
     
     func endSession() async {

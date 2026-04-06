@@ -148,4 +148,4 @@ enum UnitKind: String, Sendable, CaseIterable {
     }
 }
 
-extension UnitKind: @preconcurrency Codable {}
+extension UnitKind: Codable {}

@@ -154,12 +154,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return true
         }
 
-        // Log only if launched with CloudKit activity (debugging share URLs)
-        if #unavailable(iOS 26.0),
-           let userActivityDictionary = launchOptions?[.userActivityDictionary] as? [AnyHashable: Any] {
-            AppLogger.general.info("🔵 Launched with user activity: \(userActivityDictionary)")
-        }
-
         // Set up notification center delegate
         UNUserNotificationCenter.current().delegate = self
 
@@ -403,22 +397,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         return nil
-    }
-
-    func application(
-        _ application: UIApplication,
-        open url: URL,
-        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
-    ) -> Bool {
-        AppLogger.general.info("🔵 AppDelegate: open URL called with: \(url)")
-
-        // Post notification to handle in SwiftUI
-        NotificationCenter.default.post(
-            name: .testOpenURL,
-            object: url
-        )
-
-        return true
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {

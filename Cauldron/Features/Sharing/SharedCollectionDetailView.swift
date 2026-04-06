@@ -347,7 +347,7 @@ struct SharedCollectionDetailView: View {
         return SharedRecipe(
             recipe: recipe,
             sharedBy: owner,
-            sharedAt: collection.updatedAt ?? collection.createdAt
+            sharedAt: collection.updatedAt
         )
     }
 

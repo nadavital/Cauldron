@@ -154,6 +154,7 @@ final class EntityImageLoader {
         }
 
         guard needsPreload else { return }
+        let displayScale = max(UITraitCollection.current.displayScale, 1)
 
         await withTaskGroup(of: (String, UIImage?).self) { group in
             for sharedRecipe in sharedRecipes {
@@ -165,7 +166,7 @@ final class EntityImageLoader {
                     }
                     if let image = await self.loadImage(
                         from: sharedRecipe.recipe.imageURL,
-                        maxPixelSize: 70 * UIScreen.main.scale
+                        maxPixelSize: 70 * displayScale
                     ) {
                         return (cacheKey, image)
                     }

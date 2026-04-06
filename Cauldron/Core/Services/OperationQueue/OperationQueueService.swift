@@ -336,7 +336,7 @@ actor OperationQueueService {
         retryTask = Task {
             while !Task.isCancelled {
                 // Process operations that are ready for retry
-                await processReadyOperations()
+                processReadyOperations()
 
                 // Wait 30 seconds before next check
                 try? await Task.sleep(for: .seconds(30))

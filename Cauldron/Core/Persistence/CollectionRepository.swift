@@ -12,11 +12,11 @@ import os
 // MARK: - Collection Notification Names
 extension Notification.Name {
     /// Posted when collection metadata (name, emoji, color, description, cover image) changes
-    static let collectionMetadataChanged = Notification.Name("CollectionMetadataChanged")
+    nonisolated static let collectionMetadataChanged = Notification.Name("CollectionMetadataChanged")
     /// Posted when collection visibility changes
-    static let collectionUpdated = Notification.Name("CollectionUpdated")
+    nonisolated static let collectionUpdated = Notification.Name("CollectionUpdated")
     /// Posted when recipes in a collection change
-    static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
+    nonisolated static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
 }
 
 /// Thread-safe repository for Collection operations
@@ -229,7 +229,7 @@ actor CollectionRepository {
         // Verify the save by reading it back
         let verifyDescriptor = FetchDescriptor(predicate: predicate)
         if let verified = try context.fetch(verifyDescriptor).first {
-            let verifiedCollection = try verified.toDomain()
+            _ = try verified.toDomain()
             // Verification: collection updated successfully
         }
 

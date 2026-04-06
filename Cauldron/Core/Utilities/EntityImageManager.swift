@@ -19,7 +19,7 @@ import os
 
 /// Protocol for entities that can have managed images
 protocol ImageManageable: Sendable {
-    var id: UUID { get }
+    nonisolated var id: UUID { get }
 }
 
 // MARK: - EntityImageManager

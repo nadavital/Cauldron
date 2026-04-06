@@ -227,7 +227,7 @@ import os
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
         // Get current user to check connection status
-        guard let currentUserId = CurrentUserSession.shared.userId else {
+        guard CurrentUserSession.shared.userId != nil else {
             return []
         }
 

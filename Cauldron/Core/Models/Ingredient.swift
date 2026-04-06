@@ -41,7 +41,7 @@ struct Ingredient: Sendable, Hashable, Identifiable {
         case section
     }
 
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
@@ -51,7 +51,7 @@ struct Ingredient: Sendable, Hashable, Identifiable {
         self.section = try container.decodeIfPresent(String.self, forKey: .section)
     }
 
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
@@ -63,7 +63,7 @@ struct Ingredient: Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(section, forKey: .section)
     }
 
-    var allQuantities: [Quantity] {
+    nonisolated var allQuantities: [Quantity] {
         var result: [Quantity] = []
         if let quantity {
             result.append(quantity)
@@ -98,4 +98,4 @@ struct Ingredient: Sendable, Hashable, Identifiable {
     }
 }
 
-extension Ingredient: @preconcurrency Codable {}
+extension Ingredient: Codable {}

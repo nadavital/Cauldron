@@ -55,7 +55,7 @@ enum ParsingError: Error, LocalizedError {
 struct TimerExtractor {
 
     /// Context keywords that indicate timer purpose
-    private static let labelKeywords: [(keywords: [String], label: String)] = [
+    nonisolated private static let labelKeywords: [(keywords: [String], label: String)] = [
         (["rest", "resting"], "Rest"),
         (["chill", "chilling", "refrigerate", "refrigerating", "cool", "cooling"], "Chill"),
         (["rise", "rising", "proof", "proofing", "ferment"], "Rise"),
@@ -135,7 +135,7 @@ struct TimerExtractor {
     }
 
     /// Find all regex matches in text
-    private static func findAllMatches(
+    nonisolated private static func findAllMatches(
         pattern: String,
         in text: String,
         unit: TimeUnit
@@ -165,7 +165,7 @@ struct TimerExtractor {
     }
 
     /// Infer the label for a timer based on surrounding context
-    private static func inferLabel(
+    nonisolated private static func inferLabel(
         for range: Range<String.Index>,
         in text: String,
         index: Int,

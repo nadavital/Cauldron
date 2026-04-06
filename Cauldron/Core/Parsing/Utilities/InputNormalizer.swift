@@ -30,7 +30,7 @@ struct InputNormalizer {
     /// InputNormalizer.normalize("Great recipe! #foodie @chef")
     /// // "Great recipe!"
     /// ```
-    static func normalize(_ text: String) -> String {
+    nonisolated static func normalize(_ text: String) -> String {
         var result = text
 
         // Normalize line breaks
@@ -52,7 +52,7 @@ struct InputNormalizer {
     }
 
     /// Normalize various line break formats to \n
-    private static func normalizeLineBreaks(_ text: String) -> String {
+    nonisolated private static func normalizeLineBreaks(_ text: String) -> String {
         var result = text
         result = result.replacingOccurrences(of: "\r\n", with: "\n")
         result = result.replacingOccurrences(of: "\r", with: "\n")
@@ -60,7 +60,7 @@ struct InputNormalizer {
     }
 
     /// Remove social media artifacts like hashtags and @mentions
-    private static func removeSocialMediaArtifacts(_ text: String) -> String {
+    nonisolated private static func removeSocialMediaArtifacts(_ text: String) -> String {
         var result = text
 
         // Remove hashtags (but keep # in measurements like #10 can)
@@ -102,7 +102,7 @@ struct InputNormalizer {
     }
 
     /// Normalize various unicode bullets to a standard format
-    private static func normalizeUnicodeBullets(_ text: String) -> String {
+    nonisolated private static func normalizeUnicodeBullets(_ text: String) -> String {
         var result = text
 
         // Map various bullets to standard bullet (for easier bullet removal later)
@@ -133,7 +133,7 @@ struct InputNormalizer {
     }
 
     /// Clean excessive whitespace while preserving paragraph structure
-    private static func cleanWhitespace(_ text: String) -> String {
+    nonisolated private static func cleanWhitespace(_ text: String) -> String {
         var result = text
 
         // Collapse multiple spaces to single space (but not newlines)
@@ -166,7 +166,7 @@ struct InputNormalizer {
     /// - Returns: True if the text likely contains a recipe
     ///
     /// Uses keyword matching to validate input before parsing
-    static func textLooksLikeRecipe(_ text: String) -> Bool {
+    nonisolated static func textLooksLikeRecipe(_ text: String) -> Bool {
         let lowercased = text.lowercased()
 
         // Keywords that indicate recipe content

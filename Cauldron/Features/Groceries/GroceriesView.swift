@@ -405,9 +405,7 @@ final class GroceriesViewModel {
                         try await self.dependencies.groceryRepository.updateCategory(itemId: itemId, category: category)
                     }
                     // Reload items to show new categories
-                    await MainActor.run {
-                        Task { await self.loadItems() }
-                    }
+                    await self.loadItems()
                 } catch {
                     AppLogger.persistence.error("Failed to categorize items: \(error.localizedDescription)")
                 }

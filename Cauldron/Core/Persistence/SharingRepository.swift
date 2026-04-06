@@ -94,7 +94,7 @@ actor SharingRepository {
         )
         let models = try context.fetch(descriptor)
         
-        return try models.compactMap { model in
+        return models.compactMap { model in
             try? model.toDomain()
         }
     }

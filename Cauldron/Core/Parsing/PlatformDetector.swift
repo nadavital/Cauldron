@@ -1,12 +1,25 @@
 import Foundation
 
 /// Detects the platform/service from a URL to route to appropriate parser
-enum Platform {
+enum Platform: Sendable, Equatable {
     case youtube
     case tiktok
     case instagram
     case recipeWebsite
     case unknown
+
+    nonisolated static func == (lhs: Platform, rhs: Platform) -> Bool {
+        switch (lhs, rhs) {
+        case (.youtube, .youtube),
+             (.tiktok, .tiktok),
+             (.instagram, .instagram),
+             (.recipeWebsite, .recipeWebsite),
+             (.unknown, .unknown):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 struct PlatformDetector {
