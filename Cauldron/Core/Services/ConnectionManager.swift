@@ -83,12 +83,13 @@ class ConnectionManager: ObservableObject {
     private var processingConnectionIds: Set<UUID> = []
 
     private let maxRetries = 5
-    private let pendingRejectsKey = "pendingRejectedConnectionIds"
+    private static let pendingRejectsKey = "pendingRejectedConnectionIds"
     private var pendingRejectIds: Set<UUID> = []
 
     // Cache management
     private var lastSyncTime: Date?
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
+    private let isCloudSyncEnabled: Bool
 
     // Fallback UUID for when CurrentUserSession has no user (e.g., in tests)
     private lazy var fallbackUserId: UUID = UUID()
@@ -99,11 +100,15 @@ class ConnectionManager: ObservableObject {
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
-        self.pendingRejectIds = loadPendingRejectIds()
-        startQueueEventListener()
+        self.isCloudSyncEnabled = !RuntimeEnvironment.isRunningTests
+        self.pendingRejectIds = Self.loadPendingRejectIds()
 
-        Task {
-            await processPendingConnectionOperations()
+        if isCloudSyncEnabled {
+            startQueueEventListener()
+
+            Task {
+                await processPendingConnectionOperations()
+            }
         }
     }
 
@@ -128,6 +133,11 @@ class ConnectionManager: ObservableObject {
 
         // First, load from local cache for instant display
         await loadFromCache(userId: userId)
+
+        guard isCloudSyncEnabled else {
+            lastSyncTime = Date()
+            return
+        }
 
         // Then fetch from CloudKit in background
         await syncFromCloudKit(userId: userId)
@@ -177,6 +187,15 @@ class ConnectionManager: ObservableObject {
         // Save to local cache immediately
         try? await dependencies.connectionRepository.save(acceptedConnection)
 
+        guard isCloudSyncEnabled else {
+            connections[connection.id] = ManagedConnection(
+                connection: acceptedConnection,
+                syncState: .synced
+            )
+            updateBadgeCount()
+            return
+        }
+
         // Queue CloudKit sync via shared queue service
         await enqueueConnectionOperation(type: .acceptConnection, connection: acceptedConnection)
 
@@ -199,6 +218,11 @@ class ConnectionManager: ObservableObject {
         // Track pending reject to avoid re-adding from CloudKit during sync
         pendingRejectIds.insert(connection.id)
         persistPendingRejectIds()
+
+        guard isCloudSyncEnabled else {
+            updateBadgeCount()
+            return
+        }
 
         // Queue CloudKit delete in background (rejection = deletion for cleaner UX)
         await enqueueConnectionOperation(type: .rejectConnection, connection: connection)
@@ -255,6 +279,14 @@ class ConnectionManager: ObservableObject {
 
         // Save to local cache immediately
         try? await dependencies.connectionRepository.save(connection)
+
+        guard isCloudSyncEnabled else {
+            connections[connection.id] = ManagedConnection(
+                connection: connection,
+                syncState: .synced
+            )
+            return
+        }
 
         // Queue CloudKit sync via shared queue service
         await enqueueConnectionOperation(type: .create, connection: connection)
@@ -323,6 +355,10 @@ class ConnectionManager: ObservableObject {
             logger.warning("Failed to delete from cache: \(error.localizedDescription)")
         }
 
+        guard isCloudSyncEnabled else {
+            return
+        }
+
         // Delete from CloudKit
         do {
             try await dependencies.connectionCloudService.deleteConnection(connection)
@@ -357,14 +393,14 @@ class ConnectionManager: ObservableObject {
         }
     }
 
-    private func loadPendingRejectIds() -> Set<UUID> {
+    private static func loadPendingRejectIds() -> Set<UUID> {
         let stored = UserDefaults.standard.stringArray(forKey: pendingRejectsKey) ?? []
         return Set(stored.compactMap { UUID(uuidString: $0) })
     }
 
     private func persistPendingRejectIds() {
         let stored = pendingRejectIds.map { $0.uuidString }
-        UserDefaults.standard.set(stored, forKey: pendingRejectsKey)
+        UserDefaults.standard.set(stored, forKey: Self.pendingRejectsKey)
     }
 
     /// Sync connections from CloudKit
@@ -628,6 +664,7 @@ class ConnectionManager: ObservableObject {
 
     /// Update app icon badge count based on pending connection requests
     func updateBadgeCount() {
+        guard isCloudSyncEnabled else { return }
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(pendingRequestsCount)
@@ -639,6 +676,7 @@ class ConnectionManager: ObservableObject {
 
     /// Clear app icon badge (call when user views connection requests)
     func clearBadge() {
+        guard isCloudSyncEnabled else { return }
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(0)

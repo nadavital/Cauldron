@@ -110,7 +110,7 @@ struct ProfileAvatar: View {
 
         if let image = result.image {
             if let currentImage = profileImage {
-                if !areImagesEqual(image, currentImage) {
+                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
                     profileImage = image
                 }
             } else {
@@ -132,35 +132,6 @@ struct ProfileAvatar: View {
                 CurrentUserSession.shared.currentUser = updatedUser
             }
         }
-    }
-
-    /// Compare two images to see if they're visually identical
-    /// This prevents UI updates when CloudKit sync returns the same image
-    private func areImagesEqual(_ image1: UIImage, _ image2: UIImage) -> Bool {
-        // Fast path: if they're literally the same object, they're equal
-        if image1 === image2 {
-            return true
-        }
-
-        // Compare image dimensions
-        if image1.size != image2.size {
-            return false
-        }
-
-        // Compare scale
-        if image1.scale != image2.scale {
-            return false
-        }
-
-        // Compare PNG data for accurate equality check
-        // Profile images are typically small (< 200KB), so this is fast enough
-        guard let data1 = image1.pngData(),
-              let data2 = image2.pngData() else {
-            // If we can't get PNG data, fall back to assuming they're different
-            return false
-        }
-
-        return data1 == data2
     }
 }
 

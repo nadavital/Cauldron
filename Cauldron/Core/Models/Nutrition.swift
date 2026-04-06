@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents nutritional information
-struct Nutrition: Codable, Sendable, Hashable {
+struct Nutrition: Sendable, Hashable {
     let calories: Double?
     let protein: Double? // grams
     let fat: Double? // grams
@@ -17,7 +17,7 @@ struct Nutrition: Codable, Sendable, Hashable {
     let sugar: Double? // grams
     let sodium: Double? // milligrams
     
-    init(
+    nonisolated init(
         calories: Double? = nil,
         protein: Double? = nil,
         fat: Double? = nil,
@@ -35,12 +35,12 @@ struct Nutrition: Codable, Sendable, Hashable {
         self.sodium = sodium
     }
     
-    var hasData: Bool {
+    nonisolated var hasData: Bool {
         calories != nil || protein != nil || fat != nil || carbohydrates != nil
     }
     
     /// Scale nutrition info by a factor
-    func scaled(by factor: Double) -> Nutrition {
+    nonisolated func scaled(by factor: Double) -> Nutrition {
         Nutrition(
             calories: calories.map { $0 * factor },
             protein: protein.map { $0 * factor },
@@ -52,3 +52,5 @@ struct Nutrition: Codable, Sendable, Hashable {
         )
     }
 }
+
+extension Nutrition: @preconcurrency Codable {}

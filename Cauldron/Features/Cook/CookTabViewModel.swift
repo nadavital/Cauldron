@@ -31,6 +31,7 @@ import os
     let dependencies: DependencyContainer
     private var hasLoadedInitially = false
     @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
+    private var recipeImageURLsById: [UUID: URL?] = [:]
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
@@ -46,14 +47,19 @@ import os
             self.allRecipes = preloadedData.allRecipes
             self.recentlyAddedRecipes = preloadedData.allRecipes.sorted { $0.createdAt > $1.createdAt }
             self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
+            self.recipeImageURLsById = preloadedData.allRecipes.reduce(into: [:]) { partialResult, recipe in
+                partialResult[recipe.id] = recipe.imageURL
+            }
             self.hasLoadedInitially = true
 
             // Calculate derived data asynchronously (recently cooked and favorites)
             // This isn't critical for preventing empty state since it's an optional section
             Task { @MainActor in
+                let recentIdSet = Set(preloadedData.recentlyCookedIds)
+
                 // Load recently cooked (simple filter, very fast)
                 self.recentlyCookedRecipes = preloadedData.allRecipes.filter {
-                    preloadedData.recentlyCookedIds.contains($0.id)
+                    recentIdSet.contains($0.id)
                 }
 
                 // Load favorites (simple filter, very fast)
@@ -88,6 +94,7 @@ import os
             // Load all recipes (owned + referenced)
             allRecipes = try await fetchAllRecipesIncludingReferences()
             recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
+            rebuildRecipeImageLookup()
 
             // Load collections
             collections = try await dependencies.collectionRepository.fetchAll()
@@ -95,7 +102,8 @@ import os
 
             // Load recently cooked
             let recentIds = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            recentlyCookedRecipes = allRecipes.filter { recentIds.contains($0.id) }
+            let recentIdSet = Set(recentIds)
+            recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
 
             // Load favorites
             favoriteRecipes = allRecipes.filter { $0.isFavorite }
@@ -165,6 +173,7 @@ import os
             // Load all recipes (owned + referenced)
             allRecipes = try await fetchAllRecipesIncludingReferences()
             recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
+            rebuildRecipeImageLookup()
 
             // Load collections
             collections = try await dependencies.collectionRepository.fetchAll()
@@ -172,7 +181,8 @@ import os
 
             // Load recently cooked
             let recentIds = try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            recentlyCookedRecipes = allRecipes.filter { recentIds.contains($0.id) }
+            let recentIdSet = Set(recentIds)
+            recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
             
             // Load favorites
             favoriteRecipes = allRecipes.filter { $0.isFavorite }
@@ -306,17 +316,13 @@ import os
 
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func getRecipeImages(for collection: Collection) async -> [URL?] {
-        // Filter to only recipes in this collection
-        let collectionRecipes = allRecipes.filter { recipe in
-            collection.recipeIds.contains(recipe.id)
-        }
-        let imagePairs: [(UUID, URL)] = collectionRecipes.compactMap { recipe in
-            guard let imageURL = recipe.imageURL else { return nil }
-            return (recipe.id, imageURL)
-        }
-        let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
+        Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
+    }
 
-        return Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
+    private func rebuildRecipeImageLookup() {
+        recipeImageURLsById = allRecipes.reduce(into: [:]) { partialResult, recipe in
+            partialResult[recipe.id] = recipe.imageURL
+        }
     }
     
     private func updateSmartRecommendations() {

@@ -418,8 +418,7 @@ struct ContentView: View {
                             group.addTask {
                                 // Try to load from local file first
                                 if let imageURL = user.profileImageURL,
-                                   let imageData = try? Data(contentsOf: imageURL),
-                                   let image = UIImage(data: imageData) {
+                                   let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: imageURL, maxPixelSize: 300) {
                                     return (user.id, image)
                                 }
 
@@ -427,8 +426,7 @@ struct ContentView: View {
                                 if user.cloudProfileImageRecordName != nil {
                                     do {
                                         if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                                           let imageData = try? Data(contentsOf: downloadedURL),
-                                           let image = UIImage(data: imageData) {
+                                           let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: downloadedURL, maxPixelSize: 300) {
                                             // Downloaded profile image (don't log routine operations)
                                             return (user.id, image)
                                         }

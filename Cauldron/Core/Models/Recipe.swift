@@ -8,7 +8,7 @@
 import Foundation
 
 /// Domain model representing a complete recipe
-struct Recipe: Codable, Sendable, Hashable, Identifiable {
+struct Recipe: Sendable, Hashable, Identifiable {
     let id: UUID
     let title: String
     let ingredients: [Ingredient]
@@ -38,7 +38,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     let relatedRecipeIds: [UUID] // IDs of related recipes
     let isPreview: Bool  // true = saved locally but not owned (invisible in library), false = owned recipe
     
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         title: String,
         ingredients: [Ingredient],
@@ -94,7 +94,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         self.isPreview = isPreview
     }
     
-    var displayTime: String? {
+    nonisolated var displayTime: String? {
         guard let minutes = totalMinutes else { return nil }
         let hours = minutes / 60
         let mins = minutes % 60
@@ -107,7 +107,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Scale the recipe by a factor
-    func scaled(by factor: Double) -> Recipe {
+    nonisolated func scaled(by factor: Double) -> Recipe {
         Recipe(
             id: id,
             title: title,
@@ -139,12 +139,12 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Check if the recipe is valid (has minimum required data)
-    var isValid: Bool {
+    nonisolated var isValid: Bool {
         !title.isEmpty && !ingredients.isEmpty && !steps.isEmpty
     }
     
     /// Create a copy with updated image URL
-    func withImageURL(_ url: URL?) -> Recipe {
+    nonisolated func withImageURL(_ url: URL?) -> Recipe {
         Recipe(
             id: id,
             title: title,
@@ -181,7 +181,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     ///   - originalCreatorId: Optional ID of the original creator (for attribution)
     ///   - originalCreatorName: Optional name of the original creator (for attribution)
     /// - Returns: A new Recipe instance owned by the specified user
-    func withOwner(_ userId: UUID, originalCreatorId: UUID? = nil, originalCreatorName: String? = nil) -> Recipe {
+    nonisolated func withOwner(_ userId: UUID, originalCreatorId: UUID? = nil, originalCreatorName: String? = nil) -> Recipe {
         // Determine attribution - use provided values or fall back to current owner
         let creatorId = originalCreatorId ?? ownerId
         let creatorName = originalCreatorName
@@ -229,7 +229,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     /// - Parameters:
     ///   - viewerId: ID of the user attempting to view the recipe (nil for current user)
     /// - Returns: True if the recipe is accessible to the viewer
-    func isAccessible(to viewerId: UUID?, isFriend: Bool = false) -> Bool {
+    nonisolated func isAccessible(to viewerId: UUID?, isFriend: Bool = false) -> Bool {
         // Owner can always see their own recipes
         if let viewerId = viewerId, viewerId == ownerId {
             return true
@@ -248,7 +248,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     /// Check if this recipe meets the minimum visibility requirement for a collection
     /// - Parameter collectionVisibility: The visibility level of the collection
     /// - Returns: True if recipe visibility is sufficient for the collection
-    func meetsMinimumVisibility(for collectionVisibility: RecipeVisibility) -> Bool {
+    nonisolated func meetsMinimumVisibility(for collectionVisibility: RecipeVisibility) -> Bool {
         switch collectionVisibility {
         case .publicRecipe:
             // Public collections should only contain public recipes
@@ -264,7 +264,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     ///   - recordName: CloudKit asset record name
     ///   - modifiedAt: Timestamp when image was last modified
     /// - Returns: A new Recipe instance with updated cloud image metadata
-    func withCloudImageMetadata(recordName: String?, modifiedAt: Date?) -> Recipe {
+    nonisolated func withCloudImageMetadata(recordName: String?, modifiedAt: Date?) -> Recipe {
         Recipe(
             id: id,
             title: title,
@@ -298,7 +298,7 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
     /// Check if the recipe image needs to be uploaded to CloudKit
     /// - Parameter localImageModified: The modification date of the local image file
     /// - Returns: True if local image is newer than cloud or no cloud image exists
-    func needsImageUpload(localImageModified: Date?) -> Bool {
+    nonisolated func needsImageUpload(localImageModified: Date?) -> Bool {
         // If no local image, no upload needed
         guard let localModified = localImageModified else {
             return false
@@ -318,3 +318,5 @@ struct Recipe: Codable, Sendable, Hashable, Identifiable {
         return localModified > cloudModified
     }
 }
+
+extension Recipe: @preconcurrency Codable {}

@@ -11,11 +11,20 @@ struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
     let preferredWidth: CGFloat?
+    let dependencies: DependencyContainer?
+    @State private var customCoverImage: UIImage?
+    @State private var isLoadingImage = false
 
-    init(collection: Collection, recipeImages: [URL?], preferredWidth: CGFloat? = 200) {
+    init(
+        collection: Collection,
+        recipeImages: [URL?],
+        preferredWidth: CGFloat? = 200,
+        dependencies: DependencyContainer? = nil
+    ) {
         self.collection = collection
         self.recipeImages = recipeImages
         self.preferredWidth = preferredWidth
+        self.dependencies = dependencies
     }
 
     private var additionalRecipeCount: Int {
@@ -24,13 +33,13 @@ struct CollectionCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            recipeGridView
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(.rect(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(collectionColor.opacity(0.2), lineWidth: 1)
-            )
+            coverContent
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(collectionColor.opacity(0.2), lineWidth: 1)
+                )
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -51,6 +60,18 @@ struct CollectionCardView: View {
         }
         .frame(width: preferredWidth, alignment: .leading)
         .frame(maxWidth: preferredWidth == nil ? .infinity : nil, alignment: .leading)
+        .task(id: collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName) {
+            await loadCustomImage()
+        }
+    }
+
+    @ViewBuilder
+    private var coverContent: some View {
+        if collection.coverImageType == .customImage {
+            customImageView
+        } else {
+            recipeGridView
+        }
     }
 
     private var recipeGridView: some View {
@@ -129,6 +150,46 @@ struct CollectionCardView: View {
                     .font(.system(size: size * 0.3))
                     .foregroundStyle(.white.opacity(0.5))
             )
+    }
+
+    private var customImageView: some View {
+        Group {
+            if let customCoverImage = customCoverImage {
+                Image(uiImage: customCoverImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if isLoadingImage {
+                collectionColor
+                    .overlay(
+                        ProgressView()
+                            .tint(.white)
+                    )
+            } else {
+                // Fallback to recipe grid if custom image fails to load
+                recipeGridView
+            }
+        }
+    }
+
+    @MainActor
+    private func loadCustomImage() async {
+        guard collection.coverImageType == .customImage else {
+            customCoverImage = nil
+            return
+        }
+
+        let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
+        if let image = await loader.loadCollectionCoverImage(for: collection, dependencies: dependencies) {
+            if let currentImage = customCoverImage {
+                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
+                    customCoverImage = image
+                }
+            } else {
+                customCoverImage = image
+            }
+        } else {
+            customCoverImage = nil
+        }
     }
 
     private var collectionColor: Color {

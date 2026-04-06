@@ -30,7 +30,7 @@ struct IngredientParser {
     /// IngredientParser.parseIngredientText("Salt to taste")
     /// // Ingredient(quantity: nil, name: "Salt to taste")
     /// ```
-    static func parseIngredientText(_ text: String) -> Ingredient {
+    nonisolated static func parseIngredientText(_ text: String) -> Ingredient {
         let cleaned = normalizeQuantityUnitSpacing(
             normalizeOCRIngredientText(text.trimmingCharacters(in: .whitespaces))
         )
@@ -333,7 +333,7 @@ struct IngredientParser {
     /// extractQuantityAndUnit(from: "1/2 tsp salt, divided")
     /// // (Quantity(value: 0.5, unit: .teaspoon), "salt, divided")
     /// ```
-    static func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
+    nonisolated static func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
         // Pattern to match quantity at the start: number (possibly with fraction or unicode fraction)
         // followed by optional unit
         // Examples: "2 cups", "1/2 cup", "1 ½ cups", "2½ tablespoons", "200g", "1-2 teaspoons"

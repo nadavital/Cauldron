@@ -623,7 +623,8 @@ struct UserProfileView: View {
                             )) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: collectionImageCache[collection.id] ?? []
+                                    recipeImages: collectionImageCache[collection.id] ?? [],
+                                    dependencies: viewModel.dependencies
                                 )
                             }
                             .buttonStyle(.plain)

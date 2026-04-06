@@ -60,7 +60,7 @@ extension RecipeRepository {
         try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
 
         // Skip CloudKit sync if requested (e.g., when downloading from CloudKit)
-        if skipCloudSync {
+        if skipCloudSync || RuntimeEnvironment.isRunningTests {
             return
         }
 
@@ -267,6 +267,10 @@ extension RecipeRepository {
         // 1. Update recipe in local database (immediate)
         try await updateRecipeInDatabase(recipe, shouldUpdateTimestamp: shouldUpdateTimestamp)
 
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .update,
@@ -372,6 +376,10 @@ extension RecipeRepository {
 
         // 2. Get updated recipe for background sync
         let recipe = try model.toDomain()
+
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
 
         // 3. Queue operation for background sync
         await operationQueueService.addOperation(
@@ -532,6 +540,10 @@ extension RecipeRepository {
         NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
 
         logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
+
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
 
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(

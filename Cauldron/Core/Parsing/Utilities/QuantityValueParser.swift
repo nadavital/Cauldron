@@ -18,7 +18,7 @@ import Foundation
 struct QuantityValueParser {
 
     /// Unicode fraction to decimal mappings
-    private static let unicodeFractions: [String: String] = [
+    nonisolated private static let unicodeFractions: [String: String] = [
         "½": "0.5",
         "¼": "0.25",
         "¾": "0.75",
@@ -43,7 +43,7 @@ struct QuantityValueParser {
     /// QuantityValueParser.parse("2.5")     // 2.5
     /// QuantityValueParser.parse("1-2")     // 1.5 (average)
     /// ```
-    static func parse(_ text: String) -> Double? {
+    nonisolated static func parse(_ text: String) -> Double? {
         var cleaned = text.trimmingCharacters(in: .whitespaces)
         cleaned = normalizeOCRNumericText(cleaned)
 

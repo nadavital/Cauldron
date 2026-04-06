@@ -165,6 +165,7 @@ struct CookTabView: View {
                 }
             }) {
                 CollectionFormView()
+                    .dependencies(viewModel.dependencies)
             }
             .sheet(isPresented: $showingProfileSheet) {
                 NavigationStack {
@@ -411,7 +412,8 @@ struct CookTabView: View {
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: collectionImageCache[collection.id] ?? []
+                                    recipeImages: collectionImageCache[collection.id] ?? [],
+                                    dependencies: viewModel.dependencies
                                 )
                             }
                             .buttonStyle(.plain)

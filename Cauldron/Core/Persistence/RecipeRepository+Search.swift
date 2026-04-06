@@ -60,14 +60,18 @@ extension RecipeRepository {
     /// Uses title and ingredient count as heuristics to detect duplicates
     func hasSimilarRecipe(title: String, ownerId: UUID, ingredientCount: Int) async throws -> Bool {
         let context = ModelContext(modelContainer)
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Fetch all non-preview recipes owned by this user
-        // Preview recipes are temporary and shouldn't count as "saved" recipes
-        let descriptor = FetchDescriptor<RecipeModel>(
+        // Narrow candidates in the store first, then do the expensive ingredient-count
+        // comparison in memory because ingredients live in the model blob.
+        var descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { model in
-                model.ownerId == ownerId && model.isPreview == false
+                model.ownerId == ownerId &&
+                model.isPreview == false &&
+                model.title.localizedStandardContains(normalizedTitle)
             }
         )
+        descriptor.fetchLimit = 25
 
         let models = try context.fetch(descriptor)
         let recipes = try models.map { try $0.toDomain() }

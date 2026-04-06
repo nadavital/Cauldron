@@ -48,6 +48,14 @@ struct AddRecipeMenu: View {
             } label: {
                 Label("Create Collection", systemImage: "folder.badge.plus")
             }
+
+            Divider()
+
+            Button {
+                showingCollectionForm = true
+            } label: {
+                Label("New Collection", systemImage: "folder.badge.plus")
+            }
         } label: {
             Image(systemName: "plus")
                 .imageScale(.medium)

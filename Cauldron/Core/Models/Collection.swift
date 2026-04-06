@@ -48,7 +48,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     let createdAt: Date
     let updatedAt: Date
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         name: String,
         description: String? = nil,
@@ -85,7 +85,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Create a new collection with default settings
-    static func new(name: String, userId: UUID) -> Collection {
+    nonisolated static func new(name: String, userId: UUID) -> Collection {
         Collection(
             name: name,
             userId: userId,
@@ -94,7 +94,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Create an updated copy of this collection
-    func updated(
+    nonisolated func updated(
         name: String? = nil,
         description: String? = nil,
         recipeIds: [UUID]? = nil,
@@ -129,7 +129,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Add a recipe to this collection
-    func addingRecipe(_ recipeId: UUID) -> Collection {
+    nonisolated func addingRecipe(_ recipeId: UUID) -> Collection {
         guard !recipeIds.contains(recipeId) else { return self }
         var newRecipeIds = recipeIds
         newRecipeIds.append(recipeId)
@@ -137,42 +137,42 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Remove a recipe from this collection
-    func removingRecipe(_ recipeId: UUID) -> Collection {
+    nonisolated func removingRecipe(_ recipeId: UUID) -> Collection {
         let newRecipeIds = recipeIds.filter { $0 != recipeId }
         return updated(recipeIds: newRecipeIds)
     }
 
     /// Check if collection contains a recipe
-    func contains(recipeId: UUID) -> Bool {
+    nonisolated func contains(recipeId: UUID) -> Bool {
         recipeIds.contains(recipeId)
     }
 
     /// Number of recipes in collection
-    var recipeCount: Int {
+    nonisolated var recipeCount: Int {
         recipeIds.count
     }
 
     /// Check if collection is empty
-    var isEmpty: Bool {
+    nonisolated var isEmpty: Bool {
         recipeIds.isEmpty
     }
 
     /// Check if collection is shared (visible to others)
-    var isShared: Bool {
+    nonisolated var isShared: Bool {
         visibility != .privateRecipe
     }
 
     /// Get non-conforming recipes based on collection visibility
     /// - Parameter recipes: Array of recipes to check against collection visibility
     /// - Returns: Array of recipes that don't meet the minimum visibility requirement
-    func nonConformingRecipes(from recipes: [Recipe]) -> [Recipe] {
+    nonisolated func nonConformingRecipes(from recipes: [Recipe]) -> [Recipe] {
         recipes.filter { recipe in
             !recipe.meetsMinimumVisibility(for: visibility)
         }
     }
 
     /// Get the minimum visibility description for this collection
-    var minimumVisibilityDescription: String {
+    nonisolated var minimumVisibilityDescription: String {
         switch visibility {
         case .publicRecipe:
             return "public"
@@ -184,7 +184,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     /// Check if the collection cover image needs to be uploaded to CloudKit
     /// - Parameter localImageModified: The modification date of the local image file
     /// - Returns: True if local image is newer than cloud or no cloud image exists
-    func needsCoverImageUpload(localImageModified: Date?) -> Bool {
+    nonisolated func needsCoverImageUpload(localImageModified: Date?) -> Bool {
         // If no local image, no upload needed
         guard let localModified = localImageModified else {
             return false
@@ -206,11 +206,11 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
 
     // MARK: - Hashable & Equatable
 
-    static func == (lhs: Collection, rhs: Collection) -> Bool {
+    nonisolated static func == (lhs: Collection, rhs: Collection) -> Bool {
         lhs.id == rhs.id
     }
 
-    func hash(into hasher: inout Hasher) {
+    nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
 }

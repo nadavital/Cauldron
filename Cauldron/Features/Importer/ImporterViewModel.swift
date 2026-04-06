@@ -122,12 +122,15 @@ import os
             
         } catch {
             if ocrErrorMessage == nil {
-                errorMessage = error.localizedDescription
+                let userFacingError = userFacingErrorMessage(for: error)
+                errorMessage = userFacingError
+                AppLogger.parsing.error("Failed to import recipe: \(userFacingError)")
+            } else {
+                AppLogger.parsing.error("Failed to import recipe: \(error.localizedDescription)")
             }
-            AppLogger.parsing.error("Failed to import recipe: \(error.localizedDescription)")
         }
     }
-    
+
     private func importFromURL() async throws -> Recipe {
         guard let normalizedURL = normalizedURLInput() else {
             throw ParsingError.invalidURL
@@ -237,6 +240,28 @@ import os
             ocrErrorMessage = error.localizedDescription
             AppLogger.parsing.error("OCR extraction failed: \(error.localizedDescription)")
             throw error
+        }
+    }
+
+    private func userFacingErrorMessage(for error: Error) -> String {
+        guard importType == .url else {
+            return error.localizedDescription
+        }
+
+        let platform = PlatformDetector.detect(from: urlString)
+        let details = error.localizedDescription
+
+        switch platform {
+        case .instagram:
+            return "Instagram import failed: \(details)"
+        case .tiktok:
+            return "TikTok import failed: \(details)"
+        case .youtube:
+            return "YouTube import failed: \(details)"
+        case .recipeWebsite:
+            return "Website import failed: \(details)"
+        case .unknown:
+            return details
         }
     }
 }

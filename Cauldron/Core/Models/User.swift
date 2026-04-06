@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents a user who can share recipes
-struct User: Codable, Sendable, Hashable, Identifiable {
+struct User: Sendable, Hashable, Identifiable {
     let id: UUID
     let username: String
     let displayName: String
@@ -22,7 +22,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     let cloudProfileImageRecordName: String?  // CloudKit record name for profile image asset
     let profileImageModifiedAt: Date?  // Last modified date for sync tracking
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         username: String,
         displayName: String,
@@ -51,7 +51,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Get user's initials from display name
-    var initials: String {
+    nonisolated var initials: String {
         let words = displayName.split(separator: " ")
         if words.count >= 2 {
             return String(words[0].prefix(1) + words[1].prefix(1)).uppercased()
@@ -62,7 +62,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// Create a copy with updated profile fields
-    func updatedProfile(
+    nonisolated func updatedProfile(
         profileEmoji: String? = nil,
         profileColor: String? = nil,
         profileImageURL: URL? = nil,
@@ -88,7 +88,7 @@ struct User: Codable, Sendable, Hashable, Identifiable {
     /// Check if the profile image needs to be uploaded to CloudKit
     /// - Parameter localImageModified: The modification date of the local image file
     /// - Returns: True if local image is newer than cloud or no cloud image exists
-    func needsProfileImageUpload(localImageModified: Date?) -> Bool {
+    nonisolated func needsProfileImageUpload(localImageModified: Date?) -> Bool {
         // If no local image, no upload needed
         guard let localModified = localImageModified else {
             return false
@@ -108,3 +108,5 @@ struct User: Codable, Sendable, Hashable, Identifiable {
         return localModified > cloudModified
     }
 }
+
+extension User: @preconcurrency Codable {}

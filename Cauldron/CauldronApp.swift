@@ -15,11 +15,10 @@ import UserNotifications
 @main
 struct CauldronApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    private let isRunningUnitTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     var body: some Scene {
         WindowGroup {
-            if isRunningUnitTests {
+            if RuntimeEnvironment.isRunningTests {
                 // Keep unit-test host lightweight to avoid unrelated SwiftUI teardown crashes.
                 Color.clear
             } else {
@@ -37,6 +36,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         userActivityWillContinue userActivityType: String
     ) -> Bool {
+        if RuntimeEnvironment.isRunningTests {
+            return false
+        }
+
         AppLogger.general.info("🔵 AppDelegate: userActivityWillContinue: \(userActivityType)")
         return true
     }
@@ -46,6 +49,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         continue userActivity: NSUserActivity,
         restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
     ) -> Bool {
+        if RuntimeEnvironment.isRunningTests {
+            return false
+        }
+
         AppLogger.general.info("🔵 AppDelegate: continue userActivity type: \(userActivity.activityType)")
         AppLogger.general.info("🔵 AppDelegate: webpageURL: \(userActivity.webpageURL?.absoluteString ?? "nil")")
         AppLogger.general.info("🔵 AppDelegate: userInfo: \(userActivity.userInfo ?? [:])")
@@ -143,8 +150,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        if RuntimeEnvironment.isRunningTests {
+            return true
+        }
+
         // Log only if launched with CloudKit activity (debugging share URLs)
-        if let userActivityDictionary = launchOptions?[.userActivityDictionary] as? [AnyHashable: Any] {
+        if #unavailable(iOS 26.0),
+           let userActivityDictionary = launchOptions?[.userActivityDictionary] as? [AnyHashable: Any] {
             AppLogger.general.info("🔵 Launched with user activity: \(userActivityDictionary)")
         }
 
@@ -247,6 +259,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     /// Handle CloudKit notification and sync data
     private func handleNotification(_ userInfo: [AnyHashable: Any]) {
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         AppLogger.general.info("Processing notification userInfo: \(userInfo)")
 
         // Check if this is a CloudKit notification
@@ -406,6 +422,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        if RuntimeEnvironment.isRunningTests {
+            return
+        }
+
         AppLogger.general.info("🔵 AppDelegate: applicationDidBecomeActive")
 
         // Check for pending share metadata
@@ -437,6 +457,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
+        if RuntimeEnvironment.isRunningTests {
+            return UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        }
+
         // Only log if there's interesting activity (debugging share URLs)
         if let userActivity = options.userActivities.first {
             AppLogger.general.info("🔵 Scene connecting with user activity: \(userActivity.activityType)")
@@ -456,6 +480,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 // Scene Delegate for handling URLs in SwiftUI lifecycle
 class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // Handle user activity (Universal Links)
         if let userActivity = connectionOptions.userActivities.first {
             AppLogger.general.info("🟣 SceneDelegate: Got user activity: \(userActivity.activityType)")
@@ -470,11 +498,19 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         AppLogger.general.info("🟣 SceneDelegate: continue userActivity: \(userActivity.activityType)")
         handleUserActivity(userActivity)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         AppLogger.general.info("🟣 SceneDelegate: openURLContexts called with \(URLContexts.count) URLs")
         for context in URLContexts {
             AppLogger.general.info("🟣 SceneDelegate: Opening URL: \(context.url.absoluteString)")

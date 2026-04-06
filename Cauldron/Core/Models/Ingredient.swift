@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents an ingredient in a recipe
-struct Ingredient: Codable, Sendable, Hashable, Identifiable {
+struct Ingredient: Sendable, Hashable, Identifiable {
     let id: UUID
     let name: String
     let quantity: Quantity?
@@ -16,7 +16,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
     let note: String?
     let section: String? // e.g. "Dough", "Filling"
     
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         name: String,
         quantity: Quantity? = nil,
@@ -72,7 +72,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         return result
     }
     
-    var displayString: String {
+    nonisolated var displayString: String {
         var result = ""
         let quantityText = allQuantities.map(\.displayString).joined(separator: " + ")
         if !quantityText.isEmpty {
@@ -86,7 +86,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Scale the ingredient by a factor
-    func scaled(by factor: Double) -> Ingredient {
+    nonisolated func scaled(by factor: Double) -> Ingredient {
         Ingredient(
             id: id,
             name: name,
@@ -97,3 +97,5 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         )
     }
 }
+
+extension Ingredient: @preconcurrency Codable {}

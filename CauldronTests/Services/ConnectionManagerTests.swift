@@ -13,7 +13,6 @@ import XCTest
 /// deinitialization issues during test teardown (Swift issue #85221)
 @MainActor
 final class ConnectionManagerTests: XCTestCase {
-
     // Helper to create fresh dependencies and connection manager
     private func makeConnectionManager() -> (ConnectionManager, DependencyContainer, UUID) {
         let dependencies = DependencyContainer.preview()

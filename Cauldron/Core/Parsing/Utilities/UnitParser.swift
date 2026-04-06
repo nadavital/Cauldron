@@ -14,7 +14,7 @@ import Foundation
 struct UnitParser {
 
     /// Common unit abbreviations and variations mapped to UnitKind
-    private static let abbreviationMap: [String: UnitKind] = [
+    nonisolated private static let abbreviationMap: [String: UnitKind] = [
         // Teaspoon
         "t": .teaspoon,
         "tsp": .teaspoon,
@@ -110,7 +110,7 @@ struct UnitParser {
     /// UnitParser.parse("cups")        // .cup
     /// UnitParser.parse("oz")          // .ounce
     /// ```
-    static func parse(_ text: String) -> UnitKind? {
+    nonisolated static func parse(_ text: String) -> UnitKind? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let punctuation = CharacterSet(charactersIn: ".,:;()[]{}\"'")
         let cleaned = normalizeOCRUnitText(trimmed.trimmingCharacters(in: punctuation))
