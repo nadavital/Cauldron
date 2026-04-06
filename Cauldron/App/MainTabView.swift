@@ -74,12 +74,14 @@ struct MainTabView: View {
         // On iPhone, it keeps standard tab bar behavior.
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
-        .tabViewBottomAccessory(isEnabled: isCookModeActive) {
-            CookModeBanner(coordinator: dependencies.cookModeCoordinator)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    dependencies.cookModeCoordinator.expandToFullScreen()
-                }
+        .tabViewBottomAccessory {
+            if isCookModeActive {
+                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dependencies.cookModeCoordinator.expandToFullScreen()
+                    }
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },

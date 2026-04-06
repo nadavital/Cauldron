@@ -407,7 +407,7 @@ final class ConnectionsViewModel {
            (Date().timeIntervalSince(userDetailsCacheTimestamp!) >= cacheValidityDuration) {
             // If force refreshing, clear the in-memory image cache so images will reload
             if forceRefresh {
-                await ImageCache.shared.clearProfileImages()
+                ImageCache.shared.clearProfileImages()
             }
 
             // Batch fetch users from CloudKit (single query instead of N queries)

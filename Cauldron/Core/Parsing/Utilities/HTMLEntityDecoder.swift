@@ -17,7 +17,7 @@ import Foundation
 struct HTMLEntityDecoder {
 
     /// Named HTML entities mapped to their character equivalents
-    private static let namedEntities: [String: String] = [
+    nonisolated private static let namedEntities: [String: String] = [
         "&nbsp;": " ",
         "&amp;": "&",
         "&lt;": "<",
@@ -53,7 +53,7 @@ struct HTMLEntityDecoder {
     /// HTMLEntityDecoder.decode("&#x25a; test")
     /// // "º test"
     /// ```
-    static func decode(_ text: String, stripTags: Bool = true) -> String {
+    nonisolated static func decode(_ text: String, stripTags: Bool = true) -> String {
         var result = text
 
         // Remove HTML tags if requested
@@ -105,7 +105,7 @@ struct HTMLEntityDecoder {
     ///   - pattern: The regex pattern to match entities
     ///   - decoder: Function to convert matched value to character
     /// - Returns: Text with entities decoded
-    private static func decodeNumericEntities(_ text: String, pattern: String, decoder: (String) -> String?) -> String {
+    nonisolated private static func decodeNumericEntities(_ text: String, pattern: String, decoder: (String) -> String?) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return text
         }

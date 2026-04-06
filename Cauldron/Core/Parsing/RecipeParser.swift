@@ -25,7 +25,7 @@ enum ParsingError: Error, LocalizedError {
     case noRecipeFound
     case imageNotFound
 
-    var errorDescription: String? {
+    nonisolated var errorDescription: String? {
         switch self {
         case .invalidSource:
             return "Invalid recipe source"
@@ -55,7 +55,7 @@ enum ParsingError: Error, LocalizedError {
 struct TimerExtractor {
 
     /// Context keywords that indicate timer purpose
-    private static let labelKeywords: [(keywords: [String], label: String)] = [
+    nonisolated private static let labelKeywords: [(keywords: [String], label: String)] = [
         (["rest", "resting"], "Rest"),
         (["chill", "chilling", "refrigerate", "refrigerating", "cool", "cooling"], "Chill"),
         (["rise", "rising", "proof", "proofing", "ferment"], "Rise"),
@@ -88,7 +88,7 @@ struct TimerExtractor {
     /// TimerExtractor.extractTimers(from: "Cook for 5 minutes, then rest for 10 minutes")
     /// // [TimerSpec(5 min, "Cook"), TimerSpec(10 min, "Rest")]
     /// ```
-    static func extractTimers(from text: String) -> [TimerSpec] {
+    nonisolated static func extractTimers(from text: String) -> [TimerSpec] {
         var timers: [TimerSpec] = []
         let lowercased = text.lowercased()
 
@@ -135,7 +135,7 @@ struct TimerExtractor {
     }
 
     /// Find all regex matches in text
-    private static func findAllMatches(
+    nonisolated private static func findAllMatches(
         pattern: String,
         in text: String,
         unit: TimeUnit
@@ -165,7 +165,7 @@ struct TimerExtractor {
     }
 
     /// Infer the label for a timer based on surrounding context
-    private static func inferLabel(
+    nonisolated private static func inferLabel(
         for range: Range<String.Index>,
         in text: String,
         index: Int,
@@ -212,7 +212,7 @@ struct TimerExtractor {
 struct QuantityParser {
     
     /// Parse a quantity string like "2 cups" or "1/2 tsp" or "2-3 cups"
-    static func parse(_ text: String) -> Quantity? {
+    nonisolated static func parse(_ text: String) -> Quantity? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         // Try to match a range pattern (e.g., "1-2", "1 - 2")
@@ -264,7 +264,7 @@ struct QuantityParser {
         return Quantity(value: value, unit: unit)
     }
     
-    private static func parseValue(_ text: String) -> Double? {
+    nonisolated private static func parseValue(_ text: String) -> Double? {
         // Handle fractions
         if text.contains("/") {
             let parts = text.components(separatedBy: "/")
@@ -290,7 +290,7 @@ struct QuantityParser {
         return Double(text)
     }
     
-    private static func parseUnit(_ text: String) -> UnitKind? {
+    nonisolated private static func parseUnit(_ text: String) -> UnitKind? {
         let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Try exact matches first

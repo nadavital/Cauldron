@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents a type of sync operation that can be performed on an entity
-enum SyncOperationType: String, Codable {
+enum SyncOperationType: String, Codable, Sendable {
     case create
     case update
     case delete
@@ -17,7 +17,7 @@ enum SyncOperationType: String, Codable {
 }
 
 /// Represents the type of entity being operated on
-enum EntityType: String, Codable {
+enum EntityType: String, Codable, Sendable {
     case recipe
     case collection
     case groceryItem
@@ -26,7 +26,7 @@ enum EntityType: String, Codable {
 }
 
 /// Represents the status of a pending operation
-enum OperationStatus: String, Codable {
+enum OperationStatus: String, Codable, Sendable {
     case pending      // Waiting to be processed
     case inProgress   // Currently being synced
     case failed       // Last attempt failed, will retry
@@ -34,7 +34,7 @@ enum OperationStatus: String, Codable {
 }
 
 /// A pending sync operation that needs to be synced to CloudKit
-struct SyncOperation: Codable, Identifiable, Equatable {
+struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let type: SyncOperationType
     let entityType: EntityType
@@ -47,7 +47,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     var errorMessage: String?
     let createdAt: Date
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         type: SyncOperationType,
         entityType: EntityType,
@@ -74,7 +74,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     }
 
     /// Returns a new operation with incremented attempt count and updated retry date
-    func withRetry(error: String? = nil) -> SyncOperation {
+    nonisolated func withRetry(error: String? = nil) -> SyncOperation {
         let newAttempts = attempts + 1
         let backoffSeconds = calculateBackoff(attempts: newAttempts)
 
@@ -94,7 +94,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     }
 
     /// Returns a new operation marked as in progress
-    func markInProgress() -> SyncOperation {
+    nonisolated func markInProgress() -> SyncOperation {
         SyncOperation(
             id: id,
             type: type,
@@ -111,7 +111,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     }
 
     /// Returns a new operation marked as completed
-    func markCompleted() -> SyncOperation {
+    nonisolated func markCompleted() -> SyncOperation {
         SyncOperation(
             id: id,
             type: type,
@@ -130,7 +130,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     /// Calculate exponential backoff with jitter
     /// - Parameter attempts: Number of attempts made
     /// - Returns: Seconds to wait before next retry
-    private func calculateBackoff(attempts: Int) -> TimeInterval {
+    nonisolated private func calculateBackoff(attempts: Int) -> TimeInterval {
         // Exponential backoff: 2^attempts minutes, capped at 60 minutes
         let baseDelay: TimeInterval = 60 // 1 minute base
         let exponentialDelay = baseDelay * pow(2.0, Double(min(attempts, 6))) // Cap at 2^6 = 64 minutes
@@ -143,14 +143,14 @@ struct SyncOperation: Codable, Identifiable, Equatable {
     }
 
     /// Whether this operation is ready to retry
-    var isReadyForRetry: Bool {
+    nonisolated var isReadyForRetry: Bool {
         guard status == .failed else { return false }
         guard let nextRetry = nextRetryDate else { return true }
         return Date() >= nextRetry
     }
 
     /// User-friendly description of the operation
-    var displayDescription: String {
+    nonisolated var displayDescription: String {
         let action = type.displayName
         let entity = entityType.displayName
         return "\(action) \(entity)"
@@ -160,7 +160,7 @@ struct SyncOperation: Codable, Identifiable, Equatable {
 // MARK: - Display Extensions
 
 extension SyncOperationType {
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .create: return "Creating"
         case .update: return "Updating"
@@ -172,7 +172,7 @@ extension SyncOperationType {
 }
 
 extension EntityType {
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .recipe: return "recipe"
         case .collection: return "collection"
@@ -184,7 +184,7 @@ extension EntityType {
 }
 
 extension OperationStatus {
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .pending: return "Pending"
         case .inProgress: return "Syncing"

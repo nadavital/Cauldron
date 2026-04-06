@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents a cooking step in a recipe
-struct CookStep: Codable, Sendable, Hashable, Identifiable {
+struct CookStep: Sendable, Hashable, Identifiable {
     let id: UUID
     let index: Int
     let text: String
@@ -16,7 +16,7 @@ struct CookStep: Codable, Sendable, Hashable, Identifiable {
     let mediaURL: URL?
     let section: String?
     
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         index: Int,
         text: String,
@@ -32,11 +32,13 @@ struct CookStep: Codable, Sendable, Hashable, Identifiable {
         self.section = section
     }
     
-    var hasTimers: Bool {
+    nonisolated var hasTimers: Bool {
         !timers.isEmpty
     }
     
-    var displayIndex: String {
+    nonisolated var displayIndex: String {
         "Step \(index + 1)"
     }
 }
+
+extension CookStep: Codable {}

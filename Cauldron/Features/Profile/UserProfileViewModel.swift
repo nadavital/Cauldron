@@ -31,6 +31,7 @@ import os
     let user: User
     let dependencies: DependencyContainer
     private let connectionCoordinator: ConnectionInteractionCoordinator
+    private var recipeImageURLsById: [UUID: URL?] = [:]
 
     var currentUserId: UUID {
         dependencies.connectionManager.currentUserId
@@ -182,6 +183,10 @@ import os
            ) {
             userRecipes = cachedRecipes
             updateTierFromRecipes()
+            recipeImageURLsById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
+                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
+            }
+            updateTierFromRecipes()
             return
         }
 
@@ -190,6 +195,9 @@ import os
 
         do {
             userRecipes = try await fetchUserRecipes()
+            recipeImageURLsById = userRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
+                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
+            }
 
             // Cache the results
             dependencies.profileCacheManager.cacheRecipes(
@@ -219,7 +227,7 @@ import os
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
         // Get current user to check connection status
-        guard let currentUserId = CurrentUserSession.shared.userId else {
+        guard CurrentUserSession.shared.userId != nil else {
             return []
         }
 
@@ -306,20 +314,16 @@ import os
 
     private func fetchUserCollections() async throws -> [Collection] {
         var allCollections: [Collection] = []
+        var seenCollectionIds = Set<UUID>()
 
         // Only show public collections on profiles (simplified from private/friends/public to private/public)
 
         // If viewing own profile, load local collections (excluding private)
         if isCurrentUser {
-            let localCollections = try await dependencies.collectionRepository.fetchAll()
+            let localCollections = try await dependencies.collectionRepository.fetchAll(visibility: .publicRecipe)
             AppLogger.general.info("Found \(localCollections.count) total local collections")
-
-            // Filter to only public (profile shows what others would see)
-            let visibleCollections = localCollections.filter {
-                $0.visibility == .publicRecipe
-            }
-            AppLogger.general.info("Filtered to \(visibleCollections.count) public collections")
-            allCollections.append(contentsOf: visibleCollections)
+            allCollections.append(contentsOf: localCollections)
+            seenCollectionIds.formUnion(localCollections.map(\.id))
         }
 
         // Fetch collections from CloudKit
@@ -334,7 +338,7 @@ import os
 
                 // Add CloudKit collections that aren't already in local storage
                 for cloudCollection in publicCollections {
-                    if !allCollections.contains(where: { $0.id == cloudCollection.id }) {
+                    if seenCollectionIds.insert(cloudCollection.id).inserted {
                         allCollections.append(cloudCollection)
                     }
                 }
@@ -369,22 +373,6 @@ import os
 
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func getRecipeImages(for collection: Collection) async -> [URL?] {
-        do {
-            // Load recipes for this collection
-            let allRecipes = try await dependencies.recipeRepository.fetchAll()
-            let collectionRecipes = allRecipes.filter { recipe in
-                collection.recipeIds.contains(recipe.id)
-            }
-            let imagePairs: [(UUID, URL)] = collectionRecipes.compactMap { recipe in
-                guard let imageURL = recipe.imageURL else { return nil }
-                return (recipe.id, imageURL)
-            }
-            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
-
-            return Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
-        } catch {
-            AppLogger.general.error("Failed to fetch recipe images for collection: \(error.localizedDescription)")
-            return []
-        }
+        Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
     }
 }

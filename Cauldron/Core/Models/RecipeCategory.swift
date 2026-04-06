@@ -9,6 +9,7 @@ import SwiftUI
 
 /// Represents a rich category for recipes (Cuisine, Meal Type, etc.)
 /// These map to underlying tags but provide a richer UI experience.
+@preconcurrency
 enum RecipeCategory: String, CaseIterable, Identifiable, Sendable {
     // Meal Types
     case breakfast = "Breakfast"
@@ -52,11 +53,11 @@ enum RecipeCategory: String, CaseIterable, Identifiable, Sendable {
     case airFryer = "Air Fryer"
     case budgetFriendly = "Budget Friendly"
     
-    var id: String { rawValue }
+    nonisolated var id: String { rawValue }
     
-    var displayName: String { rawValue }
+    nonisolated var displayName: String { rawValue }
     
-    var tagValue: String { rawValue }
+    nonisolated var tagValue: String { rawValue }
     
     var emoji: String {
         switch self {
@@ -149,7 +150,7 @@ enum RecipeCategory: String, CaseIterable, Identifiable, Sendable {
         case other = "Other"
     }
     
-    var section: Section {
+    nonisolated var section: Section {
         switch self {
         case .breakfast, .lunch, .dinner, .dessert, .snack, .drink, .appetizer, .sideDish:
             return .mealType
@@ -163,7 +164,7 @@ enum RecipeCategory: String, CaseIterable, Identifiable, Sendable {
     }
     
     /// Try to match a raw string to a canonical category
-    static func match(string: String) -> RecipeCategory? {
+    nonisolated static func match(string: String) -> RecipeCategory? {
         let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         // Direct match
@@ -198,11 +199,11 @@ enum RecipeCategory: String, CaseIterable, Identifiable, Sendable {
     }
     
     /// Helper string for AI prompt listing all available tags
-    static var allTagsString: String {
+    nonisolated static var allTagsString: String {
         RecipeCategory.allCases.map { $0.displayName }.joined(separator: ", ")
     }
     
-    static func all(in section: Section) -> [RecipeCategory] {
+    nonisolated static func all(in section: Section) -> [RecipeCategory] {
         allCases.filter { $0.section == section }
     }
 }

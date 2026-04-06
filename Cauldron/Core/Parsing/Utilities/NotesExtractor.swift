@@ -17,7 +17,7 @@ import Foundation
 struct NotesExtractor {
 
     /// Section headers that indicate notes content
-    private static let notesSectionHeaders = [
+    nonisolated private static let notesSectionHeaders = [
         "notes",
         "note",
         "chef's notes",
@@ -56,7 +56,7 @@ struct NotesExtractor {
     /// NotesExtractor.extractNotes(from: ["...", "Notes:", "Use fresh herbs", "Tips:", "Can substitute butter"])
     /// // "Notes:\nUse fresh herbs\n\nTips:\nCan substitute butter"
     /// ```
-    static func extractNotes(from lines: [String]) -> String? {
+    nonisolated static func extractNotes(from lines: [String]) -> String? {
         var notesSections: [(header: String, content: [String])] = []
         var currentSection: (header: String, content: [String])? = nil
         var inNotesSection = false
@@ -123,7 +123,7 @@ struct NotesExtractor {
     ///
     /// - Parameter line: The line to check
     /// - Returns: The normalized header name, or nil if not a notes header
-    private static func isNotesSectionHeader(_ line: String) -> String? {
+    nonisolated private static func isNotesSectionHeader(_ line: String) -> String? {
         let lowercased = line.lowercased()
 
         // Check if line ends with colon (header format)
@@ -142,7 +142,7 @@ struct NotesExtractor {
     }
 
     /// Check if a line is a section header that would end the notes section
-    private static func isOtherSectionHeader(_ line: String) -> Bool {
+    nonisolated private static func isOtherSectionHeader(_ line: String) -> Bool {
         let lowercased = line.lowercased()
 
         // Headers that indicate end of notes
@@ -171,7 +171,7 @@ struct NotesExtractor {
     ///
     /// - Parameter text: The full text to search
     /// - Returns: Notes content, or nil if none found
-    static func extractNotes(from text: String) -> String? {
+    nonisolated static func extractNotes(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         return extractNotes(from: lines)
@@ -179,7 +179,7 @@ struct NotesExtractor {
 
     /// Check whether a line starts a notes/tips/variation style section.
     /// Useful for parser section routing before full notes extraction.
-    static func looksLikeNotesSectionHeader(_ line: String) -> Bool {
+    nonisolated static func looksLikeNotesSectionHeader(_ line: String) -> Bool {
         isNotesSectionHeader(line.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
     }
 }

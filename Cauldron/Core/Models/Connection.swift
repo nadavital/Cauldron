@@ -62,7 +62,7 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
     let toUsername: String?
     let toDisplayName: String?
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         fromUserId: UUID,
         toUserId: UUID,
@@ -87,12 +87,12 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Check if this is an accepted connection
-    var isAccepted: Bool {
+    nonisolated var isAccepted: Bool {
         status == .accepted
     }
     
     /// Get the other user's ID given the current user's ID
-    func otherUserId(currentUserId: UUID) -> UUID? {
+    nonisolated func otherUserId(currentUserId: UUID) -> UUID? {
         if fromUserId == currentUserId {
             return toUserId
         } else if toUserId == currentUserId {
@@ -102,7 +102,7 @@ struct Connection: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Check if the current user is the one who sent the request
-    func isRequestFromUser(_ userId: UUID) -> Bool {
+    nonisolated func isRequestFromUser(_ userId: UUID) -> Bool {
         fromUserId == userId
     }
 }

@@ -53,9 +53,13 @@ actor RecipeRepository {
         self.operationQueueService = operationQueueService
         self.externalShareService = externalShareService
 
-        // Start retry mechanism for failed syncs
-        startSyncRetryTask()
-        startImageSyncRetryTask()
+        if !RuntimeEnvironment.isRunningTests {
+            // Start retry mechanism for failed syncs
+            Task {
+                await self.startSyncRetryTask()
+                await self.startImageSyncRetryTask()
+            }
+        }
     }
 }
 

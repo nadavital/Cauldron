@@ -35,7 +35,7 @@ struct TextSectionParser {
     /// TextSectionParser.looksLikeNumberedStep("Mix ingredients")     // false
     /// TextSectionParser.looksLikeNumberedStep("1.")                  // false (too short)
     /// ```
-    static func looksLikeNumberedStep(_ line: String) -> Bool {
+    nonisolated static func looksLikeNumberedStep(_ line: String) -> Bool {
         // Match patterns like: "1.", "2)", "3 -", "4:", "Step 5.", etc.
         let patterns = [
             #"^\d+\.\s+"#,           // "1. Mix ingredients"
@@ -73,7 +73,7 @@ struct TextSectionParser {
     /// TextSectionParser.looksLikeIngredient("½ tsp salt")        // true
     /// TextSectionParser.looksLikeIngredient("Salt to taste")     // false
     /// ```
-    static func looksLikeIngredient(_ line: String) -> Bool {
+    nonisolated static func looksLikeIngredient(_ line: String) -> Bool {
         // Empty or whitespace-only lines are not ingredients
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
@@ -102,7 +102,7 @@ struct TextSectionParser {
     /// TextSectionParser.isIngredientSectionHeader("Ingredients:")      // true
     /// TextSectionParser.isIngredientSectionHeader("2 cups flour")      // false
     /// ```
-    static func isIngredientSectionHeader(_ line: String) -> Bool {
+    nonisolated static func isIngredientSectionHeader(_ line: String) -> Bool {
         let lowercased = line.lowercased()
         // Must contain "ingredient" and be relatively short (not a full sentence)
         return lowercased.contains("ingredient") && lowercased.count < 50
@@ -128,7 +128,7 @@ struct TextSectionParser {
     /// TextSectionParser.isStepsSectionHeader("How to make")         // true
     /// TextSectionParser.isStepsSectionHeader("Mix ingredients")     // false
     /// ```
-    static func isStepsSectionHeader(_ line: String) -> Bool {
+    nonisolated static func isStepsSectionHeader(_ line: String) -> Bool {
         let lowercased = line.lowercased()
 
         // First check: if this looks like a numbered step, it's NOT a header

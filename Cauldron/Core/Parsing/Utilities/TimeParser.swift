@@ -24,8 +24,14 @@ struct TimeParser {
         var cookMinutes: Int?
         var totalMinutes: Int?
 
+        nonisolated init(prepMinutes: Int? = nil, cookMinutes: Int? = nil, totalMinutes: Int? = nil) {
+            self.prepMinutes = prepMinutes
+            self.cookMinutes = cookMinutes
+            self.totalMinutes = totalMinutes
+        }
+
         /// Get the best estimate for total time
-        var bestTotalMinutes: Int? {
+        nonisolated var bestTotalMinutes: Int? {
             if let total = totalMinutes {
                 return total
             }
@@ -56,7 +62,7 @@ struct TimeParser {
     /// TimeParser.extractTotalMinutes(from: ["Total time: 1 hour"])
     /// // 60
     /// ```
-    static func extractTotalMinutes(from lines: [String]) -> Int? {
+    nonisolated static func extractTotalMinutes(from lines: [String]) -> Int? {
         let result = extractAllTimes(from: lines)
         return result.bestTotalMinutes
     }
@@ -65,7 +71,7 @@ struct TimeParser {
     ///
     /// - Parameter lines: Array of text lines to search
     /// - Returns: TimeResult with all extracted times
-    static func extractAllTimes(from lines: [String]) -> TimeResult {
+    nonisolated static func extractAllTimes(from lines: [String]) -> TimeResult {
         var result = TimeResult()
 
         for line in lines {
@@ -98,7 +104,7 @@ struct TimeParser {
     }
 
     /// Extract total time from text
-    private static func extractTotalTime(from text: String) -> Int? {
+    nonisolated private static func extractTotalTime(from text: String) -> Int? {
         let patterns = [
             #"total\s*(?:time)?\s*:?\s*"#,
             #"ready\s+in\s*:?\s*"#,
@@ -114,7 +120,7 @@ struct TimeParser {
     }
 
     /// Extract cook time from text
-    private static func extractCookTime(from text: String) -> Int? {
+    nonisolated private static func extractCookTime(from text: String) -> Int? {
         let patterns = [
             #"cook\s*(?:time|ing)?\s*:?\s*"#,
             #"bake\s*(?:time|ing)?\s*:?\s*"#,
@@ -130,7 +136,7 @@ struct TimeParser {
     }
 
     /// Extract prep time from text
-    private static func extractPrepTime(from text: String) -> Int? {
+    nonisolated private static func extractPrepTime(from text: String) -> Int? {
         let patterns = [
             #"prep\s*(?:time|aration)?\s*:?\s*"#,
             #"preparation\s*(?:time)?\s*:?\s*"#
@@ -145,7 +151,7 @@ struct TimeParser {
     }
 
     /// Extract generic time from text (e.g., "Time: 30 min")
-    private static func extractGenericTime(from text: String) -> Int? {
+    nonisolated private static func extractGenericTime(from text: String) -> Int? {
         let patterns = [
             #"^time\s*:?\s*"#,
             #"overnight\s*\(?(\d+)\s*(?:hours?|hrs?)\)?"#
@@ -174,7 +180,7 @@ struct TimeParser {
     }
 
     /// Extract time value after a pattern match
-    private static func extractTimeAfterPattern(_ pattern: String, in text: String) -> Int? {
+    nonisolated private static func extractTimeAfterPattern(_ pattern: String, in text: String) -> Int? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return nil
         }
@@ -203,7 +209,7 @@ struct TimeParser {
     /// - "1 hour", "1 hr", "1 h"
     /// - "1 hour 30 minutes", "1h 30m", "1:30"
     /// - "90" (assumes minutes if standalone number)
-    static func parseTimeString(_ text: String) -> Int? {
+    nonisolated static func parseTimeString(_ text: String) -> Int? {
         let cleaned = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         var totalMinutes = 0

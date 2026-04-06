@@ -17,7 +17,7 @@ import Foundation
 struct YieldParser {
 
     /// Common yield patterns with named capture groups
-    private static let yieldPatterns: [(pattern: String, format: String)] = [
+    nonisolated private static let yieldPatterns: [(pattern: String, format: String)] = [
         // "Serves 4" or "Serves: 4" or "Serves 4-6" or "Serves 4 to 6"
         (#"(?i)\bserves?\s*:?\s*(\d+(?:\s*[-–to]+\s*\d+)?)\b"#, "{number} servings"),
 
@@ -56,7 +56,7 @@ struct YieldParser {
     /// YieldParser.extractYield(from: "Makes about 24 cookies")
     /// // "24 cookies"
     /// ```
-    static func extractYield(from text: String) -> String? {
+    nonisolated static func extractYield(from text: String) -> String? {
         for (pattern, format) in yieldPatterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
                 continue
@@ -118,7 +118,7 @@ struct YieldParser {
     /// - Returns: The formatted yield string, or nil if not found
     ///
     /// Searches lines for common yield patterns and returns the first match.
-    static func extractYieldFromLines(_ lines: [String]) -> String? {
+    nonisolated static func extractYieldFromLines(_ lines: [String]) -> String? {
         // First, look for dedicated yield lines (more reliable)
         let yieldLineKeywords = ["serves", "servings", "yield", "makes", "portions", "for "]
 
@@ -146,7 +146,7 @@ struct YieldParser {
     }
 
     /// Normalize unit names for consistency
-    private static func normalizeUnit(_ unit: String) -> String {
+    nonisolated private static func normalizeUnit(_ unit: String) -> String {
         switch unit.lowercased() {
         case "loaf": return "loaf"
         case "loaves": return "loaves"

@@ -44,7 +44,7 @@ struct RecipeNotesSection: View {
         }
 
         for match in matches.reversed() {
-            if let range = Range(match.range, in: text),
+            if Range(match.range, in: text) != nil,
                let url = match.url {
                 let startIndex = attributedString.characters.index(attributedString.startIndex, offsetBy: match.range.location)
                 let endIndex = attributedString.characters.index(startIndex, offsetBy: match.range.length)

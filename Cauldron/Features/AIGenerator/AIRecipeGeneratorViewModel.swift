@@ -305,14 +305,6 @@ final class AIRecipeGeneratorViewModel {
         // Combine AI-generated tags with selected categories
         // Note: AI no longer generates tags to save context, so we rely on selected categories
         
-        // Add selected categories as tags
-        let selectedCategoryTags = (Array(selectedCuisines) + Array(selectedDiets) +
-                                  Array(selectedTimes) + Array(selectedTypes))
-            .map { $0.tagValue }
-        
-        // Deduplicate
-        let uniqueTags = Array(Set(selectedCategoryTags))
-
         return GeneratedRecipe(
             title: title,
             yields: partial.yields ?? "4 servings",

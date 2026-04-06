@@ -29,7 +29,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testStartSession_SetsStateToActive() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [
@@ -54,7 +54,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testPauseSession_TransitionsToPaused() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -77,7 +77,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testResumeSession_TransitionsBackToCooking() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -101,7 +101,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testEndSession_ResetsToIdle() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -125,7 +125,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testNextStep_IncrementsCurrentStep() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [
@@ -147,7 +147,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testPreviousStep_DecrementsCurrentStep() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [
@@ -170,7 +170,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testPreviousStep_AtFirstStep_ReturnsNil() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -197,7 +197,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testGetCurrentStep_WhenPaused_ReturnsStep() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -293,7 +293,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testEndSession_ClearsAllTimers() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],
@@ -335,7 +335,7 @@ final class CookSessionManagerTests: XCTestCase {
 
     func testPauseSession_PausesAllActiveTimers() async {
         // Given
-        let recipe = await Recipe(
+        let recipe = Recipe(
             title: "Test Recipe",
             ingredients: [],
             steps: [CookStep(index: 0, text: "Step 1")],

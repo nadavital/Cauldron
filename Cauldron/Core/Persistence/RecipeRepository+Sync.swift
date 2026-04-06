@@ -130,7 +130,7 @@ extension RecipeRepository {
             return
         }
 
-        guard let ownerId = recipe.ownerId else {
+        guard recipe.ownerId != nil else {
             logger.warning("Cannot delete from PUBLIC database - missing ownerId: \(recipe.title)")
             return
         }

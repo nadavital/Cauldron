@@ -16,13 +16,13 @@ import Foundation
 /// - `recipe.withOwner(userId, originalCreatorId:originalCreatorName:)` - Creates an independent copy they can edit
 ///
 /// Note: This model is used for browsing shared recipes in the Sharing tab.
-struct SharedRecipe: Codable, Sendable, Hashable, Identifiable {
+struct SharedRecipe: Sendable, Hashable, Identifiable {
     let id: UUID
     let recipe: Recipe
     let sharedBy: User
     let sharedAt: Date
 
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         recipe: Recipe,
         sharedBy: User,
@@ -34,3 +34,5 @@ struct SharedRecipe: Codable, Sendable, Hashable, Identifiable {
         self.sharedAt = sharedAt
     }
 }
+
+extension SharedRecipe: Codable {}

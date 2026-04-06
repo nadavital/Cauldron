@@ -14,7 +14,7 @@ actor SocialRecipeParser: RecipeParser {
     private let htmlFetcher: HTMLFetcher
 
     init(
-        textParser: any ModelRecipeTextParsing = TextRecipeParser(),
+        textParser: any ModelRecipeTextParsing,
         htmlFetcher: @escaping HTMLFetcher = SocialRecipeParser.defaultHTMLFetcher(for:)
     ) {
         self.textParser = textParser

@@ -191,7 +191,7 @@ extension RecipeRepository {
          // 1. No cloud metadata exists (never uploaded), OR
          // 2. Local image was modified after last upload
          let shouldUploadToPrivate: Bool
-         if let cloudImageRecordName = recipe.cloudImageRecordName,
+         if recipe.cloudImageRecordName != nil,
             let imageModifiedAt = recipe.imageModifiedAt,
             let localImageModifiedAt = await imageManager.getImageModificationDate(recipeId: recipe.id) {
              // We have cloud metadata - check if local file is newer
@@ -219,7 +219,7 @@ extension RecipeRepository {
     /// Returns true if image needs to be uploaded (doesn't exist or has been modified)
     internal func shouldUploadImageToPublic(_ recipe: Recipe) async -> Bool {
         // Check if recipe exists in PUBLIC database and already has an image
-        guard let ownerId = recipe.ownerId else {
+        guard recipe.ownerId != nil else {
             return true
         }
 
@@ -298,7 +298,6 @@ extension RecipeRepository {
             return false
         }
 
-        var anySuccess = false
         var allSuccess = true
 
         for recipeId in pendingUploads {
@@ -329,7 +328,6 @@ extension RecipeRepository {
                     await uploadRecipeImage(recipe, to: .public)
                 }
 
-                anySuccess = true
                 imageRetryAttempts.removeValue(forKey: recipeId) // Reset on success
             } catch {
                 logger.error("Retry failed for recipe \(recipeId): \(error.localizedDescription)")
@@ -395,7 +393,6 @@ extension RecipeRepository {
                 logger.info("   New: \(correctFilename)")
 
                 // Check if correct file exists
-                let imageURL = await imageManager.imageURL(for: correctFilename)
                 let fileExists = await imageManager.imageExists(recipeId: model.id)
                 
                 // Note: using model.id which is already UUID, no need to decode

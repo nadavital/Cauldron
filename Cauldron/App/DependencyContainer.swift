@@ -101,7 +101,7 @@ class DependencyContainer: ObservableObject {
     // Background task for image migration (retained to prevent premature cancellation)
     private var migrationTask: Task<Void, Never>?
 
-    nonisolated init(modelContainer: ModelContainer) {
+    init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
 
         // ============================================================
@@ -203,7 +203,10 @@ class DependencyContainer: ObservableObject {
 
         // Parsers
         self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
-        self.htmlParser = HTMLRecipeParser(textParser: textParser)
+        self.htmlParser = HTMLRecipeParser(
+            extractor: ModelImportTextExtractor(),
+            textParser: textParser
+        )
         self.socialParser = SocialRecipeParser(textParser: textParser)
 
         self.recipeImageService = MainActor.assumeIsolated {
@@ -216,18 +219,19 @@ class DependencyContainer: ObservableObject {
         // Note: lazy properties (imageSyncViewModel, operationQueueViewModel,
         // cookModeCoordinator, connectionManager) are initialized on first access
 
-        // Start periodic sync after initialization
-        self.recipeSyncService.startPeriodicSync()
+        if !RuntimeEnvironment.isRunningTests {
+            // Start periodic sync after initialization
+            self.recipeSyncService.startPeriodicSync()
 
-        // Start background image migration after a delay (runs only once)
-        // Store the task to prevent premature cancellation.
-        // Note: This Task intentionally captures `imageMigrationService` directly (not `self`)
-        // to keep the service alive during migration without creating a reference cycle.
-        // The Task is stored in `migrationTask` and cancelled in deinit for clean shutdown.
-        self.migrationTask = Task { [imageMigrationService] in
-            // Wait 10 seconds after app launch to avoid impacting startup
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            await imageMigrationService.startMigration()
+            // Start background image migration after a delay (runs only once).
+            // Store the task to prevent premature cancellation.
+            // Note: This Task intentionally captures `imageMigrationService` directly (not `self`)
+            // to keep the service alive during migration without creating a reference cycle.
+            // The Task is stored in `migrationTask` and cancelled in deinit for clean shutdown.
+            self.migrationTask = Task { [imageMigrationService] in
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                await imageMigrationService.startMigration()
+            }
         }
     }
 
@@ -237,7 +241,7 @@ class DependencyContainer: ObservableObject {
     }
 
     /// Create container with in-memory storage (for previews/testing)
-    nonisolated static func preview() -> DependencyContainer {
+    static func preview() -> DependencyContainer {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
@@ -259,7 +263,7 @@ class DependencyContainer: ObservableObject {
     }
     
     /// Create container with persistent storage
-    nonisolated static func persistent() throws -> DependencyContainer {
+    static func persistent() throws -> DependencyContainer {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
@@ -293,6 +297,10 @@ class DependencyContainer: ObservableObject {
 
 private struct DependencyContainerKey: EnvironmentKey {
     static let defaultValue: DependencyContainer = {
+        if RuntimeEnvironment.isRunningTests {
+            return DependencyContainer.preview()
+        }
+
         do {
             return try DependencyContainer.persistent()
         } catch {

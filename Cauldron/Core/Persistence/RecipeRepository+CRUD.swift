@@ -60,7 +60,7 @@ extension RecipeRepository {
         try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
 
         // Skip CloudKit sync if requested (e.g., when downloading from CloudKit)
-        if skipCloudSync {
+        if skipCloudSync || RuntimeEnvironment.isRunningTests {
             return
         }
 
@@ -267,6 +267,10 @@ extension RecipeRepository {
         // 1. Update recipe in local database (immediate)
         try await updateRecipeInDatabase(recipe, shouldUpdateTimestamp: shouldUpdateTimestamp)
 
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .update,
@@ -373,6 +377,10 @@ extension RecipeRepository {
         // 2. Get updated recipe for background sync
         let recipe = try model.toDomain()
 
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // 3. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .update,
@@ -381,7 +389,7 @@ extension RecipeRepository {
         )
 
         // 4. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
+        Task.detached { [weak self, recipe, recipeCloudService] in
             guard let self = self else { return }
 
             // Sync to CloudKit
@@ -533,6 +541,10 @@ extension RecipeRepository {
 
         logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
 
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .delete,
@@ -541,15 +553,13 @@ extension RecipeRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, recipe, cloudKitCore, recipeCloudService] in
+        Task.detached { [weak self, recipe, recipeCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             var privateDeleteSucceeded = true
-            var publicDeleteSucceeded = true
-
             // Delete image from CloudKit if exists
             // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
             if recipe.imageURL != nil && !recipe.isPreview {
@@ -581,7 +591,6 @@ extension RecipeRepository {
                 do {
                     try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
                 } catch {
-                    publicDeleteSucceeded = false
                     // Only mark failed if private also failed (public deletion is best-effort)
                     if !privateDeleteSucceeded {
                         await self.operationQueueService.markFailed(

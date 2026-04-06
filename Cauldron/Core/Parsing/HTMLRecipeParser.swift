@@ -16,8 +16,8 @@ actor HTMLRecipeParser: RecipeParser {
     private let htmlFetcher: HTMLFetcher
 
     init(
-        extractor: ModelImportTextExtractor = ModelImportTextExtractor(),
-        textParser: any ModelRecipeTextParsing = TextRecipeParser(),
+        extractor: ModelImportTextExtractor,
+        textParser: any ModelRecipeTextParsing,
         htmlFetcher: @escaping HTMLFetcher = HTMLRecipeParser.defaultHTMLFetcher(for:)
     ) {
         self.extractor = extractor

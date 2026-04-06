@@ -8,29 +8,34 @@
 import SwiftUI
 
 private enum RecipeImageLoadingPipeline {
-    static func initialCachedImage(recipeId: UUID?) -> UIImage? {
+    static func initialCachedImage(recipeId: UUID?, variant: String) -> UIImage? {
         guard let recipeId = recipeId else { return nil }
-        let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+        let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: variant)
         return ImageCache.shared.get(cacheKey)
     }
 
     static func areImagesEqual(_ lhs: UIImage, _ rhs: UIImage) -> Bool {
-        if lhs === rhs {
-            return true
-        }
-        return lhs.size == rhs.size && lhs.scale == rhs.scale
+        ImageLoadingPipeline.areImagesEqual(lhs, rhs)
     }
 
     static func loadImage(
         with service: RecipeImageService,
         recipeId: UUID?,
         imageURL: URL?,
-        ownerId: UUID?
+        ownerId: UUID?,
+        targetPixelSize: CGFloat?,
+        cacheVariant: String
     ) async -> Result<UIImage, ImageLoadError> {
         if let recipeId = recipeId {
-            return await service.loadImage(forRecipeId: recipeId, localURL: imageURL, ownerId: ownerId)
+            return await service.loadImage(
+                forRecipeId: recipeId,
+                localURL: imageURL,
+                ownerId: ownerId,
+                targetPixelSize: targetPixelSize,
+                cacheVariant: cacheVariant
+            )
         }
-        return await service.loadImage(from: imageURL)
+        return await service.loadImage(from: imageURL, targetPixelSize: targetPixelSize)
     }
 
     static func applyLoadedImage(
@@ -63,8 +68,17 @@ struct RecipeImageView: View {
     let recipeId: UUID?
     let ownerId: UUID?
 
+    @Environment(\.displayScale) private var displayScale
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
+
+    private var cacheVariant: String {
+        size.cacheVariant
+    }
+
+    private var targetPixelSize: CGFloat? {
+        size.targetPixelSize(displayScale: displayScale)
+    }
 
     init(
         imageURL: URL?,
@@ -82,7 +96,7 @@ struct RecipeImageView: View {
         self.ownerId = ownerId
 
         // Initialize with cache to avoid placeholder flicker on back-navigation.
-        if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId) {
+        if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId, variant: cacheVariant) {
             _loadedImage = State(initialValue: cachedImage)
             _imageOpacity = State(initialValue: 1.0)
         }
@@ -143,7 +157,9 @@ struct RecipeImageView: View {
             with: recipeImageService,
             recipeId: recipeId,
             imageURL: imageURL,
-            ownerId: ownerId
+            ownerId: ownerId,
+            targetPixelSize: targetPixelSize,
+            cacheVariant: cacheVariant
         )
         switch result {
         case .success(let image):
@@ -224,6 +240,28 @@ extension RecipeImageView {
             case .thumbnail: return 20
             }
         }
+
+        var cacheVariant: String {
+            switch self {
+            case .hero: return "hero"
+            case .card: return "card"
+            case .thumbnail: return "thumbnail"
+            case .preview: return "preview"
+            }
+        }
+
+        func targetPixelSize(displayScale: CGFloat) -> CGFloat? {
+            switch self {
+            case .hero:
+                return 900 * displayScale
+            case .card:
+                return max(width ?? 0, height ?? 0) * displayScale
+            case .thumbnail:
+                return max(width ?? 0, height ?? 0) * displayScale
+            case .preview:
+                return 900
+            }
+        }
     }
 }
 
@@ -277,9 +315,21 @@ struct HeroRecipeImageView: View {
     let recipeId: UUID?
     let ownerId: UUID?
 
+    @Environment(\.displayScale) private var displayScale
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
     @State private var containerWidth: CGFloat = 0
+
+    private let cacheVariant = "hero"
+    private var loadTaskKey: String {
+        let recipeKey = recipeId?.uuidString ?? "no-recipe"
+        let imageKey = imageURL?.absoluteString ?? "no-image"
+        let pixelKey = Int(targetPixelSize.rounded(.up))
+        return "\(recipeKey)|\(imageKey)|\(pixelKey)"
+    }
+    private var targetPixelSize: CGFloat {
+        max(containerWidth, 500) * displayScale
+    }
 
     init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
         self.imageURL = imageURL
@@ -287,7 +337,7 @@ struct HeroRecipeImageView: View {
         self.recipeId = recipeId
         self.ownerId = ownerId
 
-        if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId) {
+        if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId, variant: cacheVariant) {
             _loadedImage = State(initialValue: cachedImage)
             _imageOpacity = State(initialValue: 1.0)
         }
@@ -331,13 +381,8 @@ struct HeroRecipeImageView: View {
             guard width > 0 else { return }
             containerWidth = width
         }
-        .task(id: recipeId) {
+        .task(id: loadTaskKey) {
             await loadImage()
-        }
-        .onChange(of: imageURL) { _, _ in
-            Task {
-                await loadImage()
-            }
         }
     }
 
@@ -379,7 +424,9 @@ struct HeroRecipeImageView: View {
             with: recipeImageService,
             recipeId: recipeId,
             imageURL: imageURL,
-            ownerId: ownerId
+            ownerId: ownerId,
+            targetPixelSize: targetPixelSize,
+            cacheVariant: cacheVariant
         )
         switch result {
         case .success(let image):
@@ -405,7 +452,7 @@ private struct HeroImageWidthPreferenceKey: PreferenceKey {
 // MARK: - Preview
 
 #Preview("Card") {
-    let dependencies = try! DependencyContainer.preview()
+    let dependencies = DependencyContainer.preview()
     return VStack(spacing: 20) {
         RecipeImageView(cardImageURL: nil, recipeImageService: dependencies.recipeImageService)
         RecipeImageView(thumbnailImageURL: nil, recipeImageService: dependencies.recipeImageService)

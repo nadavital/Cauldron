@@ -30,7 +30,8 @@ struct CollectionsListView: View {
                                     CollectionCardView(
                                         collection: collection,
                                         recipeImages: recipeImageCache[collection.id] ?? [],
-                                        preferredWidth: nil
+                                        preferredWidth: nil,
+                                        dependencies: dependencies
                                     )
                                 }
                                 .buttonStyle(PlainButtonStyle())

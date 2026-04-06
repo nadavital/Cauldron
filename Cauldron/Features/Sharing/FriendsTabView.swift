@@ -461,7 +461,8 @@ struct FriendsTabView: View {
                         )) {
                             CollectionCardView(
                                 collection: collection,
-                                recipeImages: collectionImageCache[collection.id] ?? []
+                                recipeImages: collectionImageCache[collection.id] ?? [],
+                                dependencies: dependencies
                             )
                         }
                         .buttonStyle(.plain)
@@ -776,7 +777,8 @@ struct AllFriendsCollectionsListView: View {
                         CollectionCardView(
                             collection: collection,
                             recipeImages: collectionImageCache[collection.id] ?? [],
-                            preferredWidth: nil
+                            preferredWidth: nil,
+                            dependencies: dependencies
                         )
                     }
                     .buttonStyle(.plain)

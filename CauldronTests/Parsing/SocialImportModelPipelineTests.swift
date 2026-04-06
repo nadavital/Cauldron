@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class SocialImportModelPipelineTests: XCTestCase {
     override class func setUp() {
         super.setUp()

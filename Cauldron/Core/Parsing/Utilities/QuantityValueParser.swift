@@ -18,7 +18,7 @@ import Foundation
 struct QuantityValueParser {
 
     /// Unicode fraction to decimal mappings
-    private static let unicodeFractions: [String: String] = [
+    nonisolated private static let unicodeFractions: [String: String] = [
         "½": "0.5",
         "¼": "0.25",
         "¾": "0.75",
@@ -43,7 +43,7 @@ struct QuantityValueParser {
     /// QuantityValueParser.parse("2.5")     // 2.5
     /// QuantityValueParser.parse("1-2")     // 1.5 (average)
     /// ```
-    static func parse(_ text: String) -> Double? {
+    nonisolated static func parse(_ text: String) -> Double? {
         var cleaned = text.trimmingCharacters(in: .whitespaces)
         cleaned = normalizeOCRNumericText(cleaned)
 
@@ -96,7 +96,7 @@ struct QuantityValueParser {
         return Double(cleaned)
     }
 
-    private static func parseMixedUnicodeFraction(_ text: String) -> Double? {
+    nonisolated private static func parseMixedUnicodeFraction(_ text: String) -> Double? {
         guard let regex = try? NSRegularExpression(pattern: #"^(\d+)\s*([½¼¾⅓⅔⅛⅜⅝⅞])$"#, options: []) else {
             return nil
         }
@@ -117,7 +117,7 @@ struct QuantityValueParser {
         return whole + fraction
     }
 
-    private static func parseMergedMixedFraction(_ text: String) -> Double? {
+    nonisolated private static func parseMergedMixedFraction(_ text: String) -> Double? {
         guard let regex = try? NSRegularExpression(pattern: #"^([1-9])([1-9])/(\d{1,2})$"#, options: []) else {
             return nil
         }
@@ -147,7 +147,7 @@ struct QuantityValueParser {
         return whole + (numerator / denominator)
     }
 
-    private static func normalizeOCRNumericText(_ text: String) -> String {
+    nonisolated private static func normalizeOCRNumericText(_ text: String) -> String {
         var normalized = text
             .replacingOccurrences(of: "–", with: "-")
             .replacingOccurrences(of: "—", with: "-")

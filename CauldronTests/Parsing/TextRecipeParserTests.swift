@@ -6,6 +6,9 @@
 //
 
 import XCTest
+import UIKit
+import ImageIO
+import UniformTypeIdentifiers
 @testable import Cauldron
 
 @MainActor
@@ -261,7 +264,26 @@ final class TextRecipeParserTests: XCTestCase {
         XCTAssertFalse(recipe.ingredients.contains { $0.name.lowercased().contains("note:") })
     }
 
-    // Note: testHeuristicPrefersIngredientsWithQuantities removed - parser heuristic needs redesign
+    func testParseRecipeWithIngredientsHeaderAndImplicitStepsFallsBackToHeuristic() async throws {
+        let recipeText = """
+        Weeknight Pancakes
+
+        Ingredients:
+        2 cups flour
+        1 egg
+        1 cup milk
+        Whisk the wet and dry ingredients together until smooth.
+        Pour the batter onto a hot skillet.
+        Cook until golden on both sides.
+        """
+
+        let recipe = try await parser.parse(from: recipeText)
+
+        XCTAssertEqual(recipe.title, "Weeknight Pancakes")
+        XCTAssertEqual(recipe.ingredients.count, 3)
+        XCTAssertEqual(recipe.steps.count, 3)
+        XCTAssertTrue(recipe.steps.contains { $0.text.contains("Whisk the wet and dry ingredients together") })
+    }
 
     // MARK: - Timer Extraction Tests
 
@@ -540,5 +562,65 @@ private struct StubRecipeLineClassifier: RecipeLineClassifying, Sendable {
         lines.map { line in
             RecipeLineClassification(line: line, label: forcedLabel, confidence: confidence)
         }
+    }
+}
+
+final class ImageLoadingPipelineTests: XCTestCase {
+    func testDecodeImagePreservesExifOrientationForFullSizeLoads() async throws {
+        let sourceImage = makeSolidImage(color: .red)
+        let imageData = try makeJPEGData(from: sourceImage, orientation: .right)
+
+        let decodedImage = try await ImageLoadingPipeline.decodeImage(from: imageData, maxPixelSize: nil)
+
+        XCTAssertEqual(decodedImage.imageOrientation, .right)
+    }
+
+    func testAreImagesEqualRejectsDifferentContentWithSameDimensions() {
+        let redImage = makeSolidImage(color: .red)
+        let blueImage = makeSolidImage(color: .blue)
+
+        XCTAssertFalse(ImageLoadingPipeline.areImagesEqual(redImage, blueImage))
+    }
+
+    func testAreImagesEqualAcceptsMatchingImageContent() {
+        let redImage1 = makeSolidImage(color: .red)
+        let redImage2 = makeSolidImage(color: .red)
+
+        XCTAssertTrue(ImageLoadingPipeline.areImagesEqual(redImage1, redImage2))
+    }
+
+    private func makeSolidImage(color: UIColor, size: CGSize = CGSize(width: 16, height: 16)) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { context in
+            color.setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func makeJPEGData(from image: UIImage, orientation: CGImagePropertyOrientation) throws -> Data {
+        guard let cgImage = image.cgImage else {
+            XCTFail("Expected UIGraphicsImageRenderer to provide a CGImage-backed UIImage")
+            throw ImageLoadingPipelineError.invalidImageData
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            XCTFail("Failed to create JPEG destination")
+            throw ImageLoadingPipelineError.invalidImageData
+        }
+
+        let properties = [kCGImagePropertyOrientation: orientation.rawValue] as CFDictionary
+        CGImageDestinationAddImage(destination, cgImage, properties)
+
+        guard CGImageDestinationFinalize(destination) else {
+            XCTFail("Failed to finalize JPEG destination")
+            throw ImageLoadingPipelineError.invalidImageData
+        }
+
+        return output as Data
     }
 }

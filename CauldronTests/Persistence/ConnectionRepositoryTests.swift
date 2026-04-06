@@ -398,10 +398,10 @@ final class ConnectionRepositoryTests: XCTestCase {
         try await repository.save(request)
 
         // Verify request is pending
-        var sentRequests = try await repository.fetchSentRequests(fromUserId: user1Id)
+        let sentRequests = try await repository.fetchSentRequests(fromUserId: user1Id)
         XCTAssertEqual(sentRequests.count, 1)
 
-        var receivedRequests = try await repository.fetchReceivedRequests(forUserId: user2Id)
+        let receivedRequests = try await repository.fetchReceivedRequests(forUserId: user2Id)
         XCTAssertEqual(receivedRequests.count, 1)
 
         var areConnected = try await repository.areConnected(user1: user1Id, user2: user2Id)

@@ -66,7 +66,7 @@ actor CloudImageMigration {
             return
         }
 
-        guard migrationStatus == .notStarted else {
+        guard case .notStarted = migrationStatus else {
             logger.info("Migration already started")
             return
         }
@@ -326,20 +326,21 @@ actor CloudImageMigration {
 }
 
 /// Migration status
-enum MigrationStatus: Equatable {
+@preconcurrency
+enum MigrationStatus: Equatable, Sendable {
     case notStarted
     case inProgress(completed: Int, total: Int)
     case completed(migratedCount: Int)
     case failed(String)
 
-    var isInProgress: Bool {
+    nonisolated var isInProgress: Bool {
         if case .inProgress = self {
             return true
         }
         return false
     }
 
-    var description: String {
+    nonisolated var description: String {
         switch self {
         case .notStarted:
             return "Not started"

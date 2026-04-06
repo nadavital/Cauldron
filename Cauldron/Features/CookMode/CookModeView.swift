@@ -107,7 +107,7 @@ struct CookModeView: View {
             // Record in cooking history (only once when starting)
             if coordinator.currentStepIndex == 0 {
                 Task {
-                    try? await dependencies.cookingHistoryRepository.recordCooked(
+                    try? dependencies.cookingHistoryRepository.recordCooked(
                         recipeId: recipe.id,
                         recipeTitle: recipe.title
                     )

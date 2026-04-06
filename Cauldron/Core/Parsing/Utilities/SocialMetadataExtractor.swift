@@ -2,39 +2,39 @@ import Foundation
 
 /// Shared text and metadata helpers used by social import parsers.
 enum SocialMetadataExtractor {
-    private static let recipeKeywords = [
+    nonisolated private static let recipeKeywords = [
         "ingredient", "ingredients", "recipe", "directions", "instructions", "steps",
         "cup", "cups", "tablespoon", "teaspoon", "tbsp", "tsp",
         "bake", "cook", "mix", "stir", "combine", "blend",
         "flour", "sugar", "salt", "pepper", "oil", "butter", "water"
     ]
 
-    static func normalizedLines(from text: String) -> [String] {
+    nonisolated static func normalizedLines(from text: String) -> [String] {
         text.replacingOccurrences(of: "\\n", with: "\n")
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
-    static func looksLikeRecipe(_ text: String) -> Bool {
+    nonisolated static func looksLikeRecipe(_ text: String) -> Bool {
         let lowercased = text.lowercased()
         let keywordCount = recipeKeywords.filter { lowercased.contains($0) }.count
         return keywordCount >= 2
     }
 
-    static func extractMetaContent(from html: String, name: String) -> String? {
+    nonisolated static func extractMetaContent(from html: String, name: String) -> String? {
         let escapedName = NSRegularExpression.escapedPattern(for: name)
         let pattern = "<meta\\s+name=\"\(escapedName)\"\\s+content=\"([^\"]+)\""
         return extractWithRegex(html, pattern: pattern)
     }
 
-    static func extractMetaContent(from html: String, property: String) -> String? {
+    nonisolated static func extractMetaContent(from html: String, property: String) -> String? {
         let escapedProperty = NSRegularExpression.escapedPattern(for: property)
         let pattern = "<meta\\s+property=\"\(escapedProperty)\"\\s+content=\"([^\"]+)\""
         return extractWithRegex(html, pattern: pattern)
     }
 
-    static func extractWithRegex(
+    nonisolated static func extractWithRegex(
         _ text: String,
         pattern: String,
         options: NSRegularExpression.Options = [.caseInsensitive]

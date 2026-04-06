@@ -13,6 +13,7 @@ import CloudKit
 @MainActor
 class RecipeImageService {
     private let imageManager: RecipeImageManager
+    private var inFlightLoads: [String: Task<Result<UIImage, ImageLoadError>, Never>] = [:]
 
     init(imageManager: RecipeImageManager) {
         self.imageManager = imageManager
@@ -24,41 +25,51 @@ class RecipeImageService {
     /// Load an image from a URL (local or remote) with caching
     /// - Parameter url: The URL of the image to load
     /// - Returns: Result containing UIImage or error
-    func loadImage(from url: URL?) async -> Result<UIImage, ImageLoadError> {
+    func loadImage(from url: URL?, targetPixelSize: CGFloat? = nil) async -> Result<UIImage, ImageLoadError> {
         guard let url = url else {
             return .failure(.invalidURL)
         }
 
-        let cacheKey = cacheKey(for: url)
+        let cacheKey = cacheKey(for: url, targetPixelSize: targetPixelSize)
 
         // Check cache first
         if let cachedImage = ImageCache.shared.get(cacheKey) {
             return .success(cachedImage)
         }
 
-        // Load from disk or remote
-        do {
-            let data: Data
-
-            if url.isFileURL {
-                // Local file - load from disk
-                data = try Data(contentsOf: url)
-            } else {
-                // Remote URL - download with retry logic
-                data = try await downloadImageWithRetry(from: url)
-            }
-
-            guard let image = UIImage(data: data) else {
-                return .failure(.invalidImageData)
-            }
-
-            // Cache the loaded image
-            ImageCache.shared.set(cacheKey, image: image)
-
-            return .success(image)
-        } catch {
-            return .failure(.loadFailed(error))
+        if let existingTask = inFlightLoads[cacheKey] {
+            return await existingTask.value
         }
+
+        let loadTask = Task<Result<UIImage, ImageLoadError>, Never> {
+            do {
+                let image: UIImage
+
+                if url.isFileURL {
+                    image = try await ImageLoadingPipeline.loadImage(fromFileURL: url, maxPixelSize: targetPixelSize)
+                } else {
+                    let data = try await self.downloadImageWithRetry(from: url)
+                    image = try await ImageLoadingPipeline.decodeImage(from: data, maxPixelSize: targetPixelSize)
+                }
+
+                await MainActor.run {
+                    ImageCache.shared.set(cacheKey, image: image)
+                }
+
+                return .success(image)
+            } catch let error as ImageLoadError {
+                return .failure(error)
+            } catch ImageLoadingPipelineError.invalidImageData {
+                return .failure(.invalidImageData)
+            } catch {
+                return .failure(.loadFailed(error))
+            }
+        }
+
+        inFlightLoads[cacheKey] = loadTask
+        let result = await loadTask.value
+        inFlightLoads[cacheKey] = nil
+        return result
     }
 
     /// Download image from remote URL with retry logic
@@ -96,7 +107,7 @@ class RecipeImageService {
     /// Load an image from a filename in the RecipeImages directory
     /// - Parameter filename: The filename (e.g., "recipeId.jpg")
     /// - Returns: Result containing UIImage or error
-    func loadImage(filename: String) async -> Result<UIImage, ImageLoadError> {
+    func loadImage(filename: String, targetPixelSize: CGFloat? = nil) async -> Result<UIImage, ImageLoadError> {
         let fileManager = FileManager.default
         guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return .failure(.invalidURL)
@@ -106,7 +117,7 @@ class RecipeImageService {
             .appendingPathComponent("RecipeImages")
             .appendingPathComponent(filename)
 
-        return await loadImage(from: imageURL)
+        return await loadImage(from: imageURL, targetPixelSize: targetPixelSize)
     }
 
     /// Load an image for a recipe with CloudKit fallback
@@ -115,25 +126,36 @@ class RecipeImageService {
     ///   - url: The local URL (optional, for cache key)
     ///   - ownerId: The owner ID of the recipe (to determine which database to use)
     /// - Returns: Result containing UIImage or error
-    func loadImage(forRecipeId recipeId: UUID, localURL url: URL?, ownerId: UUID? = nil) async -> Result<UIImage, ImageLoadError> {
-        let recipeCacheKey = ImageCache.recipeImageKey(recipeId: recipeId)
+    func loadImage(
+        forRecipeId recipeId: UUID,
+        localURL url: URL?,
+        ownerId: UUID? = nil,
+        targetPixelSize: CGFloat? = nil,
+        cacheVariant: String? = nil
+    ) async -> Result<UIImage, ImageLoadError> {
+        let recipeCacheKey = ImageCache.recipeImageKey(
+            recipeId: recipeId,
+            variant: cacheVariant ?? variantKey(for: targetPixelSize)
+        )
 
-        // Recipe-keyed cache check first for instant render on repeat displays
         if let cachedImage = ImageCache.shared.get(recipeCacheKey) {
-            return .success(cachedImage)
+            if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
+                return .success(cachedImage)
+            }
+            ImageCache.shared.remove(recipeCacheKey)
         }
 
         // Try loading from local URL first
         if let url = url {
             // For non-owned recipes, verify file exists before attempting load
-            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            let currentUserId = CurrentUserSession.shared.currentUser?.id
             if let ownerId = ownerId, ownerId != currentUserId {
                 // This is a friend's recipe - check if file exists
                 if !FileManager.default.fileExists(atPath: url.path) {
                     // Skip local load, file doesn't exist for friend's recipe
                     // Fall through to CloudKit
                 } else {
-                    let result = await loadImage(from: url)
+                    let result = await loadImage(from: url, targetPixelSize: targetPixelSize)
                     if case .success(let image) = result {
                         ImageCache.shared.set(recipeCacheKey, image: image)
                         return result
@@ -141,7 +163,7 @@ class RecipeImageService {
                 }
             } else {
                 // Own recipe - try loading normally
-                let result = await loadImage(from: url)
+                let result = await loadImage(from: url, targetPixelSize: targetPixelSize)
                 if case .success(let image) = result {
                     ImageCache.shared.set(recipeCacheKey, image: image)
                     return result
@@ -153,7 +175,7 @@ class RecipeImageService {
         // Strategy: Try both databases - public first (for shared recipes), then private
         do {
             // Determine which database to try first based on ownership
-            let currentUserId = await CurrentUserSession.shared.currentUser?.id
+            let currentUserId = CurrentUserSession.shared.currentUser?.id
             let isOwnRecipe = (ownerId == currentUserId) || (ownerId == nil)
 
             // Try private database first for own recipes, public first for shared recipes
@@ -171,7 +193,7 @@ class RecipeImageService {
                         .appendingPathComponent("RecipeImages")
                         .appendingPathComponent(filename)
 
-                    let result = await loadImage(from: imageURL)
+                    let result = await loadImage(from: imageURL, targetPixelSize: targetPixelSize)
                     if case .success(let image) = result {
                         ImageCache.shared.set(recipeCacheKey, image: image)
                     }
@@ -191,7 +213,12 @@ class RecipeImageService {
         Task {
             for recipeId in recipeIds.prefix(4) {  // Only prefetch first 4 for grid
                 let localURL = await imageManager.imageURL(recipeId: recipeId)
-                _ = await loadImage(forRecipeId: recipeId, localURL: localURL)
+                _ = await loadImage(
+                    forRecipeId: recipeId,
+                    localURL: localURL,
+                    targetPixelSize: 720,
+                    cacheVariant: "card"
+                )
             }
         }
     }
@@ -204,11 +231,42 @@ class RecipeImageService {
     /// Remove a specific image from cache
     func removeFromCache(url: URL?) {
         guard let url = url else { return }
-        ImageCache.shared.remove(cacheKey(for: url))
+        ImageCache.shared.remove(cacheKey(for: url, targetPixelSize: nil))
     }
 
-    private func cacheKey(for url: URL) -> String {
-        "url_\(url.absoluteString)"
+    private func cacheKey(for url: URL, targetPixelSize: CGFloat?) -> String {
+        let sizeKey: String
+        if let targetPixelSize, targetPixelSize > 0 {
+            sizeKey = String(Int(targetPixelSize.rounded(.up)))
+        } else {
+            sizeKey = "full"
+        }
+
+        return "image_\(url.absoluteString)_\(sizeKey)"
+    }
+
+    private func variantKey(for targetPixelSize: CGFloat?) -> String {
+        if let targetPixelSize, targetPixelSize > 0 {
+            return String(Int(targetPixelSize.rounded(.up)))
+        }
+
+        return "full"
+    }
+
+    private func cachedImageSatisfiesRequest(_ image: UIImage, targetPixelSize: CGFloat?) -> Bool {
+        guard let targetPixelSize, targetPixelSize > 0 else {
+            return true
+        }
+
+        let pixelWidth = image.cgImage.map { CGFloat($0.width) } ?? (image.size.width * image.scale)
+        let pixelHeight = image.cgImage.map { CGFloat($0.height) } ?? (image.size.height * image.scale)
+        let longestEdge = max(pixelWidth, pixelHeight)
+
+        guard longestEdge > 0 else {
+            return true
+        }
+
+        return longestEdge + 1 >= targetPixelSize
     }
 }
 

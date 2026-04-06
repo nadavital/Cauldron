@@ -71,7 +71,7 @@ final class ImageSyncViewModel {
             // Subscribe to event stream
             for await event in await imageSyncManager.events {
                 guard !Task.isCancelled else { break }
-                await self.handleSyncEvent(event)
+                self.handleSyncEvent(event)
             }
         }
     }

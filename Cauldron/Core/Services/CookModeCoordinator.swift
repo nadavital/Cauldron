@@ -428,14 +428,10 @@ class CookModeCoordinator {
             lastUpdated: Date()
         )
 
-        do {
-            await activity.update(
-                .init(state: contentState, staleDate: nil)
-            )
-            AppLogger.general.debug("🔄 Updated Live Activity - Step \(currentStepIndex + 1)/\(totalSteps)")
-        } catch {
-            AppLogger.general.error("❌ Failed to update Live Activity: \(error.localizedDescription)")
-        }
+        await activity.update(
+            .init(state: contentState, staleDate: nil)
+        )
+        AppLogger.general.debug("🔄 Updated Live Activity - Step \(currentStepIndex + 1)/\(totalSteps)")
         #endif
     }
 

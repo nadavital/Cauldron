@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents different units of measurement for ingredients
-enum UnitKind: String, Codable, Sendable, CaseIterable {
+enum UnitKind: String, Sendable, CaseIterable {
     // Volume - US
     case teaspoon = "tsp"
     case tablespoon = "tbsp"
@@ -40,7 +40,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
     case can = "can"
     case package = "package"
     
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .teaspoon: return "teaspoon"
         case .tablespoon: return "tablespoon"
@@ -67,7 +67,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
     }
     
     /// Compact abbreviated display name for UI pickers
-    var compactDisplayName: String {
+    nonisolated var compactDisplayName: String {
         switch self {
         case .teaspoon: return "tsp"
         case .tablespoon: return "tbsp"
@@ -93,7 +93,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
         }
     }
     
-    var pluralName: String {
+    nonisolated var pluralName: String {
         switch self {
         case .teaspoon: return "teaspoons"
         case .tablespoon: return "tablespoons"
@@ -119,7 +119,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
         }
     }
     
-    var isVolume: Bool {
+    nonisolated var isVolume: Bool {
         switch self {
         case .teaspoon, .tablespoon, .fluidOunce, .cup, .pint, .quart, .gallon,
              .milliliter, .liter:
@@ -129,7 +129,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
         }
     }
     
-    var isWeight: Bool {
+    nonisolated var isWeight: Bool {
         switch self {
         case .ounce, .pound, .gram, .kilogram:
             return true
@@ -138,7 +138,7 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
         }
     }
     
-    var isMetric: Bool {
+    nonisolated var isMetric: Bool {
         switch self {
         case .milliliter, .liter, .gram, .kilogram:
             return true
@@ -147,3 +147,5 @@ enum UnitKind: String, Codable, Sendable, CaseIterable {
         }
     }
 }
+
+extension UnitKind: Codable {}

@@ -174,16 +174,16 @@ struct ContentView: View {
 
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.isInitialized) { _ in
+        .onChange(of: userSession.isInitialized) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.needsOnboarding) { _ in
+        .onChange(of: userSession.needsOnboarding) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: userSession.needsiCloudSignIn) { _ in
+        .onChange(of: userSession.needsiCloudSignIn) { _, _ in
             maybeShowSplashScreen()
         }
-        .onChange(of: isDataReady) { _ in
+        .onChange(of: isDataReady) { _, _ in
             maybeShowSplashScreen()
         }
     }
@@ -418,8 +418,7 @@ struct ContentView: View {
                             group.addTask {
                                 // Try to load from local file first
                                 if let imageURL = user.profileImageURL,
-                                   let imageData = try? Data(contentsOf: imageURL),
-                                   let image = UIImage(data: imageData) {
+                                   let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: imageURL, maxPixelSize: 300) {
                                     return (user.id, image)
                                 }
 
@@ -427,8 +426,7 @@ struct ContentView: View {
                                 if user.cloudProfileImageRecordName != nil {
                                     do {
                                         if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                                           let imageData = try? Data(contentsOf: downloadedURL),
-                                           let image = UIImage(data: imageData) {
+                                           let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: downloadedURL, maxPixelSize: 300) {
                                             // Downloaded profile image (don't log routine operations)
                                             return (user.id, image)
                                         }
@@ -445,7 +443,7 @@ struct ContentView: View {
                         for await (userId, image) in group {
                             if let image = image {
                                 let cacheKey = ImageCache.profileImageKey(userId: userId)
-                                await ImageCache.shared.set(cacheKey, image: image)
+                                ImageCache.shared.set(cacheKey, image: image)
                             }
                         }
                     }

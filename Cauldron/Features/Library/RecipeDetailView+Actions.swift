@@ -229,7 +229,7 @@ extension RecipeDetailView {
     }
 
     func saveRecipeToLibrary() async {
-        guard let userId = CurrentUserSession.shared.userId else {
+        guard CurrentUserSession.shared.userId != nil else {
             AppLogger.general.error("Cannot save recipe - no current user")
             return
         }
@@ -623,7 +623,7 @@ extension RecipeDetailView {
 
     func checkForRecipeUpdates() async {
         guard let originalRecipeId = recipe.originalRecipeId,
-              let originalOwnerId = recipe.originalCreatorId else {
+              recipe.originalCreatorId != nil else {
             return
         }
 

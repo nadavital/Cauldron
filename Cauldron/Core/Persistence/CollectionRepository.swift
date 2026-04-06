@@ -12,11 +12,11 @@ import os
 // MARK: - Collection Notification Names
 extension Notification.Name {
     /// Posted when collection metadata (name, emoji, color, description, cover image) changes
-    static let collectionMetadataChanged = Notification.Name("CollectionMetadataChanged")
+    nonisolated static let collectionMetadataChanged = Notification.Name("CollectionMetadataChanged")
     /// Posted when collection visibility changes
-    static let collectionUpdated = Notification.Name("CollectionUpdated")
+    nonisolated static let collectionUpdated = Notification.Name("CollectionUpdated")
     /// Posted when recipes in a collection change
-    static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
+    nonisolated static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
 }
 
 /// Thread-safe repository for Collection operations
@@ -42,15 +42,20 @@ actor CollectionRepository {
         self.collectionCloudService = collectionCloudService
         self.operationQueueService = operationQueueService
 
-        // Start retry mechanism for failed syncs
-        startSyncRetryTask()
+        if !RuntimeEnvironment.isRunningTests {
+            setupRecipeVisibilityObserver()
+        }
 
-        // Listen for recipe visibility changes
-        setupRecipeVisibilityObserver()
+        if !RuntimeEnvironment.isRunningTests {
+            // Start retry mechanism for failed syncs after actor initialization completes
+            Task {
+                await self.startSyncRetryTask()
+            }
+        }
     }
 
     /// Setup observer for recipe visibility changes
-    private func setupRecipeVisibilityObserver() {
+    nonisolated private func setupRecipeVisibilityObserver() {
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("RecipeVisibilityChanged"),
             object: nil,
@@ -95,6 +100,10 @@ actor CollectionRepository {
             ]
         )
 
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
+
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(
             type: .create,
@@ -126,6 +135,19 @@ actor CollectionRepository {
     func fetchAll() async throws -> [Collection] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionModel>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+
+        let models = try context.fetch(descriptor)
+        return try models.map { try $0.toDomain() }
+    }
+
+    /// Fetch collections for a specific visibility without loading the full table first.
+    func fetchAll(visibility: RecipeVisibility) async throws -> [Collection] {
+        let context = ModelContext(modelContainer)
+        let visibilityRaw = visibility.rawValue
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { $0.visibility == visibilityRaw },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
 
@@ -207,7 +229,7 @@ actor CollectionRepository {
         // Verify the save by reading it back
         let verifyDescriptor = FetchDescriptor(predicate: predicate)
         if let verified = try context.fetch(verifyDescriptor).first {
-            let verifiedCollection = try verified.toDomain()
+            _ = try verified.toDomain()
             // Verification: collection updated successfully
         }
 
@@ -250,6 +272,10 @@ actor CollectionRepository {
                     "collection": collection
                 ]
             )
+        }
+
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
         }
 
         // 2. Queue operation for background sync
@@ -333,6 +359,10 @@ actor CollectionRepository {
         try context.save()
 
         // Deleted collection locally
+
+        guard !RuntimeEnvironment.isRunningTests else {
+            return
+        }
 
         // 2. Queue operation for background sync
         await operationQueueService.addOperation(

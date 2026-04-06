@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class URLImportModelPipelineTests: XCTestCase {
     func testHTMLImportRoutesThroughSharedModelTextParser() async throws {
         let url = "https://example.com/recipe"

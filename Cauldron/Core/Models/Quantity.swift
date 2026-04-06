@@ -8,19 +8,25 @@
 import Foundation
 
 /// Represents a quantity with a numeric value and unit
-struct Quantity: Codable, Sendable, Hashable {
+struct Quantity: Sendable, Hashable {
     let value: Double
     let upperValue: Double? // For ranges like "2-3 cups"
     let unit: UnitKind
+
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case upperValue
+        case unit
+    }
     
-    init(value: Double, upperValue: Double? = nil, unit: UnitKind) {
+    nonisolated init(value: Double, upperValue: Double? = nil, unit: UnitKind) {
         self.value = value
         self.upperValue = upperValue
         self.unit = unit
     }
     
     /// Display the quantity with proper formatting
-    var displayString: String {
+    nonisolated var displayString: String {
         let formatted = formatValue(value)
         
         let unitStr: String
@@ -36,7 +42,7 @@ struct Quantity: Codable, Sendable, Hashable {
     }
     
     /// Format value as fraction if appropriate
-    private func formatValue(_ value: Double) -> String {
+    nonisolated private func formatValue(_ value: Double) -> String {
         // Handle common fractions
         let fraction = value.truncatingRemainder(dividingBy: 1.0)
         let whole = Int(value)
@@ -61,10 +67,26 @@ struct Quantity: Codable, Sendable, Hashable {
     }
     
     /// Scale the quantity by a factor
-    func scaled(by factor: Double) -> Quantity {
+    nonisolated func scaled(by factor: Double) -> Quantity {
         if let upper = upperValue {
             return Quantity(value: value * factor, upperValue: upper * factor, unit: unit)
         }
         return Quantity(value: value * factor, unit: unit)
     }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.value = try container.decodeIfPresent(Double.self, forKey: .value) ?? 0
+        self.upperValue = try container.decodeIfPresent(Double.self, forKey: .upperValue)
+        self.unit = try container.decodeIfPresent(UnitKind.self, forKey: .unit) ?? .whole
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encodeIfPresent(upperValue, forKey: .upperValue)
+        try container.encode(unit, forKey: .unit)
+    }
 }
+
+extension Quantity: Codable {}

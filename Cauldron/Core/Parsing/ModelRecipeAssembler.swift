@@ -42,6 +42,8 @@ struct ModelRecipeAssembler: Sendable {
         "saute", "season", "serve", "simmer", "stir", "transfer", "whisk", "chop", "dice", "slice", "toss"
     ]
 
+    nonisolated init() {}
+
     nonisolated func assemble(
         rows: [Row],
         sourceURL: URL? = nil,
@@ -320,7 +322,7 @@ struct ModelRecipeAssembler: Sendable {
         )
     }
 
-    private func groupedSections(names: [String?], texts: [String]) -> [SectionItems] {
+    nonisolated private func groupedSections(names: [String?], texts: [String]) -> [SectionItems] {
         var order: [String] = []
         var buckets: [String: [String]] = [:]
 
@@ -338,7 +340,7 @@ struct ModelRecipeAssembler: Sendable {
         }
     }
 
-    private func headerSectionType(for line: String) -> String? {
+    nonisolated private func headerSectionType(for line: String) -> String? {
         let key = headerKey(line)
         if ingredientHeaderPrefixes.contains(key) { return "ingredients" }
         if stepHeaderPrefixes.contains(key) { return "steps" }
@@ -346,7 +348,7 @@ struct ModelRecipeAssembler: Sendable {
         return nil
     }
 
-    private func headerKey(_ line: String) -> String {
+    nonisolated private func headerKey(_ line: String) -> String {
         var lowered = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         lowered = lowered.replacingOccurrences(of: #"^[\W_]+|[\W_]+$"#, with: "", options: .regularExpression)
         if lowered.hasSuffix(":") {
@@ -355,7 +357,7 @@ struct ModelRecipeAssembler: Sendable {
         return lowered
     }
 
-    private func looksLikeSubsectionHeader(_ line: String) -> Bool {
+    nonisolated private func looksLikeSubsectionHeader(_ line: String) -> Bool {
         let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.hasSuffix(":") else { return false }
         let words = text.dropLast().split(whereSeparator: \.isWhitespace)
@@ -365,11 +367,11 @@ struct ModelRecipeAssembler: Sendable {
         return true
     }
 
-    private func looksLikeIngredientLine(_ line: String) -> Bool {
+    nonisolated private func looksLikeIngredientLine(_ line: String) -> Bool {
         line.range(of: #"^[\d\s½¼¾⅓⅔⅛⅜⅝⅞/\.-]+"#, options: .regularExpression) != nil
     }
 
-    private func looksLikeHeaderlessInstruction(_ line: String) -> Bool {
+    nonisolated private func looksLikeHeaderlessInstruction(_ line: String) -> Bool {
         if looksLikeIngredientLine(line) {
             return false
         }
@@ -391,7 +393,7 @@ struct ModelRecipeAssembler: Sendable {
         return false
     }
 
-    private func isOCRArtifactLine(_ text: String) -> Bool {
+    nonisolated private func isOCRArtifactLine(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         if cleaned.isEmpty { return true }
         let lowered = cleaned.lowercased()
@@ -420,7 +422,7 @@ struct ModelRecipeAssembler: Sendable {
         return false
     }
 
-    private func isBoilerplateNoiseLine(_ loweredLine: String) -> Bool {
+    nonisolated private func isBoilerplateNoiseLine(_ loweredLine: String) -> Bool {
         switch loweredLine {
         case "ad", "ads", "advertisement", "sponsored":
             return true
@@ -429,7 +431,7 @@ struct ModelRecipeAssembler: Sendable {
         }
     }
 
-    private func extractTipsRemainder(_ text: String) -> String? {
+    nonisolated private func extractTipsRemainder(_ text: String) -> String? {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return nil }
 
@@ -450,13 +452,13 @@ struct ModelRecipeAssembler: Sendable {
         return nil
     }
 
-    private func normalizeNoteText(_ text: String) -> String {
+    nonisolated private func normalizeNoteText(_ text: String) -> String {
         let cleaned = cleanText(text)
         let trimmed = cleaned.replacingOccurrences(of: #"^[,;:\-•\s]+"#, with: "", options: .regularExpression)
         return cleanText(trimmed)
     }
 
-    private func hasExplicitNotePrefix(_ text: String) -> Bool {
+    nonisolated private func hasExplicitNotePrefix(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         return cleaned.range(
             of: #"^(?:note|notes|tip|tips|pro tip|variation|variations|chef's note|substitution|substitutions)\b[:\-\s]*"#,
@@ -464,7 +466,7 @@ struct ModelRecipeAssembler: Sendable {
         ) != nil
     }
 
-    private func looksLikeNoteFragment(_ text: String) -> Bool {
+    nonisolated private func looksLikeNoteFragment(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return false }
         if hasExplicitNotePrefix(cleaned) {
@@ -483,7 +485,7 @@ struct ModelRecipeAssembler: Sendable {
         return lowered.range(of: #"\b(?:flavor|nutrition|twist|optional|variation|tip|wine)\b"#, options: .regularExpression) != nil
     }
 
-    private func looksLikeStepFragment(_ text: String) -> Bool {
+    nonisolated private func looksLikeStepFragment(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return false }
         if hasExplicitNotePrefix(cleaned) { return false }
@@ -505,7 +507,7 @@ struct ModelRecipeAssembler: Sendable {
         return false
     }
 
-    private func sanitizeIngredientName(_ name: String) -> String {
+    nonisolated private func sanitizeIngredientName(_ name: String) -> String {
         var cleaned = cleanText(name)
         guard !cleaned.isEmpty else { return "" }
 
@@ -536,7 +538,7 @@ struct ModelRecipeAssembler: Sendable {
         return cleanText(cleaned)
     }
 
-    private func shouldDropIngredientEntry(name: String, quantity: Quantity?) -> Bool {
+    nonisolated private func shouldDropIngredientEntry(name: String, quantity: Quantity?) -> Bool {
         let cleaned = cleanText(name)
         if cleaned.isEmpty { return true }
         if isOCRArtifactLine(cleaned) { return true }
@@ -562,9 +564,16 @@ struct ModelRecipeAssembler: Sendable {
         let prepMinutes: Int?
         let cookMinutes: Int?
         let totalMinutes: Int?
+
+        nonisolated init(yields: String?, prepMinutes: Int?, cookMinutes: Int?, totalMinutes: Int?) {
+            self.yields = yields
+            self.prepMinutes = prepMinutes
+            self.cookMinutes = cookMinutes
+            self.totalMinutes = totalMinutes
+        }
     }
 
-    private func extractMetadataLine(_ text: String) -> MetadataLine? {
+    nonisolated private func extractMetadataLine(_ text: String) -> MetadataLine? {
         var yields: String?
         var prep: Int?
         var cook: Int?
@@ -582,7 +591,7 @@ struct ModelRecipeAssembler: Sendable {
         return MetadataLine(yields: yields, prepMinutes: prep, cookMinutes: cook, totalMinutes: total)
     }
 
-    private func extractMinutesByPattern(_ text: String, pattern: String) -> Int? {
+    nonisolated private func extractMinutesByPattern(_ text: String, pattern: String) -> Int? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
         }
@@ -596,7 +605,7 @@ struct ModelRecipeAssembler: Sendable {
         return TimeParser.parseTimeString(tail)
     }
 
-    private func extractYieldLine(_ text: String) -> String? {
+    nonisolated private func extractYieldLine(_ text: String) -> String? {
         let lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let prefixes = ["serves", "serving", "servings", "yield", "yields", "makes", "portion", "portions"]
         let matches = prefixes.contains { key in
@@ -617,7 +626,7 @@ struct ModelRecipeAssembler: Sendable {
         return "\(number) servings"
     }
 
-    private func looksLikeRecipeTitle(_ text: String) -> Bool {
+    nonisolated private func looksLikeRecipeTitle(_ text: String) -> Bool {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return false }
         if extractTipsRemainder(cleaned) != nil { return false }
@@ -641,7 +650,7 @@ struct ModelRecipeAssembler: Sendable {
         return matches.count >= 2 && matches.count <= 16
     }
 
-    private func splitNumberedSteps(_ text: String) -> [String] {
+    nonisolated private func splitNumberedSteps(_ text: String) -> [String] {
         let cleaned = cleanText(text)
         guard !cleaned.isEmpty else { return [] }
 
@@ -666,7 +675,7 @@ struct ModelRecipeAssembler: Sendable {
         return parts.isEmpty ? [cleaned] : parts
     }
 
-    private func stripStepNumberPrefix(_ text: String) -> String {
+    nonisolated private func stripStepNumberPrefix(_ text: String) -> String {
         var cleaned = cleanText(text)
         cleaned = cleaned.replacingOccurrences(of: #"^\s*[•·▪◦●]+\s*"#, with: "", options: .regularExpression)
         cleaned = cleaned.replacingOccurrences(of: #"^\s*\d{1,2}\s*[.)]\s*"#, with: "", options: .regularExpression)
@@ -674,7 +683,7 @@ struct ModelRecipeAssembler: Sendable {
         return cleanText(cleaned)
     }
 
-    private func mergeWrappedSteps(_ steps: [CookStep]) -> [CookStep] {
+    nonisolated private func mergeWrappedSteps(_ steps: [CookStep]) -> [CookStep] {
         var merged: [CookStep] = []
         for step in steps {
             let text = cleanText(step.text)
@@ -718,7 +727,7 @@ struct ModelRecipeAssembler: Sendable {
         }
     }
 
-    private func looksLikeStepContinuation(previous: String, current: String) -> Bool {
+    nonisolated private func looksLikeStepContinuation(previous: String, current: String) -> Bool {
         let prev = cleanText(previous)
         let curr = cleanText(current)
         guard !prev.isEmpty, !curr.isEmpty else { return false }
@@ -733,7 +742,7 @@ struct ModelRecipeAssembler: Sendable {
         return false
     }
 
-    private func mergeWrappedIngredients(_ ingredients: [Ingredient]) -> [Ingredient] {
+    nonisolated private func mergeWrappedIngredients(_ ingredients: [Ingredient]) -> [Ingredient] {
         var merged: [Ingredient] = []
         for ingredient in ingredients {
             let name = cleanText(ingredient.name)
@@ -766,7 +775,7 @@ struct ModelRecipeAssembler: Sendable {
         return merged
     }
 
-    private func looksLikeIngredientContinuation(previous: Ingredient, current: Ingredient) -> Bool {
+    nonisolated private func looksLikeIngredientContinuation(previous: Ingredient, current: Ingredient) -> Bool {
         if previous.section != current.section { return false }
         if current.quantity != nil { return false }
         if !current.additionalQuantities.isEmpty { return false }
@@ -788,7 +797,7 @@ struct ModelRecipeAssembler: Sendable {
         return false
     }
 
-    private func inferSauceSectionSplit(ingredients: inout [Ingredient], steps: [CookStep]) {
+    nonisolated private func inferSauceSectionSplit(ingredients: inout [Ingredient], steps: [CookStep]) {
         if ingredients.count < 6 { return }
         if ingredients.contains(where: { $0.section != nil }) { return }
 
@@ -834,7 +843,7 @@ struct ModelRecipeAssembler: Sendable {
         }
     }
 
-    private func cleanText(_ value: String) -> String {
+    nonisolated private func cleanText(_ value: String) -> String {
         value
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

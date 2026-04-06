@@ -50,10 +50,12 @@ actor OperationQueueService {
         }
         self.eventContinuation = continuation
 
-        // Load persisted operations
-        Task {
-            await self.loadPersistedOperations()
-            await self.startRetryLoop()
+        if !RuntimeEnvironment.isRunningTests {
+            // Load persisted operations
+            Task {
+                await self.loadPersistedOperations()
+                await self.startRetryLoop()
+            }
         }
     }
 
@@ -257,6 +259,11 @@ actor OperationQueueService {
 
     /// Load operations from UserDefaults
     private func loadPersistedOperations() {
+        guard !RuntimeEnvironment.isRunningTests else {
+            operations.removeAll()
+            return
+        }
+
         guard let data = UserDefaults.standard.data(forKey: persistenceKey),
               let loaded = try? JSONDecoder().decode([UUID: SyncOperation].self, from: data) else {
             // No persisted operations found (routine)
@@ -309,6 +316,8 @@ actor OperationQueueService {
 
     /// Persist operations to UserDefaults
     private func persistOperations() {
+        guard !RuntimeEnvironment.isRunningTests else { return }
+
         guard let data = try? JSONEncoder().encode(operations) else {
             AppLogger.general.error("Failed to encode operations for persistence")
             return
@@ -319,13 +328,15 @@ actor OperationQueueService {
 
     /// Start the retry loop that processes pending operations
     private func startRetryLoop() {
+        guard !RuntimeEnvironment.isRunningTests else { return }
+
         // Cancel existing task if any
         retryTask?.cancel()
 
         retryTask = Task {
             while !Task.isCancelled {
                 // Process operations that are ready for retry
-                await processReadyOperations()
+                processReadyOperations()
 
                 // Wait 30 seconds before next check
                 try? await Task.sleep(for: .seconds(30))

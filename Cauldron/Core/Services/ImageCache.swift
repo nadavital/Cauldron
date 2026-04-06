@@ -21,6 +21,7 @@ class ImageCache {
 
     // L2: Disk cache directory
     private let diskCacheDirectory: URL
+    private var trackedKeys = Set<String>()
 
     private let logger = Logger(subsystem: "com.cauldron", category: "ImageCache")
 
@@ -69,6 +70,7 @@ class ImageCache {
 
         // L1: Check memory cache first
         if let memoryImage = memoryCache.object(forKey: cacheKey) {
+            trackedKeys.insert(key)
             return memoryImage
         }
 
@@ -77,6 +79,7 @@ class ImageCache {
             // Promote to memory cache for faster future access
             let cost = estimateImageCost(diskImage)
             memoryCache.setObject(diskImage, forKey: cacheKey, cost: cost)
+            trackedKeys.insert(key)
             return diskImage
         }
 
@@ -90,6 +93,7 @@ class ImageCache {
 
         // L1: Store in memory cache
         memoryCache.setObject(image, forKey: cacheKey, cost: cost)
+        trackedKeys.insert(key)
 
         // L2: Store to disk asynchronously
         Task.detached(priority: .background) {
@@ -103,6 +107,7 @@ class ImageCache {
 
         // Remove from memory
         memoryCache.removeObject(forKey: cacheKey)
+        trackedKeys.remove(key)
 
         // Remove from disk
         let fileURL = diskCacheURL(for: key)
@@ -113,6 +118,7 @@ class ImageCache {
     func clear() {
         // Clear memory cache
         memoryCache.removeAllObjects()
+        trackedKeys.removeAll()
 
         // Clear disk cache
         do {
@@ -129,32 +135,13 @@ class ImageCache {
     /// Clear all profile images from cache
     /// Useful when refreshing friend data to force reload
     func clearProfileImages() {
-        // Clear from memory - we need to track keys ourselves since NSCache doesn't expose them
-        // For now, clear all memory and let profile images reload from disk or network
-        memoryCache.removeAllObjects()
-
-        // Clear all disk cache for profile images
-        // Since we hash keys, we can't easily identify profile-only files
-        // Profile images will reload from CloudKit as needed
-        do {
-            let files = try FileManager.default.contentsOfDirectory(at: diskCacheDirectory, includingPropertiesForKeys: nil)
-            var removedCount = 0
-            for file in files {
-                try? FileManager.default.removeItem(at: file)
-                removedCount += 1
-            }
-            logger.info("🗑️ Cleared \(removedCount) profile images from cache")
-        } catch {
-            logger.error("Failed to clear profile images from disk: \(error.localizedDescription)")
-        }
+        remove(keys: trackedKeys.filter { $0.hasPrefix("profile_") })
     }
 
     /// Clear all recipe images from cache
     /// Useful when refreshing recipe data to force reload
     func clearRecipeImages() {
-        // Similar to clearProfileImages - clear memory and disk
-        memoryCache.removeAllObjects()
-        logger.info("🗑️ Cleared recipe images from memory cache")
+        remove(keys: trackedKeys.filter { $0.hasPrefix("recipe_") || $0.hasPrefix("image_") })
     }
 
     /// Generate cache key for user profile image
@@ -163,8 +150,8 @@ class ImageCache {
     }
 
     /// Generate cache key for recipe image
-    static func recipeImageKey(recipeId: UUID) -> String {
-        return "recipe_\(recipeId.uuidString)"
+    static func recipeImageKey(recipeId: UUID, variant: String = "default") -> String {
+        return "recipe_\(recipeId.uuidString)_\(variant)"
     }
 
     /// Generate cache key for collection cover image
@@ -191,6 +178,20 @@ class ImageCache {
     private func estimateImageCost(_ image: UIImage) -> Int {
         guard let cgImage = image.cgImage else { return 0 }
         return cgImage.bytesPerRow * cgImage.height
+    }
+
+    private func remove(keys: some Sequence<String>) {
+        var removedCount = 0
+        for key in keys {
+            memoryCache.removeObject(forKey: key as NSString)
+            trackedKeys.remove(key)
+            try? FileManager.default.removeItem(at: diskCacheURL(for: key))
+            removedCount += 1
+        }
+
+        if removedCount > 0 {
+            logger.info("🗑️ Cleared \(removedCount) cached images")
+        }
     }
 
     /// Load image from disk cache
@@ -252,5 +253,15 @@ class ImageCache {
         } catch {
             // Ignore errors during cleanup
         }
+    }
+}
+
+private extension UIImage {
+    var cacheCost: Int {
+        guard let cgImage else {
+            return 1
+        }
+
+        return cgImage.bytesPerRow * cgImage.height
     }
 }

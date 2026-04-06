@@ -80,7 +80,7 @@ struct RecipeRowView: View {
 }
 
 #Preview {
-    let dependencies = try! DependencyContainer.preview()
+    let dependencies = DependencyContainer.preview()
     return NavigationStack {
         List {
             RecipeRowView(

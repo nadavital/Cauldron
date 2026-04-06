@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents an ingredient in a recipe
-struct Ingredient: Codable, Sendable, Hashable, Identifiable {
+struct Ingredient: Sendable, Hashable, Identifiable {
     let id: UUID
     let name: String
     let quantity: Quantity?
@@ -16,7 +16,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
     let note: String?
     let section: String? // e.g. "Dough", "Filling"
     
-    init(
+    nonisolated init(
         id: UUID = UUID(),
         name: String,
         quantity: Quantity? = nil,
@@ -41,7 +41,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         case section
     }
 
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
@@ -51,7 +51,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         self.section = try container.decodeIfPresent(String.self, forKey: .section)
     }
 
-    func encode(to encoder: Encoder) throws {
+    nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
@@ -63,7 +63,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(section, forKey: .section)
     }
 
-    var allQuantities: [Quantity] {
+    nonisolated var allQuantities: [Quantity] {
         var result: [Quantity] = []
         if let quantity {
             result.append(quantity)
@@ -72,7 +72,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         return result
     }
     
-    var displayString: String {
+    nonisolated var displayString: String {
         var result = ""
         let quantityText = allQuantities.map(\.displayString).joined(separator: " + ")
         if !quantityText.isEmpty {
@@ -86,7 +86,7 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Scale the ingredient by a factor
-    func scaled(by factor: Double) -> Ingredient {
+    nonisolated func scaled(by factor: Double) -> Ingredient {
         Ingredient(
             id: id,
             name: name,
@@ -97,3 +97,5 @@ struct Ingredient: Codable, Sendable, Hashable, Identifiable {
         )
     }
 }
+
+extension Ingredient: Codable {}

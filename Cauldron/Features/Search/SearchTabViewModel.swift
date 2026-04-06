@@ -413,21 +413,17 @@ import os
     private func groupRecipesByTags() {
         var grouped: [String: [Recipe]] = [:]
         var tagCounts: [String: Int] = [:]
+        var seenRecipeIdsByTag: [String: Set<UUID>] = [:]
         
         for recipe in allRecipes {
             for tag in recipe.tags {
                 // Normalize tag name for grouping (Title Case)
                 let normalizedName = tag.name.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
-                
-                if grouped[normalizedName] == nil {
-                    grouped[normalizedName] = []
+
+                if seenRecipeIdsByTag[normalizedName, default: []].insert(recipe.id).inserted {
+                    grouped[normalizedName, default: []].append(recipe)
+                    tagCounts[normalizedName, default: 0] += 1
                 }
-                // Only add if not already in this tag's list
-                if !(grouped[normalizedName]?.contains(where: { $0.id == recipe.id }) ?? false) {
-                    grouped[normalizedName]?.append(recipe)
-                }
-                
-                tagCounts[normalizedName, default: 0] += 1
             }
         }
         

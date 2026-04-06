@@ -8,25 +8,25 @@
 import Foundation
 
 /// Defines who can see a recipe
-enum RecipeVisibility: String, Codable, Sendable, CaseIterable {
+enum RecipeVisibility: String, Sendable, CaseIterable {
     case privateRecipe = "private"
     case publicRecipe = "public"
 
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .privateRecipe: return "Private"
         case .publicRecipe: return "Public"
         }
     }
 
-    var description: String {
+    nonisolated var description: String {
         switch self {
         case .privateRecipe: return "Only you can see this recipe"
         case .publicRecipe: return "Anyone can discover and view this recipe"
         }
     }
 
-    var icon: String {
+    nonisolated var icon: String {
         switch self {
         case .privateRecipe: return "lock.fill"
         case .publicRecipe: return "globe"
@@ -36,7 +36,7 @@ enum RecipeVisibility: String, Codable, Sendable, CaseIterable {
     // MARK: - Migration Support
 
     /// Custom decoder to handle legacy "friends" visibility by migrating to "public"
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
 
@@ -54,3 +54,5 @@ enum RecipeVisibility: String, Codable, Sendable, CaseIterable {
         }
     }
 }
+
+extension RecipeVisibility: Codable {}

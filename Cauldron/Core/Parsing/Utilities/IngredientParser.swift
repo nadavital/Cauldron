@@ -14,8 +14,8 @@ import Foundation
 /// - "1/2 tsp salt" → Ingredient(quantity: 0.5 tsp, name: "salt")
 /// - "Salt to taste" → Ingredient(quantity: nil, name: "Salt to taste")
 struct IngredientParser {
-    private static let mixedUnitPattern = #"^([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s*(?:plus|and|&|\+)\s*([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s+(.+)$"#
-    private static let rangePattern = #"^([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s*(?:to|-|–|—)\s*([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s+(.+)$"#
+    nonisolated private static let mixedUnitPattern = #"^([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s*(?:plus|and|&|\+)\s*([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s+(.+)$"#
+    nonisolated private static let rangePattern = #"^([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s*(?:to|-|–|—)\s*([0-9\s½¼¾⅓⅔⅛⅜⅝⅞/\.\-]+)\s+([a-zA-Z]+[.,]?)\s+(.+)$"#
 
     /// Parse ingredient text into structured Ingredient
     ///
@@ -30,7 +30,7 @@ struct IngredientParser {
     /// IngredientParser.parseIngredientText("Salt to taste")
     /// // Ingredient(quantity: nil, name: "Salt to taste")
     /// ```
-    static func parseIngredientText(_ text: String) -> Ingredient {
+    nonisolated static func parseIngredientText(_ text: String) -> Ingredient {
         let cleaned = normalizeQuantityUnitSpacing(
             normalizeOCRIngredientText(text.trimmingCharacters(in: .whitespaces))
         )
@@ -57,7 +57,7 @@ struct IngredientParser {
         return Ingredient(name: cleaned, quantity: nil)
     }
 
-    private static func extractComplexQuantities(from text: String) -> ([Quantity], String)? {
+    nonisolated private static func extractComplexQuantities(from text: String) -> ([Quantity], String)? {
         if let mixed = parseMixedUnits(from: text) {
             return mixed
         }
@@ -70,7 +70,7 @@ struct IngredientParser {
         return nil
     }
 
-    private static func normalizeQuantityUnitSpacing(_ text: String) -> String {
+    nonisolated private static func normalizeQuantityUnitSpacing(_ text: String) -> String {
         var normalized = text
         normalized = replacing(pattern: #"(?<=\d)(?=[A-Za-z])"#, in: normalized, with: " ")
         normalized = replacing(pattern: #"(?<=[A-Za-z])(?=\d)"#, in: normalized, with: " ")
@@ -79,7 +79,7 @@ struct IngredientParser {
         return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func normalizeOCRIngredientText(_ text: String) -> String {
+    nonisolated private static func normalizeOCRIngredientText(_ text: String) -> String {
         var normalized = text
         normalized = replacing(pattern: #"^\s*[•·▪◦●\-–—]+\s*"#, in: normalized, with: "")
         normalized = replacing(pattern: #"^\s*/+\s*(?=(?:\d+\s*/\s*\d+|[½¼¾⅓⅔⅛⅜⅝⅞]))"#, in: normalized, with: "")
@@ -91,7 +91,7 @@ struct IngredientParser {
         return normalized
     }
 
-    private static func replacing(pattern: String, in text: String, with replacement: String) -> String {
+    nonisolated private static func replacing(pattern: String, in text: String, with replacement: String) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return text
         }
@@ -99,7 +99,7 @@ struct IngredientParser {
         return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
     }
 
-    private static func parseMixedUnits(from text: String) -> ([Quantity], String)? {
+    nonisolated private static func parseMixedUnits(from text: String) -> ([Quantity], String)? {
         guard let match = firstMatch(pattern: mixedUnitPattern, text: text),
               match.count == 6 else {
             return nil
@@ -124,7 +124,7 @@ struct IngredientParser {
         return ([firstQuantity, secondQuantity], ingredientName)
     }
 
-    private static func parseRange(from text: String) -> ([Quantity], String)? {
+    nonisolated private static func parseRange(from text: String) -> ([Quantity], String)? {
         guard let match = firstMatch(pattern: rangePattern, text: text),
               match.count == 5 else {
             return nil
@@ -168,7 +168,7 @@ struct IngredientParser {
         return ([quantity], finalName)
     }
 
-    private static func parseSlashAlternatives(from text: String) -> ([Quantity], String)? {
+    nonisolated private static func parseSlashAlternatives(from text: String) -> ([Quantity], String)? {
         guard text.contains("/") else {
             return nil
         }
@@ -227,7 +227,7 @@ struct IngredientParser {
         return (quantities, ingredientName)
     }
 
-    private static func isQuantityPrefixToken(_ token: String) -> Bool {
+    nonisolated private static func isQuantityPrefixToken(_ token: String) -> Bool {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return false
@@ -246,7 +246,7 @@ struct IngredientParser {
         return UnitParser.parse(cleaned) != nil
     }
 
-    private static func parseQuantitySegment(_ segment: String) -> [Quantity] {
+    nonisolated private static func parseQuantitySegment(_ segment: String) -> [Quantity] {
         let tokens = segment
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
@@ -295,7 +295,7 @@ struct IngredientParser {
         return quantities
     }
 
-    private static func firstMatch(pattern: String, text: String) -> [String]? {
+    nonisolated private static func firstMatch(pattern: String, text: String) -> [String]? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return nil
         }
@@ -333,7 +333,7 @@ struct IngredientParser {
     /// extractQuantityAndUnit(from: "1/2 tsp salt, divided")
     /// // (Quantity(value: 0.5, unit: .teaspoon), "salt, divided")
     /// ```
-    static func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
+    nonisolated static func extractQuantityAndUnit(from text: String) -> (Quantity, String)? {
         // Pattern to match quantity at the start: number (possibly with fraction or unicode fraction)
         // followed by optional unit
         // Examples: "2 cups", "1/2 cup", "1 ½ cups", "2½ tablespoons", "200g", "1-2 teaspoons"

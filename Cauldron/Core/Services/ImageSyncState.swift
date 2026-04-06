@@ -34,7 +34,7 @@ enum ImageSyncState: Sendable {
     /// Image sync failed with an error
     case error(String)
 
-    var description: String {
+    nonisolated var description: String {
         switch self {
         case .synced:
             return "Synced"
@@ -73,7 +73,9 @@ actor ImageSyncManager {
         self.eventContinuation = continuation
 
         // Load persisted pending operations
-        loadPendingOperations()
+        Task {
+            await self.loadPendingOperations()
+        }
     }
 
     /// Subscribe to sync events

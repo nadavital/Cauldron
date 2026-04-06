@@ -8,11 +8,11 @@
 import Foundation
 
 /// Represents a tag for categorizing recipes
-struct Tag: Codable, Sendable, Hashable, Identifiable {
+struct Tag: Sendable, Hashable, Identifiable {
     let id: UUID
     let name: String
     
-    init(id: UUID = UUID(), name: String) {
+    nonisolated init(id: UUID = UUID(), name: String) {
         self.id = id
         
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,12 +27,12 @@ struct Tag: Codable, Sendable, Hashable, Identifiable {
     }
     
     /// Create a tag from a string
-    static func from(_ string: String) -> Tag {
+    nonisolated static func from(_ string: String) -> Tag {
         Tag(name: string)
     }
     
     /// Common tags to suggest to users
-    static let commonTags: [String] = [
+    nonisolated static let commonTags: [String] = [
         "Breakfast", "Lunch", "Dinner", "Dessert", "Snack",
         "Vegetarian", "Vegan", "Gluten-Free", "Keto", "Paleo",
         "Quick & Easy", "Healthy", "Comfort Food", "Baking",
@@ -40,8 +40,10 @@ struct Tag: Codable, Sendable, Hashable, Identifiable {
     ]
 }
 
+extension Tag: Codable {}
+
 extension Tag: Comparable {
-    static func < (lhs: Tag, rhs: Tag) -> Bool {
+    nonisolated static func < (lhs: Tag, rhs: Tag) -> Bool {
         lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
     }
 }
