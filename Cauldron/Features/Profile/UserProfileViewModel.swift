@@ -17,16 +17,25 @@ import os
     var showError = false
     var errorMessage = ""
     var isProcessing = false
-    var userRecipes: [SharedRecipe] = []
+    var userRecipes: [SharedRecipe] = [] {
+        didSet {
+            rebuildFilteredRecipes()
+        }
+    }
     var isLoadingRecipes = false
     var userCollections: [Collection] = []
     var isLoadingCollections = false
     var connections: [ManagedConnection] = []
     var isLoadingConnections = false
     var usersMap: [UUID: User] = [:]
-    var searchText = ""
+    var searchText = "" {
+        didSet {
+            rebuildFilteredRecipes()
+        }
+    }
     var userTier: UserTier = .apprentice
     var userRecipeCount: Int = 0
+    private(set) var filteredRecipes: [SharedRecipe] = []
 
     let user: User
     let dependencies: DependencyContainer
@@ -182,7 +191,6 @@ import os
                connectionState: connectionState
            ) {
             userRecipes = cachedRecipes
-            updateTierFromRecipes()
             recipeImageURLsById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
             }
@@ -265,17 +273,6 @@ import os
 
         // Sort by updated date (most recent first)
         return sharedRecipes.sorted { $0.sharedAt > $1.sharedAt }
-    }
-
-    var filteredRecipes: [SharedRecipe] {
-        guard !searchText.isEmpty else { return userRecipes }
-
-        let lowercased = searchText.lowercased()
-        return userRecipes.filter { sharedRecipe in
-            sharedRecipe.recipe.title.lowercased().contains(lowercased) ||
-            sharedRecipe.recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) }) ||
-            sharedRecipe.recipe.ingredients.contains(where: { $0.name.lowercased().contains(lowercased) })
-        }
     }
 
     // MARK: - Collection Fetching
@@ -375,5 +372,22 @@ import os
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func getRecipeImages(for collection: Collection) async -> [URL?] {
         Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
+    }
+
+    private func rebuildFilteredRecipes() {
+        let normalizedQuery = searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard !normalizedQuery.isEmpty else {
+            filteredRecipes = userRecipes
+            return
+        }
+
+        filteredRecipes = userRecipes.filter { sharedRecipe in
+            sharedRecipe.recipe.title.lowercased().contains(normalizedQuery) ||
+            sharedRecipe.recipe.tags.contains(where: { $0.name.lowercased().contains(normalizedQuery) }) ||
+            sharedRecipe.recipe.ingredients.contains(where: { $0.name.lowercased().contains(normalizedQuery) })
+        }
     }
 }

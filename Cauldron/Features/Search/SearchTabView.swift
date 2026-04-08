@@ -57,19 +57,13 @@ struct SearchTabView: View {
             await viewModel.loadData()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
-            Task {
-                await viewModel.refreshLocalRecipeData()
-            }
+            viewModel.scheduleLocalRecipeRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
-            Task {
-                await viewModel.refreshLocalRecipeData()
-            }
+            viewModel.scheduleLocalRecipeRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
-            Task {
-                await viewModel.refreshLocalRecipeData()
-            }
+            viewModel.scheduleLocalRecipeRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in
             // Switch to People search mode when coming from Friends empty state

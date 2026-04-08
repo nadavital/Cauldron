@@ -269,21 +269,43 @@ actor RecipeCloudService {
     func querySharedRecipes(
         ownerIds: [UUID]?,
         visibility: RecipeVisibility,
+        requiredTag: String? = nil,
         includeDerivedCopies: Bool = true,
         limit: Int = 100
     ) async throws -> [Recipe] {
         let db = try await core.getPublicDatabase()
 
         let predicate: NSPredicate
+        let normalizedTag = requiredTag?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasRequiredTag = !(normalizedTag?.isEmpty ?? true)
+
         if let ownerIds = ownerIds, !ownerIds.isEmpty {
             let ownerIdStrings = ownerIds.map { $0.uuidString }
-            predicate = NSPredicate(
-                format: "ownerId IN %@ AND visibility == %@",
-                ownerIdStrings,
-                visibility.rawValue
-            )
+            if let normalizedTag, hasRequiredTag {
+                predicate = NSPredicate(
+                    format: "ownerId IN %@ AND visibility == %@ AND ANY searchableTags == %@",
+                    ownerIdStrings,
+                    visibility.rawValue,
+                    normalizedTag
+                )
+            } else {
+                predicate = NSPredicate(
+                    format: "ownerId IN %@ AND visibility == %@",
+                    ownerIdStrings,
+                    visibility.rawValue
+                )
+            }
         } else {
-            predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
+            if let normalizedTag, hasRequiredTag {
+                predicate = NSPredicate(
+                    format: "visibility == %@ AND ANY searchableTags == %@",
+                    visibility.rawValue,
+                    normalizedTag
+                )
+            } else {
+                predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
+            }
         }
 
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)

@@ -34,6 +34,7 @@ import os
     @ObservationIgnored private var cancellables = Set<AnyCancellable>()
     @ObservationIgnored private var recipeSearchTask: Task<Void, Never>?
     @ObservationIgnored private var peopleSearchTask: Task<Void, Never>?
+    @ObservationIgnored private var localRecipeRefreshTask: Task<Void, Never>?
     @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
 
     // Search results caching
@@ -126,6 +127,15 @@ import os
             processSearchResults()
         } catch {
             AppLogger.general.error("Failed to refresh local recipe data: \(error.localizedDescription)")
+        }
+    }
+
+    func scheduleLocalRecipeRefresh() {
+        localRecipeRefreshTask?.cancel()
+        localRecipeRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshLocalRecipeData()
         }
     }
 
