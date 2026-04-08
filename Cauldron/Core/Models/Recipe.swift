@@ -35,6 +35,8 @@ struct Recipe: Sendable, Hashable, Identifiable {
     let originalCreatorId: UUID?  // ID of the user who originally created this recipe (if copied)
     let originalCreatorName: String?  // Display name of the original creator (cached for performance)
     let savedAt: Date?  // When this recipe was saved/copied (if it's a copy)
+    let sourceRecipeUpdatedAt: Date?  // Version timestamp from the source recipe currently reflected in this copy
+    let followsSourceUpdates: Bool  // true = copy-on-write saved recipe, false = independent recipe/fork
     let relatedRecipeIds: [UUID] // IDs of related recipes
     let isPreview: Bool  // true = saved locally but not owned (invisible in library), false = owned recipe
 
@@ -63,6 +65,8 @@ struct Recipe: Sendable, Hashable, Identifiable {
         case originalCreatorId
         case originalCreatorName
         case savedAt
+        case sourceRecipeUpdatedAt
+        case followsSourceUpdates
         case relatedRecipeIds
         case isPreview
     }
@@ -92,6 +96,8 @@ struct Recipe: Sendable, Hashable, Identifiable {
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil,
+        sourceRecipeUpdatedAt: Date? = nil,
+        followsSourceUpdates: Bool = false,
         relatedRecipeIds: [UUID] = [],
         isPreview: Bool = false
     ) {
@@ -119,8 +125,46 @@ struct Recipe: Sendable, Hashable, Identifiable {
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
+        self.sourceRecipeUpdatedAt = sourceRecipeUpdatedAt
+        self.followsSourceUpdates = followsSourceUpdates
         self.relatedRecipeIds = relatedRecipeIds
         self.isPreview = isPreview
+    }
+
+    /// Legacy saved copies created before `followsSourceUpdates` existed should
+    /// continue following until we record an explicit source-version snapshot.
+    nonisolated var isFollowingSourceUpdates: Bool {
+        Self.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates
+        )
+    }
+
+    nonisolated static func resolvedFollowsSourceUpdates(
+        originalRecipeId: UUID?,
+        savedAt: Date?,
+        sourceRecipeUpdatedAt: Date?,
+        followsSourceUpdates: Bool
+    ) -> Bool {
+        guard originalRecipeId != nil else {
+            return false
+        }
+
+        if followsSourceUpdates {
+            return true
+        }
+
+        return savedAt != nil && sourceRecipeUpdatedAt == nil
+    }
+
+    nonisolated var requiresLegacySourceTrackingMigration: Bool {
+        // Persisted legacy copies are normalized to `followsSourceUpdates == true`
+        // when decoded, so the absence of a source snapshot is the durable signal.
+        originalRecipeId != nil &&
+        savedAt != nil &&
+        sourceRecipeUpdatedAt == nil
     }
     
     nonisolated var displayTime: String? {
@@ -162,6 +206,8 @@ struct Recipe: Sendable, Hashable, Identifiable {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )
@@ -194,26 +240,84 @@ struct Recipe: Sendable, Hashable, Identifiable {
             cloudImageRecordName: cloudImageRecordName,
             imageModifiedAt: imageModifiedAt,
             createdAt: createdAt,
-            updatedAt: Date(),
+            updatedAt: updatedAt,
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )
     }
 
-    /// Create a copy with a new owner (for saving shared recipes)
+    /// Create a copy with updated local/cloud image state while preserving timestamps.
+    nonisolated func withImageState(
+        imageURL: URL?,
+        cloudImageRecordName: String?,
+        imageModifiedAt: Date?
+    ) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
+    /// Create a copy with a new owner while preserving root attribution
     /// - Parameters:
     ///   - userId: The ID of the user who will own the copy
     ///   - originalCreatorId: Optional ID of the original creator (for attribution)
     ///   - originalCreatorName: Optional name of the original creator (for attribution)
+    ///   - visibility: Visibility for the new copy
+    ///   - followsSourceUpdates: Whether the new copy should keep following source updates until edited
     /// - Returns: A new Recipe instance owned by the specified user
-    nonisolated func withOwner(_ userId: UUID, originalCreatorId: UUID? = nil, originalCreatorName: String? = nil) -> Recipe {
-        // Determine attribution - use provided values or fall back to current owner
-        let creatorId = originalCreatorId ?? ownerId
-        let creatorName = originalCreatorName
+    nonisolated func withOwner(
+        _ userId: UUID,
+        originalCreatorId: UUID? = nil,
+        originalCreatorName: String? = nil,
+        visibility: RecipeVisibility = .publicRecipe,
+        followsSourceUpdates: Bool = true,
+        relatedRecipeIds: [UUID]? = nil
+    ) -> Recipe {
+        let isFollowingSharedSource = self.isFollowingSourceUpdates
+        let sourceRecipeId = isFollowingSharedSource ? self.originalRecipeId! : self.id
+        let creatorId = isFollowingSharedSource
+            ? (self.originalCreatorId ?? originalCreatorId ?? ownerId)
+            : (originalCreatorId ?? ownerId)
+        let creatorName = isFollowingSharedSource
+            ? (self.originalCreatorName ?? originalCreatorName)
+            : originalCreatorName
+        let sourceRecipeUpdatedAt = isFollowingSharedSource
+            ? (self.sourceRecipeUpdatedAt ?? self.updatedAt)
+            : self.updatedAt
+        let relatedRecipeIds = relatedRecipeIds ?? self.relatedRecipeIds
 
         return Recipe(
             id: UUID(), // New ID for the copy
@@ -229,18 +333,139 @@ struct Recipe: Sendable, Hashable, Identifiable {
             notes: notes,
             imageURL: nil, // Clear imageURL - will be set after downloading from CloudKit
             isFavorite: false, // Reset favorite status
-            visibility: .publicRecipe, // Keep it public by default to maintain sharing spirit
+            visibility: visibility,
             ownerId: userId,
             cloudRecordName: nil, // Clear cloud record name for new copy
             cloudImageRecordName: cloudImageRecordName, // Keep cloud image reference so we know to download it
             imageModifiedAt: imageModifiedAt, // Preserve image modified timestamp
             createdAt: Date(),
             updatedAt: Date(),
-            originalRecipeId: self.id, // Track the original recipe for update sync
+            originalRecipeId: sourceRecipeId,
             originalCreatorId: creatorId,
             originalCreatorName: creatorName,
             savedAt: Date(),
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds // Preserve related recipe IDs
+        )
+    }
+
+    /// Create a copy with updated source-following metadata
+    nonisolated func withSourceTracking(
+        sourceRecipeUpdatedAt: Date?,
+        followsSourceUpdates: Bool
+    ) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
+    nonisolated var relatedGraphReferenceID: UUID {
+        if isFollowingSourceUpdates, let originalRecipeId {
+            return originalRecipeId
+        }
+
+        return id
+    }
+
+    nonisolated var sourceAssetReferenceID: UUID {
+        if isFollowingSourceUpdates, let originalRecipeId {
+            return originalRecipeId
+        }
+
+        return id
+    }
+
+    /// Compare source-owned content fields to determine whether a saved copy
+    /// has diverged from the recipe it follows.
+    nonisolated func hasEditableDifferences(comparedTo other: Recipe) -> Bool {
+        title != other.title ||
+        ingredients != other.ingredients ||
+        steps != other.steps ||
+        yields != other.yields ||
+        totalMinutes != other.totalMinutes ||
+        tags != other.tags ||
+        nutrition != other.nutrition ||
+        notes != other.notes ||
+        relatedRecipeIds != other.relatedRecipeIds
+    }
+
+    nonisolated func hasImageDifferences(comparedTo other: Recipe) -> Bool {
+        cloudImageRecordName != other.cloudImageRecordName ||
+        imageModifiedAt != other.imageModifiedAt
+    }
+
+    nonisolated func shouldPreserveLegacyEdits(comparedTo sourceRecipe: Recipe) -> Bool {
+        guard requiresLegacySourceTrackingMigration,
+              let savedAt,
+              updatedAt > savedAt else {
+            return false
+        }
+
+        return hasEditableDifferences(comparedTo: sourceRecipe) ||
+            hasImageDifferences(comparedTo: sourceRecipe)
+    }
+
+    /// Apply the latest source snapshot to a saved recipe while preserving user-owned state.
+    nonisolated func applyingSourceSnapshot(_ sourceRecipe: Recipe) -> Recipe {
+        Recipe(
+            id: id,
+            title: sourceRecipe.title,
+            ingredients: sourceRecipe.ingredients,
+            steps: sourceRecipe.steps,
+            yields: sourceRecipe.yields,
+            totalMinutes: sourceRecipe.totalMinutes,
+            tags: sourceRecipe.tags,
+            nutrition: sourceRecipe.nutrition,
+            sourceURL: sourceRecipe.sourceURL,
+            sourceTitle: sourceRecipe.sourceTitle,
+            notes: sourceRecipe.notes,
+            imageURL: sourceRecipe.cloudImageRecordName == nil ? nil : imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: sourceRecipe.cloudImageRecordName,
+            imageModifiedAt: sourceRecipe.imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: sourceRecipe.updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            // Follow the source recipe's current graph so saved copies pick up
+            // added/removed related recipes on the next refresh.
+            relatedRecipeIds: sourceRecipe.relatedRecipeIds,
+            isPreview: isPreview
         )
     }
 
@@ -314,11 +539,13 @@ struct Recipe: Sendable, Hashable, Identifiable {
             cloudImageRecordName: recordName,
             imageModifiedAt: modifiedAt,
             createdAt: createdAt,
-            updatedAt: Date(),
+            updatedAt: updatedAt,
             originalRecipeId: originalRecipeId,
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )
@@ -349,30 +576,38 @@ struct Recipe: Sendable, Hashable, Identifiable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        self.title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
-        self.ingredients = try container.decodeIfPresent([Ingredient].self, forKey: .ingredients) ?? []
-        self.steps = try container.decodeIfPresent([CookStep].self, forKey: .steps) ?? []
-        self.yields = try container.decodeIfPresent(String.self, forKey: .yields) ?? "4 servings"
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.ingredients = try container.decode([Ingredient].self, forKey: .ingredients)
+        self.steps = try container.decode([CookStep].self, forKey: .steps)
+        self.yields = try container.decode(String.self, forKey: .yields)
         self.totalMinutes = try container.decodeIfPresent(Int.self, forKey: .totalMinutes)
-        self.tags = try container.decodeIfPresent([Tag].self, forKey: .tags) ?? []
+        self.tags = try container.decode([Tag].self, forKey: .tags)
         self.nutrition = try container.decodeIfPresent(Nutrition.self, forKey: .nutrition)
         self.sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
         self.sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
         self.imageURL = try container.decodeIfPresent(URL.self, forKey: .imageURL)
-        self.isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
-        self.visibility = try container.decodeIfPresent(RecipeVisibility.self, forKey: .visibility) ?? .publicRecipe
+        self.isFavorite = try container.decode(Bool.self, forKey: .isFavorite)
+        self.visibility = try container.decode(RecipeVisibility.self, forKey: .visibility)
         self.ownerId = try container.decodeIfPresent(UUID.self, forKey: .ownerId)
         self.cloudRecordName = try container.decodeIfPresent(String.self, forKey: .cloudRecordName)
         self.cloudImageRecordName = try container.decodeIfPresent(String.self, forKey: .cloudImageRecordName)
         self.imageModifiedAt = try container.decodeIfPresent(Date.self, forKey: .imageModifiedAt)
-        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
-        self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         self.originalRecipeId = try container.decodeIfPresent(UUID.self, forKey: .originalRecipeId)
         self.originalCreatorId = try container.decodeIfPresent(UUID.self, forKey: .originalCreatorId)
         self.originalCreatorName = try container.decodeIfPresent(String.self, forKey: .originalCreatorName)
         self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
+        self.sourceRecipeUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .sourceRecipeUpdatedAt)
+        let followsSourceUpdates = try container.decodeIfPresent(Bool.self, forKey: .followsSourceUpdates) ?? false
+        self.followsSourceUpdates = Self.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates
+        )
         self.relatedRecipeIds = try container.decodeIfPresent([UUID].self, forKey: .relatedRecipeIds) ?? []
         self.isPreview = try container.decodeIfPresent(Bool.self, forKey: .isPreview) ?? false
     }
@@ -403,6 +638,8 @@ struct Recipe: Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(originalCreatorId, forKey: .originalCreatorId)
         try container.encodeIfPresent(originalCreatorName, forKey: .originalCreatorName)
         try container.encodeIfPresent(savedAt, forKey: .savedAt)
+        try container.encodeIfPresent(sourceRecipeUpdatedAt, forKey: .sourceRecipeUpdatedAt)
+        try container.encode(followsSourceUpdates, forKey: .followsSourceUpdates)
         try container.encode(relatedRecipeIds, forKey: .relatedRecipeIds)
         try container.encode(isPreview, forKey: .isPreview)
     }

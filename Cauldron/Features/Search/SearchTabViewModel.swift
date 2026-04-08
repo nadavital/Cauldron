@@ -34,11 +34,12 @@ import os
     @ObservationIgnored private var cancellables = Set<AnyCancellable>()
     @ObservationIgnored private var recipeSearchTask: Task<Void, Never>?
     @ObservationIgnored private var peopleSearchTask: Task<Void, Never>?
+    @ObservationIgnored private var localRecipeRefreshTask: Task<Void, Never>?
     @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
 
     // Search results caching
-    private var cachedSearchResults: [String: [Recipe]] = [:] // Key: query+categories hash
-    private var searchResultsTimestamps: [String: Date] = [:]
+    private var cachedDiscoverableRecipes: [Recipe] = []
+    private var cachedDiscoverableRecipesTimestamp: Date?
     private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
 
     // Debouncing
@@ -116,6 +117,25 @@ import os
 
         } catch {
             AppLogger.general.error("Failed to load search tab data: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshLocalRecipeData() async {
+        do {
+            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            groupRecipesByTags()
+            processSearchResults()
+        } catch {
+            AppLogger.general.error("Failed to refresh local recipe data: \(error.localizedDescription)")
+        }
+    }
+
+    func scheduleLocalRecipeRefresh() {
+        localRecipeRefreshTask?.cancel()
+        localRecipeRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.refreshLocalRecipeData()
         }
     }
 
@@ -279,18 +299,15 @@ import os
     }
     
     private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Generate cache key from query and categories
-        let categoryTags = categories.map { $0.tagValue }.sorted()
-        let cacheKey = "\(normalizedQuery.lowercased())|\(categoryTags.joined(separator: ","))"
+        let isDiscoveryRequest = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && categories.isEmpty
 
         // Check if we have valid cached results
-        if let cachedResults = cachedSearchResults[cacheKey],
-           let timestamp = searchResultsTimestamps[cacheKey],
+        if isDiscoveryRequest,
+           !cachedDiscoverableRecipes.isEmpty,
+           let timestamp = cachedDiscoverableRecipesTimestamp,
            Date().timeIntervalSince(timestamp) < cacheValidityDuration {
             // Use cached results
-            let filteredResults = cachedResults.filter { $0.ownerId != currentUserId }
+            let filteredResults = cachedDiscoverableRecipes.filter { $0.ownerId != currentUserId }
             if !Task.isCancelled {
                 publicRecipes = filteredResults
                 await fetchOwnerTiers(for: filteredResults)
@@ -302,12 +319,18 @@ import os
         isLoading = true
 
         do {
-            // Fetch discoverable public recipes and apply richer filtering/ranking client-side.
-            let results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
-
-            // Cache the results
-            cachedSearchResults[cacheKey] = results
-            searchResultsTimestamps[cacheKey] = Date()
+            let results: [Recipe]
+            if isDiscoveryRequest {
+                // Fetch discoverable public recipes and apply richer filtering/ranking client-side.
+                results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
+                cachedDiscoverableRecipes = results
+                cachedDiscoverableRecipesTimestamp = Date()
+            } else {
+                results = try await dependencies.recipeCloudService.fetchPublicRecipesForSearch(
+                    filterText: query,
+                    selectedCategories: Set(categories)
+                )
+            }
 
             // Filter out own recipes (just in case)
             let filteredResults = results.filter { $0.ownerId != currentUserId }

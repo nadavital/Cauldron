@@ -125,13 +125,13 @@ struct User: Sendable, Hashable, Identifiable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        self.username = try container.decodeIfPresent(String.self, forKey: .username) ?? ""
-        self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.username = try container.decode(String.self, forKey: .username)
+        self.displayName = try container.decode(String.self, forKey: .displayName)
         self.email = try container.decodeIfPresent(String.self, forKey: .email)
         self.cloudRecordName = try container.decodeIfPresent(String.self, forKey: .cloudRecordName)
         self.referralCode = try container.decodeIfPresent(String.self, forKey: .referralCode)
-        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.profileEmoji = try container.decodeIfPresent(String.self, forKey: .profileEmoji)
         self.profileColor = try container.decodeIfPresent(String.self, forKey: .profileColor)
         self.profileImageURL = try container.decodeIfPresent(URL.self, forKey: .profileImageURL)

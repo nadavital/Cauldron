@@ -43,8 +43,8 @@ struct Ingredient: Sendable, Hashable, Identifiable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.name = try container.decode(String.self, forKey: .name)
         self.quantity = try container.decodeIfPresent(Quantity.self, forKey: .quantity)
         self.additionalQuantities = try container.decodeIfPresent([Quantity].self, forKey: .additionalQuantities) ?? []
         self.note = try container.decodeIfPresent(String.self, forKey: .note)

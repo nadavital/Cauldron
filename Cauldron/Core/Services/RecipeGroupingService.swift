@@ -24,6 +24,17 @@ struct SearchRecipeGroup: Identifiable {
 
 /// Service to handle recipe deduplication, grouping, and ranking
 enum RecipeGroupingService {
+    nonisolated static func matchesSearchFilters(
+        _ recipe: Recipe,
+        filterText: String = "",
+        selectedCategories: Set<RecipeCategory> = []
+    ) -> Bool {
+        buildSearchCandidate(
+            for: recipe,
+            filterText: filterText,
+            selectedCategories: selectedCategories
+        ) != nil
+    }
 
     /// Group, deduplicate, and rank recipes from multiple sources
     /// - Parameters:
@@ -44,80 +55,34 @@ enum RecipeGroupingService {
         filterText: String = "",
         selectedCategories: Set<RecipeCategory> = []
     ) -> [SearchRecipeGroup] {
-        let normalizedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let queryTokens = tokenize(normalizedQuery)
-
-        func matchesSelectedCategories(_ recipe: Recipe) -> Bool {
-            guard !selectedCategories.isEmpty else { return true }
-            return selectedCategories.allSatisfy { category in
-                recipe.tags.contains { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame }
-            }
-        }
-
-        func recipeTextScore(_ recipe: Recipe) -> Double {
-            guard !normalizedQuery.isEmpty else { return 1 }
-
-            let title = recipe.title.lowercased()
-            let tags = recipe.tags.map { $0.name.lowercased() }
-            let ingredients = recipe.ingredients.map { $0.name.lowercased() }
-            let combined = ([title] + tags + ingredients).joined(separator: " ")
-
-            var score: Double = 0
-            let queryLower = normalizedQuery.lowercased()
-
-            if title == queryLower {
-                score += 320
-            } else if title.hasPrefix(queryLower) {
-                score += 250
-            } else if title.localizedStandardContains(queryLower) {
-                score += 180
-            }
-
-            if combined.localizedStandardContains(queryLower) {
-                score += 90
-            }
-
-            if !queryTokens.isEmpty {
-                var matchedTokens = 0
-                for token in queryTokens {
-                    if title.localizedStandardContains(token) {
-                        score += 65
-                        matchedTokens += 1
-                    } else if tags.contains(where: { $0.localizedStandardContains(token) }) {
-                        score += 38
-                        matchedTokens += 1
-                    } else if ingredients.contains(where: { $0.localizedStandardContains(token) }) {
-                        score += 32
-                        matchedTokens += 1
-                    }
-                }
-
-                if matchedTokens == queryTokens.count {
-                    score += 80
-                } else if matchedTokens == 0 {
-                    score = 0
-                }
-            }
-
-            return score
-        }
-
-        func buildCandidate(_ recipe: Recipe) -> (recipe: Recipe, textScore: Double)? {
-            guard matchesSelectedCategories(recipe) else { return nil }
-            let textScore = recipeTextScore(recipe)
-            guard normalizedQuery.isEmpty || textScore > 0 else {
-                return nil
-            }
-            return (recipe: recipe, textScore: textScore)
-        }
-
         // Filter + score local and public results first.
-        let allCandidates = (localRecipes + publicRecipes).compactMap(buildCandidate)
+        // A saved recipe can exist in both local storage and the public database, so
+        // dedupe by concrete recipe ID before grouping by source lineage.
+        var bestCandidateByRecipeID: [UUID: (recipe: Recipe, textScore: Double)] = [:]
+        for candidate in (localRecipes + publicRecipes).compactMap({
+            buildSearchCandidate(
+                for: $0,
+                filterText: filterText,
+                selectedCategories: selectedCategories
+            )
+        }) {
+            let existing = bestCandidateByRecipeID[candidate.recipe.id]
+            if existing == nil ||
+                candidate.textScore > existing!.textScore ||
+                (candidate.textScore == existing!.textScore &&
+                 candidate.recipe.updatedAt > existing!.recipe.updatedAt) {
+                bestCandidateByRecipeID[candidate.recipe.id] = candidate
+            }
+        }
+        let allCandidates = Array(bestCandidateByRecipeID.values)
 
         // Group related copies under original ID.
         let grouped = Dictionary(grouping: allCandidates) { candidate -> UUID in
             let recipe = candidate.recipe
-            return recipe.originalRecipeId ?? recipe.id
+            if recipe.isFollowingSourceUpdates, let originalRecipeId = recipe.originalRecipeId {
+                return originalRecipeId
+            }
+            return recipe.id
         }
 
         // Build grouped result cards.
@@ -134,7 +99,7 @@ enum RecipeGroupingService {
                 .max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) {
                 primary = owned
             } else if let original = recipes
-                .filter({ $0.originalRecipeId == nil })
+                .filter({ !$0.isFollowingSourceUpdates })
                 .max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) {
                 primary = original
             } else {
@@ -184,11 +149,88 @@ enum RecipeGroupingService {
         return groups
     }
 
-    private static func tokenize(_ query: String) -> [String] {
+    private nonisolated static func tokenize(_ query: String) -> [String] {
         query
             .lowercased()
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
             .map(String.init)
             .filter { $0.count >= 2 }
+    }
+
+    private nonisolated static func buildSearchCandidate(
+        for recipe: Recipe,
+        filterText: String,
+        selectedCategories: Set<RecipeCategory>
+    ) -> (recipe: Recipe, textScore: Double)? {
+        let normalizedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard matchesSelectedCategories(recipe, selectedCategories: selectedCategories) else {
+            return nil
+        }
+
+        let textScore = recipeTextScore(recipe, normalizedQuery: normalizedQuery)
+        guard normalizedQuery.isEmpty || textScore > 0 else {
+            return nil
+        }
+
+        return (recipe: recipe, textScore: textScore)
+    }
+
+    private nonisolated static func matchesSelectedCategories(
+        _ recipe: Recipe,
+        selectedCategories: Set<RecipeCategory>
+    ) -> Bool {
+        guard !selectedCategories.isEmpty else { return true }
+        return selectedCategories.allSatisfy { category in
+            recipe.tags.contains { $0.name.caseInsensitiveCompare(category.tagValue) == .orderedSame }
+        }
+    }
+
+    private nonisolated static func recipeTextScore(_ recipe: Recipe, normalizedQuery: String) -> Double {
+        guard !normalizedQuery.isEmpty else { return 1 }
+
+        let queryTokens = tokenize(normalizedQuery)
+        let title = recipe.title.lowercased()
+        let tags = recipe.tags.map { $0.name.lowercased() }
+        let ingredients = recipe.ingredients.map { $0.name.lowercased() }
+        let combined = ([title] + tags + ingredients).joined(separator: " ")
+
+        var score: Double = 0
+        let queryLower = normalizedQuery.lowercased()
+
+        if title == queryLower {
+            score += 320
+        } else if title.hasPrefix(queryLower) {
+            score += 250
+        } else if title.localizedStandardContains(queryLower) {
+            score += 180
+        }
+
+        if combined.localizedStandardContains(queryLower) {
+            score += 90
+        }
+
+        if !queryTokens.isEmpty {
+            var matchedTokens = 0
+            for token in queryTokens {
+                if title.localizedStandardContains(token) {
+                    score += 65
+                    matchedTokens += 1
+                } else if tags.contains(where: { $0.localizedStandardContains(token) }) {
+                    score += 38
+                    matchedTokens += 1
+                } else if ingredients.contains(where: { $0.localizedStandardContains(token) }) {
+                    score += 32
+                    matchedTokens += 1
+                }
+            }
+
+            if matchedTokens == queryTokens.count {
+                score += 80
+            } else if matchedTokens == 0 {
+                score = 0
+            }
+        }
+
+        return score
     }
 }

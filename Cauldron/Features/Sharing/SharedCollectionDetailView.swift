@@ -319,10 +319,13 @@ struct SharedCollectionDetailView: View {
 
         do {
             // Create a copy of the recipe owned by the current user using withOwner()
+            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
             let copiedRecipe = recipe.withOwner(
                 userId,
                 originalCreatorId: recipe.ownerId,
-                originalCreatorName: collectionOwner?.displayName
+                originalCreatorName: collectionOwner?.displayName,
+                visibility: .publicRecipe,
+                relatedRecipeIds: canonicalRelatedRecipeIDs
             )
             try await dependencies.recipeRepository.create(copiedRecipe)
 

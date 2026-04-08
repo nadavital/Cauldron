@@ -294,90 +294,141 @@ final class ExploreTagViewModel {
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
-            // Parallelize independent fetches for better performance
-            async let localRecipesTask = dependencies.recipeRepository.fetchAll()
-            async let sharedRecipesTask = dependencies.sharingService.getSharedRecipes()
+            let normalizedTag = tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Parallelize tag-scoped fetches instead of loading every recipe and filtering in memory.
+            async let localRecipesTask = dependencies.recipeRepository.search(tag: normalizedTag)
             async let publicRecipesTask = dependencies.recipeCloudService.querySharedRecipes(
                 ownerIds: nil,
-                visibility: .publicRecipe
+                visibility: .publicRecipe,
+                requiredTag: normalizedTag,
+                limit: 200
             )
 
-            // Fetch connections in parallel too (if we have a user)
-            let connectionsFuture: Task<[Connection], Error>?
+            let friendIDsFuture: Task<Set<UUID>, Error>?
+            let friendRecipesFuture: Task<[SharedRecipe], Error>?
             if let userId = currentUserId {
-                connectionsFuture = Task {
+                let connectionsFuture = Task {
                     try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
                 }
+                let friendIDsTask = Task {
+                    let connections = try await connectionsFuture.value
+                    return Self.acceptedFriendIDs(from: connections, currentUserId: userId)
+                }
+                friendIDsFuture = friendIDsTask
+                friendRecipesFuture = Task {
+                    let friendIds = try await friendIDsTask.value
+                    guard !friendIds.isEmpty else { return [] }
+
+                    let recipes = try await dependencies.recipeCloudService.querySharedRecipes(
+                        ownerIds: Array(friendIds),
+                        visibility: .publicRecipe,
+                        requiredTag: normalizedTag,
+                        limit: 200
+                    )
+                    let referencedIds = Set(recipes.flatMap(\.relatedRecipeIds))
+                    let filteredRecipes = recipes.filter { !referencedIds.contains($0.id) }
+
+                    let ownerIds = Array(Set(filteredRecipes.compactMap(\.ownerId)))
+                    guard !ownerIds.isEmpty else { return [] }
+
+                    let owners = try await dependencies.userCloudService.fetchUsers(byUserIds: ownerIds)
+                    let ownersById = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
+
+                    return filteredRecipes.compactMap { recipe in
+                        guard let ownerId = recipe.ownerId,
+                              let owner = ownersById[ownerId] else {
+                            return nil
+                        }
+
+                        return SharedRecipe(
+                            id: UUID(),
+                            recipe: recipe,
+                            sharedBy: owner,
+                            sharedAt: recipe.createdAt
+                        )
+                    }
+                }
             } else {
-                connectionsFuture = nil
+                friendIDsFuture = nil
+                friendRecipesFuture = nil
             }
 
             // Await all parallel fetches
-            let (allUserRecipes, allSharedRecipes, publicRecipesList) = try await (
-                localRecipesTask,
-                sharedRecipesTask,
-                publicRecipesTask
-            )
+            let allUserRecipes = try await localRecipesTask
+            let publicRecipesList = try await publicRecipesTask
 
-            // Process local recipes (filter by tag)
-            allRecipes = allUserRecipes.filter { recipe in
-                recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
-            }
+            // Process local recipes (already filtered by tag)
+            allRecipes = allUserRecipes
             AppLogger.general.info("✅ Found \(allRecipes.count) own recipes")
 
-            // Process friend recipes (filter by tag)
-            friendRecipes = allSharedRecipes
-                .filter { sharedRecipe in
-                    sharedRecipe.recipe.tags.contains { $0.name.lowercased() == tag.name.lowercased() }
-                }
-                .sorted { $0.sharedAt > $1.sharedAt }
+            if let friendRecipesFuture {
+                friendRecipes = try await friendRecipesFuture.value
+                    .sorted { $0.sharedAt > $1.sharedAt }
+            } else {
+                friendRecipes = []
+            }
             AppLogger.general.info("✅ Loaded \(friendRecipes.count) friend recipes via SharingService")
-
-            // Collect owner IDs from public recipes
-            let ownerIds = Set(publicRecipesList.map { $0.ownerId }.compactMap { $0 })
-
-            // Fetch owners in batch
-            let owners = try await dependencies.userCloudService.fetchUsers(byUserIds: Array(ownerIds))
-            let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
 
             // Get friend IDs for filtering
             var friendIds: Set<UUID> = []
-            if let connectionsFuture = connectionsFuture {
-                let connections = try await connectionsFuture.value
-                let acceptedConnections = connections.filter { $0.isAccepted }
-                friendIds = Set(acceptedConnections.map {
-                    $0.fromUserId == currentUserId ? $0.toUserId : $0.fromUserId
-                })
+            if let friendIDsFuture {
+                friendIds = try await friendIDsFuture.value
             }
 
-            // Filter and map to SharedRecipe
-            publicRecipes = publicRecipesList.compactMap { recipe -> SharedRecipe? in
-                // Match tag
-                guard recipe.tags.contains(where: { $0.name.lowercased() == tag.name.lowercased() }) else {
-                    return nil
+            let candidatePublicRecipes = publicRecipesList.filter { recipe in
+                guard let ownerId = recipe.ownerId else { return false }
+                if let currentUserId = currentUserId, ownerId == currentUserId {
+                    return false
                 }
+                if friendIds.contains(ownerId) {
+                    return false
+                }
+                return true
+            }
 
-                guard let ownerId = recipe.ownerId else { return nil }
-
-                // Exclude own recipes
-                if let currentUserId = currentUserId, ownerId == currentUserId { return nil }
-
-                // Exclude friend recipes (using friendIds from connections)
-                if friendIds.contains(ownerId) { return nil }
-
-                // Get owner
-                guard let owner = ownersMap[ownerId] else { return nil }
-
-                return SharedRecipe(
-                    recipe: recipe,
-                    sharedBy: owner,
-                    sharedAt: recipe.createdAt
+            if candidatePublicRecipes.isEmpty {
+                publicRecipes = []
+            } else {
+                let owners = try await dependencies.userCloudService.fetchUsers(
+                    byUserIds: Array(Set(candidatePublicRecipes.compactMap(\.ownerId)))
                 )
+                let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
+
+                publicRecipes = candidatePublicRecipes.compactMap { recipe -> SharedRecipe? in
+                    guard let ownerId = recipe.ownerId,
+                          let owner = ownersMap[ownerId] else {
+                        return nil
+                    }
+
+                    return SharedRecipe(
+                        recipe: recipe,
+                        sharedBy: owner,
+                        sharedAt: recipe.createdAt
+                    )
+                }
             }
 
         } catch {
             AppLogger.general.error("Failed to load recipes for tag '\(tag.name)': \(error.localizedDescription)")
         }
+    }
+
+    private nonisolated static func acceptedFriendIDs(
+        from connections: [Connection],
+        currentUserId: UUID
+    ) -> Set<UUID> {
+        Set(connections.compactMap { connection in
+            guard connection.isAccepted else { return nil }
+
+            if connection.fromUserId == currentUserId {
+                return connection.toUserId
+            }
+            if connection.toUserId == currentUserId {
+                return connection.fromUserId
+            }
+            return nil
+        })
     }
 }
 

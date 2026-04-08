@@ -70,7 +70,13 @@ struct RecipeEditorView: View {
             }
             // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
             .fullScreenCover(isPresented: $showingImagePicker) {
-                ImagePicker(image: $viewModel.selectedImage, sourceType: imagePickerSourceType)
+                ImagePicker(
+                    image: Binding(
+                        get: { viewModel.selectedImage },
+                        set: { viewModel.updateSelectedImageFromUser($0) }
+                    ),
+                    sourceType: imagePickerSourceType
+                )
                     .ignoresSafeArea()
             }
             .sheet(isPresented: $viewModel.isRelatedRecipesPickerPresented) {
@@ -120,7 +126,7 @@ struct RecipeEditorView: View {
                 
                 if viewModel.selectedImage != nil {
                     Button("Remove Image", role: .destructive) {
-                        viewModel.selectedImage = nil
+                        viewModel.removeSelectedImage()
                     }
                 }
                 

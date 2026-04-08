@@ -28,11 +28,11 @@ final class EntityImageLoader {
     func loadProfileImage(for user: User, dependencies: DependencyContainer?) async -> ProfileImageResult {
         let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
+        if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return ProfileImageResult(image: cachedImage, downloadedURL: nil)
         }
 
-        if let localImage = await loadImage(from: user.profileImageURL) {
+        if let localImage = await Self.loadImage(from: user.profileImageURL) {
             ImageCache.shared.set(cacheKey, image: localImage)
             return ProfileImageResult(image: localImage, downloadedURL: nil)
         }
@@ -45,7 +45,7 @@ final class EntityImageLoader {
 
         do {
             if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-               let downloadedImage = await loadImage(from: downloadedURL) {
+               let downloadedImage = await Self.loadImage(from: downloadedURL) {
                 ImageCache.shared.set(cacheKey, image: downloadedImage)
                 return ProfileImageResult(image: downloadedImage, downloadedURL: downloadedURL)
             }
@@ -59,11 +59,11 @@ final class EntityImageLoader {
     func loadCollectionCoverImage(for collection: Collection, dependencies: DependencyContainer?) async -> UIImage? {
         let cacheKey = ImageCache.collectionImageKey(collectionId: collection.id)
 
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
+        if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return cachedImage
         }
 
-        if let localImage = await loadImage(from: collection.coverImageURL) {
+        if let localImage = await Self.loadImage(from: collection.coverImageURL) {
             ImageCache.shared.set(cacheKey, image: localImage)
             return localImage
         }
@@ -76,7 +76,7 @@ final class EntityImageLoader {
 
         do {
             if let downloadedURL = try await dependencies.collectionImageManager.downloadImageFromCloud(collectionId: collection.id),
-               let downloadedImage = await loadImage(from: downloadedURL) {
+               let downloadedImage = await Self.loadImage(from: downloadedURL) {
                 ImageCache.shared.set(cacheKey, image: downloadedImage)
                 return downloadedImage
             }
@@ -90,11 +90,11 @@ final class EntityImageLoader {
     func ensureProfileImagesInCache(users: [User]) async {
         for user in users {
             let cacheKey = ImageCache.profileImageKey(userId: user.id)
-            if ImageCache.shared.get(cacheKey) != nil {
+            if await ImageCache.shared.load(cacheKey) != nil {
                 continue
             }
 
-            if let image = await loadImage(from: user.profileImageURL) {
+            if let image = await Self.loadImage(from: user.profileImageURL) {
                 ImageCache.shared.set(cacheKey, image: image)
             }
         }
@@ -107,25 +107,21 @@ final class EntityImageLoader {
                     continue
                 }
 
-                group.addTask { @MainActor in
-                    let cacheKey = ImageCache.profileImageKey(userId: user.id)
+                let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
-                    if !forceRefresh, ImageCache.shared.get(cacheKey) != nil {
+                group.addTask {
+                    if !forceRefresh, await ImageCache.shared.load(cacheKey) != nil {
                         return (user.id, nil)
                     }
 
-                    if let image = await self.loadImage(from: user.profileImageURL) {
+                    if let image = await Self.loadImage(from: user.profileImageURL) {
                         return (user.id, image)
                     }
 
                     if forceRefresh || user.profileImageURL == nil {
-                        do {
-                            if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                               let image = await self.loadImage(from: downloadedURL) {
-                                return (user.id, image)
-                            }
-                        } catch {
-                            self.logger.warning("Failed to preload profile image for \(user.username): \(error.localizedDescription)")
+                        if let downloadedURL = try? await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
+                           let image = await Self.loadImage(from: downloadedURL) {
+                            return (user.id, image)
                         }
                     }
 
@@ -147,7 +143,9 @@ final class EntityImageLoader {
         for sharedRecipe in sharedRecipes {
             let recipeKey = ImageCache.recipeImageKey(recipeId: sharedRecipe.recipe.id)
             let profileKey = ImageCache.profileImageKey(userId: sharedRecipe.sharedBy.id)
-            if ImageCache.shared.get(recipeKey) == nil || ImageCache.shared.get(profileKey) == nil {
+            let cachedRecipeImage = await ImageCache.shared.load(recipeKey)
+            let cachedProfileImage = await ImageCache.shared.load(profileKey)
+            if cachedRecipeImage == nil || cachedProfileImage == nil {
                 needsPreload = true
                 break
             }
@@ -159,30 +157,30 @@ final class EntityImageLoader {
         await withTaskGroup(of: (String, UIImage?).self) { group in
             for sharedRecipe in sharedRecipes {
                 let recipeId = sharedRecipe.recipe.id
-                group.addTask { @MainActor in
-                    let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: "thumbnail")
-                    if ImageCache.shared.get(cacheKey) != nil {
-                        return (cacheKey, nil)
+                let recipeCacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: "thumbnail")
+                group.addTask {
+                    if await ImageCache.shared.load(recipeCacheKey) != nil {
+                        return (recipeCacheKey, nil)
                     }
-                    if let image = await self.loadImage(
+                    if let image = await Self.loadImage(
                         from: sharedRecipe.recipe.imageURL,
                         maxPixelSize: 70 * displayScale
                     ) {
-                        return (cacheKey, image)
+                        return (recipeCacheKey, image)
                     }
-                    return (cacheKey, nil)
+                    return (recipeCacheKey, nil)
                 }
 
                 let userId = sharedRecipe.sharedBy.id
-                group.addTask { @MainActor in
-                    let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    if ImageCache.shared.get(cacheKey) != nil {
-                        return (cacheKey, nil)
+                let profileCacheKey = ImageCache.profileImageKey(userId: userId)
+                group.addTask {
+                    if await ImageCache.shared.load(profileCacheKey) != nil {
+                        return (profileCacheKey, nil)
                     }
-                    if let image = await self.loadImage(from: sharedRecipe.sharedBy.profileImageURL) {
-                        return (cacheKey, image)
+                    if let image = await Self.loadImage(from: sharedRecipe.sharedBy.profileImageURL) {
+                        return (profileCacheKey, image)
                     }
-                    return (cacheKey, nil)
+                    return (profileCacheKey, nil)
                 }
             }
 
@@ -194,7 +192,7 @@ final class EntityImageLoader {
         }
     }
 
-    private func loadImage(from url: URL?, maxPixelSize: CGFloat? = nil) async -> UIImage? {
+    private nonisolated static func loadImage(from url: URL?, maxPixelSize: CGFloat? = nil) async -> UIImage? {
         guard let url else { return nil }
 
         do {

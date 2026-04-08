@@ -22,12 +22,21 @@ struct RecipeNotesSection: View {
                     .font(.body)
                     .foregroundColor(.secondary)
                     .tint(.cauldronOrange)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(notes)
                     .font(.body)
                     .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
     }

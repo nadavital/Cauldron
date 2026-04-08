@@ -57,33 +57,50 @@ class ImageCache {
             }
         }
 
-        // Clean old disk cache entries on init (async to not block startup)
+        // Clean old disk cache entries on init without hopping back to the main actor.
+        let diskCacheDirectory = diskCacheDirectory
+        let maxDiskCacheAge = maxDiskCacheAge
         Task.detached(priority: .background) {
-            await self.cleanExpiredDiskCache()
+            Self.cleanExpiredDiskCache(in: diskCacheDirectory, maxDiskCacheAge: maxDiskCacheAge)
         }
     }
 
-    /// Get cached image for a key
-    /// Checks L1 (memory) first, then L2 (disk)
+    /// Get cached image for a key.
+    /// Synchronous callers rely on this for immediate placeholder avoidance, so
+    /// it falls back to disk and promotes hits back into memory.
     func get(_ key: String) -> UIImage? {
-        let cacheKey = key as NSString
-
-        // L1: Check memory cache first
-        if let memoryImage = memoryCache.object(forKey: cacheKey) {
-            trackedKeys.insert(key)
+        if let memoryImage = memoryImage(for: key) {
             return memoryImage
         }
 
-        // L2: Check disk cache
-        if let diskImage = loadFromDisk(key: key) {
-            // Promote to memory cache for faster future access
-            let cost = estimateImageCost(diskImage)
-            memoryCache.setObject(diskImage, forKey: cacheKey, cost: cost)
-            trackedKeys.insert(key)
-            return diskImage
+        let fileURL = diskCacheURL(for: key)
+        guard let diskImage = Self.loadFromDisk(at: fileURL) else {
+            return nil
         }
 
-        return nil
+        memoryCache.setObject(diskImage, forKey: key as NSString, cost: estimateImageCost(diskImage))
+        trackedKeys.insert(key)
+        return diskImage
+    }
+
+    /// Load an image from cache, falling back to disk off the main actor.
+    func load(_ key: String) async -> UIImage? {
+        if let memoryImage = memoryImage(for: key) {
+            return memoryImage
+        }
+
+        let fileURL = diskCacheURL(for: key)
+        let diskImage = await Task.detached(priority: .utility) {
+            Self.loadFromDisk(at: fileURL)
+        }.value
+
+        guard let diskImage else {
+            return nil
+        }
+
+        memoryCache.setObject(diskImage, forKey: key as NSString, cost: estimateImageCost(diskImage))
+        trackedKeys.insert(key)
+        return diskImage
     }
 
     /// Store image in cache (both L1 memory and L2 disk)
@@ -95,9 +112,10 @@ class ImageCache {
         memoryCache.setObject(image, forKey: cacheKey, cost: cost)
         trackedKeys.insert(key)
 
-        // L2: Store to disk asynchronously
+        // L2: Store to disk asynchronously off the main actor.
+        let fileURL = diskCacheURL(for: key)
         Task.detached(priority: .background) {
-            await self.saveToDisk(key: key, image: image)
+            Self.saveToDisk(image: image, at: fileURL)
         }
     }
 
@@ -180,6 +198,17 @@ class ImageCache {
         return cgImage.bytesPerRow * cgImage.height
     }
 
+    private func memoryImage(for key: String) -> UIImage? {
+        let cacheKey = key as NSString
+
+        if let memoryImage = memoryCache.object(forKey: cacheKey) {
+            trackedKeys.insert(key)
+            return memoryImage
+        }
+
+        return nil
+    }
+
     private func remove(keys: some Sequence<String>) {
         var removedCount = 0
         for key in keys {
@@ -195,25 +224,23 @@ class ImageCache {
     }
 
     /// Load image from disk cache
-    private func loadFromDisk(key: String) -> UIImage? {
-        let fileURL = diskCacheURL(for: key)
-
+    private nonisolated static func loadFromDisk(at fileURL: URL) -> UIImage? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return nil
         }
 
-        guard let data = try? Data(contentsOf: fileURL),
-              let image = UIImage(data: data) else {
-            return nil
-        }
+        return autoreleasepool {
+            guard let data = try? Data(contentsOf: fileURL),
+                  let image = UIImage(data: data) else {
+                return nil
+            }
 
-        return image
+            return image
+        }
     }
 
     /// Save image to disk cache
-    private func saveToDisk(key: String, image: UIImage) async {
-        let fileURL = diskCacheURL(for: key)
-
+    private nonisolated static func saveToDisk(image: UIImage, at fileURL: URL) {
         // Compress to JPEG for smaller file size
         guard let data = image.jpegData(compressionQuality: 0.8) else {
             return
@@ -227,7 +254,7 @@ class ImageCache {
     }
 
     /// Clean expired entries from disk cache
-    private func cleanExpiredDiskCache() async {
+    private nonisolated static func cleanExpiredDiskCache(in diskCacheDirectory: URL, maxDiskCacheAge: TimeInterval) {
         let fileManager = FileManager.default
         let expirationDate = Date().addingTimeInterval(-maxDiskCacheAge)
 
@@ -237,18 +264,12 @@ class ImageCache {
                 includingPropertiesForKeys: [.contentModificationDateKey]
             )
 
-            var removedCount = 0
             for fileURL in files {
                 let attributes = try? fileManager.attributesOfItem(atPath: fileURL.path)
                 if let modificationDate = attributes?[.modificationDate] as? Date,
                    modificationDate < expirationDate {
                     try? fileManager.removeItem(at: fileURL)
-                    removedCount += 1
                 }
-            }
-
-            if removedCount > 0 {
-                logger.info("🧹 Cleaned \(removedCount) expired images from disk cache")
             }
         } catch {
             // Ignore errors during cleanup

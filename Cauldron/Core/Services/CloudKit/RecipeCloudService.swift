@@ -50,18 +50,11 @@ actor RecipeCloudService {
             recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zoneID)
         }
 
-        // Try to fetch existing record first to update it, otherwise create new one
-        let record: CKRecord
-        do {
-            record = try await db.record(for: recordID)
-        } catch let error as CKError where error.code == .unknownItem {
-            // Record doesn't exist, create new one
-            record = CKRecord(recordType: CloudKitCore.RecordType.recipe, recordID: recordID)
-            logger.info("Creating new record in CloudKit: \(recipe.title)")
-        } catch {
-            logger.error("Error fetching existing record: \(error.localizedDescription)")
-            throw error
-        }
+        let record = try await fetchOrCreateRecord(
+            in: db,
+            recordID: recordID,
+            recordType: CloudKitCore.RecordType.recipe
+        )
 
         // Populate record fields
         populateRecipeRecord(record, from: recipe, ownerId: ownerId)
@@ -164,17 +157,11 @@ actor RecipeCloudService {
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: recipe.id.uuidString)
 
-        let record: CKRecord
-        do {
-            record = try await db.record(for: recordID)
-            logger.info("Updating existing record in PUBLIC database: \(recipe.title)")
-        } catch let error as CKError where error.code == .unknownItem {
-            record = CKRecord(recordType: CloudKitCore.RecordType.sharedRecipe, recordID: recordID)
-            logger.info("Creating new record in PUBLIC database: \(recipe.title)")
-        } catch {
-            logger.error("Error fetching existing PUBLIC record: \(error.localizedDescription)")
-            throw error
-        }
+        let record = try await fetchOrCreateRecord(
+            in: db,
+            recordID: recordID,
+            recordType: CloudKitCore.RecordType.sharedRecipe
+        )
 
         guard let ownerId = recipe.ownerId else {
             logger.error("Cannot copy recipe to PUBLIC: missing ownerId")
@@ -208,7 +195,7 @@ actor RecipeCloudService {
     }
 
     /// Fetch public recipes for a specific user
-    func fetchPublicRecipesForUser(ownerId: UUID) async throws -> [Recipe] {
+    func fetchPublicRecipesForUser(ownerId: UUID, includeDerivedCopies: Bool = true) async throws -> [Recipe] {
         let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
                                    ownerId.uuidString,
                                    RecipeVisibility.publicRecipe.rawValue)
@@ -227,7 +214,7 @@ actor RecipeCloudService {
             }
         }
 
-        return recipes
+        return filterDerivedCopies(in: recipes, includeDerivedCopies: includeDerivedCopies)
     }
 
     /// Fetch a single public recipe by ID
@@ -282,20 +269,43 @@ actor RecipeCloudService {
     func querySharedRecipes(
         ownerIds: [UUID]?,
         visibility: RecipeVisibility,
+        requiredTag: String? = nil,
+        includeDerivedCopies: Bool = true,
         limit: Int = 100
     ) async throws -> [Recipe] {
         let db = try await core.getPublicDatabase()
 
         let predicate: NSPredicate
+        let normalizedTag = requiredTag?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasRequiredTag = !(normalizedTag?.isEmpty ?? true)
+
         if let ownerIds = ownerIds, !ownerIds.isEmpty {
             let ownerIdStrings = ownerIds.map { $0.uuidString }
-            predicate = NSPredicate(
-                format: "ownerId IN %@ AND visibility == %@",
-                ownerIdStrings,
-                visibility.rawValue
-            )
+            if let normalizedTag, hasRequiredTag {
+                predicate = NSPredicate(
+                    format: "ownerId IN %@ AND visibility == %@ AND ANY searchableTags == %@",
+                    ownerIdStrings,
+                    visibility.rawValue,
+                    normalizedTag
+                )
+            } else {
+                predicate = NSPredicate(
+                    format: "ownerId IN %@ AND visibility == %@",
+                    ownerIdStrings,
+                    visibility.rawValue
+                )
+            }
         } else {
-            predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
+            if let normalizedTag, hasRequiredTag {
+                predicate = NSPredicate(
+                    format: "visibility == %@ AND ANY searchableTags == %@",
+                    visibility.rawValue,
+                    normalizedTag
+                )
+            } else {
+                predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
+            }
         }
 
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
@@ -311,19 +321,135 @@ actor RecipeCloudService {
             }
         }
 
-        return recipes
+        return filterDerivedCopies(in: recipes, includeDerivedCopies: includeDerivedCopies)
     }
 
     /// Fetch discoverable public recipes for Search tab results.
     ///
     /// Text and category filtering intentionally remain client-side in
     /// `RecipeGroupingService` for richer matching/ranking semantics.
-    func fetchDiscoverablePublicRecipes(limit: Int = 50) async throws -> [Recipe] {
-        try await querySharedRecipes(
-            ownerIds: nil,
-            visibility: .publicRecipe,
-            limit: limit
-        )
+    func fetchDiscoverablePublicRecipes(limit: Int = 200) async throws -> [Recipe] {
+        let db = try await core.getPublicDatabase()
+        let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        var cursor: CKQueryOperation.Cursor?
+        var recipes: [Recipe] = []
+        var canonicalGroupIDs = Set<UUID>()
+        var fetchedPageCount = 0
+
+        let batchSize = min(max(limit, 100), 200)
+        // Keep paging until we gather enough distinct groups, but cap the total
+        // query fan-out so one hot recipe cannot trigger an unbounded scan.
+        let maxPageCount = 20
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: batchSize)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: batchSize)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let recipe = try? recipeFromRecord(record) else {
+                    continue
+                }
+
+                recipes.append(recipe)
+                if !recipe.isFollowingSourceUpdates {
+                    canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
+                }
+            }
+
+            fetchedPageCount += 1
+            cursor = results.queryCursor
+        } while cursor != nil && canonicalGroupIDs.count < limit && fetchedPageCount < maxPageCount
+
+        if cursor != nil && canonicalGroupIDs.count < limit {
+            logger.warning("Stopped discovery fetch after \(fetchedPageCount) pages with \(canonicalGroupIDs.count) canonical groups")
+        }
+
+        return limitRecipesByGroup(recipes, to: limit)
+    }
+
+    func fetchPublicRecipesForSearch(
+        filterText: String,
+        selectedCategories: Set<RecipeCategory>,
+        limit: Int = 200
+    ) async throws -> [Recipe] {
+        let normalizedQuery = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty || !selectedCategories.isEmpty else {
+            return try await fetchDiscoverablePublicRecipes(limit: limit)
+        }
+
+        let db = try await core.getPublicDatabase()
+        let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        var cursor: CKQueryOperation.Cursor?
+        var matchingRecipes: [Recipe] = []
+        var canonicalMatchingGroupIDs = Set<UUID>()
+        var fetchedPageCount = 0
+
+        let batchSize = min(max(limit, 100), 200)
+        let maxPageCount = 20
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: batchSize)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: batchSize)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let recipe = try? recipeFromRecord(record),
+                      RecipeGroupingService.matchesSearchFilters(
+                        recipe,
+                        filterText: normalizedQuery,
+                        selectedCategories: selectedCategories
+                      ) else {
+                    continue
+                }
+
+                matchingRecipes.append(recipe)
+                if !recipe.isFollowingSourceUpdates {
+                    canonicalMatchingGroupIDs.insert(discoveryGroupID(for: recipe))
+                }
+            }
+
+            fetchedPageCount += 1
+            cursor = results.queryCursor
+        } while cursor != nil && canonicalMatchingGroupIDs.count < limit && fetchedPageCount < maxPageCount
+
+        if cursor != nil && canonicalMatchingGroupIDs.count < limit {
+            logger.warning("Stopped public search fetch after \(fetchedPageCount) pages with \(canonicalMatchingGroupIDs.count) canonical matching groups")
+        }
+
+        return limitRecipesByGroup(matchingRecipes, to: limit)
+    }
+
+    func resolveCanonicalRelatedRecipeIDs(for recipe: Recipe) async throws -> [UUID] {
+        guard recipe.isFollowingSourceUpdates,
+              let sourceRecipeId = recipe.originalRecipeId else {
+            return recipe.relatedRecipeIds
+        }
+
+        do {
+            guard let sourceRecipe = try await fetchPublicRecipe(id: sourceRecipeId) else {
+                return recipe.relatedRecipeIds
+            }
+
+            return sourceRecipe.relatedRecipeIds
+        } catch {
+            logger.warning("Falling back to embedded related recipe IDs for \(recipe.id): \(error.localizedDescription)")
+            return recipe.relatedRecipeIds
+        }
     }
 
     /// Delete recipe from PUBLIC database
@@ -364,8 +490,9 @@ actor RecipeCloudService {
 
         for (_, result) in results.matchResults {
             if let record = try? result.get(),
-               let ownerIdString = record["ownerId"] as? String,
-               let ownerId = UUID(uuidString: ownerIdString) {
+               let recipe = try? recipeFromRecord(record),
+               !recipe.isFollowingSourceUpdates,
+               let ownerId = recipe.ownerId {
                 counts[ownerId, default: 0] += 1
             }
         }
@@ -391,7 +518,57 @@ actor RecipeCloudService {
             }
         }
 
-        return Array(recipes.prefix(limit))
+        let filteredRecipes = filterDerivedCopies(in: recipes, includeDerivedCopies: false)
+        return Array(filteredRecipes.prefix(limit))
+    }
+
+    private func filterDerivedCopies(in recipes: [Recipe], includeDerivedCopies: Bool) -> [Recipe] {
+        guard !includeDerivedCopies else {
+            return recipes
+        }
+
+        return recipes.filter { !$0.isFollowingSourceUpdates }
+    }
+
+    private func discoveryGroupID(for recipe: Recipe) -> UUID {
+        if recipe.isFollowingSourceUpdates, let originalRecipeId = recipe.originalRecipeId {
+            return originalRecipeId
+        }
+
+        return recipe.id
+    }
+
+    private func limitRecipesByGroup(_ recipes: [Recipe], to limit: Int) -> [Recipe] {
+        guard limit > 0 else { return [] }
+
+        var canonicalGroupIDs = Set<UUID>()
+        for recipe in recipes where !recipe.isFollowingSourceUpdates {
+            canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
+        }
+
+        var orderedCanonicalGroupIDs: [UUID] = []
+        var orderedFallbackGroupIDs: [UUID] = []
+        var seenCanonicalGroupIDs = Set<UUID>()
+        var seenFallbackGroupIDs = Set<UUID>()
+        for recipe in recipes {
+            let groupID = discoveryGroupID(for: recipe)
+
+            if canonicalGroupIDs.contains(groupID) {
+                if seenCanonicalGroupIDs.insert(groupID).inserted {
+                    orderedCanonicalGroupIDs.append(groupID)
+                }
+            } else if seenFallbackGroupIDs.insert(groupID).inserted {
+                orderedFallbackGroupIDs.append(groupID)
+            }
+        }
+
+        let allowedGroupIDs = Array(
+            (orderedCanonicalGroupIDs + orderedFallbackGroupIDs)
+                .prefix(limit)
+        )
+        let allowedGroupIDSet = Set(allowedGroupIDs)
+
+        return recipes.filter { allowedGroupIDSet.contains(discoveryGroupID(for: $0)) }
     }
 
     // MARK: - Image Assets
@@ -512,6 +689,18 @@ actor RecipeCloudService {
 
     // MARK: - Private Helpers
 
+    private func fetchOrCreateRecord(
+        in database: CKDatabase,
+        recordID: CKRecord.ID,
+        recordType: String
+    ) async throws -> CKRecord {
+        do {
+            return try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return CKRecord(recordType: recordType, recordID: recordID)
+        }
+    }
+
     private func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
@@ -557,6 +746,10 @@ actor RecipeCloudService {
         if let savedAt = recipe.savedAt {
             record["savedAt"] = savedAt as CKRecordValue
         }
+        if let sourceRecipeUpdatedAt = recipe.sourceRecipeUpdatedAt {
+            record["sourceRecipeUpdatedAt"] = sourceRecipeUpdatedAt as CKRecordValue
+        }
+        record["followsSourceUpdates"] = recipe.followsSourceUpdates as CKRecordValue
         if let notes = recipe.notes {
             record["notes"] = notes as CKRecordValue
         }
@@ -629,6 +822,13 @@ actor RecipeCloudService {
         }()
         let originalCreatorName = record["originalCreatorName"] as? String
         let savedAt = record["savedAt"] as? Date
+        let sourceRecipeUpdatedAt = record["sourceRecipeUpdatedAt"] as? Date
+        let followsSourceUpdates = Recipe.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: record["followsSourceUpdates"] as? Bool ?? false
+        )
         let notes = record["notes"] as? String
 
         let isPreview = record["isPreview"] as? Bool ?? false
@@ -658,6 +858,8 @@ actor RecipeCloudService {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )

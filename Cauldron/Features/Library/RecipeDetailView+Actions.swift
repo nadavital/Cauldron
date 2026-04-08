@@ -70,12 +70,14 @@ extension RecipeDetailView {
                                 originalCreatorId: fetchedRecipe.originalCreatorId,
                                 originalCreatorName: fetchedRecipe.originalCreatorName,
                                 savedAt: fetchedRecipe.savedAt,
+                                sourceRecipeUpdatedAt: fetchedRecipe.sourceRecipeUpdatedAt,
+                                followsSourceUpdates: fetchedRecipe.followsSourceUpdates,
                                 relatedRecipeIds: fetchedRecipe.relatedRecipeIds,
                                 isPreview: true
                             )
 
                             do {
-                                try await self.dependencies.recipeRepository.create(previewRecipe)
+                                try await self.dependencies.recipeRepository.create(previewRecipe, skipCloudSync: true)
                                 AppLogger.general.info("📝 Saved related recipe as preview: \(fetchedRecipe.title)")
 
                                 if fetchedRecipe.cloudImageRecordName != nil {
@@ -85,8 +87,17 @@ extension RecipeDetailView {
                                             fromPublic: true
                                         ) {
                                             let imageURL = await self.dependencies.imageManager.imageURL(for: filename)
-                                            let updatedPreview = previewRecipe.withImageURL(imageURL)
-                                            try await self.dependencies.recipeRepository.update(updatedPreview)
+                                            let updatedPreview = previewRecipe.withImageState(
+                                                imageURL: imageURL,
+                                                cloudImageRecordName: previewRecipe.cloudImageRecordName,
+                                                imageModifiedAt: previewRecipe.imageModifiedAt
+                                            )
+                                            try await self.dependencies.recipeRepository.update(
+                                                updatedPreview,
+                                                shouldUpdateTimestamp: false,
+                                                skipImageSync: true,
+                                                skipCloudSync: true
+                                            )
                                             AppLogger.general.info("✅ Downloaded image for preview recipe: \(fetchedRecipe.title)")
                                             loadedRecipes.append(updatedPreview)
                                         } else {
@@ -234,10 +245,25 @@ extension RecipeDetailView {
             return
         }
 
-        if !recipe.relatedRecipeIds.isEmpty {
-            do {
-                let localRelated = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-                let missingIds = Set(recipe.relatedRecipeIds).subtracting(localRelated.map { $0.id })
+        do {
+            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+            if !canonicalRelatedRecipeIDs.isEmpty {
+                let localRelated = try await dependencies.recipeRepository.fetch(ids: canonicalRelatedRecipeIDs)
+                var satisfiedRelatedIDs = Set(localRelated.map(\.id))
+
+                if satisfiedRelatedIDs.count < canonicalRelatedRecipeIDs.count {
+                    let allUserRecipes = try await dependencies.recipeRepository.fetchAll()
+                    let canonicalRelatedIDSet = Set(canonicalRelatedRecipeIDs)
+
+                    for userRecipe in allUserRecipes {
+                        if let originalRecipeId = userRecipe.originalRecipeId,
+                           canonicalRelatedIDSet.contains(originalRecipeId) {
+                            satisfiedRelatedIDs.insert(originalRecipeId)
+                        }
+                    }
+                }
+
+                let missingIds = Set(canonicalRelatedRecipeIDs).subtracting(satisfiedRelatedIDs)
 
                 if !missingIds.isEmpty {
                     var fetchedRelated: [Recipe] = []
@@ -261,9 +287,9 @@ extension RecipeDetailView {
                         return
                     }
                 }
-            } catch {
-                AppLogger.general.warning("Failed to check for related recipes: \(error.localizedDescription)")
             }
+        } catch {
+            AppLogger.general.warning("Failed to check for related recipes: \(error.localizedDescription)")
         }
 
         await performSaveRecipe(saveRelatedRecipes: false)
@@ -281,28 +307,43 @@ extension RecipeDetailView {
         var relatedRecipeIdMapping: [UUID: UUID] = [:]
 
         do {
+            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+            let sourceImageRecipeID = recipe.sourceAssetReferenceID
+
             if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
                 AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
 
                 for relatedRecipe in relatedRecipesToSave {
+                    let canonicalRelatedIDsForCopy = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: relatedRecipe)
+                    let relatedImageSourceRecipeID = relatedRecipe.sourceAssetReferenceID
                     let copiedRelated = relatedRecipe.withOwner(
                         userId,
                         originalCreatorId: relatedRecipe.ownerId,
-                        originalCreatorName: nil
-                    )
+                        originalCreatorName: nil,
+                        visibility: .publicRecipe,
+                        relatedRecipeIds: canonicalRelatedIDsForCopy
+                    ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
                     try await dependencies.recipeRepository.create(copiedRelated)
                     relatedRecipeIdMapping[relatedRecipe.id] = copiedRelated.id
 
-                    if relatedRecipe.cloudImageRecordName != nil {
+                    if relatedRecipe.cloudImageRecordName != nil || relatedImageSourceRecipeID != relatedRecipe.id {
                         do {
                             if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                                recipeId: relatedRecipe.id,
+                                recipeId: relatedImageSourceRecipeID,
                                 fromPublic: true
                             ), let image = UIImage(data: imageData) {
                                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
                                 let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                                let updatedRelated = copiedRelated.withImageURL(imageURL)
-                                try await dependencies.recipeRepository.update(updatedRelated)
+                                let updatedRelated = copiedRelated
+                                    .withImageState(
+                                        imageURL: imageURL,
+                                        cloudImageRecordName: nil,
+                                        imageModifiedAt: nil
+                                    )
+                                try await dependencies.recipeRepository.update(
+                                    updatedRelated,
+                                    shouldUpdateTimestamp: false
+                                )
                                 AppLogger.general.info("✅ Downloaded image for related recipe: \(relatedRecipe.title)")
                             }
                         } catch {
@@ -325,7 +366,7 @@ extension RecipeDetailView {
                 let originalCloudImageRecordName = existingPreview.cloudImageRecordName
                 let originalRecipeId = existingPreview.originalRecipeId ?? existingPreview.id
 
-                let remappedRelatedIds = existingPreview.relatedRecipeIds.map { originalId in
+                let remappedRelatedIds = canonicalRelatedRecipeIDs.map { originalId in
                     relatedRecipeIdMapping[originalId] ?? originalId
                 }
 
@@ -354,13 +395,15 @@ extension RecipeDetailView {
                     originalCreatorId: existingPreview.originalCreatorId ?? existingPreview.ownerId,
                     originalCreatorName: existingPreview.originalCreatorName ?? recipeOwner?.displayName,
                     savedAt: Date(),
+                    sourceRecipeUpdatedAt: existingPreview.sourceRecipeUpdatedAt ?? existingPreview.updatedAt,
+                    followsSourceUpdates: true,
                     relatedRecipeIds: remappedRelatedIds,
                     isPreview: false
                 )
 
                 try await dependencies.recipeRepository.create(copiedRecipe)
 
-                if originalCloudImageRecordName != nil {
+                if originalCloudImageRecordName != nil || originalRecipeId != existingPreview.id {
                     do {
                         if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
                             recipeId: originalRecipeId,
@@ -369,8 +412,13 @@ extension RecipeDetailView {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
                             let imageURL = await dependencies.imageManager.imageURL(for: filename)
 
-                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                            let updatedRecipe = copiedRecipe
+                                .withImageState(
+                                    imageURL: imageURL,
+                                    cloudImageRecordName: nil,
+                                    imageModifiedAt: nil
+                                )
+                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false)
 
                             AppLogger.general.info("✅ Downloaded and saved image for copied recipe")
                             copiedRecipe = updatedRecipe
@@ -385,8 +433,10 @@ extension RecipeDetailView {
                 var tempCopiedRecipe = recipe.withOwner(
                     userId,
                     originalCreatorId: recipe.ownerId,
-                    originalCreatorName: recipeOwner?.displayName
-                )
+                    originalCreatorName: recipeOwner?.displayName,
+                    visibility: .publicRecipe,
+                    relatedRecipeIds: canonicalRelatedRecipeIDs
+                ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
 
                 if !relatedRecipeIdMapping.isEmpty {
                     let remappedRelatedIds = tempCopiedRecipe.relatedRecipeIds.map { originalId in
@@ -417,6 +467,8 @@ extension RecipeDetailView {
                         originalCreatorId: tempCopiedRecipe.originalCreatorId,
                         originalCreatorName: tempCopiedRecipe.originalCreatorName,
                         savedAt: tempCopiedRecipe.savedAt,
+                        sourceRecipeUpdatedAt: tempCopiedRecipe.sourceRecipeUpdatedAt,
+                        followsSourceUpdates: tempCopiedRecipe.followsSourceUpdates,
                         relatedRecipeIds: remappedRelatedIds,
                         isPreview: tempCopiedRecipe.isPreview
                     )
@@ -426,17 +478,26 @@ extension RecipeDetailView {
                 try await dependencies.recipeRepository.create(copiedRecipe)
                 AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
 
-                if recipe.cloudImageRecordName != nil && copiedRecipe.imageURL == nil {
+                if copiedRecipe.imageURL == nil {
                     do {
                         if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                            recipeId: recipe.id,
+                            recipeId: sourceImageRecipeID,
                             fromPublic: true
                         ), let image = UIImage(data: imageData) {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
                             let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                            let updatedRecipe = copiedRecipe.withImageURL(imageURL)
-                            try await dependencies.recipeRepository.update(updatedRecipe)
+                            let updatedRecipe = copiedRecipe
+                                .withImageState(
+                                    imageURL: imageURL,
+                                    cloudImageRecordName: nil,
+                                    imageModifiedAt: nil
+                                )
+                            try await dependencies.recipeRepository.update(
+                                updatedRecipe,
+                                shouldUpdateTimestamp: false
+                            )
                             AppLogger.general.info("✅ Downloaded and saved recipe image: \(filename)")
+                            copiedRecipe = updatedRecipe
                         }
                     } catch {
                         AppLogger.general.warning("Failed to download recipe image: \(error.localizedDescription)")
@@ -484,8 +545,17 @@ extension RecipeDetailView {
                         fromPublic: true
                     ) {
                         let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                        let updatedRecipe = existingRecipe.withImageURL(imageURL)
-                        try await dependencies.recipeRepository.update(updatedRecipe, skipImageSync: true)
+                        let updatedRecipe = existingRecipe.withImageState(
+                            imageURL: imageURL,
+                            cloudImageRecordName: existingRecipe.cloudImageRecordName,
+                            imageModifiedAt: existingRecipe.imageModifiedAt
+                        )
+                        try await dependencies.recipeRepository.update(
+                            updatedRecipe,
+                            shouldUpdateTimestamp: false,
+                            skipImageSync: true,
+                            skipCloudSync: true
+                        )
                         AppLogger.general.info("✅ Updated preview with image: \(recipe.title)")
 
                         self.recipe = updatedRecipe
@@ -520,11 +590,13 @@ extension RecipeDetailView {
                 originalCreatorId: recipe.originalCreatorId,
                 originalCreatorName: recipe.originalCreatorName,
                 savedAt: recipe.savedAt,
+                sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+                followsSourceUpdates: recipe.followsSourceUpdates,
                 relatedRecipeIds: recipe.relatedRecipeIds,
                 isPreview: true
             )
 
-            try await dependencies.recipeRepository.create(previewRecipe)
+            try await dependencies.recipeRepository.create(previewRecipe, skipCloudSync: true)
             AppLogger.general.info("📝 Saved recipe as preview: \(recipe.title)")
 
             if recipe.cloudImageRecordName != nil {
@@ -532,10 +604,19 @@ extension RecipeDetailView {
                     if let filename = try await dependencies.imageManager.downloadImageFromCloud(
                         recipeId: previewRecipe.id,
                         fromPublic: true
-                    ) {
-                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                        let updatedPreview = previewRecipe.withImageURL(imageURL)
-                        try await dependencies.recipeRepository.update(updatedPreview)
+                        ) {
+                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                        let updatedPreview = previewRecipe.withImageState(
+                            imageURL: imageURL,
+                            cloudImageRecordName: previewRecipe.cloudImageRecordName,
+                            imageModifiedAt: previewRecipe.imageModifiedAt
+                        )
+                        try await dependencies.recipeRepository.update(
+                            updatedPreview,
+                            shouldUpdateTimestamp: false,
+                            skipImageSync: true,
+                            skipCloudSync: true
+                        )
                         AppLogger.general.info("✅ Downloaded image for preview recipe: \(recipe.title)")
 
                         self.recipe = updatedPreview
@@ -607,7 +688,11 @@ extension RecipeDetailView {
                     originalRecipeId: recipe.originalRecipeId,
                     originalCreatorId: recipe.originalCreatorId,
                     originalCreatorName: recipe.originalCreatorName,
-                    savedAt: recipe.savedAt
+                    savedAt: recipe.savedAt,
+                    sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+                    followsSourceUpdates: recipe.followsSourceUpdates,
+                    relatedRecipeIds: recipe.relatedRecipeIds,
+                    isPreview: recipe.isPreview
                 )
             }
 
@@ -622,8 +707,13 @@ extension RecipeDetailView {
     }
 
     func checkForRecipeUpdates() async {
-        guard let originalRecipeId = recipe.originalRecipeId,
-              recipe.originalCreatorId != nil else {
+        guard let originalRecipeId = recipe.originalRecipeId else {
+            return
+        }
+
+        guard recipe.isFollowingSourceUpdates else {
+            hasUpdates = false
+            originalRecipe = nil
             return
         }
 
@@ -638,11 +728,97 @@ extension RecipeDetailView {
 
             originalRecipe = original
 
-            if let savedAt = recipe.savedAt,
-               original.updatedAt > savedAt {
-                hasUpdates = true
-                AppLogger.general.info("🔄 Updates available for recipe '\(recipe.title)': original updated at \(original.updatedAt), saved at \(savedAt)")
+            let sourceVersion = recipe.sourceRecipeUpdatedAt ?? recipe.savedAt
+            if let sourceVersion,
+               original.updatedAt > sourceVersion {
+                if recipe.shouldPreserveLegacyEdits(comparedTo: original) {
+                    let migratedRecipe = recipe.withSourceTracking(
+                        sourceRecipeUpdatedAt: original.updatedAt,
+                        followsSourceUpdates: false
+                    )
+                    try await dependencies.recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                    self.recipe = migratedRecipe
+                    hasUpdates = false
+                    originalRecipe = nil
+                    return
+                }
+
+                let shouldRemoveImage = original.cloudImageRecordName == nil
+                let needsImageRefresh = !shouldRemoveImage &&
+                    (original.imageModifiedAt != recipe.imageModifiedAt || recipe.imageURL == nil)
+                let pendingSourceVersion = needsImageRefresh
+                    ? (recipe.sourceRecipeUpdatedAt ?? recipe.savedAt ?? recipe.updatedAt)
+                    : original.updatedAt
+
+                var updatedRecipe = recipe
+                    .applyingSourceSnapshot(original)
+                    .withSourceTracking(
+                        sourceRecipeUpdatedAt: pendingSourceVersion,
+                        followsSourceUpdates: true
+                    )
+                if needsImageRefresh {
+                    updatedRecipe = updatedRecipe
+                        .withImageState(
+                            imageURL: recipe.imageURL,
+                            cloudImageRecordName: recipe.cloudImageRecordName,
+                            imageModifiedAt: recipe.imageModifiedAt
+                        )
+                        .withSourceTracking(
+                            sourceRecipeUpdatedAt: pendingSourceVersion,
+                            followsSourceUpdates: true
+                        )
+                }
+
+                try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+
+                var didRefreshImage = false
+                if shouldRemoveImage {
+                    await dependencies.imageManager.deleteImage(recipeId: updatedRecipe.id)
+                    didRefreshImage = true
+                } else if needsImageRefresh {
+                    do {
+                        if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
+                            recipeId: originalRecipeId,
+                            fromPublic: true
+                        ), let image = UIImage(data: imageData) {
+                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: updatedRecipe.id)
+                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                            updatedRecipe = updatedRecipe
+                                .withImageState(
+                                    imageURL: imageURL,
+                                    cloudImageRecordName: original.cloudImageRecordName,
+                                    imageModifiedAt: original.imageModifiedAt
+                                )
+                                .withSourceTracking(
+                                    sourceRecipeUpdatedAt: original.updatedAt,
+                                    followsSourceUpdates: true
+                                )
+                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                            didRefreshImage = true
+                        }
+                    } catch {
+                        AppLogger.general.warning("Failed to refresh image from source recipe: \(error.localizedDescription)")
+                    }
+                }
+
+                self.recipe = updatedRecipe
+                currentVisibility = updatedRecipe.visibility
+                localIsFavorite = updatedRecipe.isFavorite
+                if didRefreshImage {
+                    imageRefreshID = UUID()
+                }
+                hasUpdates = false
+                AppLogger.general.info("✅ Auto-updated saved recipe '\(recipe.title)' from source")
+                NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: updatedRecipe.id)
             } else {
+                if recipe.requiresLegacySourceTrackingMigration {
+                    let migratedRecipe = recipe.withSourceTracking(
+                        sourceRecipeUpdatedAt: original.updatedAt,
+                        followsSourceUpdates: true
+                    )
+                    try await dependencies.recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                    self.recipe = migratedRecipe
+                }
                 hasUpdates = false
                 AppLogger.general.info("✅ Recipe '\(recipe.title)' is up to date")
             }
@@ -662,36 +838,72 @@ extension RecipeDetailView {
         defer { isUpdatingRecipe = false }
 
         do {
-            let updatedRecipe = Recipe(
-                id: recipe.id,
-                title: original.title,
-                ingredients: original.ingredients,
-                steps: original.steps,
-                yields: original.yields,
-                totalMinutes: original.totalMinutes,
-                tags: original.tags,
-                nutrition: original.nutrition,
-                sourceURL: original.sourceURL,
-                sourceTitle: original.sourceTitle,
-                notes: original.notes,
-                imageURL: original.imageURL,
-                isFavorite: recipe.isFavorite,
-                visibility: recipe.visibility,
-                ownerId: recipe.ownerId,
-                cloudRecordName: recipe.cloudRecordName,
-                cloudImageRecordName: recipe.cloudImageRecordName,
-                imageModifiedAt: recipe.imageModifiedAt,
-                createdAt: recipe.createdAt,
-                updatedAt: Date(),
-                originalRecipeId: recipe.originalRecipeId,
-                originalCreatorId: recipe.originalCreatorId,
-                originalCreatorName: recipe.originalCreatorName,
-                savedAt: Date()
-            )
+            let shouldRemoveImage = original.cloudImageRecordName == nil
+            let needsImageRefresh = !shouldRemoveImage &&
+                (original.imageModifiedAt != recipe.imageModifiedAt || recipe.imageURL == nil)
+            let pendingSourceVersion = needsImageRefresh
+                ? (recipe.sourceRecipeUpdatedAt ?? recipe.savedAt ?? recipe.updatedAt)
+                : original.updatedAt
 
-            try await dependencies.recipeRepository.update(updatedRecipe)
+            var updatedRecipe = recipe
+                .applyingSourceSnapshot(original)
+                .withSourceTracking(
+                    sourceRecipeUpdatedAt: pendingSourceVersion,
+                    followsSourceUpdates: true
+                )
+            if needsImageRefresh {
+                updatedRecipe = updatedRecipe
+                    .withImageState(
+                        imageURL: recipe.imageURL,
+                        cloudImageRecordName: recipe.cloudImageRecordName,
+                        imageModifiedAt: recipe.imageModifiedAt
+                    )
+                    .withSourceTracking(
+                        sourceRecipeUpdatedAt: pendingSourceVersion,
+                        followsSourceUpdates: true
+                    )
+            }
 
-            AppLogger.general.info("✅ Successfully updated recipe '\(recipe.title)' from original")
+            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+
+            var didRefreshImage = false
+            if shouldRemoveImage {
+                await dependencies.imageManager.deleteImage(recipeId: updatedRecipe.id)
+                didRefreshImage = true
+            } else if needsImageRefresh {
+                do {
+                    if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
+                        recipeId: original.id,
+                        fromPublic: true
+                    ), let image = UIImage(data: imageData) {
+                        let filename = try await dependencies.imageManager.saveImage(image, recipeId: updatedRecipe.id)
+                        let imageURL = await dependencies.imageManager.imageURL(for: filename)
+                        updatedRecipe = updatedRecipe
+                            .withImageState(
+                                imageURL: imageURL,
+                                cloudImageRecordName: original.cloudImageRecordName,
+                                imageModifiedAt: original.imageModifiedAt
+                            )
+                            .withSourceTracking(
+                                sourceRecipeUpdatedAt: original.updatedAt,
+                                followsSourceUpdates: true
+                            )
+                        try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                        didRefreshImage = true
+                    }
+                } catch {
+                    AppLogger.general.warning("Failed to refresh image while updating recipe from source: \(error.localizedDescription)")
+                }
+            }
+
+            self.recipe = updatedRecipe
+            currentVisibility = updatedRecipe.visibility
+            localIsFavorite = updatedRecipe.isFavorite
+            if didRefreshImage {
+                imageRefreshID = UUID()
+            }
+
+            AppLogger.general.info("✅ Successfully refreshed recipe '\(recipe.title)' from source")
 
             hasUpdates = false
 

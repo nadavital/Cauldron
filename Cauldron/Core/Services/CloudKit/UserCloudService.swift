@@ -191,17 +191,11 @@ actor UserCloudService {
         let recordID = CKRecord.ID(recordName: recordName)
         let db = try await core.getPublicDatabase()
 
-        let record: CKRecord
-        do {
-            record = try await db.record(for: recordID)
-            logger.info("Updating existing user record in CloudKit: \(normalizedUsername)")
-        } catch let error as CKError where error.code == .unknownItem {
-            record = CKRecord(recordType: CloudKitCore.RecordType.user, recordID: recordID)
-            logger.info("Creating new user record in CloudKit: \(normalizedUsername)")
-        } catch {
-            logger.error("Error fetching existing user record: \(error.localizedDescription)")
-            throw error
-        }
+        let record = try await fetchOrCreateRecord(
+            in: db,
+            recordID: recordID,
+            recordType: CloudKitCore.RecordType.user
+        )
 
         record["userId"] = user.id.uuidString as CKRecordValue
         record["username"] = normalizedUsername as CKRecordValue
@@ -269,13 +263,17 @@ actor UserCloudService {
 
     /// Fetch all users from CloudKit PUBLIC database
     func fetchAllUsers() async throws -> [User] {
+        try await fetchAllUsers(limit: 200)
+    }
+
+    func fetchAllUsers(limit: Int) async throws -> [User] {
         let db = try await core.getPublicDatabase()
 
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "username", ascending: true)]
 
-        let results = try await db.records(matching: query, resultsLimit: 200)
+        let results = try await db.records(matching: query, resultsLimit: limit)
 
         var users: [User] = []
         for (_, result) in results.matchResults {
@@ -286,6 +284,25 @@ actor UserCloudService {
         }
 
         logger.info("Fetched \(users.count) total users from PUBLIC database")
+        return users
+    }
+
+    func fetchSuggestedUsers(limit: Int) async throws -> [User] {
+        let db = try await core.getPublicDatabase()
+
+        let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: NSPredicate(value: true))
+        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+        let results = try await db.records(matching: query, resultsLimit: limit)
+
+        var users: [User] = []
+        for (_, result) in results.matchResults {
+            if let record = try? result.get(),
+               let user = try? userFromRecord(record) {
+                users.append(user)
+            }
+        }
+
         return users
     }
 
@@ -392,14 +409,11 @@ actor UserCloudService {
         let imageRecordID = CKRecord.ID(recordName: imageRecordName)
 
         do {
-            let imageRecord: CKRecord
-            do {
-                imageRecord = try await db.record(for: imageRecordID)
-                logger.info("Updating existing profile image record")
-            } catch let error as CKError where error.code == .unknownItem {
-                imageRecord = CKRecord(recordType: CloudKitCore.RecordType.profileImage, recordID: imageRecordID)
-                logger.info("Creating new profile image record")
-            }
+            let imageRecord = try await fetchOrCreateRecord(
+                in: db,
+                recordID: imageRecordID,
+                recordType: CloudKitCore.RecordType.profileImage
+            )
 
             imageRecord["imageAsset"] = asset
             imageRecord["userId"] = userId.uuidString as CKRecordValue
@@ -814,6 +828,18 @@ actor UserCloudService {
 
         try await saveUser(updatedUser)
         return updatedUser
+    }
+
+    private func fetchOrCreateRecord(
+        in database: CKDatabase,
+        recordID: CKRecord.ID,
+        recordType: String
+    ) async throws -> CKRecord {
+        do {
+            return try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return CKRecord(recordType: recordType, recordID: recordID)
+        }
     }
 
     func userFromRecord(_ record: CKRecord) throws -> User {

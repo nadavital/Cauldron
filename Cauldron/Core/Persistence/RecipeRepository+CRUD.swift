@@ -44,9 +44,14 @@ extension RecipeRepository {
                 imageModifiedAt: recipe.imageModifiedAt,
                 createdAt: recipe.createdAt,
                 updatedAt: recipe.updatedAt,
+                originalRecipeId: recipe.originalRecipeId,
                 originalCreatorId: recipe.originalCreatorId,
                 originalCreatorName: recipe.originalCreatorName,
-                savedAt: recipe.savedAt
+                savedAt: recipe.savedAt,
+                sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+                followsSourceUpdates: recipe.followsSourceUpdates,
+                relatedRecipeIds: recipe.relatedRecipeIds,
+                isPreview: recipe.isPreview
             )
         }
 
@@ -140,19 +145,29 @@ extension RecipeRepository {
     /// - Returns: The saved recipe
     func savePublicRecipeWithImage(_ recipe: Recipe, as userId: UUID) async throws -> Recipe {
         // Create a new recipe copy for the user
-        var newRecipe = recipe.withOwner(userId)
+        let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+        var newRecipe = recipe.withOwner(
+            userId,
+            visibility: .publicRecipe,
+            relatedRecipeIds: canonicalRelatedRecipeIDs
+        )
+        let sourceImageRecipeID = recipe.sourceAssetReferenceID
 
         // Download image from Public database if exists
-        if recipe.imageURL != nil {
+        if recipe.cloudImageRecordName != nil || recipe.imageURL != nil || sourceImageRecipeID != recipe.id {
             do {
-                if let imageData = try await recipeCloudService.downloadImageAsset(recipeId: recipe.id, fromPublic: true),
+                if let imageData = try await recipeCloudService.downloadImageAsset(recipeId: sourceImageRecipeID, fromPublic: true),
                    let image = UIImage(data: imageData) {
                     // Save image locally with new recipe ID
                     _ = try await imageManager.saveImage(image, recipeId: newRecipe.id)
 
                     // Update image URL
                     let imageURL = await imageManager.imageURL(for: "\(newRecipe.id.uuidString).jpg")
-                    newRecipe = newRecipe.withImageURL(imageURL)
+                    newRecipe = newRecipe.withImageState(
+                        imageURL: imageURL,
+                        cloudImageRecordName: nil,
+                        imageModifiedAt: nil
+                    )
 
                     logger.info("✅ Downloaded and saved image for copied recipe")
                 }
@@ -257,7 +272,13 @@ extension RecipeRepository {
     ///   - recipe: The recipe to update
     ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
     ///   - skipImageSync: Whether to skip image synchronization. Set to true for metadata-only sync operations to avoid unnecessary image processing.
-    func update(_ recipe: Recipe, shouldUpdateTimestamp: Bool = true, skipImageSync: Bool = false) async throws {
+    ///   - skipCloudSync: Whether to keep the change local-only. Use for preview recipes and other non-owned cached copies.
+    func update(
+        _ recipe: Recipe,
+        shouldUpdateTimestamp: Bool = true,
+        skipImageSync: Bool = false,
+        skipCloudSync: Bool = false
+    ) async throws {
         // Capture old state before updating to detect image changes
         let oldRecipe = try await fetch(id: recipe.id)
         guard let oldRecipe = oldRecipe else {
@@ -267,7 +288,7 @@ extension RecipeRepository {
         // 1. Update recipe in local database (immediate)
         try await updateRecipeInDatabase(recipe, shouldUpdateTimestamp: shouldUpdateTimestamp)
 
-        guard !RuntimeEnvironment.isRunningTests else {
+        guard !skipCloudSync, !RuntimeEnvironment.isRunningTests else {
             return
         }
 
@@ -352,6 +373,13 @@ extension RecipeRepository {
         model.cloudImageRecordName = recipe.cloudImageRecordName
         model.imageModifiedAt = recipe.imageModifiedAt
         model.ownerId = recipe.ownerId  // Preserve owner ID
+        model.originalRecipeId = recipe.originalRecipeId
+        model.originalCreatorId = recipe.originalCreatorId
+        model.originalCreatorName = recipe.originalCreatorName
+        model.savedAt = recipe.savedAt
+        model.sourceRecipeUpdatedAt = recipe.sourceRecipeUpdatedAt
+        model.followsSourceUpdates = recipe.followsSourceUpdates
+        model.isPreview = recipe.isPreview
         // Only update timestamp for user actions, not sync operations
         model.updatedAt = shouldUpdateTimestamp ? Date() : recipe.updatedAt
 
@@ -432,8 +460,18 @@ extension RecipeRepository {
             visibility: visibility,
             ownerId: recipe.ownerId,
             cloudRecordName: recipe.cloudRecordName,
+            cloudImageRecordName: recipe.cloudImageRecordName,
+            imageModifiedAt: recipe.imageModifiedAt,
             createdAt: recipe.createdAt,
-            updatedAt: Date()
+            updatedAt: Date(),
+            originalRecipeId: recipe.originalRecipeId,
+            originalCreatorId: recipe.originalCreatorId,
+            originalCreatorName: recipe.originalCreatorName,
+            savedAt: recipe.savedAt,
+            sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+            followsSourceUpdates: recipe.followsSourceUpdates,
+            relatedRecipeIds: recipe.relatedRecipeIds,
+            isPreview: recipe.isPreview
         )
 
         // Update the recipe (this handles CloudKit sync)

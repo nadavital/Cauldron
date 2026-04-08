@@ -208,10 +208,13 @@ actor SharingService {
         }
 
         // Create a copy using withOwner(), preserving attribution to the shared recipe creator
+        let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: sharedRecipe.recipe)
         let personalCopy = sharedRecipe.recipe.withOwner(
             userId,
             originalCreatorId: sharedRecipe.sharedBy.id,
-            originalCreatorName: sharedRecipe.sharedBy.displayName
+            originalCreatorName: sharedRecipe.sharedBy.displayName,
+            visibility: .publicRecipe,
+            relatedRecipeIds: canonicalRelatedRecipeIDs
         )
         try await recipeRepository.create(personalCopy)
         logger.info("Copied shared recipe '\(personalCopy.title)' to personal collection with ownerId: \(userId)")

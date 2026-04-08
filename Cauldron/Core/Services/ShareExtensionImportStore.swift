@@ -133,6 +133,8 @@ extension Recipe {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: self.sourceRecipeUpdatedAt,
+            followsSourceUpdates: self.followsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )
