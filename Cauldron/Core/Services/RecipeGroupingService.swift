@@ -24,7 +24,7 @@ struct SearchRecipeGroup: Identifiable {
 
 /// Service to handle recipe deduplication, grouping, and ranking
 enum RecipeGroupingService {
-    static func matchesSearchFilters(
+    nonisolated static func matchesSearchFilters(
         _ recipe: Recipe,
         filterText: String = "",
         selectedCategories: Set<RecipeCategory> = []
@@ -149,7 +149,7 @@ enum RecipeGroupingService {
         return groups
     }
 
-    private static func tokenize(_ query: String) -> [String] {
+    private nonisolated static func tokenize(_ query: String) -> [String] {
         query
             .lowercased()
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
@@ -157,7 +157,7 @@ enum RecipeGroupingService {
             .filter { $0.count >= 2 }
     }
 
-    private static func buildSearchCandidate(
+    private nonisolated static func buildSearchCandidate(
         for recipe: Recipe,
         filterText: String,
         selectedCategories: Set<RecipeCategory>
@@ -175,7 +175,7 @@ enum RecipeGroupingService {
         return (recipe: recipe, textScore: textScore)
     }
 
-    private static func matchesSelectedCategories(
+    private nonisolated static func matchesSelectedCategories(
         _ recipe: Recipe,
         selectedCategories: Set<RecipeCategory>
     ) -> Bool {
@@ -185,7 +185,7 @@ enum RecipeGroupingService {
         }
     }
 
-    private static func recipeTextScore(_ recipe: Recipe, normalizedQuery: String) -> Double {
+    private nonisolated static func recipeTextScore(_ recipe: Recipe, normalizedQuery: String) -> Double {
         guard !normalizedQuery.isEmpty else { return 1 }
 
         let queryTokens = tokenize(normalizedQuery)

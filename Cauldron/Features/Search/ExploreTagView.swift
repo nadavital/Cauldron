@@ -311,12 +311,13 @@ final class ExploreTagViewModel {
                 let connectionsFuture = Task {
                     try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
                 }
-                friendIDsFuture = Task {
+                let friendIDsTask = Task {
                     let connections = try await connectionsFuture.value
                     return Self.acceptedFriendIDs(from: connections, currentUserId: userId)
                 }
+                friendIDsFuture = friendIDsTask
                 friendRecipesFuture = Task {
-                    let friendIds = try await friendIDsFuture.value
+                    let friendIds = try await friendIDsTask.value
                     guard !friendIds.isEmpty else { return [] }
 
                     let recipes = try await dependencies.recipeCloudService.querySharedRecipes(

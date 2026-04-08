@@ -558,10 +558,11 @@ actor RecipeSyncService {
                 }
             }
 
+            let updatedRecipeID = updatedRecipe.id
             await MainActor.run {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("RecipeUpdated"),
-                    object: updatedRecipe.id
+                    object: updatedRecipeID
                 )
             }
         }

@@ -107,9 +107,9 @@ final class EntityImageLoader {
                     continue
                 }
 
-                group.addTask {
-                    let cacheKey = ImageCache.profileImageKey(userId: user.id)
+                let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
+                group.addTask {
                     if !forceRefresh, await ImageCache.shared.load(cacheKey) != nil {
                         return (user.id, nil)
                     }
@@ -143,7 +143,9 @@ final class EntityImageLoader {
         for sharedRecipe in sharedRecipes {
             let recipeKey = ImageCache.recipeImageKey(recipeId: sharedRecipe.recipe.id)
             let profileKey = ImageCache.profileImageKey(userId: sharedRecipe.sharedBy.id)
-            if await ImageCache.shared.load(recipeKey) == nil || await ImageCache.shared.load(profileKey) == nil {
+            let cachedRecipeImage = await ImageCache.shared.load(recipeKey)
+            let cachedProfileImage = await ImageCache.shared.load(profileKey)
+            if cachedRecipeImage == nil || cachedProfileImage == nil {
                 needsPreload = true
                 break
             }
@@ -155,30 +157,30 @@ final class EntityImageLoader {
         await withTaskGroup(of: (String, UIImage?).self) { group in
             for sharedRecipe in sharedRecipes {
                 let recipeId = sharedRecipe.recipe.id
+                let recipeCacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: "thumbnail")
                 group.addTask {
-                    let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: "thumbnail")
-                    if await ImageCache.shared.load(cacheKey) != nil {
-                        return (cacheKey, nil)
+                    if await ImageCache.shared.load(recipeCacheKey) != nil {
+                        return (recipeCacheKey, nil)
                     }
                     if let image = await Self.loadImage(
                         from: sharedRecipe.recipe.imageURL,
                         maxPixelSize: 70 * displayScale
                     ) {
-                        return (cacheKey, image)
+                        return (recipeCacheKey, image)
                     }
-                    return (cacheKey, nil)
+                    return (recipeCacheKey, nil)
                 }
 
                 let userId = sharedRecipe.sharedBy.id
+                let profileCacheKey = ImageCache.profileImageKey(userId: userId)
                 group.addTask {
-                    let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    if await ImageCache.shared.load(cacheKey) != nil {
-                        return (cacheKey, nil)
+                    if await ImageCache.shared.load(profileCacheKey) != nil {
+                        return (profileCacheKey, nil)
                     }
                     if let image = await Self.loadImage(from: sharedRecipe.sharedBy.profileImageURL) {
-                        return (cacheKey, image)
+                        return (profileCacheKey, image)
                     }
-                    return (cacheKey, nil)
+                    return (profileCacheKey, nil)
                 }
             }
 
