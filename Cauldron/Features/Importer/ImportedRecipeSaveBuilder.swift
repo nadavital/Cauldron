@@ -37,6 +37,8 @@ enum ImportedRecipeSaveBuilder {
             originalCreatorId: recipe.originalCreatorId,
             originalCreatorName: recipe.originalCreatorName,
             savedAt: recipe.savedAt,
+            sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+            followsSourceUpdates: recipe.followsSourceUpdates,
             relatedRecipeIds: recipe.relatedRecipeIds,
             isPreview: recipe.isPreview
         )

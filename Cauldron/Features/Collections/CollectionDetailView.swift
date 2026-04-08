@@ -941,10 +941,13 @@ struct CollectionRecipeSelectorSheet: View {
             }
 
             // Create a copy of the recipe owned by the current user using withOwner()
+            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
             let copiedRecipe = recipe.withOwner(
                 userId,
                 originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipeOwner?.displayName
+                originalCreatorName: recipeOwner?.displayName,
+                visibility: .publicRecipe,
+                relatedRecipeIds: canonicalRelatedRecipeIDs
             )
 
             // Save the copied recipe
@@ -1263,8 +1266,18 @@ struct ConformanceFixSheet: View {
                     visibility: targetVisibility,
                     ownerId: recipe.ownerId,
                     cloudRecordName: recipe.cloudRecordName,
+                    cloudImageRecordName: recipe.cloudImageRecordName,
+                    imageModifiedAt: recipe.imageModifiedAt,
                     createdAt: recipe.createdAt,
-                    updatedAt: Date()
+                    updatedAt: Date(),
+                    originalRecipeId: recipe.originalRecipeId,
+                    originalCreatorId: recipe.originalCreatorId,
+                    originalCreatorName: recipe.originalCreatorName,
+                    savedAt: recipe.savedAt,
+                    sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+                    followsSourceUpdates: recipe.followsSourceUpdates,
+                    relatedRecipeIds: recipe.relatedRecipeIds,
+                    isPreview: recipe.isPreview
                 )
 
                 try await dependencies.recipeRepository.update(updatedRecipe)

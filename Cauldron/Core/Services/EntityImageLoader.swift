@@ -28,7 +28,7 @@ final class EntityImageLoader {
     func loadProfileImage(for user: User, dependencies: DependencyContainer?) async -> ProfileImageResult {
         let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
+        if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return ProfileImageResult(image: cachedImage, downloadedURL: nil)
         }
 
@@ -59,7 +59,7 @@ final class EntityImageLoader {
     func loadCollectionCoverImage(for collection: Collection, dependencies: DependencyContainer?) async -> UIImage? {
         let cacheKey = ImageCache.collectionImageKey(collectionId: collection.id)
 
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
+        if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return cachedImage
         }
 

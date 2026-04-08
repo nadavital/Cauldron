@@ -76,9 +76,9 @@ struct Quantity: Sendable, Hashable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.value = try container.decodeIfPresent(Double.self, forKey: .value) ?? 0
+        self.value = try container.decode(Double.self, forKey: .value)
         self.upperValue = try container.decodeIfPresent(Double.self, forKey: .upperValue)
-        self.unit = try container.decodeIfPresent(UnitKind.self, forKey: .unit) ?? .whole
+        self.unit = try container.decode(UnitKind.self, forKey: .unit)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {

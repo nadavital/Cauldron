@@ -51,9 +51,9 @@ struct PreparedShareRecipePayload: Codable, Sendable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
-        self.ingredients = try container.decodeIfPresent([String].self, forKey: .ingredients) ?? []
-        self.steps = try container.decodeIfPresent([String].self, forKey: .steps) ?? []
+        self.title = try container.decode(String.self, forKey: .title)
+        self.ingredients = try container.decode([String].self, forKey: .ingredients)
+        self.steps = try container.decode([String].self, forKey: .steps)
         self.yields = try container.decodeIfPresent(String.self, forKey: .yields)
         self.totalMinutes = try container.decodeIfPresent(Int.self, forKey: .totalMinutes)
         self.sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL)

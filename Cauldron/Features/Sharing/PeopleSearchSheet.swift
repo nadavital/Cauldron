@@ -403,9 +403,9 @@ final class PeopleSearchViewModel {
                 }
             }
 
-            // Fetch users and filter to only show strangers
-            let allUsers = try await dependencies.userCloudService.searchUsers(query: "")
-            recommendedUsers = allUsers
+            // Fetch a bounded suggestion set instead of issuing an empty-prefix directory search.
+            let suggestedUsers = try await dependencies.userCloudService.fetchSuggestedUsers(limit: 40)
+            recommendedUsers = suggestedUsers
                 .filter { $0.id != currentUserId && !excludedUserIds.contains($0.id) }
                 .prefix(5)
                 .map { $0 }

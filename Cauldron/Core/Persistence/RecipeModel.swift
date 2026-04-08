@@ -47,6 +47,8 @@ final class RecipeModel {
     var originalCreatorId: UUID?
     var originalCreatorName: String?
     var savedAt: Date?
+    var sourceRecipeUpdatedAt: Date?
+    var followsSourceUpdates: Bool = false
     var isPreview: Bool = false  // true = saved locally but not owned (invisible in library)
 
     init(
@@ -75,6 +77,8 @@ final class RecipeModel {
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
         savedAt: Date? = nil,
+        sourceRecipeUpdatedAt: Date? = nil,
+        followsSourceUpdates: Bool = false,
         isPreview: Bool = false
     ) {
         self.id = id
@@ -102,6 +106,8 @@ final class RecipeModel {
         self.originalCreatorId = originalCreatorId
         self.originalCreatorName = originalCreatorName
         self.savedAt = savedAt
+        self.sourceRecipeUpdatedAt = sourceRecipeUpdatedAt
+        self.followsSourceUpdates = followsSourceUpdates
         self.isPreview = isPreview
     }
     
@@ -143,6 +149,8 @@ final class RecipeModel {
             originalCreatorId: recipe.originalCreatorId,
             originalCreatorName: recipe.originalCreatorName,
             savedAt: recipe.savedAt,
+            sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
+            followsSourceUpdates: recipe.followsSourceUpdates,
             isPreview: recipe.isPreview
         )
     }
@@ -176,6 +184,12 @@ final class RecipeModel {
                     filename = url.lastPathComponent
                     AppLogger.general.debug("🔄 Migrating old imageURL format to filename: \(filename)")
                 } else {
+                    let resolvedFollowsSourceUpdates = Recipe.resolvedFollowsSourceUpdates(
+                        originalRecipeId: originalRecipeId,
+                        savedAt: savedAt,
+                        sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+                        followsSourceUpdates: followsSourceUpdates
+                    )
                     AppLogger.general.warning("⚠️ Failed to parse imageURL: \(imageURLString)")
                     return Recipe(
                         id: id, title: title, ingredients: ingredients, steps: steps,
@@ -185,6 +199,12 @@ final class RecipeModel {
                         visibility: RecipeVisibility(rawValue: visibility) ?? .privateRecipe,
                         ownerId: ownerId, cloudRecordName: cloudRecordName,
                         createdAt: createdAt, updatedAt: updatedAt,
+                        originalRecipeId: originalRecipeId,
+                        originalCreatorId: originalCreatorId,
+                        originalCreatorName: originalCreatorName,
+                        savedAt: savedAt,
+                        sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+                        followsSourceUpdates: resolvedFollowsSourceUpdates,
                         relatedRecipeIds: relatedRecipeIds, isPreview: isPreview
                     )
                 }
@@ -197,6 +217,13 @@ final class RecipeModel {
             let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
             finalImageURL = documentsURL.appendingPathComponent("RecipeImages").appendingPathComponent(filename)
         }
+
+        let resolvedFollowsSourceUpdates = Recipe.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates
+        )
 
         return Recipe(
             id: id,
@@ -223,6 +250,8 @@ final class RecipeModel {
             originalCreatorId: originalCreatorId,
             originalCreatorName: originalCreatorName,
             savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: resolvedFollowsSourceUpdates,
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )

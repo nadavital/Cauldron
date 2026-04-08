@@ -37,6 +37,7 @@ Guidance for coding agents working in this repository.
   - Parser behavior changes should keep parity/regression tests green.
 - Social sharing is a core workflow:
   - Invite links/referrals, friend connections, and profile/friends UX should remain reliable and low-friction.
+  - Saving someone else's recipe should preserve attribution while creating a synced, profile-visible user-owned copy that follows source updates until the saver edits it.
   - CloudKit + Firebase share-link behavior must remain compatible with associated domains and app routing.
 - Large-screen experience is intentional:
   - iPad layouts are first-class, not stretched iPhone views.

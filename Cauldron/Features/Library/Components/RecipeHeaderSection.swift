@@ -118,7 +118,7 @@ struct RecipeHeaderSection: View {
                     HStack {
                         ProfileAvatar(user: owner, size: 32, dependencies: dependencies)
 
-                        Text("Recipe by \(owner.displayName)")
+                        Text(recipe.isFollowingSourceUpdates ? "Saved by \(owner.displayName)" : "Recipe by \(owner.displayName)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 

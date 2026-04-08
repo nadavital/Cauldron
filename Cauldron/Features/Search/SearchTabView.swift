@@ -58,17 +58,17 @@ struct SearchTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             Task {
-                await viewModel.loadData()
+                await viewModel.refreshLocalRecipeData()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
             Task {
-                await viewModel.loadData()
+                await viewModel.refreshLocalRecipeData()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
             Task {
-                await viewModel.loadData()
+                await viewModel.refreshLocalRecipeData()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in

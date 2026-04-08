@@ -8,6 +8,7 @@
 import Foundation
 import os
 import CloudKit
+import UIKit
 
 /// Sync status for recipe syncing
 enum RecipeSyncStatus {
@@ -128,6 +129,9 @@ actor RecipeSyncService {
 
         // Merge strategies
         try await mergeRecipes(cloudRecipes: cloudRecipes, localRecipes: localRecipes, userId: userId)
+
+        // Refresh saved recipes that still follow their source of truth.
+        try await syncFollowedRecipesFromSources(for: userId)
 
         // Update last sync date
         lastSyncDate = Date()
@@ -261,6 +265,12 @@ actor RecipeSyncService {
                         imageModifiedAt: cloudRecipe.imageModifiedAt,
                         createdAt: cloudRecipe.createdAt,
                         updatedAt: cloudRecipe.updatedAt,
+                        originalRecipeId: cloudRecipe.originalRecipeId,
+                        originalCreatorId: cloudRecipe.originalCreatorId,
+                        originalCreatorName: cloudRecipe.originalCreatorName,
+                        savedAt: cloudRecipe.savedAt,
+                        sourceRecipeUpdatedAt: cloudRecipe.sourceRecipeUpdatedAt,
+                        followsSourceUpdates: cloudRecipe.followsSourceUpdates,
                         relatedRecipeIds: cloudRecipe.relatedRecipeIds  // Preserve related recipes
                     )
                     try await recipeRepository.update(mergedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
@@ -294,6 +304,12 @@ actor RecipeSyncService {
                             imageModifiedAt: localRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
                             updatedAt: localRecipe.updatedAt,
+                            originalRecipeId: localRecipe.originalRecipeId,
+                            originalCreatorId: localRecipe.originalCreatorId,
+                            originalCreatorName: localRecipe.originalCreatorName,
+                            savedAt: localRecipe.savedAt,
+                            sourceRecipeUpdatedAt: localRecipe.sourceRecipeUpdatedAt,
+                            followsSourceUpdates: localRecipe.followsSourceUpdates,
                             relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
                         try await recipeCloudService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
@@ -328,6 +344,12 @@ actor RecipeSyncService {
                             imageModifiedAt: cloudRecipe.imageModifiedAt,
                             createdAt: localRecipe.createdAt,
                             updatedAt: localRecipe.updatedAt,
+                            originalRecipeId: localRecipe.originalRecipeId,
+                            originalCreatorId: localRecipe.originalCreatorId,
+                            originalCreatorName: localRecipe.originalCreatorName,
+                            savedAt: localRecipe.savedAt,
+                            sourceRecipeUpdatedAt: localRecipe.sourceRecipeUpdatedAt,
+                            followsSourceUpdates: localRecipe.followsSourceUpdates,
                             relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
                         // Don't update timestamp - just syncing CloudKit metadata (skip image sync for metadata-only updates)
@@ -414,7 +436,8 @@ actor RecipeSyncService {
             // Fetch user's public recipes from CloudKit public database
             let publicRecipes = try await recipeCloudService.querySharedRecipes(
                 ownerIds: [userId],
-                visibility: .publicRecipe
+                visibility: .publicRecipe,
+                includeDerivedCopies: true
             )
 
             // Find orphans: public records not in local/private storage
@@ -436,6 +459,111 @@ actor RecipeSyncService {
         } catch {
             // Don't fail sync if cleanup fails - this is a best-effort operation
             logger.warning("Orphan cleanup skipped: \(error.localizedDescription)")
+        }
+    }
+
+    private func syncFollowedRecipesFromSources(for userId: UUID) async throws {
+        let localRecipes = try await recipeRepository.fetchAll()
+        let followedRecipes = localRecipes.filter {
+            $0.ownerId == userId &&
+            $0.originalRecipeId != nil &&
+            $0.isFollowingSourceUpdates
+        }
+
+        guard !followedRecipes.isEmpty else { return }
+
+        for localRecipe in followedRecipes {
+            guard let sourceRecipeId = localRecipe.originalRecipeId else { continue }
+
+            guard let sourceRecipe = try await recipeCloudService.fetchPublicRecipe(id: sourceRecipeId) else {
+                logger.warning("Source recipe not found for saved recipe \(localRecipe.id)")
+                continue
+            }
+
+            if localRecipe.shouldPreserveLegacyEdits(comparedTo: sourceRecipe) {
+                let migratedRecipe = localRecipe.withSourceTracking(
+                    sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
+                    followsSourceUpdates: false
+                )
+                try await recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                continue
+            }
+
+            let followsSourceUpdates = true
+
+            let currentSourceVersion = localRecipe.sourceRecipeUpdatedAt ?? localRecipe.savedAt
+            if let currentSourceVersion, sourceRecipe.updatedAt <= currentSourceVersion {
+                if localRecipe.requiresLegacySourceTrackingMigration {
+                    let migratedRecipe = localRecipe.withSourceTracking(
+                        sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
+                        followsSourceUpdates: followsSourceUpdates
+                    )
+                    try await recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                }
+                continue
+            }
+
+            let shouldRemoveImage = sourceRecipe.cloudImageRecordName == nil
+            let needsImageRefresh = !shouldRemoveImage &&
+                (sourceRecipe.imageModifiedAt != localRecipe.imageModifiedAt || localRecipe.imageURL == nil)
+            let pendingSourceVersion = needsImageRefresh
+                ? (localRecipe.sourceRecipeUpdatedAt ?? localRecipe.savedAt ?? localRecipe.updatedAt)
+                : sourceRecipe.updatedAt
+
+            var updatedRecipe = localRecipe
+                .applyingSourceSnapshot(sourceRecipe)
+                .withSourceTracking(
+                    sourceRecipeUpdatedAt: pendingSourceVersion,
+                    followsSourceUpdates: followsSourceUpdates
+                )
+            if needsImageRefresh {
+                updatedRecipe = updatedRecipe
+                    .withImageState(
+                        imageURL: localRecipe.imageURL,
+                        cloudImageRecordName: localRecipe.cloudImageRecordName,
+                        imageModifiedAt: localRecipe.imageModifiedAt
+                    )
+                    .withSourceTracking(
+                        sourceRecipeUpdatedAt: pendingSourceVersion,
+                        followsSourceUpdates: followsSourceUpdates
+                    )
+            }
+
+            try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+
+            if shouldRemoveImage {
+                await imageManager.deleteImage(recipeId: updatedRecipe.id)
+            } else if needsImageRefresh {
+                do {
+                    if let imageData = try await recipeCloudService.downloadImageAsset(
+                        recipeId: sourceRecipeId,
+                        fromPublic: true
+                    ), let image = UIImage(data: imageData) {
+                        let filename = try await imageManager.saveImage(image, recipeId: updatedRecipe.id)
+                        let imageURL = await imageManager.imageURL(for: filename)
+                        updatedRecipe = updatedRecipe
+                            .withImageState(
+                                imageURL: imageURL,
+                                cloudImageRecordName: sourceRecipe.cloudImageRecordName,
+                                imageModifiedAt: sourceRecipe.imageModifiedAt
+                            )
+                            .withSourceTracking(
+                                sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
+                                followsSourceUpdates: followsSourceUpdates
+                            )
+                        try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                    }
+                } catch {
+                    logger.warning("Failed to refresh source image for saved recipe \(localRecipe.id): \(error.localizedDescription)")
+                }
+            }
+
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("RecipeUpdated"),
+                    object: updatedRecipe.id
+                )
+            }
         }
     }
 
@@ -482,12 +610,11 @@ actor RecipeSyncService {
                 let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
 
                 // Update recipe with correct imageURL and cloud metadata
-                let updatedRecipe = recipe
-                    .withImageURL(imageURL)
-                    .withCloudImageMetadata(
-                        recordName: recipe.cloudImageRecordName ?? recipe.id.uuidString,
-                        modifiedAt: modificationDate
-                    )
+                let updatedRecipe = recipe.withImageState(
+                    imageURL: imageURL,
+                    cloudImageRecordName: recipe.cloudImageRecordName ?? recipe.id.uuidString,
+                    imageModifiedAt: modificationDate
+                )
                 try? await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
                 // Notify views that recipe image was downloaded (so they can refresh and show the image)

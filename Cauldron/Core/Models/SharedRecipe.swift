@@ -13,7 +13,7 @@ import Foundation
 /// but are not necessarily saved to the user's personal collection yet.
 ///
 /// To actually save a shared recipe, use:
-/// - `recipe.withOwner(userId, originalCreatorId:originalCreatorName:)` - Creates an independent copy they can edit
+/// - `recipe.withOwner(userId, originalCreatorId:originalCreatorName:)` - Creates a synced saved copy that follows source updates until edited
 ///
 /// Note: This model is used for browsing shared recipes in the Sharing tab.
 struct SharedRecipe: Sendable, Hashable, Identifiable {

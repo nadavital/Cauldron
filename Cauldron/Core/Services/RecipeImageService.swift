@@ -33,7 +33,7 @@ class RecipeImageService {
         let cacheKey = cacheKey(for: url, targetPixelSize: targetPixelSize)
 
         // Check cache first
-        if let cachedImage = ImageCache.shared.get(cacheKey) {
+        if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return .success(cachedImage)
         }
 
@@ -138,7 +138,7 @@ class RecipeImageService {
             variant: cacheVariant ?? variantKey(for: targetPixelSize)
         )
 
-        if let cachedImage = ImageCache.shared.get(recipeCacheKey) {
+        if let cachedImage = await ImageCache.shared.load(recipeCacheKey) {
             if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
                 return .success(cachedImage)
             }

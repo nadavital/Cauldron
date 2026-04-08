@@ -151,6 +151,7 @@ struct NutritionInput {
     var selectedImage: UIImage?
     var imageFilename: String?
     var visibility: RecipeVisibility = .publicRecipe
+    private(set) var didUserChangeImageSelection: Bool = false
 
     let dependencies: DependencyContainer
     let existingRecipe: Recipe?
@@ -229,9 +230,30 @@ struct NutritionInput {
         Task {
             if !recipe.relatedRecipeIds.isEmpty {
                 do {
-                    let related = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+                    let directMatches = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
+                    let directMatchIDs = Set(directMatches.map(\.id))
+                    let missingCanonicalIDs = recipe.relatedRecipeIds.filter { !directMatchIDs.contains($0) }
+
+                    var resolvedRelated = directMatches
+                    if !missingCanonicalIDs.isEmpty {
+                        let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                        var ownedCopiesByOriginalID: [UUID: Recipe] = [:]
+                        for candidate in allRecipes {
+                            guard let originalRecipeId = candidate.originalRecipeId else {
+                                continue
+                            }
+                            ownedCopiesByOriginalID[originalRecipeId] = ownedCopiesByOriginalID[originalRecipeId] ?? candidate
+                        }
+
+                        for canonicalID in missingCanonicalIDs {
+                            if let ownedCopy = ownedCopiesByOriginalID[canonicalID] {
+                                resolvedRelated.append(ownedCopy)
+                            }
+                        }
+                    }
+
                     await MainActor.run {
-                        self.relatedRecipes = related
+                        self.relatedRecipes = resolvedRelated
                     }
                 } catch {
                     AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
@@ -250,7 +272,7 @@ struct NutritionInput {
                 )
                 if case .success(let image) = result {
                     await MainActor.run {
-                        selectedImage = image
+                        self.setLoadedImage(image)
                     }
                 }
             }
@@ -524,6 +546,7 @@ struct NutritionInput {
 
         do {
             var recipe = try buildRecipe()
+            let didChangeImageSelection = didUserChangeImageSelection
 
             // Handle image changes
             if let image = selectedImage {
@@ -549,6 +572,8 @@ struct NutritionInput {
                     ImageCache.shared.remove(cacheKey)
                 }
             }
+
+            recipe = finalizeSourceTracking(for: recipe, didChangeImageSelection: didChangeImageSelection)
 
             // Save to local database (CloudKit sync happens automatically in repository)
             // Check if recipe actually exists in database, not just if existingRecipe is set
@@ -638,7 +663,7 @@ struct NutritionInput {
         let recipeTags = selectedTags.map { Tag(name: $0.tagValue) }
         
         // Build related recipe IDs
-        let relatedIds = relatedRecipes.map { $0.id }
+        let relatedIds = relatedRecipes.map(\.relatedGraphReferenceID)
         
         // Build nutrition
         let recipeNutrition: Nutrition?
@@ -655,7 +680,7 @@ struct NutritionInput {
         
         // Create or update recipe
         if let existing = existingRecipe {
-            return Recipe(
+            let draftRecipe = Recipe(
                 id: existing.id,
                 title: title,
                 ingredients: recipeIngredients,
@@ -672,13 +697,30 @@ struct NutritionInput {
                 visibility: visibility,
                 ownerId: existing.ownerId ?? CurrentUserSession.shared.userId,
                 cloudRecordName: existing.cloudRecordName,
+                cloudImageRecordName: existing.cloudImageRecordName,
+                imageModifiedAt: existing.imageModifiedAt,
                 createdAt: existing.createdAt,
                 updatedAt: Date(),
                 originalRecipeId: existing.originalRecipeId,
                 originalCreatorId: existing.originalCreatorId,
                 originalCreatorName: existing.originalCreatorName,
                 savedAt: existing.savedAt,
-                relatedRecipeIds: relatedIds
+                sourceRecipeUpdatedAt: existing.sourceRecipeUpdatedAt,
+                followsSourceUpdates: existing.followsSourceUpdates,
+                relatedRecipeIds: relatedIds,
+                isPreview: existing.isPreview
+            )
+
+            guard existing.originalRecipeId != nil else {
+                return draftRecipe
+            }
+
+            let shouldContinueFollowing = existing.isFollowingSourceUpdates &&
+                !draftRecipe.hasEditableDifferences(comparedTo: existing)
+
+            return draftRecipe.withSourceTracking(
+                sourceRecipeUpdatedAt: existing.sourceRecipeUpdatedAt ?? existing.savedAt ?? existing.updatedAt,
+                followsSourceUpdates: shouldContinueFollowing
             )
         } else {
             return Recipe(
@@ -708,6 +750,35 @@ struct NutritionInput {
         }
 
         return lowerFormatted
+    }
+
+    func updateSelectedImageFromUser(_ image: UIImage?) {
+        selectedImage = image
+        didUserChangeImageSelection = true
+    }
+
+    func removeSelectedImage() {
+        selectedImage = nil
+        didUserChangeImageSelection = true
+    }
+
+    private func setLoadedImage(_ image: UIImage) {
+        selectedImage = image
+    }
+
+    private func finalizeSourceTracking(for recipe: Recipe, didChangeImageSelection: Bool) -> Recipe {
+        guard let existingRecipe,
+              existingRecipe.originalRecipeId != nil else {
+            return recipe
+        }
+
+        let shouldContinueFollowing = recipe.isFollowingSourceUpdates && !didChangeImageSelection
+        let sourceVersion = existingRecipe.sourceRecipeUpdatedAt ?? existingRecipe.savedAt ?? existingRecipe.updatedAt
+
+        return recipe.withSourceTracking(
+            sourceRecipeUpdatedAt: sourceVersion,
+            followsSourceUpdates: shouldContinueFollowing
+        )
     }
 }
 

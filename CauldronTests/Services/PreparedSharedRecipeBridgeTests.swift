@@ -128,4 +128,13 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
         XCTAssertEqual(prepared?.recipe.sourceURL?.absoluteString, "https://example.com/pasta")
         XCTAssertEqual(prepared?.sourceInfo, "Imported from https://example.com/pasta")
     }
+
+    func testPreparedSharePayload_InvalidRequiredFieldsFailsConversion() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "ingredients": ["8 oz pasta"],
+            "steps": ["Boil pasta"]
+        ])
+
+        XCTAssertNil(ShareExtensionImportStore.preparedRecipe(from: data))
+    }
 }

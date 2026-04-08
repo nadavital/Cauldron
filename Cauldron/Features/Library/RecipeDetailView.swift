@@ -252,7 +252,7 @@ struct RecipeDetailView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            if recipe.originalRecipeId != nil {
+            if recipe.isFollowingSourceUpdates {
                 await checkForRecipeUpdates()
             }
         }
@@ -392,7 +392,7 @@ struct RecipeDetailView: View {
                 await loadOriginalCreator(creatorId)
             }
 
-            if recipe.originalRecipeId != nil {
+            if recipe.isFollowingSourceUpdates {
                 await checkForRecipeUpdates()
             }
 
