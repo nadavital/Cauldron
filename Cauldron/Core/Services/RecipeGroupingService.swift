@@ -67,7 +67,10 @@ enum RecipeGroupingService {
             )
         }) {
             let existing = bestCandidateByRecipeID[candidate.recipe.id]
-            if existing == nil || candidate.textScore > existing!.textScore {
+            if existing == nil ||
+                candidate.textScore > existing!.textScore ||
+                (candidate.textScore == existing!.textScore &&
+                 candidate.recipe.updatedAt > existing!.recipe.updatedAt) {
                 bestCandidateByRecipeID[candidate.recipe.id] = candidate
             }
         }

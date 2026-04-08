@@ -58,16 +58,13 @@ final class ImportPreviewViewModel {
             originalCreatorName: originalCreator?.displayName,
             relatedRecipeIds: canonicalRelatedRecipeIDs
         )
+        let sourceImageRecipeID = recipe.sourceAssetReferenceID
 
         try await dependencies.recipeRepository.create(importedRecipe)
 
-        guard recipe.cloudImageRecordName != nil else {
-            return
-        }
-
         do {
             if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                recipeId: recipe.id,
+                recipeId: sourceImageRecipeID,
                 fromPublic: true
             ), let image = UIImage(data: imageData) {
                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: importedRecipe.id)

@@ -151,11 +151,12 @@ extension RecipeRepository {
             visibility: .publicRecipe,
             relatedRecipeIds: canonicalRelatedRecipeIDs
         )
+        let sourceImageRecipeID = recipe.sourceAssetReferenceID
 
         // Download image from Public database if exists
-        if recipe.cloudImageRecordName != nil || recipe.imageURL != nil {
+        if recipe.cloudImageRecordName != nil || recipe.imageURL != nil || sourceImageRecipeID != recipe.id {
             do {
-                if let imageData = try await recipeCloudService.downloadImageAsset(recipeId: recipe.id, fromPublic: true),
+                if let imageData = try await recipeCloudService.downloadImageAsset(recipeId: sourceImageRecipeID, fromPublic: true),
                    let image = UIImage(data: imageData) {
                     // Save image locally with new recipe ID
                     _ = try await imageManager.saveImage(image, recipeId: newRecipe.id)

@@ -395,6 +395,14 @@ struct Recipe: Sendable, Hashable, Identifiable {
         return id
     }
 
+    nonisolated var sourceAssetReferenceID: UUID {
+        if isFollowingSourceUpdates, let originalRecipeId {
+            return originalRecipeId
+        }
+
+        return id
+    }
+
     /// Compare source-owned content fields to determine whether a saved copy
     /// has diverged from the recipe it follows.
     nonisolated func hasEditableDifferences(comparedTo other: Recipe) -> Bool {

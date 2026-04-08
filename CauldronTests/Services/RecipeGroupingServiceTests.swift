@@ -129,6 +129,42 @@ final class RecipeGroupingServiceTests: XCTestCase {
         XCTAssertEqual(groups.first?.primaryRecipe.id, savedRecipeId)
     }
 
+    func testGroupAndRankRecipes_PrefersFreshestDuplicateVariantWhenScoresTie() {
+        let currentUserId = UUID()
+        let ownerId = UUID()
+        let recipeId = UUID()
+        let staleDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let freshDate = Date(timeIntervalSince1970: 1_700_000_500)
+
+        let staleLocalRecipe = makeRecipe(
+            id: recipeId,
+            title: "Spicy Vodka Pasta",
+            ownerId: ownerId,
+            tags: ["Dinner"],
+            ingredients: ["pasta", "tomato"],
+            updatedAt: staleDate
+        )
+        let freshPublicRecipe = makeRecipe(
+            id: recipeId,
+            title: "Spicy Vodka Pasta",
+            ownerId: ownerId,
+            tags: ["Dinner"],
+            ingredients: ["pasta", "tomato"],
+            updatedAt: freshDate
+        )
+
+        let groups = RecipeGroupingService.groupAndRankRecipes(
+            localRecipes: [staleLocalRecipe],
+            publicRecipes: [freshPublicRecipe],
+            friends: [],
+            currentUserId: currentUserId,
+            filterText: "vodka pasta"
+        )
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.primaryRecipe.updatedAt, freshDate)
+    }
+
     func testGroupAndRankRecipes_CountsDistinctSavedCopiesTowardPopularity() {
         let currentUserId = UUID()
         let sourceOwnerId = UUID()
@@ -220,6 +256,7 @@ final class RecipeGroupingServiceTests: XCTestCase {
         ownerId: UUID,
         tags: [String],
         ingredients: [String],
+        updatedAt: Date = Date(),
         originalRecipeId: UUID? = nil,
         followsSourceUpdates: Bool? = nil,
         savedAt: Date? = nil,
@@ -234,7 +271,7 @@ final class RecipeGroupingServiceTests: XCTestCase {
             yields: "2 servings",
             tags: tags.compactMap { Tag(name: $0) },
             ownerId: ownerId,
-            updatedAt: Date(),
+            updatedAt: updatedAt,
             originalRecipeId: originalRecipeId,
             savedAt: originalRecipeId == nil ? savedAt : (savedAt ?? Date(timeIntervalSince1970: 1_700_000_000)),
             sourceRecipeUpdatedAt: originalRecipeId == nil ? sourceRecipeUpdatedAt : (sourceRecipeUpdatedAt ?? Date(timeIntervalSince1970: 1_700_000_100)),

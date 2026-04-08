@@ -652,6 +652,40 @@ final class RecipeCopyOnWriteTests: XCTestCase {
         XCTAssertEqual(savedCopy.relatedGraphReferenceID, sourceId)
     }
 
+    func testSourceAssetReferenceID_UsesSourceIDForFollowingCopies() {
+        let sourceId = UUID()
+        let savedCopy = Recipe(
+            id: UUID(),
+            title: "Saved Pasta",
+            ingredients: [Ingredient(name: "Salt", quantity: nil)],
+            steps: [CookStep(index: 0, text: "Mix", timers: [])],
+            yields: "4 servings",
+            totalMinutes: 20,
+            tags: [Tag(name: "Dinner")],
+            nutrition: nil,
+            sourceURL: nil,
+            sourceTitle: nil,
+            notes: nil,
+            imageURL: nil,
+            isFavorite: false,
+            visibility: .publicRecipe,
+            ownerId: UUID(),
+            cloudRecordName: nil,
+            cloudImageRecordName: nil,
+            imageModifiedAt: nil,
+            createdAt: Date(timeIntervalSince1970: 1_699_999_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            originalRecipeId: sourceId,
+            originalCreatorId: UUID(),
+            originalCreatorName: "Alice",
+            savedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            sourceRecipeUpdatedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            followsSourceUpdates: true
+        )
+
+        XCTAssertEqual(savedCopy.sourceAssetReferenceID, sourceId)
+    }
+
     func testHasEditableDifferences_DetectsRelatedRecipeChanges() {
         let original = makeRecipe(
             title: "Lemon Pasta",

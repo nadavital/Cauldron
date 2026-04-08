@@ -308,12 +308,14 @@ extension RecipeDetailView {
 
         do {
             let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+            let sourceImageRecipeID = recipe.sourceAssetReferenceID
 
             if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
                 AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
 
                 for relatedRecipe in relatedRecipesToSave {
                     let canonicalRelatedIDsForCopy = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: relatedRecipe)
+                    let relatedImageSourceRecipeID = relatedRecipe.sourceAssetReferenceID
                     let copiedRelated = relatedRecipe.withOwner(
                         userId,
                         originalCreatorId: relatedRecipe.ownerId,
@@ -324,10 +326,10 @@ extension RecipeDetailView {
                     try await dependencies.recipeRepository.create(copiedRelated)
                     relatedRecipeIdMapping[relatedRecipe.id] = copiedRelated.id
 
-                    if relatedRecipe.cloudImageRecordName != nil {
+                    if relatedRecipe.cloudImageRecordName != nil || relatedImageSourceRecipeID != relatedRecipe.id {
                         do {
                             if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                                recipeId: relatedRecipe.id,
+                                recipeId: relatedImageSourceRecipeID,
                                 fromPublic: true
                             ), let image = UIImage(data: imageData) {
                                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
@@ -401,7 +403,7 @@ extension RecipeDetailView {
 
                 try await dependencies.recipeRepository.create(copiedRecipe)
 
-                if originalCloudImageRecordName != nil {
+                if originalCloudImageRecordName != nil || originalRecipeId != existingPreview.id {
                     do {
                         if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
                             recipeId: originalRecipeId,
@@ -476,10 +478,10 @@ extension RecipeDetailView {
                 try await dependencies.recipeRepository.create(copiedRecipe)
                 AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
 
-                if recipe.cloudImageRecordName != nil && copiedRecipe.imageURL == nil {
+                if copiedRecipe.imageURL == nil {
                     do {
                         if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                            recipeId: recipe.id,
+                            recipeId: sourceImageRecipeID,
                             fromPublic: true
                         ), let image = UIImage(data: imageData) {
                             let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
