@@ -23,6 +23,7 @@ struct CauldronApp: App {
                 Color.clear
             } else {
                 ContentView()
+                    .dependencies(DependencyContainer.shared)
             }
         }
     }
@@ -281,10 +282,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
             // Update badge count and sync referral count asynchronously
             Task { @MainActor in
-                // Access the default dependencies to get connection manager
-                let dependencies = try? DependencyContainer.persistent()
-                if let dependencies = dependencies,
-                   let userId = CurrentUserSession.shared.userId {
+                let dependencies = DependencyContainer.shared
+                if let userId = CurrentUserSession.shared.userId {
                     await dependencies.connectionManager.loadConnections(forUserId: userId)
                     // Badge will be updated automatically in loadConnections
 
@@ -421,12 +420,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Update badge count when app becomes active
         Task { @MainActor in
-            let dependencies = try? DependencyContainer.persistent()
-            if let dependencies = dependencies {
-                // Update badge count based on current pending requests
-                dependencies.connectionManager.updateBadgeCount()
-                AppLogger.general.info("📛 Badge count refreshed on app activation")
-            }
+            let dependencies = DependencyContainer.shared
+            // Update badge count based on current pending requests
+            dependencies.connectionManager.updateBadgeCount()
+            AppLogger.general.info("📛 Badge count refreshed on app activation")
         }
     }
 

@@ -34,13 +34,15 @@ import os
     @ObservationIgnored private var cancellables = Set<AnyCancellable>()
     @ObservationIgnored private var recipeSearchTask: Task<Void, Never>?
     @ObservationIgnored private var peopleSearchTask: Task<Void, Never>?
-    @ObservationIgnored private var localRecipeRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var recipeSearchResultsTask: Task<Void, Never>?
+    @ObservationIgnored private var recipeLibraryRefreshTask: Task<Void, Never>?
     @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
+    @ObservationIgnored private var hasLoadedOnce = false
 
-    // Search results caching
-    private var cachedDiscoverableRecipes: [Recipe] = []
-    private var cachedDiscoverableRecipesTimestamp: Date?
-    private let cacheValidityDuration: TimeInterval = 300 // 5 minutes
+    // Public discovery caching
+    private var discoverablePublicRecipesCache: [Recipe] = []
+    private var discoverablePublicRecipesFetchedAt: Date?
+    private let discoverablePublicRecipeCacheValidityDuration: TimeInterval = 300 // 5 minutes
 
     // Debouncing
     private let peopleSearchSubject = PassthroughSubject<String, Never>()
@@ -95,16 +97,13 @@ import os
         // Cleanup happens automatically when the object is deallocated
     }
     
-    func loadData() async {
+    func loadData(forceRefreshPublicRecipes: Bool = false) async {
         isLoading = true
         defer { isLoading = false }
 
         do {
             // Load user's own recipes
             allRecipes = try await dependencies.recipeRepository.fetchAll()
-
-            // Load initial public recipes (empty search = recent)
-            await performRecipeSearch(query: "", categories: [])
 
             // Group recipes by tags (using own recipes for category browsing)
             groupRecipesByTags()
@@ -115,28 +114,23 @@ import os
             // Load recommendations (Friends of Friends)
             await loadRecommendations()
 
+            // Load initial public recipes (empty search = recent)
+            await performRecipeSearch(
+                query: recipeSearchText,
+                categories: Array(selectedCategories),
+                forceRefreshPublicRecipes: forceRefreshPublicRecipes
+            )
+
+            hasLoadedOnce = true
+
         } catch {
             AppLogger.general.error("Failed to load search tab data: \(error.localizedDescription)")
         }
     }
 
-    func refreshLocalRecipeData() async {
-        do {
-            allRecipes = try await dependencies.recipeRepository.fetchAll()
-            groupRecipesByTags()
-            processSearchResults()
-        } catch {
-            AppLogger.general.error("Failed to refresh local recipe data: \(error.localizedDescription)")
-        }
-    }
-
-    func scheduleLocalRecipeRefresh() {
-        localRecipeRefreshTask?.cancel()
-        localRecipeRefreshTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            guard !Task.isCancelled, let self else { return }
-            await self.refreshLocalRecipeData()
-        }
+    func loadDataIfNeeded() async {
+        guard !hasLoadedOnce else { return }
+        await loadData()
     }
 
     // loadPublicRecipes removed in favor of server-side search
@@ -295,42 +289,24 @@ import os
     }
     
     private func filterLocalRecipes() {
-        processSearchResults()
+        scheduleRecipeSearchResultsRebuild(
+            filterText: recipeSearchText,
+            selectedCategories: selectedCategories
+        )
     }
     
-    private func performRecipeSearch(query: String, categories: [RecipeCategory]) async {
-        let isDiscoveryRequest = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && categories.isEmpty
-
-        // Check if we have valid cached results
-        if isDiscoveryRequest,
-           !cachedDiscoverableRecipes.isEmpty,
-           let timestamp = cachedDiscoverableRecipesTimestamp,
-           Date().timeIntervalSince(timestamp) < cacheValidityDuration {
-            // Use cached results
-            let filteredResults = cachedDiscoverableRecipes.filter { $0.ownerId != currentUserId }
-            if !Task.isCancelled {
-                publicRecipes = filteredResults
-                await fetchOwnerTiers(for: filteredResults)
-                processSearchResults()
-            }
-            return
-        }
+    private func performRecipeSearch(
+        query: String,
+        categories: [RecipeCategory],
+        forceRefreshPublicRecipes: Bool = false
+    ) async {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedCategories = Set(categories)
 
         isLoading = true
 
         do {
-            let results: [Recipe]
-            if isDiscoveryRequest {
-                // Fetch discoverable public recipes and apply richer filtering/ranking client-side.
-                results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
-                cachedDiscoverableRecipes = results
-                cachedDiscoverableRecipesTimestamp = Date()
-            } else {
-                results = try await dependencies.recipeCloudService.fetchPublicRecipesForSearch(
-                    filterText: query,
-                    selectedCategories: Set(categories)
-                )
-            }
+            let results = try await ensureDiscoverablePublicRecipesLoaded(forceRefresh: forceRefreshPublicRecipes)
 
             // Filter out own recipes (just in case)
             let filteredResults = results.filter { $0.ownerId != currentUserId }
@@ -342,31 +318,99 @@ import os
                 await fetchOwnerTiers(for: filteredResults)
 
                 // Re-merge with local results and process grouping
-                processSearchResults()
+                scheduleRecipeSearchResultsRebuild(
+                    filterText: normalizedQuery,
+                    selectedCategories: selectedCategories
+                )
                 isLoading = false
             }
         } catch {
             if !Task.isCancelled {
                 AppLogger.general.error("Failed to search public recipes: \(error.localizedDescription)")
                 publicRecipes = []
-                processSearchResults()
+                scheduleRecipeSearchResultsRebuild(
+                    filterText: normalizedQuery,
+                    selectedCategories: selectedCategories
+                )
                 isLoading = false
             }
         }
     }
+
+    func scheduleRecipeLibraryRefresh() {
+        recipeLibraryRefreshTask?.cancel()
+        recipeLibraryRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                try await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled else { return }
+                await self.refreshRecipeLibrary()
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func refreshRecipeLibrary() async {
+        do {
+            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            groupRecipesByTags()
+            scheduleRecipeSearchResultsRebuild(
+                filterText: recipeSearchText,
+                selectedCategories: selectedCategories
+            )
+        } catch {
+            AppLogger.general.error("Failed to refresh local search recipes: \(error.localizedDescription)")
+        }
+    }
     
-    // Process results: Filter local options, merge with public, group copies, rank, and extract friend context
-    private func processSearchResults() {
-        // Use the centralized grouping service to filter, merge, group, and rank recipes
-        self.recipeSearchResults = RecipeGroupingService.groupAndRankRecipes(
-            localRecipes: allRecipes,
-            publicRecipes: publicRecipes,
-            friends: friends,
-            currentUserId: currentUserId,
-            ownerTiers: ownerTiers,
-            filterText: recipeSearchText,
-            selectedCategories: selectedCategories
-        )
+    private func ensureDiscoverablePublicRecipesLoaded(forceRefresh: Bool = false) async throws -> [Recipe] {
+        if !forceRefresh,
+           let fetchedAt = discoverablePublicRecipesFetchedAt,
+           Date().timeIntervalSince(fetchedAt) < discoverablePublicRecipeCacheValidityDuration {
+            return discoverablePublicRecipesCache
+        }
+
+        let results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
+        discoverablePublicRecipesCache = results
+        discoverablePublicRecipesFetchedAt = Date()
+        return results
+    }
+
+    // Process results: Filter local options, merge with public, group copies, rank, and extract friend context.
+    private func scheduleRecipeSearchResultsRebuild(
+        filterText: String,
+        selectedCategories: Set<RecipeCategory>
+    ) {
+        let localRecipesSnapshot = allRecipes
+        let publicRecipesSnapshot = publicRecipes
+        let friendsSnapshot = friends
+        let currentUserIdSnapshot = currentUserId
+        let ownerTiersSnapshot = ownerTiers
+
+        recipeSearchResultsTask?.cancel()
+        recipeSearchResultsTask = Task(priority: .userInitiated) {
+            let groupingTask = Task.detached(priority: .userInitiated) {
+                RecipeGroupingService.groupAndRankRecipes(
+                    localRecipes: localRecipesSnapshot,
+                    publicRecipes: publicRecipesSnapshot,
+                    friends: friendsSnapshot,
+                    currentUserId: currentUserIdSnapshot,
+                    ownerTiers: ownerTiersSnapshot,
+                    filterText: filterText,
+                    selectedCategories: selectedCategories
+                )
+            }
+            let groups = await withTaskCancellationHandler {
+                await groupingTask.value
+            } onCancel: {
+                groupingTask.cancel()
+            }
+
+            guard !Task.isCancelled else { return }
+            self.recipeSearchResults = groups
+        }
     }
 
     /// Fetch owner tiers for recipes based on their public recipe counts

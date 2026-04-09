@@ -21,6 +21,7 @@ final class CollectionsListViewModel {
 
     let dependencies: DependencyContainer
     @ObservationIgnored private var notificationObservers: [any NSObjectProtocol] = []
+    @ObservationIgnored private var recipeImageURLsById: [UUID: URL?] = [:]
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
@@ -87,7 +88,14 @@ final class CollectionsListViewModel {
         defer { isLoading = false }
 
         do {
-            ownedCollections = try await dependencies.collectionRepository.fetchAll()
+            async let fetchedCollections = dependencies.collectionRepository.fetchAll()
+            async let fetchedRecipes = dependencies.recipeRepository.fetchAll()
+
+            ownedCollections = try await fetchedCollections
+            let recipes = try await fetchedRecipes
+            recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
+                partialResult[recipe.id] = recipe.imageURL
+            }
             AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) collections")
         } catch {
             AppLogger.general.error("❌ Failed to load collections: \(error.localizedDescription)")
@@ -145,31 +153,8 @@ final class CollectionsListViewModel {
         }
     }
 
-    /// Get recipes for a collection
-    func getRecipes(for collection: Collection) async throws -> [Recipe] {
-        // Fetch all owned recipes
-        let allRecipes = try await dependencies.recipeRepository.fetchAll()
-
-        // Filter to only recipes in this collection
-        return allRecipes.filter { recipe in
-            collection.recipeIds.contains(recipe.id)
-        }
-    }
-
     /// Get first 4 recipe image URLs for a collection (for grid display)
-    func getRecipeImages(for collection: Collection) async -> [URL?] {
-        do {
-            let recipes = try await getRecipes(for: collection)
-            let imagePairs: [(UUID, URL)] = recipes.compactMap { recipe in
-                guard let imageURL = recipe.imageURL else { return nil }
-                return (recipe.id, imageURL)
-            }
-            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
-
-            return Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
-        } catch {
-            AppLogger.general.error("Failed to fetch recipe images for collection: \(error.localizedDescription)")
-            return []
-        }
+    func recipeImages(for collection: Collection) -> [URL?] {
+        Array(collection.recipeIds.compactMap { recipeImageURLsById[$0] ?? nil }.prefix(4).map(Optional.some))
     }
 }

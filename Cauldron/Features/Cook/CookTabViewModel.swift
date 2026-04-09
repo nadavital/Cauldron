@@ -9,6 +9,129 @@ import Foundation
 import SwiftUI
 import os
 
+private struct CookTabDerivedSections {
+    let quickRecipes: [Recipe]
+    let onRotationRecipes: [Recipe]
+    let forgottenFavorites: [Recipe]
+    let tagRows: [(tag: String, recipes: [Recipe])]
+
+    static func build(
+        allRecipes: [Recipe],
+        stats: [UUID: (count: Int, lastCooked: Date)],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> CookTabDerivedSections {
+        let hour = calendar.component(.hour, from: now)
+        let isWeekend = calendar.isDateInWeekend(now)
+        let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+
+        var promotedTags: [String] = []
+        if hour >= 5 && hour < 11 {
+            promotedTags.append(contentsOf: ["Breakfast", "Brunch"])
+        } else if hour >= 11 && hour < 14 {
+            promotedTags.append(contentsOf: ["Lunch", "Sandwich", "Salad"])
+        } else if hour >= 14 && hour < 17 {
+            promotedTags.append(contentsOf: ["Snack", "Treat"])
+        } else if hour >= 17 && hour < 21 {
+            promotedTags.append(contentsOf: ["Dinner", "Main Course", "Side Dish"])
+        } else {
+            promotedTags.append(contentsOf: ["Dessert", "Drink", "Cocktail", "Late Night"])
+        }
+
+        if isWeekend {
+            if hour >= 11 {
+                promotedTags.append(contentsOf: ["Appetizer", "Dip", "Finger Food"])
+            }
+            if hour >= 11 && hour < 14 && !promotedTags.contains("Brunch") {
+                promotedTags.append("Brunch")
+            }
+        }
+
+        let quickRecipes = allRecipes
+            .filter { recipe in
+                guard let minutes = recipe.totalMinutes else { return false }
+                return minutes <= 30 && minutes > 0
+            }
+            .shuffled()
+            .prefix(10)
+            .map { $0 }
+
+        let rotationCandidates = allRecipes.filter { recipe in
+            guard let stat = stats[recipe.id] else { return false }
+            return stat.lastCooked >= thirtyDaysAgo
+        }
+
+        let onRotationRecipes = rotationCandidates.sorted {
+            let count1 = stats[$0.id]?.count ?? 0
+            let count2 = stats[$1.id]?.count ?? 0
+            return count1 > count2
+        }
+        .prefix(10)
+        .map { $0 }
+
+        let forgottenFavorites = allRecipes.filter { recipe in
+            guard recipe.isFavorite else { return false }
+
+            if let stat = stats[recipe.id] {
+                return stat.lastCooked < thirtyDaysAgo
+            }
+            return true
+        }
+        .shuffled()
+        .prefix(10)
+        .map { $0 }
+
+        var tagGroups: [String: [Recipe]] = [:]
+        for recipe in allRecipes {
+            for tag in recipe.tags {
+                tagGroups[tag.name, default: []].append(recipe)
+            }
+        }
+
+        var finalTagRows: [(tag: String, recipes: [Recipe])] = []
+
+        for tag in promotedTags {
+            if let recipes = tagGroups.first(where: { $0.key.localizedCaseInsensitiveCompare(tag) == .orderedSame })?.value,
+               !recipes.isEmpty {
+                let sortedRecipes = recipes.sorted {
+                    let count1 = stats[$0.id]?.count ?? 0
+                    let count2 = stats[$1.id]?.count ?? 0
+                    return count1 > count2
+                }
+
+                if !finalTagRows.contains(where: { $0.tag == tag }) {
+                    finalTagRows.append((tag: tag, recipes: sortedRecipes.prefix(10).map { $0 }))
+                }
+            }
+        }
+
+        let standardTags = tagGroups
+            .filter { group in
+                let isPromoted = finalTagRows.contains { $0.tag.localizedCaseInsensitiveCompare(group.key) == .orderedSame }
+                return !isPromoted && group.value.count >= 3
+            }
+            .sorted { $0.value.count > $1.value.count }
+            .prefix(5)
+            .map { group -> (tag: String, recipes: [Recipe]) in
+                let sortedRecipes = group.value.sorted {
+                    let count1 = stats[$0.id]?.count ?? 0
+                    let count2 = stats[$1.id]?.count ?? 0
+                    return count1 > count2
+                }
+                return (tag: group.key, recipes: sortedRecipes.prefix(10).map { $0 })
+            }
+
+        finalTagRows.append(contentsOf: standardTags)
+
+        return CookTabDerivedSections(
+            quickRecipes: quickRecipes,
+            onRotationRecipes: onRotationRecipes,
+            forgottenFavorites: forgottenFavorites,
+            tagRows: finalTagRows
+        )
+    }
+}
+
 @MainActor
 @Observable final class CookTabViewModel {
     var allRecipes: [Recipe] = []
@@ -31,6 +154,7 @@ import os
     let dependencies: DependencyContainer
     private var hasLoadedInitially = false
     @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var smartRecommendationsTask: Task<Void, Never>?
     private var recipeImageURLsById: [UUID: URL?] = [:]
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
@@ -91,29 +215,8 @@ import os
     /// Load data without showing loading state changes (for initial load)
     private func loadDataSilently() async {
         do {
-            // Load all recipes (owned + referenced)
-            allRecipes = try await fetchAllRecipesIncludingReferences()
-            recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
-            rebuildRecipeImageLookup()
-
-            // Load collections
-            collections = try await dependencies.collectionRepository.fetchAll()
-            collections.sort { $0.updatedAt > $1.updatedAt }
-
-            // Load recently cooked
-            let recentIds = try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            let recentIdSet = Set(recentIds)
-            recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
-
-            // Load favorites
-            favoriteRecipes = allRecipes.filter { $0.isFavorite }
-            
-            // Load smart recommendations
-            updateSmartRecommendations()
-
-            // Load friends' recipes and popular recipes in background
+            try await reloadLocalLibrary(loadCollections: true)
             await loadSocialRecipes()
-
             hasLoadedInitially = true
         } catch {
             AppLogger.general.error("Failed to silently load cook tab data: \(error.localizedDescription)")
@@ -170,32 +273,28 @@ import os
         }
 
         do {
-            // Load all recipes (owned + referenced)
-            allRecipes = try await fetchAllRecipesIncludingReferences()
-            recentlyAddedRecipes = allRecipes.sorted { $0.createdAt > $1.createdAt }
-            rebuildRecipeImageLookup()
-
-            // Load collections
-            collections = try await dependencies.collectionRepository.fetchAll()
-            collections.sort { $0.updatedAt > $1.updatedAt }
-
-            // Load recently cooked
-            let recentIds = try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            let recentIdSet = Set(recentIds)
-            recentlyCookedRecipes = allRecipes.filter { recentIdSet.contains($0.id) }
-            
-            // Load favorites
-            favoriteRecipes = allRecipes.filter { $0.isFavorite }
-            
-            // Load smart recommendations
-            updateSmartRecommendations()
-
-            // Load friends' recipes and popular recipes in background
+            try await reloadLocalLibrary(loadCollections: true)
             await loadSocialRecipes()
-
             hasLoadedInitially = true
         } catch {
             AppLogger.general.error("Failed to load cook tab data: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshLocalLibrary() async {
+        do {
+            try await reloadLocalLibrary(loadCollections: true)
+        } catch {
+            AppLogger.general.error("Failed to refresh cook library: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshCollections() async {
+        do {
+            collections = try await dependencies.collectionRepository.fetchAll()
+            collections.sort { $0.updatedAt > $1.updatedAt }
+        } catch {
+            AppLogger.general.error("Failed to refresh collections: \(error.localizedDescription)")
         }
     }
 
@@ -259,27 +358,40 @@ import os
         guard !ownerIds.isEmpty else { return }
 
         do {
-            // Fetch user profiles and recipe counts for each owner
-            for ownerId in ownerIds {
-                // Skip if we already have this owner's data cached
-                guard popularRecipeTiers[ownerId] == nil || popularRecipeOwners[ownerId] == nil else { continue }
+            let userCloudService = dependencies.userCloudService
+            let ownerIdsNeedingUsers = ownerIds.filter { popularRecipeOwners[$0] == nil }
+            let ownerIdsNeedingTiers = ownerIds.filter { popularRecipeTiers[$0] == nil }
 
-                // Fetch user profile
-                if popularRecipeOwners[ownerId] == nil {
-                    if let user = try await dependencies.userCloudService.fetchUser(byUserId: ownerId) {
-                        popularRecipeOwners[ownerId] = user
+            if !ownerIdsNeedingUsers.isEmpty {
+                let fetchedUsers = try await withThrowingTaskGroup(of: (UUID, User?).self, returning: [UUID: User].self) { group in
+                    for ownerId in ownerIdsNeedingUsers {
+                        group.addTask {
+                            let user = try await userCloudService.fetchUser(byUserId: ownerId)
+                            return (ownerId, user)
+                        }
                     }
+
+                    var usersById: [UUID: User] = [:]
+                    for try await (ownerId, user) in group {
+                        if let user {
+                            usersById[ownerId] = user
+                        }
+                    }
+                    return usersById
                 }
 
-                // Fetch recipe count for tier calculation
-                if popularRecipeTiers[ownerId] == nil {
-                    let ownerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
-                        ownerIds: [ownerId],
-                        visibility: .publicRecipe
-                    )
+                for (ownerId, user) in fetchedUsers {
+                    popularRecipeOwners[ownerId] = user
+                }
+            }
 
-                    let tier = UserTier.tier(for: ownerRecipes.count)
-                    popularRecipeTiers[ownerId] = tier
+            if !ownerIdsNeedingTiers.isEmpty {
+                let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
+                    forOwnerIds: Array(ownerIdsNeedingTiers)
+                )
+
+                for (ownerId, count) in counts {
+                    popularRecipeTiers[ownerId] = UserTier.tier(for: count)
                 }
             }
         } catch {
@@ -296,18 +408,15 @@ import os
         guard !sharerIds.isEmpty else { return }
 
         do {
-            for sharerId in sharerIds {
-                // Skip if already cached
-                guard friendsRecipeTiers[sharerId] == nil else { continue }
+            let uncachedSharerIds = sharerIds.filter { friendsRecipeTiers[$0] == nil }
+            guard !uncachedSharerIds.isEmpty else { return }
 
-                // Fetch public recipe count for tier calculation
-                let sharerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
-                    ownerIds: [sharerId],
-                    visibility: .publicRecipe
-                )
+            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
+                forOwnerIds: Array(uncachedSharerIds)
+            )
 
-                let tier = UserTier.tier(for: sharerRecipes.count)
-                friendsRecipeTiers[sharerId] = tier
+            for (sharerId, count) in counts {
+                friendsRecipeTiers[sharerId] = UserTier.tier(for: count)
             }
         } catch {
             AppLogger.general.error("Failed to fetch friends' tiers: \(error.localizedDescription)")
@@ -315,7 +424,7 @@ import os
     }
 
     /// Get first 4 recipe image URLs for a collection (for grid display)
-    func getRecipeImages(for collection: Collection) async -> [URL?] {
+    func getRecipeImages(for collection: Collection) -> [URL?] {
         Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
     }
 
@@ -324,150 +433,41 @@ import os
             partialResult[recipe.id] = recipe.imageURL
         }
     }
+
+    private func reloadLocalLibrary(loadCollections: Bool) async throws {
+        async let fetchedRecipes = fetchAllRecipesIncludingReferences()
+
+        let recipes = try await fetchedRecipes
+        let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
+
+        allRecipes = recipes
+        recentlyAddedRecipes = recipes.sorted { $0.createdAt > $1.createdAt }
+        rebuildRecipeImageLookup()
+        recentlyCookedRecipes = recipes.filter { recentIdSet.contains($0.id) }
+        favoriteRecipes = recipes.filter { $0.isFavorite }
+        updateSmartRecommendations()
+
+        if loadCollections {
+            collections = try await dependencies.collectionRepository.fetchAll()
+            collections.sort { $0.updatedAt > $1.updatedAt }
+        }
+    }
     
     private func updateSmartRecommendations() {
-        // 1. Determine Promoted Tags based on Time of Day & Weekend
-        let date = Date()
-        let calendar = Calendar.current
-        let hour = calendar.component(.hour, from: date)
-        let isWeekend = calendar.isDateInWeekend(date)
-        
-        var promotedTags: [String] = []
-        
-        // Time of Day Logic
-        if hour >= 5 && hour < 11 {
-            // Morning
-            promotedTags.append(contentsOf: ["Breakfast", "Brunch"])
-        } else if hour >= 11 && hour < 14 {
-            // Lunch
-            promotedTags.append(contentsOf: ["Lunch", "Sandwich", "Salad"])
-        } else if hour >= 14 && hour < 17 {
-            // Afternoon
-            promotedTags.append(contentsOf: ["Snack", "Treat"])
-        } else if hour >= 17 && hour < 21 {
-            // Evening
-            promotedTags.append(contentsOf: ["Dinner", "Main Course", "Side Dish"])
-        } else {
-            // Night (21+) or Early Morning (<5)
-            promotedTags.append(contentsOf: ["Dessert", "Drink", "Cocktail", "Late Night"])
-        }
-        
-        // Weekend Logic (Add to existing list)
-        if isWeekend {
-            // Add weekend-specific vibes
-            if hour >= 11 {
-                promotedTags.append(contentsOf: ["Appetizer", "Dip", "Finger Food"])
-            }
-            // Maybe "Brunch" is more relevant on weekends even later?
-            if hour >= 11 && hour < 14 {
-                 if !promotedTags.contains("Brunch") { promotedTags.append("Brunch") }
-            }
-        }
-        
-        // 2. Quick & Easy (<= 30 mins)
-        quickRecipes = allRecipes.filter { recipe in
-            guard let minutes = recipe.totalMinutes else { return false }
-            return minutes <= 30 && minutes > 0
-        }
-        .shuffled()
-        .prefix(10)
-        .map { $0 }
-        
-        // 3. On Rotation & Forgotten Favorites
-        Task {
+        let allRecipes = self.allRecipes
+        smartRecommendationsTask?.cancel()
+        smartRecommendationsTask = Task { @MainActor in
             do {
                 let stats = try dependencies.cookingHistoryRepository.fetchCookingStats()
-                let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-                
-                // On Rotation: Most cooked in last 30 days
-                // Since we only track last cooked, we'll use total count as a proxy for "on rotation" 
-                // but prioritize those cooked recently
-                let rotationCandidates = allRecipes.filter { recipe in
-                    guard let stat = stats[recipe.id] else { return false }
-                    return stat.lastCooked >= thirtyDaysAgo
-                }
-                
-                onRotationRecipes = rotationCandidates.sorted {
-                    let count1 = stats[$0.id]?.count ?? 0
-                    let count2 = stats[$1.id]?.count ?? 0
-                    return count1 > count2
-                }
-                .prefix(10)
-                .map { $0 }
-                
-                // Forgotten Favorites: Favorites NOT cooked in last 30 days
-                forgottenFavorites = allRecipes.filter { recipe in
-                    guard recipe.isFavorite else { return false }
-                    
-                    if let stat = stats[recipe.id] {
-                        return stat.lastCooked < thirtyDaysAgo
-                    } else {
-                        // Never cooked but is favorite
-                        return true
-                    }
-                }
-                .shuffled()
-                .prefix(10)
-                .map { $0 }
-                
-                // 4. Dynamic Tag Rows
-                var tagGroups: [String: [Recipe]] = [:]
-                
-                for recipe in allRecipes {
-                    for tag in recipe.tags {
-                        if tagGroups[tag.name] == nil {
-                            tagGroups[tag.name] = []
-                        }
-                        tagGroups[tag.name]?.append(recipe)
-                    }
-                }
-                
-                var finalTagRows: [(tag: String, recipes: [Recipe])] = []
-                
-                // Add Promoted Rows (Bypass 3+ rule)
-                for tag in promotedTags {
-                    // Case-insensitive lookup
-                    if let recipes = tagGroups.first(where: { $0.key.localizedCaseInsensitiveCompare(tag) == .orderedSame })?.value,
-                       !recipes.isEmpty {
-                        
-                        // Sort by popularity (most cooked first)
-                        let sortedRecipes = recipes.sorted {
-                            let count1 = stats[$0.id]?.count ?? 0
-                            let count2 = stats[$1.id]?.count ?? 0
-                            return count1 > count2
-                        }
-                        
-                        // Use the capitalized tag name from our list for display consistency
-                        // Check if we already added this tag (to avoid duplicates if logic overlaps)
-                        if !finalTagRows.contains(where: { $0.tag == tag }) {
-                             finalTagRows.append((tag: tag, recipes: sortedRecipes.prefix(10).map { $0 }))
-                        }
-                    }
-                }
-                
-                // Add Standard Rows (Apply 3+ rule)
-                let standardTags = tagGroups
-                    .filter { group in
-                        // Exclude if already promoted (check against finalTagRows to be safe)
-                        let isPromoted = finalTagRows.contains { $0.tag.localizedCaseInsensitiveCompare(group.key) == .orderedSame }
-                        return !isPromoted && group.value.count >= 3
-                    }
-                    .sorted { $0.value.count > $1.value.count } // Sort by most popular tags (most recipes)
-                    .prefix(5) // Limit to top 5 tags to avoid clutter
-                    .map { group -> (tag: String, recipes: [Recipe]) in
-                        // Sort recipes within the tag by popularity
-                        let sortedRecipes = group.value.sorted {
-                            let count1 = stats[$0.id]?.count ?? 0
-                            let count2 = stats[$1.id]?.count ?? 0
-                            return count1 > count2
-                        }
-                        return (tag: group.key, recipes: sortedRecipes.prefix(10).map { $0 })
-                    }
-                
-                finalTagRows.append(contentsOf: standardTags)
-                
-                tagRows = finalTagRows
-                
+                let derivedSections = await Task.detached(priority: .utility) {
+                    CookTabDerivedSections.build(allRecipes: allRecipes, stats: stats)
+                }.value
+
+                guard !Task.isCancelled else { return }
+                quickRecipes = derivedSections.quickRecipes
+                onRotationRecipes = derivedSections.onRotationRecipes
+                forgottenFavorites = derivedSections.forgottenFavorites
+                tagRows = derivedSections.tagRows
             } catch {
                 AppLogger.general.error("Failed to fetch cooking stats: \(error.localizedDescription)")
             }

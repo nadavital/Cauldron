@@ -250,6 +250,39 @@ final class RecipeGroupingServiceTests: XCTestCase {
         XCTAssertEqual(Set(groups.map(\.primaryRecipe.id)), Set([sourceId, forkId]))
     }
 
+    func testGroupAndRankRecipes_UsesStableGroupedIdentifier() {
+        let currentUserId = UUID()
+        let ownerId = UUID()
+        let groupId = UUID()
+
+        let original = makeRecipe(
+            id: groupId,
+            title: "Roast Chicken",
+            ownerId: ownerId,
+            tags: ["Dinner"],
+            ingredients: ["chicken"]
+        )
+        let savedCopy = makeRecipe(
+            id: UUID(),
+            title: "Roast Chicken",
+            ownerId: UUID(),
+            tags: ["Dinner"],
+            ingredients: ["chicken"],
+            originalRecipeId: groupId
+        )
+
+        let groups = RecipeGroupingService.groupAndRankRecipes(
+            localRecipes: [],
+            publicRecipes: [original, savedCopy],
+            friends: [],
+            currentUserId: currentUserId,
+            filterText: "roast chicken"
+        )
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.id, groupId)
+    }
+
     private func makeRecipe(
         id: UUID = UUID(),
         title: String,

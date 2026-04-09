@@ -265,6 +265,32 @@ actor RecipeCloudService {
         }
     }
 
+    /// Fetch multiple public recipes by ID in a single CloudKit query.
+    func fetchPublicRecipes(ids: [UUID]) async throws -> [UUID: Recipe] {
+        let uniqueIds = Array(Set(ids))
+        guard !uniqueIds.isEmpty else { return [:] }
+
+        let db = try await core.getPublicDatabase()
+        let recipeIdStrings = uniqueIds.map(\.uuidString)
+        let predicate = NSPredicate(format: "recipeId IN %@", recipeIdStrings)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+
+        let results = try await db.records(matching: query, resultsLimit: uniqueIds.count)
+
+        var recipesById: [UUID: Recipe] = [:]
+        recipesById.reserveCapacity(uniqueIds.count)
+
+        for (_, result) in results.matchResults {
+            guard let record = try? result.get(),
+                  let recipe = try? recipeFromRecord(record) else {
+                continue
+            }
+            recipesById[recipe.id] = recipe
+        }
+
+        return recipesById
+    }
+
     /// Query shared recipes by visibility and optional owner IDs
     func querySharedRecipes(
         ownerIds: [UUID]?,

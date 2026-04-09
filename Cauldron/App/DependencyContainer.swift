@@ -21,6 +21,30 @@ import Combine
 /// 5. **Feature Services Layer**: ImageManager, ProfileImageManager, etc.
 @MainActor
 class DependencyContainer: ObservableObject {
+    private static let sharedInstance: DependencyContainer = {
+        if RuntimeEnvironment.isRunningTests {
+            return DependencyContainer.preview()
+        }
+
+        do {
+            return try DependencyContainer.persistent()
+        } catch {
+            fatalError("""
+                Failed to initialize database: \(error.localizedDescription)
+
+                This may indicate database corruption. Please try:
+                1. Restart the app
+                2. If the issue persists, reinstall the app
+
+                Note: Your recipes are safely stored in iCloud and will be restored after reinstalling.
+                """)
+        }
+    }()
+
+    static var shared: DependencyContainer {
+        sharedInstance
+    }
+
     let modelContainer: ModelContainer
 
     // MARK: - Layer 1: Infrastructure
@@ -296,25 +320,7 @@ class DependencyContainer: ObservableObject {
 // MARK: - Environment Key
 
 private struct DependencyContainerKey: EnvironmentKey {
-    static let defaultValue: DependencyContainer = {
-        if RuntimeEnvironment.isRunningTests {
-            return DependencyContainer.preview()
-        }
-
-        do {
-            return try DependencyContainer.persistent()
-        } catch {
-            fatalError("""
-                Failed to initialize database: \(error.localizedDescription)
-
-                This may indicate database corruption. Please try:
-                1. Restart the app
-                2. If the issue persists, reinstall the app
-
-                Note: Your recipes are safely stored in iCloud and will be restored after reinstalling.
-                """)
-        }
-    }()
+    static let defaultValue: DependencyContainer = DependencyContainer.shared
 }
 
 extension EnvironmentValues {
