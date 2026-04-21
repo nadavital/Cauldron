@@ -478,6 +478,60 @@ actor RecipeCloudService {
         }
     }
 
+    /// Search public recipes using CloudKit-queryable fields and return full recipe records.
+    ///
+    /// This keeps the rich local reranking pipeline, but avoids treating public search as
+    /// "search the latest 50 recipes" whenever the user has entered an actual query.
+    func searchDiscoverablePublicRecipes(
+        query: String,
+        categories: [RecipeCategory],
+        limit: Int = 50
+    ) async throws -> [Recipe] {
+        let normalizedQuery = normalizeSearchValue(query)
+        let normalizedCategories = categories
+            .map { normalizeSearchValue($0.tagValue) }
+            .filter { !$0.isEmpty }
+
+        guard !normalizedQuery.isEmpty || !normalizedCategories.isEmpty else {
+            return try await fetchDiscoverablePublicRecipes(limit: limit)
+        }
+
+        let visibilityPredicate = NSPredicate(
+            format: "visibility == %@",
+            RecipeVisibility.publicRecipe.rawValue
+        )
+
+        var requiredPredicates: [NSPredicate] = [visibilityPredicate]
+
+        for category in normalizedCategories {
+            requiredPredicates.append(NSPredicate(format: "ANY searchableTags == %@", category))
+        }
+
+        if !normalizedQuery.isEmpty {
+            let queryTokens = tokenizeSearchText(normalizedQuery)
+            var textPredicates: [NSPredicate] = [
+                NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
+            ]
+
+            for token in queryTokens {
+                textPredicates.append(NSPredicate(format: "ANY searchableTitleTerms == %@", token))
+                textPredicates.append(NSPredicate(format: "ANY searchableTags == %@", token))
+                textPredicates.append(NSPredicate(format: "ANY searchableIngredients == %@", token))
+            }
+
+            requiredPredicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: textPredicates))
+        }
+
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: requiredPredicates)
+
+        do {
+            return try await fetchSharedRecipes(matching: predicate, limit: limit)
+        } catch {
+            logger.warning("Falling back to recency-based public recipe discovery after search query failed: \(error.localizedDescription)")
+            return try await fetchDiscoverablePublicRecipes(limit: limit)
+        }
+    }
+
     /// Delete recipe from PUBLIC database
     func deletePublicRecipe(recipeId: UUID) async throws {
         logger.info("🗑️ Deleting recipe from PUBLIC database: \(recipeId)")
@@ -727,6 +781,70 @@ actor RecipeCloudService {
         }
     }
 
+    private func fetchSharedRecipes(
+        matching predicate: NSPredicate,
+        limit: Int
+    ) async throws -> [Recipe] {
+        let db = try await core.getPublicDatabase()
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        var recipes: [Recipe] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (
+                matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                queryCursor: CKQueryOperation.Cursor?
+            )
+
+            if let cursor {
+                results = try await db.records(
+                    continuingMatchFrom: cursor,
+                    resultsLimit: max(1, limit - recipes.count)
+                )
+            } else {
+                results = try await db.records(matching: query, resultsLimit: limit)
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let recipe = try? recipeFromRecord(record) else {
+                    continue
+                }
+                recipes.append(recipe)
+                if recipes.count == limit {
+                    return recipes
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil && recipes.count < limit
+
+        return recipes
+    }
+
+    private func normalizeSearchValue(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func tokenizeSearchText(_ text: String) -> [String] {
+        normalizeSearchValue(text)
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count >= 2 }
+    }
+
+    private func uniqueSearchTerms(from values: [String]) -> [String] {
+        Array(Set(values
+            .flatMap { tokenizeSearchText($0) }
+            .filter { !$0.isEmpty }))
+            .sorted()
+    }
+
     private func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
@@ -744,9 +862,25 @@ actor RecipeCloudService {
             record["tagsData"] = tagsData as CKRecordValue
         }
 
-        let searchableTags = recipe.tags.map { $0.name }
+        let searchableTags = uniqueSearchTerms(from: recipe.tags.map(\.name))
         if !searchableTags.isEmpty {
             record["searchableTags"] = searchableTags as CKRecordValue
+        } else {
+            record["searchableTags"] = nil
+        }
+
+        let searchableTitleTerms = uniqueSearchTerms(from: [recipe.title])
+        if !searchableTitleTerms.isEmpty {
+            record["searchableTitleTerms"] = searchableTitleTerms as CKRecordValue
+        } else {
+            record["searchableTitleTerms"] = nil
+        }
+
+        let searchableIngredients = uniqueSearchTerms(from: recipe.ingredients.map(\.name))
+        if !searchableIngredients.isEmpty {
+            record["searchableIngredients"] = searchableIngredients as CKRecordValue
+        } else {
+            record["searchableIngredients"] = nil
         }
 
         record["yields"] = recipe.yields as CKRecordValue

@@ -40,9 +40,9 @@ import os
     @ObservationIgnored private var hasLoadedOnce = false
 
     // Public discovery caching
-    private var discoverablePublicRecipesCache: [Recipe] = []
-    private var discoverablePublicRecipesFetchedAt: Date?
-    private let discoverablePublicRecipeCacheValidityDuration: TimeInterval = 300 // 5 minutes
+    private var publicRecipeSearchCache: [String: [Recipe]] = [:]
+    private var publicRecipeSearchFetchedAt: [String: Date] = [:]
+    private let publicRecipeSearchCacheValidityDuration: TimeInterval = 300 // 5 minutes
 
     // Debouncing
     private let peopleSearchSubject = PassthroughSubject<String, Never>()
@@ -306,7 +306,11 @@ import os
         isLoading = true
 
         do {
-            let results = try await ensureDiscoverablePublicRecipesLoaded(forceRefresh: forceRefreshPublicRecipes)
+            let results = try await loadPublicRecipeSearchResults(
+                query: normalizedQuery,
+                categories: categories,
+                forceRefresh: forceRefreshPublicRecipes
+            )
 
             // Filter out own recipes (just in case)
             let filteredResults = results.filter { $0.ownerId != currentUserId }
@@ -365,17 +369,39 @@ import os
         }
     }
     
-    private func ensureDiscoverablePublicRecipesLoaded(forceRefresh: Bool = false) async throws -> [Recipe] {
+    private func loadPublicRecipeSearchResults(
+        query: String,
+        categories: [RecipeCategory],
+        forceRefresh: Bool = false
+    ) async throws -> [Recipe] {
+        let cacheKey = publicRecipeSearchCacheKey(query: query, categories: categories)
+
         if !forceRefresh,
-           let fetchedAt = discoverablePublicRecipesFetchedAt,
-           Date().timeIntervalSince(fetchedAt) < discoverablePublicRecipeCacheValidityDuration {
-            return discoverablePublicRecipesCache
+           let fetchedAt = publicRecipeSearchFetchedAt[cacheKey],
+           Date().timeIntervalSince(fetchedAt) < publicRecipeSearchCacheValidityDuration,
+           let cachedResults = publicRecipeSearchCache[cacheKey] {
+            return cachedResults
         }
 
-        let results = try await dependencies.recipeCloudService.fetchDiscoverablePublicRecipes()
-        discoverablePublicRecipesCache = results
-        discoverablePublicRecipesFetchedAt = Date()
+        let results = try await dependencies.recipeCloudService.searchDiscoverablePublicRecipes(
+            query: query,
+            categories: categories
+        )
+        publicRecipeSearchCache[cacheKey] = results
+        publicRecipeSearchFetchedAt[cacheKey] = Date()
         return results
+    }
+
+    private func publicRecipeSearchCacheKey(query: String, categories: [RecipeCategory]) -> String {
+        let normalizedQuery = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let categoryKey = categories
+            .map(\.tagValue)
+            .map { $0.lowercased() }
+            .sorted()
+            .joined(separator: "|")
+        return "\(normalizedQuery)::\(categoryKey)"
     }
 
     // Process results: Filter local options, merge with public, group copies, rank, and extract friend context.

@@ -11,7 +11,34 @@ import os
 import CloudKit
 import UIKit
 
+enum PublicRecipeSyncResult {
+    case success
+    case retryNeeded
+}
+
 extension RecipeRepository {
+    private var publicRecipeMigrationCompletedKey: String {
+        "hasMigratedPublicRecipesToPublicDB_v3"
+    }
+
+    private var publicRecipeMigrationPendingIDsKey: String {
+        "\(publicRecipeMigrationCompletedKey)_pendingRecipeIDs"
+    }
+
+    private func loadPendingPublicRecipeMigrationIDs() -> Set<UUID> {
+        let storedIds = UserDefaults.standard.stringArray(forKey: publicRecipeMigrationPendingIDsKey) ?? []
+        return Set(storedIds.compactMap(UUID.init(uuidString:)))
+    }
+
+    private func savePendingPublicRecipeMigrationIDs(_ ids: Set<UUID>) {
+        if ids.isEmpty {
+            UserDefaults.standard.removeObject(forKey: publicRecipeMigrationPendingIDsKey)
+            return
+        }
+
+        let storedIds = ids.map(\.uuidString).sorted()
+        UserDefaults.standard.set(storedIds, forKey: publicRecipeMigrationPendingIDsKey)
+    }
     
     // MARK: - Local to Cloud Sync
     
@@ -72,29 +99,36 @@ extension RecipeRepository {
     // MARK: - Public Database Sync
     
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
-    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
+    @discardableResult
+    func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> PublicRecipeSyncResult {
         // Don't sync preview recipes to PUBLIC database - they're local-only copies
         guard !recipe.isPreview else {
             logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
-            return
+            return .success
         }
 
         // Only sync if visibility is public
         guard recipe.visibility != .privateRecipe else {
+            let isAvailable = await cloudKitCore.isAvailable()
+            guard isAvailable else {
+                logger.warning("CloudKit not available - cannot update PUBLIC visibility for recipe: \(recipe.title)")
+                return .retryNeeded
+            }
+
             // If recipe was made private, delete from PUBLIC database (including image)
             await deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
             // Delete image from public database
             if recipe.imageURL != nil {
                 await deleteRecipeImageFromPublic(recipe)
             }
-            return
+            return .success
         }
 
         // Check if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - recipe PUBLIC sync will happen later: \(recipe.title)")
-            return
+            return .retryNeeded
         }
 
         do {
@@ -116,8 +150,10 @@ extension RecipeRepository {
                     logger.debug("⏭️ Skipping image upload - already synced to PUBLIC database")
                 }
             }
+            return .success
         } catch {
             logger.error("❌ PUBLIC database sync failed for recipe '\(recipe.title)': \(error.localizedDescription)")
+            return .retryNeeded
         }
     }
     
@@ -147,40 +183,79 @@ extension RecipeRepository {
     /// Migrate all public recipes to the public database
     /// This ensures that recipes marked as public are actually accessible to others
     func migratePublicRecipesToPublicDatabase() async {
-        let migrationKey = "hasMigratedPublicRecipesToPublicDB_v2" // Bumped to v2 to ensure share metadata sync
-        
-        // Check if already migrated (don't log - it's the common case)
-        if UserDefaults.standard.bool(forKey: migrationKey) {
+        let defaults = UserDefaults.standard
+        let hasCompletedMigration = defaults.bool(forKey: publicRecipeMigrationCompletedKey)
+        let persistedPendingIds = loadPendingPublicRecipeMigrationIDs()
+
+        if hasCompletedMigration && persistedPendingIds.isEmpty {
             return
         }
-        
-        logger.info("🔄 Starting migration of public recipes to PUBLIC database...")
-        
+
         do {
-            // 1. Fetch all local recipes
             let allRecipes = try await fetchAll()
-            
-            // 2. Filter for public recipes
-            let publicRecipes = allRecipes.filter { $0.visibility == .publicRecipe }
-            logger.info("Found \(publicRecipes.count) public recipes to check")
-            
-            // 3. Sync each one to public database
+            let publicRecipes = allRecipes.filter { $0.visibility == .publicRecipe && $0.ownerId != nil }
+            let eligibleRecipeIds = Set(publicRecipes.map(\.id))
+
+            if eligibleRecipeIds.isEmpty {
+                defaults.set(true, forKey: publicRecipeMigrationCompletedKey)
+                savePendingPublicRecipeMigrationIDs(Set<UUID>())
+                logger.info("✅ Public recipe migration complete: no eligible public recipes found")
+                return
+            }
+
+            var pendingIds = persistedPendingIds
+            if pendingIds.isEmpty {
+                pendingIds = eligibleRecipeIds
+            } else {
+                pendingIds.formIntersection(eligibleRecipeIds)
+                if !hasCompletedMigration {
+                    pendingIds.formUnion(eligibleRecipeIds)
+                }
+            }
+
+            guard !pendingIds.isEmpty else {
+                defaults.set(true, forKey: publicRecipeMigrationCompletedKey)
+                savePendingPublicRecipeMigrationIDs(Set<UUID>())
+                logger.info("✅ Public recipe migration already up to date")
+                return
+            }
+
+            logger.info("🔄 Starting migration of \(pendingIds.count) public recipes to PUBLIC database...")
+
+            var remainingIds = pendingIds
             var successCount = 0
-            for recipe in publicRecipes {
-                // Skip if no owner ID (can't sync)
-                guard recipe.ownerId != nil else { continue }
-                
-                // Trigger sync to public DB
-                await syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
-                successCount += 1
-                
-                // Small delay to avoid rate limiting
+
+            for recipe in publicRecipes where remainingIds.contains(recipe.id) {
+                if Task.isCancelled {
+                    break
+                }
+
+                let result = await syncRecipeToPublicDatabase(
+                    recipe,
+                    cloudKitCore: cloudKitCore,
+                    recipeCloudService: recipeCloudService
+                )
+
+                switch result {
+                case .success:
+                    remainingIds.remove(recipe.id)
+                    successCount += 1
+                case .retryNeeded:
+                    break
+                }
+
                 try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
             }
-            
-            // Mark migration as complete
-            UserDefaults.standard.set(true, forKey: migrationKey)
-            logger.info("✅ Migration complete: Synced \(successCount) public recipes to PUBLIC database")
+
+            savePendingPublicRecipeMigrationIDs(remainingIds)
+
+            if remainingIds.isEmpty {
+                defaults.set(true, forKey: publicRecipeMigrationCompletedKey)
+                logger.info("✅ Migration complete: synced \(successCount) public recipes to PUBLIC database")
+            } else {
+                defaults.removeObject(forKey: publicRecipeMigrationCompletedKey)
+                logger.warning("⚠️ Public recipe migration incomplete: synced \(successCount), will retry \(remainingIds.count) recipes later")
+            }
         } catch {
             logger.error("❌ Migration failed: \(error.localizedDescription)")
         }
@@ -206,7 +281,9 @@ extension RecipeRepository {
 
     /// Retry syncing recipes that failed previously
     func retryPendingSyncs() async {
-        guard !self.pendingSyncRecipes.isEmpty else { return }
+        let hasPendingPublicMigration = !loadPendingPublicRecipeMigrationIDs().isEmpty ||
+            !UserDefaults.standard.bool(forKey: publicRecipeMigrationCompletedKey)
+        guard !self.pendingSyncRecipes.isEmpty || hasPendingPublicMigration else { return }
 
         logger.info("Retrying sync for \(self.pendingSyncRecipes.count) pending recipes")
 
@@ -236,6 +313,10 @@ extension RecipeRepository {
             } catch {
                 logger.error("Error fetching recipe for retry sync: \(error.localizedDescription)")
             }
+        }
+
+        if hasPendingPublicMigration {
+            await migratePublicRecipesToPublicDatabase()
         }
 
         if self.pendingSyncRecipes.isEmpty {

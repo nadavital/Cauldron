@@ -18,8 +18,6 @@ struct AllRecipesListView: View {
     @State private var selectedTag: String?
     @State private var sortOption: SortOption = .recent
     @State private var localRecipes: [Recipe]
-    @State private var availableTags: [String]
-    @State private var displayedRecipes: [Recipe]
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
@@ -31,8 +29,6 @@ struct AllRecipesListView: View {
         self.recipes = recipes
         self.dependencies = dependencies
         self._localRecipes = State(initialValue: recipes)
-        self._availableTags = State(initialValue: Self.buildTags(from: recipes))
-        self._displayedRecipes = State(initialValue: Self.filterAndSort(recipes: recipes, searchText: "", selectedTag: nil, sortOption: .recent))
     }
     
     enum SortOption: String, CaseIterable {
@@ -50,11 +46,16 @@ struct AllRecipesListView: View {
     }
     
     var allTags: [String] {
-        availableTags
+        Self.buildTags(from: localRecipes)
     }
 
     var filteredAndSortedRecipes: [Recipe] {
-        displayedRecipes
+        Self.filterAndSort(
+            recipes: localRecipes,
+            searchText: searchText,
+            selectedTag: selectedTag,
+            sortOption: sortOption
+        )
     }
 
     private static func buildTags(from recipes: [Recipe]) -> [String] {
@@ -112,39 +113,23 @@ struct AllRecipesListView: View {
     private var usesGridRecipeLayout: Bool {
         resolvedRecipeLayoutMode == .grid
     }
-
-    private func refreshDerivedState() {
-        availableTags = Self.buildTags(from: localRecipes)
-        displayedRecipes = Self.filterAndSort(
-            recipes: localRecipes,
-            searchText: searchText,
-            selectedTag: selectedTag,
-            sortOption: sortOption
-        )
-    }
     
     var body: some View {
         contentView
             .navigationTitle("All Recipes")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: "Search recipes")
-            .onAppear {
-                localRecipes = recipes
-                refreshDerivedState()
-            }
             .onChange(of: recipes) {
                 localRecipes = $1
-                refreshDerivedState()
             }
-            .onChange(of: localRecipes) { _, _ in refreshDerivedState() }
-            .onChange(of: searchText) { _, _ in refreshDerivedState() }
-            .onChange(of: selectedTag) { _, _ in refreshDerivedState() }
-            .onChange(of: sortOption) { _, _ in refreshDerivedState() }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { handleRecipeDeleted($0) }
             .sheet(isPresented: $showingImporter, onDismiss: refreshRecipes) { ImporterView(dependencies: dependencies) }
             .sheet(isPresented: $showingEditor) { RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe) }
             .sheet(isPresented: $showingAIGenerator) { AIRecipeGeneratorView(dependencies: dependencies) }
-            .sheet(isPresented: $showingCollectionForm, onDismiss: refreshRecipes) { CollectionFormView() }
+            .sheet(isPresented: $showingCollectionForm, onDismiss: refreshRecipes) {
+                CollectionFormView()
+                    .dependencies(dependencies)
+            }
             .toolbar { toolbarContent }
     }
 
@@ -306,10 +291,6 @@ struct AllRecipesListView: View {
             }
         } label: {
             Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
-        }
-        .sheet(isPresented: $showingCollectionForm) {
-            CollectionFormView()
-                .dependencies(dependencies)
         }
     }
 

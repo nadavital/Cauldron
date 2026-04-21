@@ -59,17 +59,14 @@ actor CloudKitCore {
     // MARK: - Initialization
 
     init() {
-        // CloudKit will SIGTRAP if entitlements are missing (common in CI tests).
-        // Skip CloudKit initialization in tests/CI to avoid crashing the test host app.
-        let env = ProcessInfo.processInfo.environment
-        let isRunningTests = env["XCTestConfigurationFilePath"] != nil
-        let isCI = env["CI"] == "true"
-        if isRunningTests || isCI {
+        // CloudKit will SIGTRAP if entitlements are missing.
+        // Disable it in unsupported runtimes so the app can stay usable offline.
+        if !RuntimeEnvironment.canUseCloudKit {
             self.container = nil
             self._privateDatabase = nil
             self._publicDatabase = nil
             self.isEnabled = false
-            logger.notice("CloudKit disabled for tests/CI environment")
+            logger.notice("CloudKit disabled for current runtime environment")
             return
         }
 

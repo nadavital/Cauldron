@@ -21,7 +21,7 @@ final class CollectionsListViewModel {
 
     let dependencies: DependencyContainer
     @ObservationIgnored private var notificationObservers: [any NSObjectProtocol] = []
-    @ObservationIgnored private var recipeImageURLsById: [UUID: URL?] = [:]
+    private var recipeImageURLsById: [UUID: URL?] = [:]
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
@@ -91,11 +91,12 @@ final class CollectionsListViewModel {
             async let fetchedCollections = dependencies.collectionRepository.fetchAll()
             async let fetchedRecipes = dependencies.recipeRepository.fetchAll()
 
-            ownedCollections = try await fetchedCollections
+            let collections = try await fetchedCollections
             let recipes = try await fetchedRecipes
             recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
+            ownedCollections = collections
             AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) collections")
         } catch {
             AppLogger.general.error("❌ Failed to load collections: \(error.localizedDescription)")

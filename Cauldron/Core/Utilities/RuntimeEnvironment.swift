@@ -8,8 +8,23 @@
 import Foundation
 
 enum RuntimeEnvironment {
+    nonisolated private static var environment: [String: String] {
+        ProcessInfo.processInfo.environment
+    }
+
     nonisolated static var isRunningTests: Bool {
-        let environment = ProcessInfo.processInfo.environment
         return environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
+    }
+
+    nonisolated static var isRunningCI: Bool {
+        environment["CI"] == "true"
+    }
+
+    nonisolated static var isCloudKitForcedOff: Bool {
+        environment["CAULDRON_DISABLE_CLOUDKIT"] == "1"
+    }
+
+    nonisolated static var canUseCloudKit: Bool {
+        !isRunningTests && !isRunningCI && !isCloudKitForcedOff
     }
 }

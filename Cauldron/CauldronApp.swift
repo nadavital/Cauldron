@@ -88,6 +88,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 AppLogger.general.info("🔵 AppDelegate: Detected iCloud share URL, fetching metadata...")
 
                 Task {
+                    guard RuntimeEnvironment.canUseCloudKit else {
+                        AppLogger.general.error("🔵 AppDelegate: CloudKit unavailable in current runtime; skipping share metadata fetch")
+                        return
+                    }
+
                     // Store URL for later if UI not ready
                     await PendingShareManager.shared.setPendingURL(url)
 
@@ -527,6 +532,11 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
                 AppLogger.general.info("🟣 SceneDelegate: Detected iCloud share URL, processing...")
 
                 Task {
+                    guard RuntimeEnvironment.canUseCloudKit else {
+                        AppLogger.general.error("🟣 SceneDelegate: CloudKit unavailable in current runtime; skipping share metadata fetch")
+                        return
+                    }
+
                     do {
                         let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
                         let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in

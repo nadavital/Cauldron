@@ -349,6 +349,7 @@ final class GroceriesViewModel {
     let dependencies: DependencyContainer
     private var currentViewMode: GroceryGroupingType = .recipe
     @ObservationIgnored private var categorizationTask: Task<Void, Never>?
+    @ObservationIgnored private var needsAnotherCategorizationPass = false
 
     var hasCheckedItems: Bool {
         items.contains { $0.isChecked }
@@ -385,11 +386,20 @@ final class GroceriesViewModel {
     }
 
     private func scheduleCategorizationIfNeeded() {
-        guard categorizationTask == nil else { return }
+        guard categorizationTask == nil else {
+            needsAnotherCategorizationPass = true
+            return
+        }
 
         categorizationTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.categorizationTask = nil }
+            defer {
+                self.categorizationTask = nil
+                if self.needsAnotherCategorizationPass {
+                    self.needsAnotherCategorizationPass = false
+                    self.scheduleCategorizationIfNeeded()
+                }
+            }
             await self.categorizeUncategorizedItems()
         }
     }

@@ -119,6 +119,7 @@ struct CollectionCardView: View {
                     showPlaceholderText: false,
                     recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService
                 )
+                .id(imageURL.absoluteString)
                 .frame(width: size, height: size)
                 .clipped()
             } else {

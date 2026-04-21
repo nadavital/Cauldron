@@ -48,7 +48,7 @@ enum UserTier: Int, CaseIterable, Comparable {
     }
 
     /// Search result boost multiplier for this tier
-    var searchBoost: Double {
+    nonisolated var searchBoost: Double {
         switch self {
         case .apprentice: return 1.0
         case .potionMaker: return 1.1

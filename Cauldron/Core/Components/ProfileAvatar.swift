@@ -27,8 +27,8 @@ struct ProfileAvatar: View {
         _profileImage = State(initialValue: ImageCache.shared.get(cacheKey))
     }
 
-    /// Returns the current user from session if this is the current user's avatar, otherwise the passed user
-    /// This ensures profile changes propagate immediately throughout the app
+    /// Use the live session user when rendering the signed-in user's avatar so profile edits
+    /// propagate immediately without waiting for parent views to reload their `User` snapshots.
     private var displayUser: User {
         if let currentUser = currentUserSession.currentUser, currentUser.id == user.id {
             return currentUser
@@ -120,7 +120,8 @@ struct ProfileAvatar: View {
 
         if let downloadedURL = result.downloadedURL,
            let currentUser = CurrentUserSession.shared.currentUser,
-           currentUser.id == displayUser.id {
+           currentUser.id == displayUser.id,
+           currentUser.profileImageURL != downloadedURL {
             let updatedUser = currentUser.updatedProfile(
                 profileEmoji: currentUser.profileEmoji,
                 profileColor: currentUser.profileColor,
@@ -129,7 +130,7 @@ struct ProfileAvatar: View {
                 profileImageModifiedAt: currentUser.profileImageModifiedAt
             )
             await MainActor.run {
-                CurrentUserSession.shared.currentUser = updatedUser
+                CurrentUserSession.shared.replaceCurrentUserIfChanged(updatedUser)
             }
         }
     }
