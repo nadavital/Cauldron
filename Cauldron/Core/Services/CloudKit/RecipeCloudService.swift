@@ -302,18 +302,17 @@ actor RecipeCloudService {
         let db = try await core.getPublicDatabase()
 
         let predicate: NSPredicate
-        let normalizedTag = requiredTag?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasRequiredTag = !(normalizedTag?.isEmpty ?? true)
+        let requiredTagPredicate = requiredTag.flatMap(searchableTagPredicate)
 
         if let ownerIds = ownerIds, !ownerIds.isEmpty {
             let ownerIdStrings = ownerIds.map { $0.uuidString }
-            if let normalizedTag, hasRequiredTag {
-                predicate = NSPredicate(
-                    format: "ownerId IN %@ AND visibility == %@ AND ANY searchableTags == %@",
-                    ownerIdStrings,
-                    visibility.rawValue,
-                    normalizedTag
+            if let requiredTagPredicate {
+                predicate = NSCompoundPredicate(
+                    andPredicateWithSubpredicates: [
+                        NSPredicate(format: "ownerId IN %@", ownerIdStrings),
+                        NSPredicate(format: "visibility == %@", visibility.rawValue),
+                        requiredTagPredicate
+                    ]
                 )
             } else {
                 predicate = NSPredicate(
@@ -323,11 +322,12 @@ actor RecipeCloudService {
                 )
             }
         } else {
-            if let normalizedTag, hasRequiredTag {
-                predicate = NSPredicate(
-                    format: "visibility == %@ AND ANY searchableTags == %@",
-                    visibility.rawValue,
-                    normalizedTag
+            if let requiredTagPredicate {
+                predicate = NSCompoundPredicate(
+                    andPredicateWithSubpredicates: [
+                        NSPredicate(format: "visibility == %@", visibility.rawValue),
+                        requiredTagPredicate
+                    ]
                 )
             } else {
                 predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
@@ -504,7 +504,9 @@ actor RecipeCloudService {
         var requiredPredicates: [NSPredicate] = [visibilityPredicate]
 
         for category in normalizedCategories {
-            requiredPredicates.append(NSPredicate(format: "ANY searchableTags == %@", category))
+            if let categoryPredicate = searchableTagPredicate(for: category) {
+                requiredPredicates.append(categoryPredicate)
+            }
         }
 
         if !normalizedQuery.isEmpty {
@@ -843,6 +845,25 @@ actor RecipeCloudService {
             .flatMap { tokenizeSearchText($0) }
             .filter { !$0.isEmpty }))
             .sorted()
+    }
+
+    private func searchableTagPredicate(for rawTag: String) -> NSPredicate? {
+        let normalizedTag = normalizeSearchValue(rawTag)
+        let tagTokens = tokenizeSearchText(normalizedTag)
+
+        guard !tagTokens.isEmpty else {
+            return nil
+        }
+
+        let tokenPredicates = tagTokens.map { token in
+            NSPredicate(format: "ANY searchableTags == %@", token)
+        }
+
+        if tokenPredicates.count == 1 {
+            return tokenPredicates[0]
+        }
+
+        return NSCompoundPredicate(andPredicateWithSubpredicates: tokenPredicates)
     }
 
     private func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
