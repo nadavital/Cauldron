@@ -13,6 +13,7 @@ struct CollectionCardView: View {
     let preferredWidth: CGFloat?
     let dependencies: DependencyContainer?
     @State private var customCoverImage: UIImage?
+    @State private var loadedCoverKey: String?
     @State private var isLoadingImage = false
 
     init(
@@ -29,6 +30,11 @@ struct CollectionCardView: View {
 
     private var additionalRecipeCount: Int {
         max(0, collection.recipeCount - 4)
+    }
+
+    private var customCoverTaskID: String {
+        let remoteKey = collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName ?? "no-cover"
+        return "\(collection.id.uuidString)|\(collection.coverImageType.rawValue)|\(remoteKey)"
     }
 
     var body: some View {
@@ -60,7 +66,7 @@ struct CollectionCardView: View {
         }
         .frame(width: preferredWidth, alignment: .leading)
         .frame(maxWidth: preferredWidth == nil ? .infinity : nil, alignment: .leading)
-        .task(id: collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName) {
+        .task(id: customCoverTaskID) {
             await loadCustomImage()
         }
     }
@@ -108,22 +114,14 @@ struct CollectionCardView: View {
     private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
         Group {
             if index < recipeImages.count, let imageURL = recipeImages[index] {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .empty:
-                        placeholderTile(size: size)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: size, height: size)
-                            .clipped()
-                    case .failure:
-                        placeholderTile(size: size)
-                    @unknown default:
-                        placeholderTile(size: size)
-                    }
-                }
+                RecipeImageView(
+                    previewImageURL: imageURL,
+                    showPlaceholderText: false,
+                    recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService
+                )
+                .id(imageURL.absoluteString)
+                .frame(width: size, height: size)
+                .clipped()
             } else {
                 placeholderTile(size: size)
             }
@@ -175,11 +173,20 @@ struct CollectionCardView: View {
     private func loadCustomImage() async {
         guard collection.coverImageType == .customImage else {
             customCoverImage = nil
+            loadedCoverKey = nil
+            isLoadingImage = false
             return
         }
 
+        if loadedCoverKey != customCoverTaskID {
+            customCoverImage = nil
+        }
+        isLoadingImage = true
+        defer { isLoadingImage = false }
+
         let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
         if let image = await loader.loadCollectionCoverImage(for: collection, dependencies: dependencies) {
+            guard !Task.isCancelled else { return }
             if let currentImage = customCoverImage {
                 if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
                     customCoverImage = image
@@ -187,8 +194,10 @@ struct CollectionCardView: View {
             } else {
                 customCoverImage = image
             }
+            loadedCoverKey = customCoverTaskID
         } else {
             customCoverImage = nil
+            loadedCoverKey = nil
         }
     }
 

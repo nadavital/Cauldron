@@ -23,7 +23,6 @@ struct CookTabView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSessionConflictAlert = false
     @State private var isAIAvailable = false
-    @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
     @State private var shouldSpotlightRecentlyAdded = false
     @State private var recentlyAddedSpotlightTask: Task<Void, Never>?
     private let recentlyAddedSectionID = "cookRecentlyAddedSection"
@@ -135,33 +134,29 @@ struct CookTabView: View {
                 }
             }
             .sheet(isPresented: $showingImporter, onDismiss: {
-                // Refresh data when importer is dismissed
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                 }
             }) {
                 ImporterView(dependencies: viewModel.dependencies)
             }
             .sheet(isPresented: $showingEditor, onDismiss: {
-                // Refresh data when editor is dismissed
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                 }
             }) {
                 RecipeEditorView(dependencies: viewModel.dependencies, recipe: selectedRecipe)
             }
             .sheet(isPresented: $showingAIGenerator, onDismiss: {
-                // Refresh data when AI generator is dismissed
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                 }
             }) {
                 AIRecipeGeneratorView(dependencies: viewModel.dependencies)
             }
             .sheet(isPresented: $showingCollectionForm, onDismiss: {
-                // Refresh data when collection form is dismissed
                 Task {
-                    await viewModel.loadData()
+                    await viewModel.refreshCollections()
                 }
             }) {
                 CollectionFormView()
@@ -209,9 +204,8 @@ struct CookTabView: View {
                 await viewModel.loadData(forceSync: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: .recipeAdded)) { _ in
-                // Refresh when a recipe is added from another tab
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                     let hasRecentlyAdded = !viewModel.recentlyAddedRecipes.isEmpty
                     await MainActor.run {
                         guard hasRecentlyAdded else { return }
@@ -224,21 +218,18 @@ struct CookTabView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { _ in
-                // Refresh when a collection is added from another tab
                 Task {
-                    await viewModel.loadData()
+                    await viewModel.refreshCollections()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
-                // Refresh when a recipe is deleted from another tab
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
-                // Refresh when a recipe is updated (e.g., edited from detail view)
                 Task {
-                    await viewModel.loadData()
+                    await refreshCookLibrary()
                 }
             }
             .navigationDestination(for: Tag.self) { tag in
@@ -260,6 +251,10 @@ struct CookTabView: View {
                 shouldSpotlightRecentlyAdded = false
             }
         }
+    }
+
+    private func refreshCookLibrary() async {
+        await viewModel.refreshLocalLibrary()
     }
 
     private var recentlyAddedSection: some View {
@@ -412,18 +407,11 @@ struct CookTabView: View {
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: collectionImageCache[collection.id] ?? [],
+                                    recipeImages: viewModel.getRecipeImages(for: collection),
                                     dependencies: viewModel.dependencies
                                 )
                             }
                             .buttonStyle(.plain)
-                            .task(id: collection.id) {
-                                // Load recipe images if not cached
-                                if collectionImageCache[collection.id] == nil {
-                                    let images = await viewModel.getRecipeImages(for: collection)
-                                    collectionImageCache[collection.id] = images
-                                }
-                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -842,7 +830,7 @@ struct CookTabView: View {
         Button {
             Task {
                 try? await viewModel.dependencies.recipeRepository.toggleFavorite(id: recipe.id)
-                await viewModel.loadData()
+                await viewModel.refreshLocalLibrary()
             }
         } label: {
             Label(recipe.isFavorite ? "Unfavorite" : "Favorite", systemImage: recipe.isFavorite ? "star.slash" : "star.fill")

@@ -200,7 +200,6 @@ struct GroceriesView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: viewModel.groups.map { $0.id })
     }
 
     // MARK: - Ungrouped View
@@ -214,7 +213,6 @@ struct GroceriesView: View {
             }
             .onDelete(perform: deleteItems)
         }
-        .animation(.easeInOut(duration: 0.3), value: viewModel.sortedItems.map { $0.id })
     }
 
     // MARK: - Item Row
@@ -350,6 +348,8 @@ final class GroceriesViewModel {
 
     let dependencies: DependencyContainer
     private var currentViewMode: GroceryGroupingType = .recipe
+    @ObservationIgnored private var categorizationTask: Task<Void, Never>?
+    @ObservationIgnored private var needsAnotherCategorizationPass = false
 
     var hasCheckedItems: Bool {
         items.contains { $0.isChecked }
@@ -379,10 +379,28 @@ final class GroceriesViewModel {
                 updateGroups(for: currentViewMode)
             }
 
-            // Categorize uncategorized items in background
-            await categorizeUncategorizedItems()
+            scheduleCategorizationIfNeeded()
         } catch {
             AppLogger.persistence.error("Failed to load grocery items: \(error.localizedDescription)")
+        }
+    }
+
+    private func scheduleCategorizationIfNeeded() {
+        guard categorizationTask == nil else {
+            needsAnotherCategorizationPass = true
+            return
+        }
+
+        categorizationTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.categorizationTask = nil
+                if self.needsAnotherCategorizationPass {
+                    self.needsAnotherCategorizationPass = false
+                    self.scheduleCategorizationIfNeeded()
+                }
+            }
+            await self.categorizeUncategorizedItems()
         }
     }
 
@@ -396,22 +414,30 @@ final class GroceriesViewModel {
             let uncategorized = try await dependencies.groceryRepository.fetchUncategorizedItems()
             guard !uncategorized.isEmpty else { return }
 
-            // Categorize in background
-            Task.detached { [weak self] in
-                guard let self = self else { return }
-                do {
-                    let results = try await self.dependencies.groceryCategorizer.categorizeItems(uncategorized)
-                    for (itemId, category) in results {
-                        try await self.dependencies.groceryRepository.updateCategory(itemId: itemId, category: category)
-                    }
-                    // Reload items to show new categories
-                    await self.loadItems()
-                } catch {
-                    AppLogger.persistence.error("Failed to categorize items: \(error.localizedDescription)")
-                }
+            let results = try await dependencies.groceryCategorizer.categorizeItems(uncategorized)
+            guard !results.isEmpty else { return }
+
+            for (itemId, category) in results {
+                try await dependencies.groceryRepository.updateCategory(itemId: itemId, category: category)
             }
+
+            items = items.map { item in
+                guard let category = results[item.id] else { return item }
+                return GroceryItemDisplay(
+                    id: item.id,
+                    name: item.name,
+                    quantity: item.quantity,
+                    isChecked: item.isChecked,
+                    recipeID: item.recipeID,
+                    recipeName: item.recipeName,
+                    addedOrder: item.addedOrder,
+                    aiCategory: category
+                )
+            }
+            updateSortedItems()
+            updateGroups(for: currentViewMode)
         } catch {
-            AppLogger.persistence.error("Failed to fetch uncategorized items: \(error.localizedDescription)")
+            AppLogger.persistence.error("Failed to categorize items: \(error.localizedDescription)")
         }
     }
 
@@ -438,7 +464,16 @@ final class GroceriesViewModel {
     func toggleItem(id: UUID) async {
         do {
             try await dependencies.groceryRepository.toggleItem(id: id)
-            await loadItems(animated: true)
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                await loadItems(animated: true)
+                return
+            }
+
+            items[index].isChecked.toggle()
+            withAnimation(.easeInOut(duration: 0.3)) {
+                updateSortedItems()
+                updateGroups(for: currentViewMode)
+            }
         } catch {
             AppLogger.persistence.error("Failed to toggle item: \(error.localizedDescription)")
         }
@@ -476,7 +511,18 @@ final class GroceriesViewModel {
                 // For recipe items, use the bulk operation
                 try await dependencies.groceryRepository.setRecipeChecked(recipeID: recipeID, isChecked: !allChecked)
             }
-            await loadItems(animated: true)
+
+            let idsToToggle = Set(itemsToToggle.map(\.id))
+            items = items.map { item in
+                guard idsToToggle.contains(item.id) else { return item }
+                var updatedItem = item
+                updatedItem.isChecked = !allChecked
+                return updatedItem
+            }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                updateSortedItems()
+                updateGroups(for: currentViewMode)
+            }
         } catch {
             AppLogger.persistence.error("Failed to toggle group: \(error.localizedDescription)")
         }
@@ -503,7 +549,9 @@ final class GroceriesViewModel {
     func deleteItem(id: UUID) async {
         do {
             try await dependencies.groceryRepository.deleteItem(id: id)
-            await loadItems()
+            items.removeAll { $0.id == id }
+            updateSortedItems()
+            updateGroups(for: currentViewMode)
         } catch {
             AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
         }
@@ -518,7 +566,10 @@ final class GroceriesViewModel {
                 AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
             }
         }
-        await loadItems()
+        let checkedIdSet = Set(checkedItemIds)
+        items.removeAll { checkedIdSet.contains($0.id) }
+        updateSortedItems()
+        updateGroups(for: currentViewMode)
     }
 }
 

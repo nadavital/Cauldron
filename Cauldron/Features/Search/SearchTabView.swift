@@ -54,16 +54,16 @@ struct SearchTabView: View {
             }
         }
         .task {
-            await viewModel.loadData()
+            await viewModel.loadDataIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
-            viewModel.scheduleLocalRecipeRefresh()
+            viewModel.scheduleRecipeLibraryRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
-            viewModel.scheduleLocalRecipeRefresh()
+            viewModel.scheduleRecipeLibraryRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeAdded"))) { _ in
-            viewModel.scheduleLocalRecipeRefresh()
+            viewModel.scheduleRecipeLibraryRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in
             // Switch to People search mode when coming from Friends empty state
@@ -89,7 +89,7 @@ struct SearchTabView: View {
                 .navigationTitle("Search")
                 .toolbar { searchToolbar }
                 .refreshable {
-                    await viewModel.loadData()
+                    await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
                 .navigationDestination(for: Recipe.self) { recipe in
                     RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
@@ -116,7 +116,7 @@ struct SearchTabView: View {
                 .toolbar { searchToolbar }
                 .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
                 .refreshable {
-                    await viewModel.loadData()
+                    await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
         } detail: {
             NavigationStack(path: $navigationPath) {

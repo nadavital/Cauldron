@@ -75,6 +75,7 @@ final class FriendsTabViewModel {
 
         do {
             sharedRecipes = try await dependencies.sharingService.getSharedRecipes(forceRefresh: forceRefresh)
+            organizeRecipesIntoSections()
 
             // Fetch tier information for sharers
             await fetchSharerTiers()
@@ -84,9 +85,6 @@ final class FriendsTabViewModel {
 
             // Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
-
-            // Organize recipes into sections for better UX
-            organizeRecipesIntoSections()
         } catch {
             AppLogger.general.error("Failed to load shared recipes: \(error.localizedDescription)")
             alertMessage = "Failed to load shared recipes: \(error.localizedDescription)"
@@ -136,24 +134,11 @@ final class FriendsTabViewModel {
 
     /// Get first 4 visible recipe image URLs for a shared collection card.
     func getRecipeImages(for collection: Collection) async -> [URL?] {
-        guard let dependencies = dependencies else { return [] }
-        guard !collection.recipeIds.isEmpty else { return [] }
-
-        var imageURLs: [URL?] = []
-        for recipeId in collection.recipeIds.prefix(12) {
-            do {
-                let recipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId)
-                if let imageURL = recipe?.imageURL {
-                    imageURLs.append(imageURL)
-                    if imageURLs.count == 4 {
-                        break
-                    }
-                }
-            } catch {
-                continue
-            }
-        }
-        return imageURLs
+        guard let dependencies else { return [] }
+        return await SharedCollectionPreviewLoader.loadPreviewImageURLs(
+            for: collection,
+            dependencies: dependencies
+        )
     }
 
     /// Organize shared recipes into curated sections
@@ -209,18 +194,16 @@ final class FriendsTabViewModel {
         guard !sharerIds.isEmpty else { return }
 
         do {
-            for sharerId in sharerIds {
-                // Skip if already cached
-                guard sharerTiers[sharerId] == nil else { continue }
+            let uncachedSharerIds = sharerIds.filter { sharerTiers[$0] == nil }
+            guard !uncachedSharerIds.isEmpty else { return }
 
-                // Fetch public recipe count for tier calculation
-                let sharerRecipes = try await dependencies.recipeCloudService.querySharedRecipes(
-                    ownerIds: [sharerId],
-                    visibility: .publicRecipe
-                )
+            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
+                forOwnerIds: Array(uncachedSharerIds)
+            )
 
-                let tier = UserTier.tier(for: sharerRecipes.count)
-                sharerTiers[sharerId] = tier
+            for sharerId in uncachedSharerIds {
+                let count = counts[sharerId] ?? 0
+                sharerTiers[sharerId] = UserTier.tier(for: count)
             }
         } catch {
             AppLogger.general.error("Failed to fetch sharer tiers: \(error.localizedDescription)")

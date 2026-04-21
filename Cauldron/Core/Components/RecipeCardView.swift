@@ -34,8 +34,6 @@ struct RecipeCardView: View {
     var creatorTier: UserTier?
     var onTagTap: ((Tag) -> Void)?
 
-    @ObservedObject private var currentUserSession = CurrentUserSession.shared
-
     // MARK: - Initializers
 
     /// Standard initializer for user's own recipes
@@ -63,16 +61,6 @@ struct RecipeCardView: View {
         self.sharedBy = sharedRecipe.sharedBy
         self.creatorTier = creatorTier
         self.onTagTap = onTagTap
-    }
-
-    /// Returns the current user from session if creator is the current user, otherwise the passed creator
-    /// This ensures profile changes propagate immediately throughout the app
-    private var displayCreator: User? {
-        guard let sharedBy = sharedBy else { return nil }
-        if let currentUser = currentUserSession.currentUser, currentUser.id == sharedBy.id {
-            return currentUser
-        }
-        return sharedBy
     }
 
     /// Whether this is a shared recipe (from someone else)
@@ -128,7 +116,7 @@ struct RecipeCardView: View {
         VStack {
             HStack(alignment: .top) {
                 // Creator info (top left)
-                if let creator = displayCreator {
+                if let creator = sharedBy {
                     HStack(spacing: 6) {
                         ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
 

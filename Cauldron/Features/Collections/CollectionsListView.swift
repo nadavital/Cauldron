@@ -12,7 +12,6 @@ struct CollectionsListView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
-    @State private var recipeImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
 
     init(dependencies: DependencyContainer) {
         _viewModel = State(initialValue: CollectionsListViewModel(dependencies: dependencies))
@@ -29,19 +28,12 @@ struct CollectionsListView: View {
                                 NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                                     CollectionCardView(
                                         collection: collection,
-                                        recipeImages: recipeImageCache[collection.id] ?? [],
+                                        recipeImages: viewModel.recipeImages(for: collection),
                                         preferredWidth: nil,
                                         dependencies: dependencies
                                     )
                                 }
                                 .buttonStyle(PlainButtonStyle())
-                                .task(id: collection.id) {
-                                    // Load recipe images if not cached
-                                    if recipeImageCache[collection.id] == nil {
-                                        let images = await viewModel.getRecipeImages(for: collection)
-                                        recipeImageCache[collection.id] = images
-                                    }
-                                }
                                 .contextMenu {
                                     Button(role: .destructive) {
                                         Task {
@@ -118,11 +110,9 @@ struct CollectionsListView: View {
             await viewModel.loadCollections()
         }
         .refreshable {
-            recipeImageCache.removeAll()  // Clear cache on refresh
             await viewModel.loadCollections()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
-            recipeImageCache.removeAll()  // Clear image cache
             Task {
                 await viewModel.loadCollections()
             }

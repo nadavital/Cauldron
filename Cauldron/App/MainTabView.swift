@@ -32,6 +32,7 @@ struct MainTabView: View {
     @State private var didCheckInitialPendingImport = false
     @State private var isSavingPreparedSharedRecipe = false
     @State private var showSharedRecipeSavedToast = false
+    @State private var sidebarRefreshTask: Task<Void, Never>?
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
@@ -151,7 +152,7 @@ struct MainTabView: View {
             openPendingImporterIfNeeded()
         }
         .task {
-            await refreshSidebarCollections()
+            scheduleSidebarCollectionsRefresh(delayNanoseconds: 0)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
@@ -159,14 +160,10 @@ struct MainTabView: View {
             resetCatalystWindowTitle()
             #endif
             openPendingImporterIfNeeded()
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .onChange(of: horizontalSizeClass) {
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .onChange(of: selectedTab) { _, newTab in
             #if targetEnvironment(macCatalyst)
@@ -176,34 +173,24 @@ struct MainTabView: View {
 
             switch newTab {
             case .collection:
-                Task {
-                    await refreshSidebarCollections()
-                }
+                scheduleSidebarCollectionsRefresh()
             default:
                 break
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .collectionMetadataChanged)) { notification in
             applyOptimisticSidebarCollectionUpdate(notification)
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .collectionUpdated)) { _ in
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { _ in
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { notification in
             applyOptimisticSidebarCollectionInsert(notification)
-            Task {
-                await refreshSidebarCollections()
-            }
+            scheduleSidebarCollectionsRefresh()
         }
         .toast(
             isShowing: Binding(
@@ -397,6 +384,17 @@ struct MainTabView: View {
             }
         } catch {
             AppLogger.general.warning("⚠️ Failed to refresh sidebar collections: \(error.localizedDescription)")
+        }
+    }
+
+    private func scheduleSidebarCollectionsRefresh(delayNanoseconds: UInt64 = 150_000_000) {
+        sidebarRefreshTask?.cancel()
+        sidebarRefreshTask = Task { @MainActor in
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+            guard !Task.isCancelled else { return }
+            await refreshSidebarCollections()
         }
     }
 

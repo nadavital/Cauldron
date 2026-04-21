@@ -809,12 +809,10 @@ struct AllFriendsCollectionsListView: View {
 
     @MainActor
     private func loadRecipeImages(for collection: Collection) async -> [URL?] {
-        let loader = SharedCollectionLoader(dependencies: dependencies)
-        let loadResult = await loader.loadRecipes(
-            from: collection,
-            viewerId: CurrentUserSession.shared.userId
+        await SharedCollectionPreviewLoader.loadPreviewImageURLs(
+            for: collection,
+            dependencies: dependencies
         )
-        return Array(loadResult.visibleRecipes.compactMap(\.imageURL).prefix(4).map(Optional.some))
     }
 }
 

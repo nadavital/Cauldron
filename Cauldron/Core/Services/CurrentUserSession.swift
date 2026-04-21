@@ -191,6 +191,11 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.set(user.referralCode, forKey: referralCodeKey)
     }
 
+    func replaceCurrentUserIfChanged(_ updatedUser: User) {
+        guard currentUser != updatedUser else { return }
+        currentUser = updatedUser
+    }
+
     /// Sync referral count from CloudKit for the current user when available
     private func syncReferralCountIfNeeded(for user: User, dependencies: DependencyContainer) async {
         guard cloudKitAccountStatus?.isAvailable == true else { return }
@@ -230,7 +235,7 @@ class CurrentUserSession: ObservableObject {
                     cloudProfileImageRecordName: user.cloudProfileImageRecordName,
                     profileImageModifiedAt: user.profileImageModifiedAt
                 )
-                currentUser = updatedUser
+                replaceCurrentUserIfChanged(updatedUser)
                 logger.info("✅ Downloaded and set profile image")
             } else {
                 logger.info("No profile image found in CloudKit (record may be stale)")

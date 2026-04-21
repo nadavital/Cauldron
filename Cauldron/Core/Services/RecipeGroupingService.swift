@@ -9,7 +9,7 @@ import Foundation
 
 /// Represents a group of related recipes (original + copies)
 struct SearchRecipeGroup: Identifiable {
-    let id = UUID()
+    let id: UUID
     let primaryRecipe: Recipe
     let saveCount: Int
     let friendSavers: [User]
@@ -46,7 +46,7 @@ enum RecipeGroupingService {
     ///   - filterText: Text filter for recipe search
     ///   - selectedCategories: Category filter
     /// - Returns: Grouped and ranked recipe results
-    static func groupAndRankRecipes(
+    nonisolated static func groupAndRankRecipes(
         localRecipes: [Recipe],
         publicRecipes: [Recipe],
         friends: [User],
@@ -75,8 +75,12 @@ enum RecipeGroupingService {
             }
         }
         let allCandidates = Array(bestCandidateByRecipeID.values)
+        let friendIds = Set(friends.map(\.id))
+        let friendsById = Dictionary(uniqueKeysWithValues: friends.map { ($0.id, $0) })
+        let now = Date()
 
         // Group related copies under original ID.
+        guard !Task.isCancelled else { return [] }
         let grouped = Dictionary(grouping: allCandidates) { candidate -> UUID in
             let recipe = candidate.recipe
             if recipe.isFollowingSourceUpdates, let originalRecipeId = recipe.originalRecipeId {
@@ -87,8 +91,10 @@ enum RecipeGroupingService {
 
         // Build grouped result cards.
         var groups: [SearchRecipeGroup] = []
+        groups.reserveCapacity(grouped.count)
 
-        for (_, candidates) in grouped {
+        for (groupId, candidates) in grouped {
+            guard !Task.isCancelled else { return [] }
             let recipes = candidates.map(\.recipe)
             let recipeScores = Dictionary(uniqueKeysWithValues: candidates.map { ($0.recipe.id, $0.textScore) })
 
@@ -106,13 +112,15 @@ enum RecipeGroupingService {
                 primary = recipes.max(by: { (recipeScores[$0.id] ?? 0) < (recipeScores[$1.id] ?? 0) }) ?? recipes[0]
             }
 
-            let friendIds = Set(friends.map { $0.id })
             let friendSavers = recipes
                 .filter { $0.ownerId != nil && friendIds.contains($0.ownerId!) }
                 .compactMap { recipe -> User? in
-                    return friends.first(where: { $0.id == recipe.ownerId })
+                    guard let ownerId = recipe.ownerId else { return nil }
+                    return friendsById[ownerId]
                 }
-            let uniqueFriendSavers = Array(Set(friendSavers))
+            let uniqueFriendSavers = Array(
+                Dictionary(uniqueKeysWithValues: friendSavers.map { ($0.id, $0) }).values
+            )
 
             let saveCount = recipes.count
 
@@ -127,10 +135,11 @@ enum RecipeGroupingService {
             let popularityBoost = Double(max(saveCount - 1, 0)) * 30
             let friendBoost = Double(uniqueFriendSavers.count) * 110
             let tierBoost = ownerTier.searchBoost * 35
-            let recencyBoost = max(0, 14 - min(14, Date().timeIntervalSince(primary.updatedAt) / 86_400))
+            let recencyBoost = max(0, 14 - min(14, now.timeIntervalSince(primary.updatedAt) / 86_400))
             let relevanceScore = bestTextScore + popularityBoost + friendBoost + tierBoost + recencyBoost
 
             groups.append(SearchRecipeGroup(
+                id: groupId,
                 primaryRecipe: primary,
                 saveCount: saveCount,
                 friendSavers: uniqueFriendSavers,
@@ -139,6 +148,7 @@ enum RecipeGroupingService {
             ))
         }
 
+        guard !Task.isCancelled else { return [] }
         groups.sort { g1, g2 in
             if g1.relevanceScore != g2.relevanceScore {
                 return g1.relevanceScore > g2.relevanceScore

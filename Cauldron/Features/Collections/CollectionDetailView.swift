@@ -20,6 +20,7 @@ struct CollectionDetailView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var recipeImages: [URL?] = []  // For recipe grid display
+    @State private var visibleRecipes: [Recipe] = []
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
@@ -62,16 +63,6 @@ struct CollectionDetailView: View {
         self._collection = State(initialValue: collection)
     }
 
-    var filteredRecipes: [Recipe] {
-        if searchText.isEmpty {
-            return recipes
-        }
-        return recipes.filter { recipe in
-            recipe.title.localizedCaseInsensitiveContains(searchText) ||
-            recipe.tags.contains(where: { $0.name.localizedCaseInsensitiveContains(searchText) })
-        }
-    }
-
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
         return storedMode.resolved(for: horizontalSizeClass)
@@ -95,6 +86,9 @@ struct CollectionDetailView: View {
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search recipes")
+        .onChange(of: searchText) { _, _ in
+            updateVisibleRecipes()
+        }
         .sheet(item: $activeSheet) { sheet in
             sheetContent(for: sheet)
         }
@@ -246,10 +240,11 @@ struct CollectionDetailView: View {
 
                 // Fetch all owned recipes from local storage
                 let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                let recipeIdSet = Set(collection.recipeIds)
 
                 // Filter to only recipes in this collection
                 recipes = allRecipes.filter { recipe in
-                    collection.recipeIds.contains(recipe.id)
+                    recipeIdSet.contains(recipe.id)
                 }
             } else {
                 // For non-owned collections, fetch recipes from CloudKit in parallel
@@ -287,6 +282,7 @@ struct CollectionDetailView: View {
             }
             let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
             recipeImages = Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
+            updateVisibleRecipes()
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
         } catch {
@@ -337,7 +333,7 @@ struct CollectionDetailView: View {
                     Spacer()
                 }
             }
-        } else if filteredRecipes.isEmpty {
+        } else if visibleRecipes.isEmpty {
             Section {
                 VStack(spacing: 12) {
                     Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
@@ -384,7 +380,7 @@ struct CollectionDetailView: View {
 
     @ViewBuilder
     private var recipesCompactContent: some View {
-        ForEach(filteredRecipes) { recipe in
+        ForEach(visibleRecipes) { recipe in
             NavigationLink {
                 RecipeDetailView(recipe: recipe, dependencies: dependencies)
             } label: {
@@ -408,7 +404,7 @@ struct CollectionDetailView: View {
 
     private var recipesGridContent: some View {
         LazyVGrid(columns: recipeGridColumns, spacing: 12) {
-            ForEach(filteredRecipes) { recipe in
+            ForEach(visibleRecipes) { recipe in
                 NavigationLink {
                     RecipeDetailView(recipe: recipe, dependencies: dependencies)
                 } label: {
@@ -615,6 +611,19 @@ struct CollectionDetailView: View {
             return Color(hex: colorHex) ?? .cauldronOrange
         }
         return .cauldronOrange
+    }
+
+    private func updateVisibleRecipes() {
+        let trimmedSearchText = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearchText.isEmpty else {
+            visibleRecipes = recipes
+            return
+        }
+
+        visibleRecipes = recipes.filter { recipe in
+            recipe.title.localizedCaseInsensitiveContains(trimmedSearchText) ||
+            recipe.tags.contains(where: { $0.name.localizedCaseInsensitiveContains(trimmedSearchText) })
+        }
     }
 
     private var visibilityIcon: String {

@@ -51,27 +51,26 @@ class SharedCollectionLoader {
         var visibleRecipes: [Recipe] = []
         var skippedCount = 0
 
-        for recipeId in collection.recipeIds {
-            do {
-                // Fetch recipe from CloudKit PUBLIC database
-                guard let recipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId) else {
+        do {
+            let recipesById = try await dependencies.recipeCloudService.fetchPublicRecipes(ids: collection.recipeIds)
+
+            for recipeId in collection.recipeIds {
+                guard let recipe = recipesById[recipeId] else {
                     skippedCount += 1
                     logger.warning("Recipe not found in public database: \(recipeId)")
                     continue
                 }
 
-                // Check if the viewer can access this recipe
                 if recipe.isAccessible(to: viewerId, isFriend: isFriend) {
                     visibleRecipes.append(recipe)
                 } else {
                     skippedCount += 1
                     logger.info("Skipped inaccessible recipe: \(recipe.title)")
                 }
-            } catch {
-                // Recipe might be private (doesn't exist in PUBLIC database) or deleted
-                skippedCount += 1
-                logger.warning("Failed to fetch recipe \(recipeId): \(error.localizedDescription)")
             }
+        } catch {
+            skippedCount = collection.recipeIds.count
+            logger.warning("Failed to batch fetch shared collection recipes: \(error.localizedDescription)")
         }
 
         logger.info("✅ Loaded \(visibleRecipes.count) visible recipes, \(skippedCount) hidden/unavailable")

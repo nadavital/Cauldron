@@ -341,14 +341,18 @@ struct ContentView: View {
 
                     // Fix corrupted image filenames (CloudKit version suffixes)
                     try await dependencies.recipeRepository.fixCorruptedImageFilenames()
-
-                    // Run migration to ensure public recipes are in the public database
-                    // This runs in the background
-                    Task.detached(priority: .utility) {
-                        await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
-                    }
                 } catch {
                     AppLogger.general.warning("Migration failed (continuing): \(error.localizedDescription)")
+                }
+            }
+
+            if userSession.userId != nil {
+                // Run migration to ensure public recipes are in the public database.
+                // This is safe on both first launch and subsequent launches because the
+                // repository only marks the migration complete after every eligible
+                // public recipe has actually been backfilled.
+                Task.detached(priority: .utility) {
+                    await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
                 }
             }
 
@@ -365,101 +369,90 @@ struct ContentView: View {
                 }
             }
 
-            // Preload shared recipes feed in background
-            Task.detached(priority: .utility) { @MainActor in
-                FriendsTabViewModel.shared.configure(dependencies: dependencies)
-                await FriendsTabViewModel.shared.loadSharedRecipes()
-            }
-
-            // Preload connections/friends list in background
-            // This prevents the "slow population" effect when navigating to friends tab
             if let userId = userSession.userId {
-                Task.detached(priority: .utility) { @MainActor in
-                    // Load connections first
-                    await dependencies.connectionManager.loadConnections(forUserId: userId)
-
-                    // Then preload user details for all connections
-                    // This eliminates the flicker when opening the friends list
-                    let connections = dependencies.connectionManager.connections.values.map { $0.connection }
-                    var userIds = Set<UUID>()
-                    for connection in connections {
-                        userIds.insert(connection.fromUserId)
-                        userIds.insert(connection.toUserId)
-                    }
-
-                    // Build a map of users for profile image preloading
-                    var usersMap: [UUID: User] = [:]
-
-                    // Load from local cache first (instant)
-                    for userId in userIds {
-                        if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
-                            usersMap[userId] = cachedUser
-                        }
-                    }
-
-                    // Batch fetch from CloudKit to get latest data (single query instead of N queries)
-                    if let cloudUsers = try? await dependencies.userCloudService.fetchUsers(byUserIds: Array(userIds)) {
-                        for cloudUser in cloudUsers {
-                            usersMap[cloudUser.id] = cloudUser
-                            try? await dependencies.sharingRepository.save(cloudUser)
-                        }
-                    }
-
-                    // Preload profile images for all friends into memory cache
-                    // Preloading during app launch (don't log routine operations)
-
-                    await withTaskGroup(of: (UUID, UIImage?).self) { group in
-                        for user in usersMap.values {
-                            // Skip if user doesn't have a cloud profile image and no local image
-                            guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
-                                continue
-                            }
-
-                            group.addTask {
-                                // Try to load from local file first
-                                if let imageURL = user.profileImageURL,
-                                   let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: imageURL, maxPixelSize: 300) {
-                                    return (user.id, image)
-                                }
-
-                                // If no local file, download from CloudKit
-                                if user.cloudProfileImageRecordName != nil {
-                                    do {
-                                        if let downloadedURL = try await dependencies.profileImageManager.downloadImageFromCloud(userId: user.id),
-                                           let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: downloadedURL, maxPixelSize: 300) {
-                                            // Downloaded profile image (don't log routine operations)
-                                            return (user.id, image)
-                                        }
-                                    } catch {
-                                        AppLogger.general.warning("⚠️ Failed to download profile image for \(user.username): \(error.localizedDescription)")
-                                    }
-                                }
-
-                                return (user.id, nil)
-                            }
-                        }
-
-                        // Collect results and load into memory cache
-                        for await (userId, image) in group {
-                            if let image = image {
-                                let cacheKey = ImageCache.profileImageKey(userId: userId)
-                                ImageCache.shared.set(cacheKey, image: image)
-                            }
-                        }
-                    }
-
-                    // Finished preloading friend profile images (don't log routine operations)
-
-                    // Set the shared cache timestamp so ConnectionsViewModel knows data is fresh
-                    // This is a workaround since we can't directly access the static variable
-                    // But loading connections will trigger ConnectionsViewModel to set it
-                }
+                scheduleBackgroundWarmup(for: userId)
             }
 
             return PreloadedRecipeData(allRecipes: allRecipes, recentlyCookedIds: recentlyCookedIds, collections: collections)
         } catch {
             AppLogger.general.warning("Data preload failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    private func scheduleBackgroundWarmup(for userId: UUID) {
+        let sharingService = dependencies.sharingService
+        let connectionCloudService = dependencies.connectionCloudService
+        let userCloudService = dependencies.userCloudService
+        let sharingRepository = dependencies.sharingRepository
+        let profileImageManager = dependencies.profileImageManager
+
+        Task.detached(priority: .utility) {
+            _ = try? await sharingService.getSharedRecipes()
+
+            guard let connections = try? await connectionCloudService.fetchConnections(forUserId: userId) else {
+                return
+            }
+
+            var relatedUserIds = Set<UUID>()
+            for connection in connections {
+                relatedUserIds.insert(connection.fromUserId)
+                relatedUserIds.insert(connection.toUserId)
+            }
+            relatedUserIds.remove(userId)
+
+            guard !relatedUserIds.isEmpty else { return }
+
+            var usersById: [UUID: User] = [:]
+            for relatedUserId in relatedUserIds {
+                if let cachedUser = try? await sharingRepository.fetchUser(id: relatedUserId) {
+                    usersById[relatedUserId] = cachedUser
+                }
+            }
+
+            if let cloudUsers = try? await userCloudService.fetchUsers(byUserIds: Array(relatedUserIds)) {
+                for cloudUser in cloudUsers {
+                    usersById[cloudUser.id] = cloudUser
+                    try? await sharingRepository.save(cloudUser)
+                }
+            }
+
+            await withTaskGroup(of: (UUID, UIImage?).self) { group in
+                for user in usersById.values {
+                    guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
+                        continue
+                    }
+
+                    group.addTask {
+                        if let imageURL = user.profileImageURL,
+                           let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: imageURL, maxPixelSize: 300) {
+                            return (user.id, image)
+                        }
+
+                        guard user.cloudProfileImageRecordName != nil else {
+                            return (user.id, nil)
+                        }
+
+                        do {
+                            if let downloadedURL = try await profileImageManager.downloadImageFromCloud(userId: user.id),
+                               let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: downloadedURL, maxPixelSize: 300) {
+                                return (user.id, image)
+                            }
+                        } catch {
+                            AppLogger.general.warning("⚠️ Failed to warm profile image for \(user.username): \(error.localizedDescription)")
+                        }
+
+                        return (user.id, nil)
+                    }
+                }
+
+                for await (warmedUserId, image) in group {
+                    if let image {
+                        let cacheKey = ImageCache.profileImageKey(userId: warmedUserId)
+                        ImageCache.shared.set(cacheKey, image: image)
+                    }
+                }
+            }
         }
     }
 }

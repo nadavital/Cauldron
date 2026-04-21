@@ -23,6 +23,7 @@ struct CauldronApp: App {
                 Color.clear
             } else {
                 ContentView()
+                    .dependencies(DependencyContainer.shared)
             }
         }
     }
@@ -87,6 +88,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 AppLogger.general.info("🔵 AppDelegate: Detected iCloud share URL, fetching metadata...")
 
                 Task {
+                    guard RuntimeEnvironment.canUseCloudKit else {
+                        AppLogger.general.error("🔵 AppDelegate: CloudKit unavailable in current runtime; skipping share metadata fetch")
+                        return
+                    }
+
                     // Store URL for later if UI not ready
                     await PendingShareManager.shared.setPendingURL(url)
 
@@ -281,10 +287,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
             // Update badge count and sync referral count asynchronously
             Task { @MainActor in
-                // Access the default dependencies to get connection manager
-                let dependencies = try? DependencyContainer.persistent()
-                if let dependencies = dependencies,
-                   let userId = CurrentUserSession.shared.userId {
+                let dependencies = DependencyContainer.shared
+                if let userId = CurrentUserSession.shared.userId {
                     await dependencies.connectionManager.loadConnections(forUserId: userId)
                     // Badge will be updated automatically in loadConnections
 
@@ -421,12 +425,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Update badge count when app becomes active
         Task { @MainActor in
-            let dependencies = try? DependencyContainer.persistent()
-            if let dependencies = dependencies {
-                // Update badge count based on current pending requests
-                dependencies.connectionManager.updateBadgeCount()
-                AppLogger.general.info("📛 Badge count refreshed on app activation")
-            }
+            let dependencies = DependencyContainer.shared
+            // Update badge count based on current pending requests
+            dependencies.connectionManager.updateBadgeCount()
+            AppLogger.general.info("📛 Badge count refreshed on app activation")
         }
     }
 
@@ -530,6 +532,11 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
                 AppLogger.general.info("🟣 SceneDelegate: Detected iCloud share URL, processing...")
 
                 Task {
+                    guard RuntimeEnvironment.canUseCloudKit else {
+                        AppLogger.general.error("🟣 SceneDelegate: CloudKit unavailable in current runtime; skipping share metadata fetch")
+                        return
+                    }
+
                     do {
                         let container = CKContainer(identifier: "iCloud.Nadav.Cauldron")
                         let metadata = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CKShare.Metadata, Error>) in
