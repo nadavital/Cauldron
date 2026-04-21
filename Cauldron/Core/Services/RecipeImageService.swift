@@ -37,10 +37,6 @@ class RecipeImageService {
             return .success(cachedImage)
         }
 
-        if let diskCachedImage = await ImageCache.shared.getFromDisk(cacheKey) {
-            return .success(diskCachedImage)
-        }
-
         if let existingTask = inFlightLoads[cacheKey] {
             return await existingTask.value
         }
@@ -145,13 +141,6 @@ class RecipeImageService {
         if let cachedImage = await ImageCache.shared.load(recipeCacheKey) {
             if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
                 return .success(cachedImage)
-            }
-            ImageCache.shared.remove(recipeCacheKey)
-        }
-
-        if let diskCachedImage = await ImageCache.shared.getFromDisk(recipeCacheKey) {
-            if cachedImageSatisfiesRequest(diskCachedImage, targetPixelSize: targetPixelSize) {
-                return .success(diskCachedImage)
             }
             ImageCache.shared.remove(recipeCacheKey)
         }
