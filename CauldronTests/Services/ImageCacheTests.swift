@@ -24,9 +24,9 @@ final class ImageCacheTests: XCTestCase {
         let key = "test-image-cache-key"
         let image = makeImage(color: .systemOrange)
 
-        ImageCache.shared.set(key, image: image)
+        try writeDiskImage(image, for: key)
 
-        let diskImage = try await loadDiskImage(for: key)
+        let diskImage = await ImageCache.shared.getFromDisk(key)
 
         XCTAssertNotNil(diskImage)
         XCTAssertEqual(diskImage?.cgImage?.width, image.cgImage?.width)
@@ -61,17 +61,6 @@ final class ImageCacheTests: XCTestCase {
             color.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 12, height: 12))
         }
-    }
-
-    private func loadDiskImage(for key: String) async throws -> UIImage? {
-        for _ in 0..<10 {
-            if let image = await ImageCache.shared.getFromDisk(key) {
-                return image
-            }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-
-        return nil
     }
 
     private func writeDiskImage(_ image: UIImage, for key: String) throws {
