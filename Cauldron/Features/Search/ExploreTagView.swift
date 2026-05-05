@@ -76,9 +76,10 @@ struct ExploreTagView: View {
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(displayName)
+        .toolbarTitleDisplayMode(.inlineLarge)
         .toolbar {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .title) {
                 toolbarHeader
             }
         }
@@ -95,21 +96,21 @@ struct ExploreTagView: View {
             ZStack {
                 Circle()
                     .fill(color.opacity(0.16))
-                    .frame(width: 28, height: 28)
+                    .frame(width: 34, height: 34)
 
                 if let emoji = emoji {
                     Text(emoji)
-                        .font(.system(size: 16))
+                        .font(.system(size: 19))
                 } else {
                     Image(systemName: "tag.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(color)
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(displayName)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                     .lineLimit(1)
 
                 if totalRecipeCount > 0 {
