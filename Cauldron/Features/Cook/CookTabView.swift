@@ -408,6 +408,7 @@ struct CookTabView: View {
                                 CollectionCardView(
                                     collection: collection,
                                     recipeImages: viewModel.getRecipeImages(for: collection),
+                                    recipeImageSources: viewModel.getRecipeImageSources(for: collection),
                                     dependencies: viewModel.dependencies
                                 )
                             }

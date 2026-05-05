@@ -34,13 +34,40 @@ extension RecipeRepository {
     /// Search recipes by tag
     func search(tag: String) async throws -> [Recipe] {
         let context = ModelContext(modelContainer)
-        let descriptor = FetchDescriptor<RecipeModel>()
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.isPreview == false
+            }
+        )
         let models = try context.fetch(descriptor)
         
         // Filter by tag in memory (since tags are in blob)
         let recipes = try models.map { try $0.toDomain() }
         return recipes.filter { recipe in
             recipe.tags.contains { $0.name.localizedCaseInsensitiveContains(tag) }
+        }
+    }
+
+    /// Fetch owned recipes that are saved copies of the given canonical public recipe IDs.
+    func fetchOwnedCopies(originalRecipeIds: [UUID]) async throws -> [Recipe] {
+        let originalRecipeIdSet = Set(originalRecipeIds)
+        guard !originalRecipeIdSet.isEmpty else { return [] }
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.isPreview == false && model.originalRecipeId != nil
+            },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+
+        let models = try context.fetch(descriptor)
+        let recipes = try models.map { try $0.toDomain() }
+        return recipes.filter { recipe in
+            guard let originalRecipeId = recipe.originalRecipeId else {
+                return false
+            }
+            return originalRecipeIdSet.contains(originalRecipeId)
         }
     }
     

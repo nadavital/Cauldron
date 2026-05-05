@@ -80,6 +80,12 @@ struct RecipeImageView: View {
         size.targetPixelSize(displayScale: displayScale)
     }
 
+    private var loadTaskKey: String {
+        let recipeKey = recipeId?.uuidString ?? "no-recipe"
+        let imageKey = imageURL?.absoluteString ?? "no-image"
+        return "\(recipeKey)|\(imageKey)|\(cacheVariant)"
+    }
+
     init(
         imageURL: URL?,
         size: ImageSize = .card,
@@ -121,7 +127,7 @@ struct RecipeImageView: View {
             x: 0,
             y: size.shadowY
         )
-        .task(id: recipeId) {
+        .task(id: loadTaskKey) {
             await loadImage()
         }
     }

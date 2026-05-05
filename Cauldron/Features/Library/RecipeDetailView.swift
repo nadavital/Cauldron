@@ -195,22 +195,24 @@ struct RecipeDetailView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { scrollProxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if hasHeroImage {
-                            HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-                                .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
-                                .ignoresSafeArea(edges: .top)
-                                .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
-                        }
+                GeometryReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if hasHeroImage {
+                                HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                                    .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
+                                    .ignoresSafeArea(edges: .top)
+                                    .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
+                            }
 
-                        if horizontalSizeClass == .regular {
-                            regularRecipeContent
-                        } else {
-                            compactRecipeContent
+                            if horizontalSizeClass == .regular {
+                                regularRecipeContent
+                            } else {
+                                compactRecipeContent
+                            }
                         }
+                        .frame(width: proxy.size.width, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onAppear {
                     if let stepIndex = highlightedStepIndex {

@@ -71,6 +71,10 @@ struct SharedCollectionDetailView: View {
         }
         .navigationTitle(collection.name)
         .navigationBarTitleDisplayMode(.large)
+        .refreshable {
+            await checkFriendshipStatus(forceRefresh: true)
+            await loadRecipes(forceRefresh: true)
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if !recipes.isEmpty {
@@ -272,32 +276,33 @@ struct SharedCollectionDetailView: View {
 
     // MARK: - Actions
 
-    private func checkFriendshipStatus() async {
+    private func checkFriendshipStatus(forceRefresh: Bool = false) async {
         guard let currentUserId = CurrentUserSession.shared.userId else {
             isFriendWithOwner = false
             return
         }
 
         // Check if we're friends with the collection owner
-        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
         let connectionStatus = dependencies.connectionManager.connectionStatus(with: collection.userId)
         isFriendWithOwner = connectionStatus?.isAccepted ?? false
 
         AppLogger.general.info("Friendship status with collection owner: \(isFriendWithOwner)")
     }
 
-    private func loadRecipes() async {
+    private func loadRecipes(forceRefresh: Bool = false) async {
         isLoading = true
         defer { isLoading = false }
 
         // Check friendship status first
-        await checkFriendshipStatus()
+        await checkFriendshipStatus(forceRefresh: forceRefresh)
 
         // Load recipes using shared loader
         let result = await loader.loadRecipes(
             from: collection,
             viewerId: CurrentUserSession.shared.userId,
-            isFriend: isFriendWithOwner
+            isFriend: isFriendWithOwner,
+            forceRefresh: forceRefresh
         )
 
         recipes = result.visibleRecipes

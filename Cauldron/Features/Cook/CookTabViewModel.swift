@@ -15,7 +15,7 @@ private struct CookTabDerivedSections {
     let forgottenFavorites: [Recipe]
     let tagRows: [(tag: String, recipes: [Recipe])]
 
-    static func build(
+    nonisolated static func build(
         allRecipes: [Recipe],
         stats: [UUID: (count: Int, lastCooked: Date)],
         now: Date = Date(),
@@ -274,7 +274,7 @@ private struct CookTabDerivedSections {
 
         do {
             try await reloadLocalLibrary(loadCollections: true)
-            await loadSocialRecipes()
+            await loadSocialRecipes(forceRefresh: forceSync)
             hasLoadedInitially = true
         } catch {
             AppLogger.general.error("Failed to load cook tab data: \(error.localizedDescription)")
@@ -299,24 +299,27 @@ private struct CookTabDerivedSections {
     }
 
     /// Load friends' recipes and popular recipes for the social sections
-    private func loadSocialRecipes() async {
+    private func loadSocialRecipes(forceRefresh: Bool = false) async {
         // Load friends' recipes
         do {
-            let sharedRecipes = try await dependencies.sharingService.getSharedRecipes()
+            let sharedRecipes = try await dependencies.sharingService.getSharedRecipes(forceRefresh: forceRefresh)
             // Sort by most recent and limit to 15
             friendsRecipes = sharedRecipes.sorted { $0.sharedAt > $1.sharedAt }
                 .prefix(15)
                 .map { $0 }
 
             // Fetch tiers for friends who shared recipes
-            await fetchFriendsRecipeTiers(for: friendsRecipes)
+            await fetchFriendsRecipeTiers(for: friendsRecipes, forceRefresh: forceRefresh)
         } catch {
             AppLogger.general.warning("Failed to load friends' recipes: \(error.localizedDescription)")
         }
 
         // Load popular public recipes
         do {
-            let popular = try await dependencies.recipeCloudService.fetchPopularPublicRecipes(limit: 20)
+            let popular = try await dependencies.recipeDiscoveryCache.fetchPopularPublicRecipes(
+                limit: 20,
+                forceRefresh: forceRefresh
+            )
 
             // Get current user ID to exclude own recipes
             let currentUserId = CurrentUserSession.shared.userId
@@ -330,7 +333,7 @@ private struct CookTabDerivedSections {
             }
 
             // Fetch owner tiers and user objects for display
-            await fetchOwnerTiersAndUsers(for: filteredRecipes)
+            await fetchOwnerTiersAndUsers(for: filteredRecipes, forceRefresh: forceRefresh)
 
             // Sort by tier boost (higher tier users' recipes appear first)
             filteredRecipes = filteredRecipes.sorted { recipe1, recipe2 in
@@ -351,43 +354,31 @@ private struct CookTabDerivedSections {
     }
 
     /// Fetch owner tiers and User objects for popular recipes
-    private func fetchOwnerTiersAndUsers(for recipes: [Recipe]) async {
+    private func fetchOwnerTiersAndUsers(for recipes: [Recipe], forceRefresh: Bool = false) async {
         // Collect unique owner IDs
         let ownerIds = Set(recipes.compactMap { $0.ownerId })
 
         guard !ownerIds.isEmpty else { return }
 
         do {
-            let userCloudService = dependencies.userCloudService
-            let ownerIdsNeedingUsers = ownerIds.filter { popularRecipeOwners[$0] == nil }
-            let ownerIdsNeedingTiers = ownerIds.filter { popularRecipeTiers[$0] == nil }
+            let ownerIdsNeedingUsers = forceRefresh ? ownerIds : ownerIds.filter { popularRecipeOwners[$0] == nil }
+            let ownerIdsNeedingTiers = forceRefresh ? ownerIds : ownerIds.filter { popularRecipeTiers[$0] == nil }
 
             if !ownerIdsNeedingUsers.isEmpty {
-                let fetchedUsers = try await withThrowingTaskGroup(of: (UUID, User?).self, returning: [UUID: User].self) { group in
-                    for ownerId in ownerIdsNeedingUsers {
-                        group.addTask {
-                            let user = try await userCloudService.fetchUser(byUserId: ownerId)
-                            return (ownerId, user)
-                        }
-                    }
+                let fetchedUsers = try await dependencies.recipeDiscoveryCache.fetchUsers(
+                    byUserIds: Array(ownerIdsNeedingUsers),
+                    forceRefresh: forceRefresh
+                )
 
-                    var usersById: [UUID: User] = [:]
-                    for try await (ownerId, user) in group {
-                        if let user {
-                            usersById[ownerId] = user
-                        }
-                    }
-                    return usersById
-                }
-
-                for (ownerId, user) in fetchedUsers {
-                    popularRecipeOwners[ownerId] = user
+                for user in fetchedUsers {
+                    popularRecipeOwners[user.id] = user
                 }
             }
 
             if !ownerIdsNeedingTiers.isEmpty {
-                let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
-                    forOwnerIds: Array(ownerIdsNeedingTiers)
+                let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
+                    forOwnerIds: Array(ownerIdsNeedingTiers),
+                    forceRefresh: forceRefresh
                 )
 
                 for (ownerId, count) in counts {
@@ -401,18 +392,19 @@ private struct CookTabDerivedSections {
     }
 
     /// Fetch tiers for friends who shared recipes
-    private func fetchFriendsRecipeTiers(for sharedRecipes: [SharedRecipe]) async {
+    private func fetchFriendsRecipeTiers(for sharedRecipes: [SharedRecipe], forceRefresh: Bool = false) async {
         // Collect unique sharer user IDs
         let sharerIds = Set(sharedRecipes.map { $0.sharedBy.id })
 
         guard !sharerIds.isEmpty else { return }
 
         do {
-            let uncachedSharerIds = sharerIds.filter { friendsRecipeTiers[$0] == nil }
+            let uncachedSharerIds = forceRefresh ? sharerIds : sharerIds.filter { friendsRecipeTiers[$0] == nil }
             guard !uncachedSharerIds.isEmpty else { return }
 
-            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
-                forOwnerIds: Array(uncachedSharerIds)
+            let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
+                forOwnerIds: Array(uncachedSharerIds),
+                forceRefresh: forceRefresh
             )
 
             for (sharerId, count) in counts {
@@ -426,6 +418,18 @@ private struct CookTabDerivedSections {
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func getRecipeImages(for collection: Collection) -> [URL?] {
         Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
+    }
+
+    func getRecipeImageSources(for collection: Collection) -> [CollectionRecipeImageSource] {
+        collection.recipeIds.prefix(4).map { recipeId in
+            let recipe = allRecipes.first { $0.id == recipeId }
+            return CollectionRecipeImageSource(
+                recipeId: recipeId,
+                imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
+                ownerId: recipe?.ownerId,
+                hasCloudImage: recipe?.cloudImageRecordName != nil
+            )
+        }
     }
 
     private func rebuildRecipeImageLookup() {

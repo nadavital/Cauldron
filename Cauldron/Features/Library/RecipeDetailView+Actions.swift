@@ -23,28 +23,25 @@ extension RecipeDetailView {
             var missingIds = recipe.relatedRecipeIds.filter { !localIds.contains($0) }
 
             if !missingIds.isEmpty {
-                let allUserRecipes = try await dependencies.recipeRepository.fetchAll()
-                for userRecipe in allUserRecipes {
-                    if let originalId = userRecipe.originalRecipeId, missingIds.contains(originalId) {
-                        loadedRecipes.append(userRecipe)
-                        missingIds.removeAll { $0 == originalId }
-                        AppLogger.general.info("✅ Found owned copy for related recipe: \(userRecipe.title)")
+                let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(originalRecipeIds: missingIds)
+                for ownedCopy in ownedCopies {
+                    guard let originalId = ownedCopy.originalRecipeId,
+                          missingIds.contains(originalId) else {
+                        continue
                     }
+                    loadedRecipes.append(ownedCopy)
+                    missingIds.removeAll { $0 == originalId }
+                    AppLogger.general.info("✅ Found owned copy for related recipe: \(ownedCopy.title)")
                 }
             }
 
             if !missingIds.isEmpty {
                 AppLogger.general.info("📥 Fetching \(missingIds.count) missing related recipes from CloudKit")
 
-                await withTaskGroup(of: Recipe?.self) { group in
+                do {
+                    let fetchedRecipesById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: missingIds)
                     for missingId in missingIds {
-                        group.addTask {
-                            try? await self.dependencies.recipeCloudService.fetchPublicRecipe(id: missingId)
-                        }
-                    }
-
-                    for await fetchedRecipe in group {
-                        if let fetchedRecipe = fetchedRecipe {
+                        if let fetchedRecipe = fetchedRecipesById[missingId] {
                             let previewRecipe = Recipe(
                                 id: fetchedRecipe.id,
                                 title: fetchedRecipe.title,
@@ -116,6 +113,8 @@ extension RecipeDetailView {
                             }
                         }
                     }
+                } catch {
+                    AppLogger.general.warning("Failed to batch fetch related recipes: \(error.localizedDescription)")
                 }
 
                 AppLogger.general.info("✅ Loaded \(loadedRecipes.count) total related recipes (\(localRecipes.count) local, \(loadedRecipes.count - localRecipes.count) from CloudKit)")
@@ -252,12 +251,11 @@ extension RecipeDetailView {
                 var satisfiedRelatedIDs = Set(localRelated.map(\.id))
 
                 if satisfiedRelatedIDs.count < canonicalRelatedRecipeIDs.count {
-                    let allUserRecipes = try await dependencies.recipeRepository.fetchAll()
-                    let canonicalRelatedIDSet = Set(canonicalRelatedRecipeIDs)
-
-                    for userRecipe in allUserRecipes {
-                        if let originalRecipeId = userRecipe.originalRecipeId,
-                           canonicalRelatedIDSet.contains(originalRecipeId) {
+                    let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+                        originalRecipeIds: canonicalRelatedRecipeIDs
+                    )
+                    for ownedCopy in ownedCopies {
+                        if let originalRecipeId = ownedCopy.originalRecipeId {
                             satisfiedRelatedIDs.insert(originalRecipeId)
                         }
                     }
@@ -266,20 +264,8 @@ extension RecipeDetailView {
                 let missingIds = Set(canonicalRelatedRecipeIDs).subtracting(satisfiedRelatedIDs)
 
                 if !missingIds.isEmpty {
-                    var fetchedRelated: [Recipe] = []
-                    await withTaskGroup(of: Recipe?.self) { group in
-                        for missingId in missingIds {
-                            group.addTask {
-                                try? await self.dependencies.recipeCloudService.fetchPublicRecipe(id: missingId)
-                            }
-                        }
-
-                        for await recipe in group {
-                            if let recipe = recipe {
-                                fetchedRelated.append(recipe)
-                            }
-                        }
-                    }
+                    let fetchedRelatedById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: Array(missingIds))
+                    let fetchedRelated = canonicalRelatedRecipeIDs.compactMap { fetchedRelatedById[$0] }
 
                     if !fetchedRelated.isEmpty {
                         relatedRecipesToSave = fetchedRelated

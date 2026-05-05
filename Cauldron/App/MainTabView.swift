@@ -45,7 +45,7 @@ struct MainTabView: View {
     }
 
     private var isCookModeActive: Bool {
-        dependencies.cookModeCoordinator.isActive
+        dependencies.cookModeCoordinator.isActive && dependencies.cookModeCoordinator.currentRecipe != nil
     }
 
     private var isRegularWidthLayout: Bool {
@@ -70,20 +70,7 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        tabScaffold
-        // On iPad, this enables the native sidebar-based tab presentation.
-        // On iPhone, it keeps standard tab bar behavior.
-        .tabViewStyle(.sidebarAdaptable)
-        .tabBarMinimizeBehavior(.onScrollDown)
-        .tabViewBottomAccessory {
-            if isCookModeActive {
-                CookModeBanner(coordinator: dependencies.cookModeCoordinator)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        dependencies.cookModeCoordinator.expandToFullScreen()
-                    }
-            }
-        }
+        tabScaffoldWithAccessory
         .fullScreenCover(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
             set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
@@ -210,6 +197,39 @@ struct MainTabView: View {
             resetCatalystWindowTitle()
             #endif
         }
+    }
+
+    @ViewBuilder
+    private var tabScaffoldWithAccessory: some View {
+        if #available(iOS 26.1, macCatalyst 26.1, *) {
+            tabScaffold
+                // On iPad, this enables the native sidebar-based tab presentation.
+                // On iPhone, it keeps standard tab bar behavior.
+                .tabViewStyle(.sidebarAdaptable)
+                .tabBarMinimizeBehavior(.onScrollDown)
+                .tabViewBottomAccessory(isEnabled: isCookModeActive) {
+                    cookModeAccessory
+                }
+        } else {
+            tabScaffold
+                // On iPad, this enables the native sidebar-based tab presentation.
+                // On iPhone, it keeps standard tab bar behavior.
+                .tabViewStyle(.sidebarAdaptable)
+                .tabBarMinimizeBehavior(.onScrollDown)
+                .tabViewBottomAccessory {
+                    if isCookModeActive {
+                        cookModeAccessory
+                    }
+                }
+        }
+    }
+
+    private var cookModeAccessory: some View {
+        CookModeBanner(coordinator: dependencies.cookModeCoordinator)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                dependencies.cookModeCoordinator.expandToFullScreen()
+            }
     }
 
     private var tabScaffold: some View {

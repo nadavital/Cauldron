@@ -10,6 +10,10 @@ import SwiftUI
 struct RecipeNotesSection: View {
     let notes: String
 
+    private var displayNotes: String {
+        notes.recipeDetailLineBreakFriendly()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Notes", systemImage: "note.text")
@@ -27,7 +31,7 @@ struct RecipeNotesSection: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text(notes)
+                Text(displayNotes)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
@@ -42,7 +46,8 @@ struct RecipeNotesSection: View {
     }
 
     private func makeLinksClickable(_ text: String) -> AttributedString? {
-        var attributedString = AttributedString(text)
+        let displayText = text.recipeDetailLineBreakFriendly()
+        var attributedString = AttributedString(displayText)
 
         // Regular expression to detect URLs
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
@@ -52,20 +57,31 @@ struct RecipeNotesSection: View {
             return nil
         }
 
-        for match in matches.reversed() {
-            if Range(match.range, in: text) != nil,
-               let url = match.url {
-                let startIndex = attributedString.characters.index(attributedString.startIndex, offsetBy: match.range.location)
-                let endIndex = attributedString.characters.index(startIndex, offsetBy: match.range.length)
-                let attributedRange = startIndex..<endIndex
+        var searchStart = displayText.startIndex
+        var didApplyLink = false
 
-                attributedString[attributedRange].link = url
-                attributedString[attributedRange].foregroundColor = .cauldronOrange
-                attributedString[attributedRange].underlineStyle = .single
+        for match in matches {
+            guard let sourceRange = Range(match.range, in: text),
+                  let url = match.url else {
+                continue
             }
+
+            let breakableURLText = String(text[sourceRange]).recipeDetailLineBreakFriendly()
+            guard let displayRange = displayText.range(of: breakableURLText, range: searchStart..<displayText.endIndex),
+                  let startIndex = AttributedString.Index(displayRange.lowerBound, within: attributedString),
+                  let endIndex = AttributedString.Index(displayRange.upperBound, within: attributedString) else {
+                continue
+            }
+
+            let attributedRange = startIndex..<endIndex
+            attributedString[attributedRange].link = url
+            attributedString[attributedRange].foregroundColor = .cauldronOrange
+            attributedString[attributedRange].underlineStyle = .single
+            searchStart = displayRange.upperBound
+            didApplyLink = true
         }
 
-        return attributedString
+        return didApplyLink ? attributedString : nil
     }
 }
 

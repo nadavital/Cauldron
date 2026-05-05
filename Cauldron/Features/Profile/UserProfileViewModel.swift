@@ -247,7 +247,7 @@ import os
             AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
         } else {
             // If viewing someone else's profile, fetch their public recipes from CloudKit
-            recipes = try await dependencies.recipeCloudService.querySharedRecipes(
+            recipes = try await dependencies.recipeDiscoveryCache.querySharedRecipes(
                 ownerIds: [user.id],
                 visibility: .publicRecipe,
                 includeDerivedCopies: true

@@ -143,3 +143,8 @@ appstorescreenshots/*
 *.pyc
 tools/recipe_schema_model/artifacts/
 .agent/done/
+
+# CloudKit admin migration runtime artifacts. Keep server-to-server keys and
+# resumable migration checkpoints out of source control.
+tools/cloudkit_public_search_backfill/backfill-checkpoint*.json
+tools/cloudkit_public_search_backfill/*.pem

@@ -20,6 +20,7 @@ struct CollectionDetailView: View {
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var recipeImages: [URL?] = []  // For recipe grid display
+    @State private var recipeImageSources: [CollectionRecipeImageSource] = []
     @State private var visibleRecipes: [Recipe] = []
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -111,7 +112,7 @@ struct CollectionDetailView: View {
             await loadRecipes()
         }
         .refreshable {
-            await loadRecipes()
+            await loadRecipes(forceRefresh: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             Task {
@@ -225,7 +226,7 @@ struct CollectionDetailView: View {
 
     // MARK: - Actions
 
-    private func loadRecipes() async {
+    private func loadRecipes(forceRefresh: Bool = false) async {
         isLoading = true
         defer { isLoading = false }
 
@@ -238,40 +239,19 @@ struct CollectionDetailView: View {
                     AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
                 }
 
-                // Fetch all owned recipes from local storage
-                let allRecipes = try await dependencies.recipeRepository.fetchAll()
-                let recipeIdSet = Set(collection.recipeIds)
-
-                // Filter to only recipes in this collection
-                recipes = allRecipes.filter { recipe in
-                    recipeIdSet.contains(recipe.id)
+                let fetchedRecipes = try await dependencies.recipeRepository.fetch(ids: collection.recipeIds)
+                let recipesById = fetchedRecipes.reduce(into: [UUID: Recipe]()) { partialResult, recipe in
+                    partialResult[recipe.id] = recipe
                 }
+                recipes = collection.recipeIds.compactMap { recipesById[$0] }
             } else {
-                // For non-owned collections, fetch recipes from CloudKit in parallel
                 AppLogger.general.info("📡 Loading recipes from CloudKit for non-owned collection: \(collection.name)")
 
-                let fetchedRecipes = await withTaskGroup(of: Recipe?.self, returning: [Recipe].self) { group in
-                    for recipeId in collection.recipeIds {
-                        group.addTask {
-                            do {
-                                return try await dependencies.recipeCloudService.fetchPublicRecipe(id: recipeId)
-                            } catch {
-                                AppLogger.general.warning("Failed to fetch recipe \(recipeId) from CloudKit: \(error.localizedDescription)")
-                                return nil
-                            }
-                        }
-                    }
-
-                    var results: [Recipe] = []
-                    for await recipe in group {
-                        if let recipe = recipe {
-                            results.append(recipe)
-                        }
-                    }
-                    return results
-                }
-
-                recipes = fetchedRecipes
+                let fetchedRecipes = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(
+                    ids: collection.recipeIds,
+                    forceRefresh: forceRefresh
+                )
+                recipes = collection.recipeIds.compactMap { fetchedRecipes[$0] }
                 AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes from CloudKit")
             }
 
@@ -282,6 +262,16 @@ struct CollectionDetailView: View {
             }
             let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
             recipeImages = Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
+            let recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
+            recipeImageSources = collection.recipeIds.prefix(4).map { recipeId in
+                let recipe = recipesById[recipeId]
+                return CollectionRecipeImageSource(
+                    recipeId: recipeId,
+                    imageURL: recipe?.imageURL,
+                    ownerId: recipe?.ownerId,
+                    hasCloudImage: recipe?.cloudImageRecordName != nil
+                )
+            }
             updateVisibleRecipes()
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
@@ -539,7 +529,7 @@ struct CollectionDetailView: View {
         Group {
             let size: CGFloat = 60  // 120 / 2 for the 2x2 grid
 
-            if collection.recipeCount == 0 || recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+            if collection.recipeCount == 0 || recipeImageSources.isEmpty || recipeImageSources.allSatisfy({ !$0.canLoadImage }) {
                 // Show placeholder
                 collectionColor
                     .overlay(
@@ -572,23 +562,18 @@ struct CollectionDetailView: View {
 
     private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
         Group {
-            if index < recipeImages.count, let imageURL = recipeImages[index] {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .empty:
-                        placeholderTile(size: size)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: size, height: size)
-                            .clipped()
-                    case .failure:
-                        placeholderTile(size: size)
-                    @unknown default:
-                        placeholderTile(size: size)
-                    }
-                }
+            if index < recipeImageSources.count, recipeImageSources[index].canLoadImage {
+                let imageSource = recipeImageSources[index]
+                RecipeImageView(
+                    previewImageURL: imageSource.imageURL,
+                    showPlaceholderText: false,
+                    recipeImageService: dependencies.recipeImageService,
+                    recipeId: imageSource.recipeId,
+                    ownerId: imageSource.ownerId
+                )
+                .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
+                .frame(width: size, height: size)
+                .clipped()
             } else {
                 placeholderTile(size: size)
             }

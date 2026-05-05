@@ -43,6 +43,7 @@ import os
     private var publicRecipeSearchCache: [String: [Recipe]] = [:]
     private var publicRecipeSearchFetchedAt: [String: Date] = [:]
     private let publicRecipeSearchCacheValidityDuration: TimeInterval = 300 // 5 minutes
+    private let minimumPublicRecipeSearchQueryLength = 2
 
     // Debouncing
     private let peopleSearchSubject = PassthroughSubject<String, Never>()
@@ -268,6 +269,16 @@ import os
             return
         }
 
+        guard normalizedQuery.count >= minimumPublicRecipeSearchQueryLength else {
+            recipeSearchTask?.cancel()
+            publicRecipes = []
+            scheduleRecipeSearchResultsRebuild(
+                filterText: normalizedQuery,
+                selectedCategories: selectedCategories
+            )
+            return
+        }
+
         // Trigger debounced server search for active query.
         recipeSearchSubject.send((normalizedQuery, selectedCategories))
     }
@@ -302,6 +313,15 @@ import os
     ) async {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let selectedCategories = Set(categories)
+
+        guard normalizedQuery.isEmpty || normalizedQuery.count >= minimumPublicRecipeSearchQueryLength else {
+            publicRecipes = []
+            scheduleRecipeSearchResultsRebuild(
+                filterText: normalizedQuery,
+                selectedCategories: selectedCategories
+            )
+            return
+        }
 
         isLoading = true
 
@@ -383,9 +403,10 @@ import os
             return cachedResults
         }
 
-        let results = try await dependencies.recipeCloudService.searchDiscoverablePublicRecipes(
+        let results = try await dependencies.recipeDiscoveryCache.searchDiscoverablePublicRecipes(
             query: query,
-            categories: categories
+            categories: categories,
+            forceRefresh: forceRefresh
         )
         publicRecipeSearchCache[cacheKey] = results
         publicRecipeSearchFetchedAt[cacheKey] = Date()
@@ -450,7 +471,7 @@ import os
 
         do {
             // Batch fetch recipe counts for all owners at once (avoids N+1 queries)
-            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
+            let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
                 forOwnerIds: Array(ownerIds)
             )
 

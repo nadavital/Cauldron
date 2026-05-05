@@ -236,13 +236,14 @@ struct NutritionInput {
 
                     var resolvedRelated = directMatches
                     if !missingCanonicalIDs.isEmpty {
-                        let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                        let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+                            originalRecipeIds: missingCanonicalIDs
+                        )
                         var ownedCopiesByOriginalID: [UUID: Recipe] = [:]
-                        for candidate in allRecipes {
-                            guard let originalRecipeId = candidate.originalRecipeId else {
-                                continue
+                        for ownedCopy in ownedCopies {
+                            if let originalRecipeId = ownedCopy.originalRecipeId {
+                                ownedCopiesByOriginalID[originalRecipeId] = ownedCopiesByOriginalID[originalRecipeId] ?? ownedCopy
                             }
-                            ownedCopiesByOriginalID[originalRecipeId] = ownedCopiesByOriginalID[originalRecipeId] ?? candidate
                         }
 
                         for canonicalID in missingCanonicalIDs {

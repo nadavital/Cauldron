@@ -12,6 +12,7 @@ struct ExploreTagView: View {
     let dependencies: DependencyContainer
 
     @State private var viewModel: ExploreTagViewModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(tag: Tag, dependencies: DependencyContainer) {
         self.tag = tag
@@ -36,87 +37,90 @@ struct ExploreTagView: View {
         category?.color ?? .cauldronOrange
     }
 
+    private var horizontalContentPadding: CGFloat {
+        horizontalSizeClass == .regular ? 24 : 16
+    }
+
+    private var totalRecipeCount: Int {
+        viewModel.allRecipes.count + viewModel.friendRecipes.count + viewModel.publicRecipes.count
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Header with category styling
-                headerSection
+                if viewModel.isLoading && !viewModel.hasContent {
+                    loadingPlaceholder
+                }
 
-                // All Recipes Section
                 if !viewModel.allRecipes.isEmpty {
                     allRecipesSection
                 }
 
-                // From Friends Section
                 if !viewModel.friendRecipes.isEmpty {
                     friendRecipesSection
                 }
 
-                // Community Recipes Section
                 if !viewModel.publicRecipes.isEmpty {
                     publicRecipesSection
                 }
 
-                // Empty State
-                if viewModel.allRecipes.isEmpty && viewModel.friendRecipes.isEmpty && viewModel.publicRecipes.isEmpty && !viewModel.isLoading {
+                if !viewModel.hasContent && !viewModel.isLoading {
                     emptyState
                 }
 
-                // Loading State
-                if viewModel.isLoading {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .padding(.vertical, 40)
+                if viewModel.isLoading && viewModel.hasContent {
+                    refreshingIndicator
                 }
             }
-            .padding()
+            .padding(.horizontal, horizontalContentPadding)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                toolbarHeader
+            }
+        }
         .task {
             await viewModel.loadRecipes()
         }
         .refreshable {
-            await viewModel.loadRecipes()
+            await viewModel.loadRecipes(forceRefresh: true)
         }
     }
 
-    private var headerSection: some View {
-        HStack(spacing: 12) {
-            // Category icon
+    private var toolbarHeader: some View {
+        HStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 60, height: 60)
+                    .fill(color.opacity(0.16))
+                    .frame(width: 28, height: 28)
 
                 if let emoji = emoji {
                     Text(emoji)
-                        .font(.system(size: 32))
+                        .font(.system(size: 16))
                 } else {
                     Image(systemName: "tag.fill")
-                        .font(.system(size: 28))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(color)
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(displayName)
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(.headline)
+                    .lineLimit(1)
 
-                let totalCount = viewModel.allRecipes.count + viewModel.friendRecipes.count
-                if totalCount > 0 {
-                    Text("\(totalCount) \(totalCount == 1 ? "recipe" : "recipes")")
-                        .font(.subheadline)
+                if totalRecipeCount > 0 {
+                    Text("\(totalRecipeCount) \(totalRecipeCount == 1 ? "recipe" : "recipes")")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
             }
-
-            Spacer()
         }
-        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
     }
 
     private var allRecipesSection: some View {
@@ -144,14 +148,12 @@ struct ExploreTagView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(viewModel.allRecipes.prefix(10)) { recipe in
-                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
-                            RecipeCardView(recipe: recipe, dependencies: dependencies)
-                        }
-                        .buttonStyle(.plain)
+            edgeToEdgeRecipeCarousel {
+                ForEach(viewModel.allRecipes.prefix(10)) { recipe in
+                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                        RecipeCardView(recipe: recipe, dependencies: dependencies)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -182,19 +184,15 @@ struct ExploreTagView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(viewModel.friendRecipes.prefix(10)) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )) {
-                            RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
-                        }
-                        .buttonStyle(.plain)
+            edgeToEdgeRecipeCarousel {
+                ForEach(viewModel.friendRecipes.prefix(10)) { sharedRecipeSummary in
+                    NavigationLink(destination: PublicRecipeDetailLoaderView(
+                        summary: sharedRecipeSummary,
+                        dependencies: dependencies
+                    )) {
+                        RecipeCardView(sharedRecipe: sharedRecipeSummary.previewSharedRecipe, dependencies: dependencies)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -225,21 +223,30 @@ struct ExploreTagView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(viewModel.publicRecipes.prefix(10)) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy
-                        )) {
-                            RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
-                        }
-                        .buttonStyle(.plain)
+            edgeToEdgeRecipeCarousel {
+                ForEach(viewModel.publicRecipes.prefix(10)) { sharedRecipeSummary in
+                    NavigationLink(destination: PublicRecipeDetailLoaderView(
+                        summary: sharedRecipeSummary,
+                        dependencies: dependencies
+                    )) {
+                        RecipeCardView(sharedRecipe: sharedRecipeSummary.previewSharedRecipe, dependencies: dependencies)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    private func edgeToEdgeRecipeCarousel<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                content()
+            }
+            .padding(.horizontal, horizontalContentPadding)
+        }
+        .padding(.horizontal, -horizontalContentPadding)
     }
 
     private var emptyState: some View {
@@ -260,6 +267,57 @@ struct ExploreTagView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
     }
+
+    private var loadingPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ExploreTagSectionPlaceholder(title: "My Recipes", systemImage: "book.fill", color: color)
+            ExploreTagSectionPlaceholder(title: "From Friends", systemImage: "person.2.fill", color: color)
+            ExploreTagSectionPlaceholder(title: "Community Recipes", systemImage: "globe", color: color)
+        }
+        .redacted(reason: .placeholder)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var refreshingIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Refreshing")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+}
+
+private struct ExploreTagSectionPlaceholder: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .foregroundColor(color)
+                Text(title)
+            }
+            .font(.title2)
+            .fontWeight(.bold)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.secondary.opacity(0.16))
+                            .frame(width: 180, height: 230)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - ViewModel
@@ -271,12 +329,29 @@ final class ExploreTagViewModel {
     let dependencies: DependencyContainer
 
     var allRecipes: [Recipe] = []
-    var friendRecipes: [SharedRecipe] = []
-    var publicRecipes: [SharedRecipe] = []
+    var friendRecipes: [SharedRecipeSummary] = []
+    var publicRecipes: [SharedRecipeSummary] = []
     var isLoading = false
+
+    @ObservationIgnored private var ownerCache: [UUID: User] = [:]
+    @ObservationIgnored private var hasRequestedSearchMetadataRefresh = false
+
+    private static let cacheValidityDuration: TimeInterval = 300
+    private static var tagResultCache: [String: CachedTagResults] = [:]
+
+    private struct CachedTagResults {
+        let allRecipes: [Recipe]
+        let friendRecipes: [SharedRecipeSummary]
+        let publicRecipes: [SharedRecipeSummary]
+        let fetchedAt: Date
+    }
 
     private var currentUserId: UUID? {
         CurrentUserSession.shared.userId
+    }
+
+    var hasContent: Bool {
+        !allRecipes.isEmpty || !friendRecipes.isEmpty || !publicRecipes.isEmpty
     }
 
     init(tag: Tag, dependencies: DependencyContainer) {
@@ -287,26 +362,32 @@ final class ExploreTagViewModel {
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {}
 
-    func loadRecipes() async {
+    func loadRecipes(forceRefresh: Bool = false) async {
+        let normalizedTag = tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cacheKey = Self.cacheKey(for: normalizedTag, currentUserId: currentUserId)
+
+        if !forceRefresh, applyCachedResults(for: cacheKey) {
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
 
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
-            let normalizedTag = tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
-
             // Parallelize tag-scoped fetches instead of loading every recipe and filtering in memory.
             async let localRecipesTask = dependencies.recipeRepository.search(tag: normalizedTag)
-            async let publicRecipesTask = dependencies.recipeCloudService.querySharedRecipes(
+            async let primarySharedRecipesTask = dependencies.recipeDiscoveryCache.querySharedRecipeSummaries(
                 ownerIds: nil,
                 visibility: .publicRecipe,
                 requiredTag: normalizedTag,
-                limit: 200
+                includeDerivedCopies: false,
+                limit: 200,
+                forceRefresh: forceRefresh
             )
 
             let friendIDsFuture: Task<Set<UUID>, Error>?
-            let friendRecipesFuture: Task<[SharedRecipe], Error>?
             if let userId = currentUserId {
                 let connectionsFuture = Task {
                     try await dependencies.connectionRepository.fetchConnections(forUserId: userId)
@@ -316,102 +397,214 @@ final class ExploreTagViewModel {
                     return Self.acceptedFriendIDs(from: connections, currentUserId: userId)
                 }
                 friendIDsFuture = friendIDsTask
-                friendRecipesFuture = Task {
-                    let friendIds = try await friendIDsTask.value
-                    guard !friendIds.isEmpty else { return [] }
-
-                    let recipes = try await dependencies.recipeCloudService.querySharedRecipes(
-                        ownerIds: Array(friendIds),
-                        visibility: .publicRecipe,
-                        requiredTag: normalizedTag,
-                        limit: 200
-                    )
-                    let referencedIds = Set(recipes.flatMap(\.relatedRecipeIds))
-                    let filteredRecipes = recipes.filter { !referencedIds.contains($0.id) }
-
-                    let ownerIds = Array(Set(filteredRecipes.compactMap(\.ownerId)))
-                    guard !ownerIds.isEmpty else { return [] }
-
-                    let owners = try await dependencies.userCloudService.fetchUsers(byUserIds: ownerIds)
-                    let ownersById = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
-
-                    return filteredRecipes.compactMap { recipe in
-                        guard let ownerId = recipe.ownerId,
-                              let owner = ownersById[ownerId] else {
-                            return nil
-                        }
-
-                        return SharedRecipe(
-                            id: UUID(),
-                            recipe: recipe,
-                            sharedBy: owner,
-                            sharedAt: recipe.createdAt
-                        )
-                    }
-                }
             } else {
                 friendIDsFuture = nil
-                friendRecipesFuture = nil
             }
 
-            // Await all parallel fetches
             let allUserRecipes = try await localRecipesTask
-            let publicRecipesList = try await publicRecipesTask
 
-            // Process local recipes (already filtered by tag)
+            // Process local recipes as soon as they are ready. Shared CloudKit/profile
+            // lookups can still be in flight without blocking owned content.
             allRecipes = allUserRecipes
             AppLogger.general.info("✅ Found \(allRecipes.count) own recipes")
 
-            if let friendRecipesFuture {
-                friendRecipes = try await friendRecipesFuture.value
-                    .sorted { $0.sharedAt > $1.sharedAt }
-            } else {
-                friendRecipes = []
-            }
-            AppLogger.general.info("✅ Loaded \(friendRecipes.count) friend recipes via SharingService")
+            let primarySharedRecipes = try await primarySharedRecipesTask
+            await applySharedRecipeSummaries(primarySharedRecipes, friendIds: [])
 
-            // Get friend IDs for filtering
             var friendIds: Set<UUID> = []
             if let friendIDsFuture {
                 friendIds = try await friendIDsFuture.value
+                if !friendIds.isEmpty {
+                    await applySharedRecipeSummaries(primarySharedRecipes, friendIds: friendIds)
+                }
             }
 
-            let candidatePublicRecipes = publicRecipesList.filter { recipe in
+            if primarySharedRecipes.isEmpty {
+                requestSearchMetadataRefresh(normalizedTag: normalizedTag, friendIds: friendIds)
+            }
+
+            storeCachedResults(for: cacheKey)
+
+        } catch {
+            AppLogger.general.error("Failed to load recipes for tag '\(tag.name)': \(error.localizedDescription)")
+        }
+    }
+
+    private func applySharedRecipeSummaries(
+        _ sharedRecipesList: [RecipeSummary],
+        friendIds: Set<UUID>
+    ) async {
+        do {
+            let visibleSharedRecipes = sharedRecipesList.filter { recipe in
                 guard let ownerId = recipe.ownerId else { return false }
                 if let currentUserId = currentUserId, ownerId == currentUserId {
-                    return false
-                }
-                if friendIds.contains(ownerId) {
                     return false
                 }
                 return true
             }
 
-            if candidatePublicRecipes.isEmpty {
-                publicRecipes = []
-            } else {
-                let owners = try await dependencies.userCloudService.fetchUsers(
-                    byUserIds: Array(Set(candidatePublicRecipes.compactMap(\.ownerId)))
-                )
-                let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
-
-                publicRecipes = candidatePublicRecipes.compactMap { recipe -> SharedRecipe? in
-                    guard let ownerId = recipe.ownerId,
-                          let owner = ownersMap[ownerId] else {
-                        return nil
-                    }
-
-                    return SharedRecipe(
-                        recipe: recipe,
-                        sharedBy: owner,
-                        sharedAt: recipe.createdAt
-                    )
-                }
+            let friendRecipeCandidates = visibleSharedRecipes.filter { recipe in
+                guard let ownerId = recipe.ownerId else { return false }
+                return friendIds.contains(ownerId)
+            }
+            let publicRecipeCandidates = visibleSharedRecipes.filter { recipe in
+                guard let ownerId = recipe.ownerId else { return false }
+                return !friendIds.contains(ownerId)
             }
 
+            setSharedRecipeSections(
+                friendRecipeCandidates: friendRecipeCandidates,
+                publicRecipeCandidates: publicRecipeCandidates,
+                ownersMap: cachedOwnerMap(for: Set(visibleSharedRecipes.compactMap(\.ownerId)))
+            )
+
+            let ownerIds = Set(visibleSharedRecipes.compactMap(\.ownerId))
+            if !ownerIds.isEmpty {
+                let ownersMap = try await owners(for: ownerIds)
+                setSharedRecipeSections(
+                    friendRecipeCandidates: friendRecipeCandidates,
+                    publicRecipeCandidates: publicRecipeCandidates,
+                    ownersMap: ownersMap
+                )
+            }
         } catch {
-            AppLogger.general.error("Failed to load recipes for tag '\(tag.name)': \(error.localizedDescription)")
+            AppLogger.general.warning("Loaded shared recipes for tag '\(tag.name)' without profile refresh: \(error.localizedDescription)")
         }
+    }
+
+    private func requestSearchMetadataRefresh(normalizedTag: String, friendIds: Set<UUID>) {
+        guard !hasRequestedSearchMetadataRefresh else {
+            return
+        }
+
+        hasRequestedSearchMetadataRefresh = true
+        let capturedDependencies = dependencies
+        let cacheKey = Self.cacheKey(for: normalizedTag, currentUserId: currentUserId)
+
+        Task {
+            await capturedDependencies.recipeRepository.migratePublicRecipeSearchMetadata()
+
+            do {
+                let refreshedSharedRecipes = try await capturedDependencies.recipeDiscoveryCache.querySharedRecipeSummaries(
+                    ownerIds: nil,
+                    visibility: .publicRecipe,
+                    requiredTag: normalizedTag,
+                    includeDerivedCopies: false,
+                    limit: 200,
+                    forceRefresh: true
+                )
+                await applySharedRecipeSummaries(refreshedSharedRecipes, friendIds: friendIds)
+                storeCachedResults(for: cacheKey)
+            } catch {
+                AppLogger.general.warning("Search metadata refresh for tag '\(normalizedTag)' did not return shared recipes: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func owners(for ownerIds: Set<UUID>) async throws -> [UUID: User] {
+        var ownersMap = cachedOwnerMap(for: ownerIds)
+        var missingOwnerIds: [UUID] = []
+
+        for ownerId in ownerIds where ownersMap[ownerId] == nil {
+            if let cachedOwner = try? await dependencies.sharingRepository.fetchUser(id: ownerId) {
+                ownersMap[ownerId] = cachedOwner
+                ownerCache[ownerId] = cachedOwner
+            } else {
+                missingOwnerIds.append(ownerId)
+            }
+        }
+
+        guard !missingOwnerIds.isEmpty else {
+            return ownersMap
+        }
+
+        let cloudOwners = try await dependencies.recipeDiscoveryCache.fetchUsers(byUserIds: missingOwnerIds)
+        for owner in cloudOwners {
+            ownersMap[owner.id] = owner
+            ownerCache[owner.id] = owner
+            try? await dependencies.sharingRepository.save(owner)
+        }
+
+        return ownersMap
+    }
+
+    private func cachedOwnerMap(for ownerIds: Set<UUID>) -> [UUID: User] {
+        Dictionary(uniqueKeysWithValues: ownerIds.compactMap { ownerId in
+            ownerCache[ownerId].map { (ownerId, $0) }
+        })
+    }
+
+    private func setSharedRecipeSections(
+        friendRecipeCandidates: [RecipeSummary],
+        publicRecipeCandidates: [RecipeSummary],
+        ownersMap: [UUID: User]
+    ) {
+        friendRecipes = friendRecipeCandidates.map { recipe in
+            SharedRecipeSummary(
+                id: UUID(),
+                recipe: recipe,
+                sharedBy: owner(for: recipe, ownersMap: ownersMap),
+                sharedAt: recipe.createdAt
+            )
+        }
+        .sorted { $0.sharedAt > $1.sharedAt }
+        AppLogger.general.info("✅ Loaded \(friendRecipes.count) friend recipes")
+
+        publicRecipes = publicRecipeCandidates.map { recipe in
+            SharedRecipeSummary(
+                recipe: recipe,
+                sharedBy: owner(for: recipe, ownersMap: ownersMap),
+                sharedAt: recipe.createdAt
+            )
+        }
+        .sorted { $0.sharedAt > $1.sharedAt }
+    }
+
+    private func applyCachedResults(for cacheKey: String) -> Bool {
+        guard let cachedResults = Self.tagResultCache[cacheKey],
+              Date().timeIntervalSince(cachedResults.fetchedAt) < Self.cacheValidityDuration else {
+            return false
+        }
+
+        allRecipes = cachedResults.allRecipes
+        friendRecipes = cachedResults.friendRecipes
+        publicRecipes = cachedResults.publicRecipes
+        return true
+    }
+
+    private func storeCachedResults(for cacheKey: String) {
+        Self.tagResultCache[cacheKey] = CachedTagResults(
+            allRecipes: allRecipes,
+            friendRecipes: friendRecipes,
+            publicRecipes: publicRecipes,
+            fetchedAt: Date()
+        )
+    }
+
+    private nonisolated static func cacheKey(for tag: String, currentUserId: UUID?) -> String {
+        let normalizedTag = tag
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+        return "\(currentUserId?.uuidString ?? "anonymous")::\(normalizedTag)"
+    }
+
+    private func owner(for recipe: RecipeSummary, ownersMap: [UUID: User]) -> User {
+        guard let ownerId = recipe.ownerId else {
+            return User(username: "unknown", displayName: "Unknown Chef")
+        }
+
+        if let owner = ownersMap[ownerId] {
+            return owner
+        }
+
+        let displayName = recipe.originalCreatorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackName = displayName?.isEmpty == false ? displayName! : "Community Chef"
+        return User(
+            id: ownerId,
+            username: "chef_\(ownerId.uuidString.prefix(8).lowercased())",
+            displayName: fallbackName
+        )
     }
 
     private nonisolated static func acceptedFriendIDs(
@@ -501,7 +694,7 @@ struct TagRecipesListView: View {
 
 struct TagFriendRecipesListView: View {
     let tag: Tag
-    let sharedRecipes: [SharedRecipe]
+    let sharedRecipes: [SharedRecipeSummary]
     let dependencies: DependencyContainer
     let color: Color
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -540,14 +733,12 @@ struct TagFriendRecipesListView: View {
 
     private var listContent: some View {
         List {
-            ForEach(sharedRecipes) { sharedRecipe in
-                NavigationLink(destination: RecipeDetailView(
-                    recipe: sharedRecipe.recipe,
-                    dependencies: dependencies,
-                    sharedBy: sharedRecipe.sharedBy,
-                    sharedAt: sharedRecipe.sharedAt
+            ForEach(sharedRecipes) { sharedRecipeSummary in
+                NavigationLink(destination: PublicRecipeDetailLoaderView(
+                    summary: sharedRecipeSummary,
+                    dependencies: dependencies
                 )) {
-                    RecipeRowView(recipe: sharedRecipe.recipe, dependencies: dependencies)
+                    RecipeRowView(recipe: sharedRecipeSummary.recipe.previewRecipe, dependencies: dependencies)
                 }
             }
         }
@@ -556,14 +747,12 @@ struct TagFriendRecipesListView: View {
     private var gridContent: some View {
         ScrollView {
             LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
-                ForEach(sharedRecipes) { sharedRecipe in
-                    NavigationLink(destination: RecipeDetailView(
-                        recipe: sharedRecipe.recipe,
-                        dependencies: dependencies,
-                        sharedBy: sharedRecipe.sharedBy,
-                        sharedAt: sharedRecipe.sharedAt
+                ForEach(sharedRecipes) { sharedRecipeSummary in
+                    NavigationLink(destination: PublicRecipeDetailLoaderView(
+                        summary: sharedRecipeSummary,
+                        dependencies: dependencies
                     )) {
-                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        RecipeCardView(sharedRecipe: sharedRecipeSummary.previewSharedRecipe, dependencies: dependencies)
                     }
                     .buttonStyle(.plain)
                 }
@@ -576,7 +765,7 @@ struct TagFriendRecipesListView: View {
 
 struct TagPublicRecipesListView: View {
     let tag: Tag
-    let recipes: [SharedRecipe]
+    let recipes: [SharedRecipeSummary]
     let dependencies: DependencyContainer
     let color: Color
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -615,13 +804,12 @@ struct TagPublicRecipesListView: View {
 
     private var listContent: some View {
         List {
-            ForEach(recipes) { sharedRecipe in
-                NavigationLink(destination: RecipeDetailView(
-                    recipe: sharedRecipe.recipe,
-                    dependencies: dependencies,
-                    sharedBy: sharedRecipe.sharedBy
+            ForEach(recipes) { sharedRecipeSummary in
+                NavigationLink(destination: PublicRecipeDetailLoaderView(
+                    summary: sharedRecipeSummary,
+                    dependencies: dependencies
                 )) {
-                    RecipeRowView(recipe: sharedRecipe.recipe, dependencies: dependencies)
+                    RecipeRowView(recipe: sharedRecipeSummary.recipe.previewRecipe, dependencies: dependencies)
                 }
             }
         }
@@ -630,13 +818,12 @@ struct TagPublicRecipesListView: View {
     private var gridContent: some View {
         ScrollView {
             LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
-                ForEach(recipes) { sharedRecipe in
-                    NavigationLink(destination: RecipeDetailView(
-                        recipe: sharedRecipe.recipe,
-                        dependencies: dependencies,
-                        sharedBy: sharedRecipe.sharedBy
+                ForEach(recipes) { sharedRecipeSummary in
+                    NavigationLink(destination: PublicRecipeDetailLoaderView(
+                        summary: sharedRecipeSummary,
+                        dependencies: dependencies
                     )) {
-                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        RecipeCardView(sharedRecipe: sharedRecipeSummary.previewSharedRecipe, dependencies: dependencies)
                     }
                     .buttonStyle(.plain)
                 }
@@ -644,6 +831,59 @@ struct TagPublicRecipesListView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+    }
+}
+
+private struct PublicRecipeDetailLoaderView: View {
+    let summary: SharedRecipeSummary
+    let dependencies: DependencyContainer
+
+    @State private var fullRecipe: Recipe?
+    @State private var isLoading = true
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if let fullRecipe {
+                RecipeDetailView(
+                    recipe: fullRecipe,
+                    dependencies: dependencies,
+                    sharedBy: summary.sharedBy,
+                    sharedAt: summary.sharedAt
+                )
+            } else if loadFailed {
+                ContentUnavailableView(
+                    "Recipe Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("This recipe could not be loaded right now.")
+                )
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: summary.recipe.id) {
+            await loadFullRecipe()
+        }
+    }
+
+    private func loadFullRecipe() async {
+        guard isLoading else { return }
+        isLoading = true
+        loadFailed = false
+
+        do {
+            if let recipe = try await dependencies.recipeDiscoveryCache.fetchPublicRecipe(id: summary.recipe.id) {
+                fullRecipe = recipe
+            } else {
+                loadFailed = true
+            }
+        } catch {
+            AppLogger.general.warning("Failed to load full public recipe \(summary.recipe.id): \(error.localizedDescription)")
+            loadFailed = true
+        }
+
+        isLoading = false
     }
 }
 

@@ -21,7 +21,7 @@ struct RecipeStepsSection: View {
             ForEach(sortedSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 8) {
                     if section != "Main" {
-                        Text(section)
+                        Text(section.recipeDetailLineBreakFriendly())
                             .font(.headline)
                             .foregroundColor(.secondary)
                             .padding(.top, 4)
@@ -74,7 +74,7 @@ private struct StepRow: View {
                 .fixedSize()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(step.text.decodingHTMLEntities)
+                Text(step.text.decodingHTMLEntities.recipeDetailLineBreakFriendly())
                     .font(.body)
                     .lineLimit(nil)
                     .multilineTextAlignment(.leading)

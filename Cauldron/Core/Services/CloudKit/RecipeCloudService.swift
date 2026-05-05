@@ -9,6 +9,13 @@ import Foundation
 import CloudKit
 import os
 
+struct PublicRecipeSearchMetadataBackfillSummary: Sendable, Equatable {
+    let scanned: Int
+    let updated: Int
+    let alreadyCurrent: Int
+    let failed: Int
+}
+
 /// CloudKit service for recipe-related operations.
 ///
 /// Handles:
@@ -177,21 +184,7 @@ actor RecipeCloudService {
     /// Fetch public recipes
     func fetchPublicRecipes(limit: Int = 50) async throws -> [Recipe] {
         let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
-
-        let db = try await core.getPublicDatabase()
-        let results = try await db.records(matching: query, resultsLimit: limit)
-
-        var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
-            }
-        }
-
-        return recipes
+        return try await fetchSharedRecipes(matching: predicate, limit: limit)
     }
 
     /// Fetch public recipes for a specific user
@@ -199,21 +192,7 @@ actor RecipeCloudService {
         let predicate = NSPredicate(format: "ownerId == %@ AND visibility == %@",
                                    ownerId.uuidString,
                                    RecipeVisibility.publicRecipe.rawValue)
-        // Use sharedRecipe record type - public recipes are stored in the public database
-        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
-
-        let db = try await core.getPublicDatabase()
-        let results = try await db.records(matching: query)
-
-        var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
-            }
-        }
-
+        let recipes = try await fetchSharedRecipes(matching: predicate, limit: 500)
         return filterDerivedCopies(in: recipes, includeDerivedCopies: includeDerivedCopies)
     }
 
@@ -242,7 +221,7 @@ actor RecipeCloudService {
 
         // 2. Fallback: Query by recipeId field
         let predicate = NSPredicate(format: "recipeId == %@", id.uuidString)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
 
         do {
             let results = try await db.records(matching: query, resultsLimit: 1)
@@ -271,21 +250,51 @@ actor RecipeCloudService {
         guard !uniqueIds.isEmpty else { return [:] }
 
         let db = try await core.getPublicDatabase()
-        let recipeIdStrings = uniqueIds.map(\.uuidString)
-        let predicate = NSPredicate(format: "recipeId IN %@", recipeIdStrings)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
-
-        let results = try await db.records(matching: query, resultsLimit: uniqueIds.count)
 
         var recipesById: [UUID: Recipe] = [:]
         recipesById.reserveCapacity(uniqueIds.count)
 
-        for (_, result) in results.matchResults {
-            guard let record = try? result.get(),
-                  let recipe = try? recipeFromRecord(record) else {
-                continue
+        for startIndex in stride(from: 0, to: uniqueIds.count, by: Self.publicRecipeIdQueryChunkSize) {
+            let endIndex = min(startIndex + Self.publicRecipeIdQueryChunkSize, uniqueIds.count)
+            let idChunk = Array(uniqueIds[startIndex..<endIndex])
+            let recipeIdStrings = idChunk.map(\.uuidString)
+            let predicate = NSPredicate(format: "recipeId IN %@", recipeIdStrings)
+            let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (
+                    matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                    queryCursor: CKQueryOperation.Cursor?
+                )
+
+                if let cursor {
+                    results = try await db.records(
+                        continuingMatchFrom: cursor,
+                        resultsLimit: idChunk.count
+                    )
+                } else {
+                    results = try await db.records(
+                        matching: query,
+                        resultsLimit: idChunk.count
+                    )
+                }
+
+                for (_, result) in results.matchResults {
+                    guard let record = try? result.get(),
+                          let recipe = try? recipeFromRecord(record) else {
+                        continue
+                    }
+                    recipesById[recipe.id] = recipe
+                }
+
+                cursor = results.queryCursor
+            } while cursor != nil
+
+            if recipesById.count == uniqueIds.count {
+                break
             }
-            recipesById[recipe.id] = recipe
         }
 
         return recipesById
@@ -299,55 +308,116 @@ actor RecipeCloudService {
         includeDerivedCopies: Bool = true,
         limit: Int = 100
     ) async throws -> [Recipe] {
-        let db = try await core.getPublicDatabase()
+        let predicate = sharedRecipePredicate(
+            ownerIds: ownerIds,
+            visibility: visibility,
+            requiredTag: requiredTag
+        )
+        let recipes = try await fetchSharedRecipes(matching: predicate, limit: limit)
+        return filterDerivedCopies(in: recipes, includeDerivedCopies: includeDerivedCopies)
+    }
 
-        let predicate: NSPredicate
-        let requiredTagPredicate = requiredTag.flatMap(searchableTagPredicate)
+    /// Query shared recipes using only the fields needed for list/card browsing.
+    func querySharedRecipeSummaries(
+        ownerIds: [UUID]?,
+        visibility: RecipeVisibility,
+        requiredTag: String? = nil,
+        includeDerivedCopies: Bool = true,
+        limit: Int = 100
+    ) async throws -> [RecipeSummary] {
+        let predicate = sharedRecipePredicate(
+            ownerIds: ownerIds,
+            visibility: visibility,
+            requiredTag: requiredTag
+        )
+        let summaries = try await fetchSharedRecipeSummaries(matching: predicate, limit: limit)
+        return filterDerivedSummaries(in: summaries, includeDerivedCopies: includeDerivedCopies)
+    }
 
-        if let ownerIds = ownerIds, !ownerIds.isEmpty {
-            let ownerIdStrings = ownerIds.map { $0.uuidString }
-            if let requiredTagPredicate {
-                predicate = NSCompoundPredicate(
-                    andPredicateWithSubpredicates: [
-                        NSPredicate(format: "ownerId IN %@", ownerIdStrings),
-                        NSPredicate(format: "visibility == %@", visibility.rawValue),
-                        requiredTagPredicate
-                    ]
-                )
-            } else {
-                predicate = NSPredicate(
-                    format: "ownerId IN %@ AND visibility == %@",
-                    ownerIdStrings,
-                    visibility.rawValue
-                )
-            }
-        } else {
-            if let requiredTagPredicate {
-                predicate = NSCompoundPredicate(
-                    andPredicateWithSubpredicates: [
-                        NSPredicate(format: "visibility == %@", visibility.rawValue),
-                        requiredTagPredicate
-                    ]
-                )
-            } else {
-                predicate = NSPredicate(format: "visibility == %@", visibility.rawValue)
-            }
+    /// Backfill CloudKit-queryable search fields on public recipe records.
+    ///
+    /// This is a one-time compatibility bridge for public recipes created before
+    /// searchable metadata fields existed. It is intentionally best-effort:
+    /// records owned by another iCloud account may not be writable from this app
+    /// instance, but records the current user owns will also be republished by
+    /// the repository migration path.
+    func backfillPublicRecipeSearchMetadata(limit: Int = 1_000) async throws -> PublicRecipeSearchMetadataBackfillSummary {
+        guard limit > 0 else {
+            return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0)
         }
 
+        let db = try await core.getPublicDatabase()
+        let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
 
-        let results = try await db.records(matching: query, resultsLimit: limit)
+        var cursor: CKQueryOperation.Cursor?
+        var scanned = 0
+        var updated = 0
+        var alreadyCurrent = 0
+        var failed = 0
 
-        var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
+        repeat {
+            let remaining = max(1, min(200, limit - scanned))
+            let results: (
+                matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                queryCursor: CKQueryOperation.Cursor?
+            )
+
+            if let cursor {
+                results = try await db.records(
+                    continuingMatchFrom: cursor,
+                    desiredKeys: Self.searchMetadataBackfillRecordKeys,
+                    resultsLimit: remaining
+                )
+            } else {
+                results = try await db.records(
+                    matching: query,
+                    desiredKeys: Self.searchMetadataBackfillRecordKeys,
+                    resultsLimit: remaining
+                )
             }
-        }
 
-        return filterDerivedCopies(in: recipes, includeDerivedCopies: includeDerivedCopies)
+            for (_, result) in results.matchResults {
+                guard scanned < limit else { break }
+                scanned += 1
+
+                guard let record = try? result.get() else {
+                    failed += 1
+                    continue
+                }
+
+                guard updateSearchMetadataFields(on: record) else {
+                    alreadyCurrent += 1
+                    continue
+                }
+
+                do {
+                    let fullRecord = try await db.record(for: record.recordID)
+                    guard updateSearchMetadataFields(on: fullRecord) else {
+                        alreadyCurrent += 1
+                        continue
+                    }
+
+                    _ = try await db.save(fullRecord)
+                    updated += 1
+                } catch {
+                    failed += 1
+                    logger.warning("Failed to backfill searchable recipe metadata for \(record.recordID.recordName): \(error.localizedDescription)")
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil && scanned < limit
+
+        let summary = PublicRecipeSearchMetadataBackfillSummary(
+            scanned: scanned,
+            updated: updated,
+            alreadyCurrent: alreadyCurrent,
+            failed: failed
+        )
+        logger.info("Public recipe search metadata backfill scanned=\(summary.scanned) updated=\(summary.updated) current=\(summary.alreadyCurrent) failed=\(summary.failed)")
+        return summary
     }
 
     /// Fetch discoverable public recipes for Search tab results.
@@ -496,6 +566,12 @@ actor RecipeCloudService {
             return try await fetchDiscoverablePublicRecipes(limit: limit)
         }
 
+        let queryTokens = tokenizeSearchText(normalizedQuery)
+
+        guard normalizedQuery.isEmpty || !queryTokens.isEmpty else {
+            return []
+        }
+
         let visibilityPredicate = NSPredicate(
             format: "visibility == %@",
             RecipeVisibility.publicRecipe.rawValue
@@ -509,11 +585,8 @@ actor RecipeCloudService {
             }
         }
 
-        if !normalizedQuery.isEmpty {
-            let queryTokens = tokenizeSearchText(normalizedQuery)
-            var textPredicates: [NSPredicate] = [
-                NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
-            ]
+        if !queryTokens.isEmpty {
+            var textPredicates: [NSPredicate] = []
 
             for token in queryTokens {
                 textPredicates.append(NSPredicate(format: "ANY searchableTitleTerms == %@", token))
@@ -521,7 +594,9 @@ actor RecipeCloudService {
                 textPredicates.append(NSPredicate(format: "ANY searchableIngredients == %@", token))
             }
 
-            requiredPredicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: textPredicates))
+            if !textPredicates.isEmpty {
+                requiredPredicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: textPredicates))
+            }
         }
 
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: requiredPredicates)
@@ -554,52 +629,86 @@ actor RecipeCloudService {
         guard !ownerIds.isEmpty else { return [:] }
 
         let db = try await core.getPublicDatabase()
-        let ownerIdStrings = ownerIds.map { $0.uuidString }
-
-        let predicate = NSPredicate(
-            format: "ownerId IN %@ AND visibility == %@",
-            ownerIdStrings,
-            RecipeVisibility.publicRecipe.rawValue
-        )
-        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
-
-        let results = try await db.records(matching: query, resultsLimit: 500)
-
         var counts: [UUID: Int] = [:]
         for ownerId in ownerIds {
             counts[ownerId] = 0
         }
 
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record),
-               !recipe.isFollowingSourceUpdates,
-               let ownerId = recipe.ownerId {
-                counts[ownerId, default: 0] += 1
-            }
+        let uniqueOwnerIds = Array(Set(ownerIds))
+        for startIndex in stride(from: 0, to: uniqueOwnerIds.count, by: Self.publicRecipeIdQueryChunkSize) {
+            let endIndex = min(startIndex + Self.publicRecipeIdQueryChunkSize, uniqueOwnerIds.count)
+            let ownerIdChunk = Array(uniqueOwnerIds[startIndex..<endIndex])
+            let ownerIdStrings = ownerIdChunk.map(\.uuidString)
+            let predicate = NSPredicate(
+                format: "ownerId IN %@ AND visibility == %@",
+                ownerIdStrings,
+                RecipeVisibility.publicRecipe.rawValue
+            )
+            let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (
+                    matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                    queryCursor: CKQueryOperation.Cursor?
+                )
+
+                if let cursor {
+                    results = try await db.records(
+                        continuingMatchFrom: cursor,
+                        desiredKeys: Self.publicRecipeCountRecordKeys,
+                        resultsLimit: 500
+                    )
+                } else {
+                    results = try await db.records(
+                        matching: query,
+                        desiredKeys: Self.publicRecipeCountRecordKeys,
+                        resultsLimit: 500
+                    )
+                }
+
+                for (_, result) in results.matchResults {
+                    guard let record = try? result.get(),
+                          !recordRepresentsDerivedCopy(record),
+                          let ownerIdString = record["ownerId"] as? String,
+                          let ownerId = UUID(uuidString: ownerIdString) else {
+                        continue
+                    }
+
+                    counts[ownerId, default: 0] += 1
+                }
+
+                cursor = results.queryCursor
+            } while cursor != nil
         }
 
         return counts
     }
 
+    private func recordRepresentsDerivedCopy(_ record: CKRecord) -> Bool {
+        let originalRecipeId: UUID? = {
+            guard let idString = record["originalRecipeId"] as? String else {
+                return nil
+            }
+
+            return UUID(uuidString: idString)
+        }()
+        let savedAt = record["savedAt"] as? Date
+        let sourceRecipeUpdatedAt = record["sourceRecipeUpdatedAt"] as? Date
+
+        return Recipe.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: Self.boolValue(for: record["followsSourceUpdates"])
+        )
+    }
+
     /// Fetch popular public recipes
     func fetchPopularPublicRecipes(limit: Int = 20) async throws -> [Recipe] {
-        let db = try await core.getPublicDatabase()
-
         let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
-
-        let results = try await db.records(matching: query, resultsLimit: limit * 2)
-
-        var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
-            }
-        }
-
+        let recipes = try await fetchSharedRecipes(matching: predicate, limit: max(limit, limit * 3))
         let filteredRecipes = filterDerivedCopies(in: recipes, includeDerivedCopies: false)
         return Array(filteredRecipes.prefix(limit))
     }
@@ -610,6 +719,14 @@ actor RecipeCloudService {
         }
 
         return recipes.filter { !$0.isFollowingSourceUpdates }
+    }
+
+    private func filterDerivedSummaries(in summaries: [RecipeSummary], includeDerivedCopies: Bool) -> [RecipeSummary] {
+        guard !includeDerivedCopies else {
+            return summaries
+        }
+
+        return summaries.filter { !$0.isFollowingSourceUpdates }
     }
 
     private func discoveryGroupID(for recipe: Recipe) -> UUID {
@@ -787,6 +904,8 @@ actor RecipeCloudService {
         matching predicate: NSPredicate,
         limit: Int
     ) async throws -> [Recipe] {
+        guard limit > 0 else { return [] }
+
         let db = try await core.getPublicDatabase()
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
@@ -826,28 +945,119 @@ actor RecipeCloudService {
         return recipes
     }
 
-    private func normalizeSearchValue(_ value: String) -> String {
+    private func fetchSharedRecipeSummaries(
+        matching predicate: NSPredicate,
+        limit: Int
+    ) async throws -> [RecipeSummary] {
+        guard limit > 0 else { return [] }
+
+        let db = try await core.getPublicDatabase()
+        let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        var summaries: [RecipeSummary] = []
+        summaries.reserveCapacity(limit)
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let requestedLimit = max(1, limit - summaries.count)
+            let results: (
+                matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                queryCursor: CKQueryOperation.Cursor?
+            )
+
+            if let cursor {
+                results = try await db.records(
+                    continuingMatchFrom: cursor,
+                    desiredKeys: Self.recipeSummaryRecordKeys,
+                    resultsLimit: requestedLimit
+                )
+            } else {
+                results = try await db.records(
+                    matching: query,
+                    desiredKeys: Self.recipeSummaryRecordKeys,
+                    resultsLimit: requestedLimit
+                )
+            }
+
+            for (_, result) in results.matchResults {
+                guard let record = try? result.get(),
+                      let summary = try? recipeSummaryFromRecord(record) else {
+                    continue
+                }
+
+                summaries.append(summary)
+                if summaries.count == limit {
+                    return summaries
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil && summaries.count < limit
+
+        return summaries
+    }
+
+    private func sharedRecipePredicate(
+        ownerIds: [UUID]?,
+        visibility: RecipeVisibility,
+        requiredTag: String?
+    ) -> NSPredicate {
+        let requiredTagPredicate = requiredTag.flatMap(searchableTagPredicate)
+
+        if let ownerIds = ownerIds, !ownerIds.isEmpty {
+            let ownerIdStrings = ownerIds.map { $0.uuidString }
+            if let requiredTagPredicate {
+                return NSCompoundPredicate(
+                    andPredicateWithSubpredicates: [
+                        NSPredicate(format: "ownerId IN %@", ownerIdStrings),
+                        NSPredicate(format: "visibility == %@", visibility.rawValue),
+                        requiredTagPredicate
+                    ]
+                )
+            }
+
+            return NSPredicate(
+                format: "ownerId IN %@ AND visibility == %@",
+                ownerIdStrings,
+                visibility.rawValue
+            )
+        }
+
+        if let requiredTagPredicate {
+            return NSCompoundPredicate(
+                andPredicateWithSubpredicates: [
+                    NSPredicate(format: "visibility == %@", visibility.rawValue),
+                    requiredTagPredicate
+                ]
+            )
+        }
+
+        return NSPredicate(format: "visibility == %@", visibility.rawValue)
+    }
+
+    private nonisolated func normalizeSearchValue(_ value: String) -> String {
         value
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func tokenizeSearchText(_ text: String) -> [String] {
+    private nonisolated func tokenizeSearchText(_ text: String) -> [String] {
         normalizeSearchValue(text)
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
             .map(String.init)
             .filter { $0.count >= 2 }
     }
 
-    private func uniqueSearchTerms(from values: [String]) -> [String] {
+    private nonisolated func uniqueSearchTerms(from values: [String]) -> [String] {
         Array(Set(values
             .flatMap { tokenizeSearchText($0) }
             .filter { !$0.isEmpty }))
             .sorted()
     }
 
-    private func searchableTagPredicate(for rawTag: String) -> NSPredicate? {
+    private nonisolated func searchableTagPredicate(for rawTag: String) -> NSPredicate? {
         let normalizedTag = normalizeSearchValue(rawTag)
         let tagTokens = tokenizeSearchText(normalizedTag)
 
@@ -866,7 +1076,51 @@ actor RecipeCloudService {
         return NSCompoundPredicate(andPredicateWithSubpredicates: tokenPredicates)
     }
 
-    private func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
+    private static let recipeSummaryRecordKeys = [
+        "recipeId",
+        "ownerId",
+        "title",
+        "visibility",
+        "tagsData",
+        "yields",
+        "totalMinutes",
+        "createdAt",
+        "updatedAt",
+        "imageModifiedAt",
+        "originalRecipeId",
+        "originalCreatorId",
+        "originalCreatorName",
+        "savedAt",
+        "sourceRecipeUpdatedAt",
+        "followsSourceUpdates",
+        "isPreview"
+    ]
+
+    private static let searchMetadataRecordKeys = [
+        "searchableTags",
+        "searchableTitleTerms",
+        "searchableIngredients"
+    ]
+
+    private static let searchMetadataBackfillRecordKeys = [
+        "recipeId",
+        "title",
+        "visibility",
+        "ingredientsData",
+        "tagsData"
+    ] + searchMetadataRecordKeys
+
+    private static let publicRecipeCountRecordKeys = [
+        "ownerId",
+        "originalRecipeId",
+        "savedAt",
+        "sourceRecipeUpdatedAt",
+        "followsSourceUpdates"
+    ]
+
+    private static let publicRecipeIdQueryChunkSize = 100
+
+    func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
         record["title"] = recipe.title as CKRecordValue
@@ -905,9 +1159,7 @@ actor RecipeCloudService {
         }
 
         record["yields"] = recipe.yields as CKRecordValue
-        if let totalMinutes = recipe.totalMinutes {
-            record["totalMinutes"] = totalMinutes as CKRecordValue
-        }
+        record["totalMinutes"] = recipe.totalMinutes as CKRecordValue?
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
 
@@ -915,27 +1167,74 @@ actor RecipeCloudService {
             record["relatedRecipeIdsData"] = relatedIdsData as CKRecordValue
         }
 
-        if let originalRecipeId = recipe.originalRecipeId {
-            record["originalRecipeId"] = originalRecipeId.uuidString as CKRecordValue
-        }
-        if let originalCreatorId = recipe.originalCreatorId {
-            record["originalCreatorId"] = originalCreatorId.uuidString as CKRecordValue
-        }
-        if let originalCreatorName = recipe.originalCreatorName {
-            record["originalCreatorName"] = originalCreatorName as CKRecordValue
-        }
-        if let savedAt = recipe.savedAt {
-            record["savedAt"] = savedAt as CKRecordValue
-        }
-        if let sourceRecipeUpdatedAt = recipe.sourceRecipeUpdatedAt {
-            record["sourceRecipeUpdatedAt"] = sourceRecipeUpdatedAt as CKRecordValue
-        }
-        record["followsSourceUpdates"] = recipe.followsSourceUpdates as CKRecordValue
-        if let notes = recipe.notes {
-            record["notes"] = notes as CKRecordValue
-        }
+        record["originalRecipeId"] = recipe.originalRecipeId?.uuidString as CKRecordValue?
+        record["originalCreatorId"] = recipe.originalCreatorId?.uuidString as CKRecordValue?
+        record["originalCreatorName"] = recipe.originalCreatorName as CKRecordValue?
+        record["savedAt"] = recipe.savedAt as CKRecordValue?
+        record["sourceRecipeUpdatedAt"] = recipe.sourceRecipeUpdatedAt as CKRecordValue?
+        record["followsSourceUpdates"] = (recipe.followsSourceUpdates ? 1 : 0) as CKRecordValue
+        record["notes"] = recipe.notes as CKRecordValue?
 
         record["isPreview"] = recipe.isPreview as CKRecordValue
+    }
+
+    @discardableResult
+    nonisolated func updateSearchMetadataFields(on record: CKRecord) -> Bool {
+        let title = record["title"] as? String ?? ""
+        let ingredientNames = Self.decodeNameValues(from: record, key: "ingredientsData")
+        let tagNames = Self.decodeNameValues(from: record, key: "tagsData")
+
+        var didUpdate = false
+        didUpdate = updateSearchTerms(
+            uniqueSearchTerms(from: tagNames),
+            on: record,
+            key: "searchableTags"
+        ) || didUpdate
+        didUpdate = updateSearchTerms(
+            uniqueSearchTerms(from: [title]),
+            on: record,
+            key: "searchableTitleTerms"
+        ) || didUpdate
+        didUpdate = updateSearchTerms(
+            uniqueSearchTerms(from: ingredientNames),
+            on: record,
+            key: "searchableIngredients"
+        ) || didUpdate
+
+        return didUpdate
+    }
+
+    private nonisolated func updateSearchTerms(
+        _ expectedTerms: [String],
+        on record: CKRecord,
+        key: String
+    ) -> Bool {
+        let currentTerms = record[key] as? [String] ?? []
+        guard Set(currentTerms) != Set(expectedTerms) else {
+            return false
+        }
+
+        if expectedTerms.isEmpty {
+            record[key] = nil
+        } else {
+            record[key] = expectedTerms as CKRecordValue
+        }
+        return true
+    }
+
+    private nonisolated static func decodeNameValues(
+        from record: CKRecord,
+        key: String
+    ) -> [String] {
+        guard let data = record[key] as? Data else {
+            return []
+        }
+
+        guard let objects = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+
+        return objects.compactMap { $0["name"] as? String }
     }
 
     func recipeFromRecord(_ record: CKRecord) throws -> Recipe {
@@ -1008,7 +1307,7 @@ actor RecipeCloudService {
             originalRecipeId: originalRecipeId,
             savedAt: savedAt,
             sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
-            followsSourceUpdates: record["followsSourceUpdates"] as? Bool ?? false
+            followsSourceUpdates: Self.boolValue(for: record["followsSourceUpdates"])
         )
         let notes = record["notes"] as? String
 
@@ -1044,5 +1343,103 @@ actor RecipeCloudService {
             relatedRecipeIds: relatedRecipeIds,
             isPreview: isPreview
         )
+    }
+
+    func recipeSummaryFromRecord(_ record: CKRecord) throws -> RecipeSummary {
+        guard let recipeIdString = record["recipeId"] as? String,
+              let recipeId = UUID(uuidString: recipeIdString),
+              let title = record["title"] as? String,
+              let visibilityString = record["visibility"] as? String,
+              let visibility = RecipeVisibility(rawValue: visibilityString),
+              let createdAt = record["createdAt"] as? Date,
+              let updatedAt = record["updatedAt"] as? Date else {
+            throw CloudKitError.invalidRecord
+        }
+
+        let decoder = JSONDecoder()
+
+        let ingredients: [Ingredient]
+        if let ingredientsData = record["ingredientsData"] as? Data {
+            ingredients = (try? decoder.decode([Ingredient].self, from: ingredientsData)) ?? []
+        } else {
+            ingredients = []
+        }
+
+        let tags: [Tag]
+        if let tagsData = record["tagsData"] as? Data {
+            tags = (try? decoder.decode([Tag].self, from: tagsData)) ?? []
+        } else {
+            tags = []
+        }
+
+        let relatedRecipeIds: [UUID]
+        if let relatedIdsData = record["relatedRecipeIdsData"] as? Data {
+            relatedRecipeIds = (try? decoder.decode([UUID].self, from: relatedIdsData)) ?? []
+        } else {
+            relatedRecipeIds = []
+        }
+
+        let ownerId: UUID? = {
+            if let idString = record["ownerId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalRecipeId: UUID? = {
+            if let idString = record["originalRecipeId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let originalCreatorId: UUID? = {
+            if let idString = record["originalCreatorId"] as? String {
+                return UUID(uuidString: idString)
+            }
+            return nil
+        }()
+        let savedAt = record["savedAt"] as? Date
+        let sourceRecipeUpdatedAt = record["sourceRecipeUpdatedAt"] as? Date
+        let followsSourceUpdates = Recipe.resolvedFollowsSourceUpdates(
+            originalRecipeId: originalRecipeId,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: Self.boolValue(for: record["followsSourceUpdates"])
+        )
+
+        return RecipeSummary(
+            id: recipeId,
+            title: title,
+            ingredients: ingredients,
+            yields: record["yields"] as? String ?? "4 servings",
+            totalMinutes: record["totalMinutes"] as? Int,
+            tags: tags,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: record.recordID.recordName,
+            cloudImageRecordName: (record["imageModifiedAt"] as? Date) != nil ? record.recordID.recordName : nil,
+            imageModifiedAt: record["imageModifiedAt"] as? Date,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: record["originalCreatorName"] as? String,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: record["isPreview"] as? Bool ?? false
+        )
+    }
+
+    private nonisolated static func boolValue(for value: CKRecordValue?) -> Bool {
+        if let boolValue = value as? Bool {
+            return boolValue
+        }
+
+        if let numberValue = value as? NSNumber {
+            return numberValue.boolValue
+        }
+
+        return false
     }
 }

@@ -15,6 +15,7 @@ actor SharingService {
     private let userCloudService: UserCloudService
     private let connectionCloudService: ConnectionCloudService
     private let recipeCloudService: RecipeCloudService
+    private let recipeDiscoveryCache: RecipeDiscoveryCache
     private let logger = Logger(subsystem: "com.cauldron", category: "SharingService")
 
     init(
@@ -22,13 +23,15 @@ actor SharingService {
         recipeRepository: RecipeRepository,
         userCloudService: UserCloudService,
         connectionCloudService: ConnectionCloudService,
-        recipeCloudService: RecipeCloudService
+        recipeCloudService: RecipeCloudService,
+        recipeDiscoveryCache: RecipeDiscoveryCache
     ) {
         self.sharingRepository = sharingRepository
         self.recipeRepository = recipeRepository
         self.userCloudService = userCloudService
         self.connectionCloudService = connectionCloudService
         self.recipeCloudService = recipeCloudService
+        self.recipeDiscoveryCache = recipeDiscoveryCache
     }
     
     // MARK: - User Management
@@ -108,8 +111,7 @@ actor SharingService {
     /// Get cached shared recipes if still valid (for instant UI)
     func getCachedSharedRecipes() -> [SharedRecipe]? {
         guard let timestamp = cacheTimestamp,
-              Date().timeIntervalSince(timestamp) < cacheTTL,
-              !cachedSharedRecipes.isEmpty else {
+              Date().timeIntervalSince(timestamp) < cacheTTL else {
             return nil
         }
         return cachedSharedRecipes
@@ -153,9 +155,10 @@ actor SharingService {
 
         // Fetch public recipes from friends
         if !friendIds.isEmpty {
-            let friendsPublicRecipes = try await recipeCloudService.querySharedRecipes(
+            let friendsPublicRecipes = try await recipeDiscoveryCache.querySharedRecipes(
                 ownerIds: friendIds,
-                visibility: .publicRecipe
+                visibility: .publicRecipe,
+                forceRefresh: forceRefresh
             )
 
             // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
@@ -165,7 +168,10 @@ actor SharingService {
 
             // Batch fetch all owners at once to avoid N+1 queries
             let ownerIds = Set(filteredRecipes.compactMap { $0.ownerId })
-            let owners = try await userCloudService.fetchUsers(byUserIds: Array(ownerIds))
+            let owners = try await recipeDiscoveryCache.fetchUsers(
+                byUserIds: Array(ownerIds),
+                forceRefresh: forceRefresh
+            )
             let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
 
             // Convert to SharedRecipe objects using the pre-fetched owners

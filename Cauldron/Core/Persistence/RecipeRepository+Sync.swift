@@ -18,11 +18,15 @@ enum PublicRecipeSyncResult {
 
 extension RecipeRepository {
     private var publicRecipeMigrationCompletedKey: String {
-        "hasMigratedPublicRecipesToPublicDB_v3"
+        "hasMigratedPublicRecipesToPublicDB_v4"
     }
 
     private var publicRecipeMigrationPendingIDsKey: String {
         "\(publicRecipeMigrationCompletedKey)_pendingRecipeIDs"
+    }
+
+    private var publicRecipeSearchMetadataMigrationAttemptedKey: String {
+        "hasAttemptedPublicRecipeSearchMetadataBackfill_v1"
     }
 
     private func loadPendingPublicRecipeMigrationIDs() -> Set<UUID> {
@@ -260,6 +264,33 @@ extension RecipeRepository {
             logger.error("❌ Migration failed: \(error.localizedDescription)")
         }
     }
+
+    /// Best-effort migration for public recipe search fields used by tag and text discovery.
+    ///
+    /// The current user's public recipes are also republished by
+    /// `migratePublicRecipesToPublicDatabase()`. This broader pass lets older
+    /// public records gain queryable metadata when CloudKit permissions allow it,
+    /// without doing a broad compatibility scan during Explore navigation.
+    func migratePublicRecipeSearchMetadata() async {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: publicRecipeSearchMetadataMigrationAttemptedKey) else {
+            return
+        }
+
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else {
+            logger.info("CloudKit not available - public recipe search metadata migration will retry later")
+            return
+        }
+
+        do {
+            let summary = try await recipeCloudService.backfillPublicRecipeSearchMetadata(limit: 1_000)
+            defaults.set(true, forKey: publicRecipeSearchMetadataMigrationAttemptedKey)
+            logger.info("✅ Public recipe search metadata migration attempted: scanned \(summary.scanned), updated \(summary.updated), current \(summary.alreadyCurrent), failed \(summary.failed)")
+        } catch {
+            logger.error("❌ Public recipe search metadata migration failed: \(error.localizedDescription)")
+        }
+    }
     
     // MARK: - Retry Logic
     
@@ -283,7 +314,10 @@ extension RecipeRepository {
     func retryPendingSyncs() async {
         let hasPendingPublicMigration = !loadPendingPublicRecipeMigrationIDs().isEmpty ||
             !UserDefaults.standard.bool(forKey: publicRecipeMigrationCompletedKey)
-        guard !self.pendingSyncRecipes.isEmpty || hasPendingPublicMigration else { return }
+        let hasPendingPublicSearchMetadataMigration = !UserDefaults.standard.bool(forKey: publicRecipeSearchMetadataMigrationAttemptedKey)
+        guard !self.pendingSyncRecipes.isEmpty ||
+            hasPendingPublicMigration ||
+            hasPendingPublicSearchMetadataMigration else { return }
 
         logger.info("Retrying sync for \(self.pendingSyncRecipes.count) pending recipes")
 
@@ -317,6 +351,10 @@ extension RecipeRepository {
 
         if hasPendingPublicMigration {
             await migratePublicRecipesToPublicDatabase()
+        }
+
+        if hasPendingPublicSearchMetadataMigration {
+            await migratePublicRecipeSearchMetadata()
         }
 
         if self.pendingSyncRecipes.isEmpty {

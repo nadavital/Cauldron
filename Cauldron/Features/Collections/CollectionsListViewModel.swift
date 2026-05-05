@@ -22,6 +22,7 @@ final class CollectionsListViewModel {
     let dependencies: DependencyContainer
     @ObservationIgnored private var notificationObservers: [any NSObjectProtocol] = []
     private var recipeImageURLsById: [UUID: URL?] = [:]
+    private var recipesById: [UUID: Recipe] = [:]
 
     init(dependencies: DependencyContainer) {
         self.dependencies = dependencies
@@ -93,6 +94,7 @@ final class CollectionsListViewModel {
 
             let collections = try await fetchedCollections
             let recipes = try await fetchedRecipes
+            recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
             recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
@@ -157,5 +159,17 @@ final class CollectionsListViewModel {
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func recipeImages(for collection: Collection) -> [URL?] {
         Array(collection.recipeIds.compactMap { recipeImageURLsById[$0] ?? nil }.prefix(4).map(Optional.some))
+    }
+
+    func recipeImageSources(for collection: Collection) -> [CollectionRecipeImageSource] {
+        collection.recipeIds.prefix(4).map { recipeId in
+            let recipe = recipesById[recipeId]
+            return CollectionRecipeImageSource(
+                recipeId: recipeId,
+                imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
+                ownerId: recipe?.ownerId,
+                hasCloudImage: recipe?.cloudImageRecordName != nil
+            )
+        }
     }
 }

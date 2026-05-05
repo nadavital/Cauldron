@@ -503,6 +503,15 @@ extension RecipeRepository {
         var migratedCount = 0
 
         for model in allModels {
+            if model.isPreview {
+                if model.ownerId == currentUserId,
+                   let originalCreatorId = model.originalCreatorId {
+                    model.ownerId = originalCreatorId
+                    migratedCount += 1
+                }
+                continue
+            }
+
             // Only update recipes that don't have the current user as owner
             if model.ownerId != currentUserId {
                 let oldOwnerId = model.ownerId

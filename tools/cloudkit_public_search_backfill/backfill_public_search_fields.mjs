@@ -13,7 +13,8 @@ import {
 
 const DEFAULT_RESULTS_LIMIT = 200;
 const DEFAULT_MODIFY_BATCH_SIZE = 100;
-const DEFAULT_RECORD_TYPE = "sharedRecipe";
+const DEFAULT_RECORD_TYPE = "SharedRecipe";
+const PUBLIC_RECIPE_VISIBILITY = "public";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CHECKPOINT_FILE = path.join(
   SCRIPT_DIR,
@@ -35,9 +36,11 @@ function parseArgs(argv) {
     checkpointFile: process.env.CLOUDKIT_CHECKPOINT_FILE ?? DEFAULT_CHECKPOINT_FILE,
     dryRun: process.env.CLOUDKIT_DRY_RUN === "1",
     resetCheckpoint: false,
-    forceUpdate: process.env.CLOUDKIT_FORCE_UPDATE !== "0",
+    forceUpdate: process.env.CLOUDKIT_FORCE_UPDATE === "1",
     maxPages: null,
     maxRecords: null,
+    authProbe: process.env.CLOUDKIT_AUTH_PROBE === "1",
+    authDebug: process.env.CLOUDKIT_AUTH_DEBUG === "1",
     verbose: process.env.CLOUDKIT_VERBOSE === "1",
   };
 
@@ -101,11 +104,20 @@ function parseArgs(argv) {
       case "--dry-run":
         options.dryRun = true;
         break;
+      case "--auth-debug":
+        options.authDebug = true;
+        break;
+      case "--auth-probe":
+        options.authProbe = true;
+        break;
       case "--reset-checkpoint":
         options.resetCheckpoint = true;
         break;
       case "--no-force-update":
         options.forceUpdate = false;
+        break;
+      case "--force-update":
+        options.forceUpdate = true;
         break;
       case "--verbose":
         options.verbose = true;
@@ -157,15 +169,18 @@ Required:
 
 Optional:
   --environment <development|production>   Default: development
-  --record-type <record type>              Default: sharedRecipe
+  --record-type <record type>              Default: SharedRecipe
   --results-limit <1-200>                  Default: 200
   --modify-batch-size <1-200>              Default: 100
   --checkpoint-file <path>                 Default: tools/cloudkit_public_search_backfill/backfill-checkpoint.json
   --max-pages <n>                          Stop after n pages
   --max-records <n>                        Stop after scanning n records
   --dry-run                                Compute changes without writing
+  --auth-probe                             Check server-to-server auth with users/current and exit
+  --auth-debug                             Print non-secret signing diagnostics
   --reset-checkpoint                       Ignore any saved continuation marker
-  --no-force-update                        Use update instead of forceUpdate
+  --force-update                           Force update without a record change tag
+  --no-force-update                        Use normal update; accepted for older commands
   --verbose                                Log per-page details
 
 Environment variables:
@@ -179,7 +194,9 @@ Environment variables:
   CLOUDKIT_MODIFY_BATCH_SIZE
   CLOUDKIT_CHECKPOINT_FILE
   CLOUDKIT_DRY_RUN=1
-  CLOUDKIT_FORCE_UPDATE=0
+  CLOUDKIT_AUTH_PROBE=1
+  CLOUDKIT_AUTH_DEBUG=1
+  CLOUDKIT_FORCE_UPDATE=1
   CLOUDKIT_VERBOSE=1
 `);
 }
@@ -206,35 +223,68 @@ function buildSubpath(options, endpoint) {
   return `/database/1/${options.container}/${options.environment}/public/${endpoint}`;
 }
 
-function buildSignedHeaders({ body, keyId, privateKey, subpath }) {
+function buildSignedHeaders({ body, hasBody, keyId, privateKey, subpath }) {
   const isoDate = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const bodyHash = crypto.createHash("sha256").update(body).digest("base64");
   const message = `${isoDate}:${bodyHash}:${subpath}`;
-  const signature = crypto.sign("sha256", Buffer.from(message, "utf8"), privateKey).toString("base64");
+  const signer = crypto.createSign("SHA256");
+  signer.update(message, "utf8");
+  signer.end();
+  const signature = signer.sign(privateKey).toString("base64");
 
   return {
-    "Content-Type": "application/json",
+    ...(hasBody ? { "Content-Type": "application/json" } : {}),
     "X-Apple-CloudKit-Request-KeyID": keyId,
     "X-Apple-CloudKit-Request-ISO8601Date": isoDate,
     "X-Apple-CloudKit-Request-SignatureV1": signature,
   };
 }
 
-async function cloudKitRequest(options, privateKey, endpoint, payload) {
+function getPublicKeyBody(privateKey) {
+  return crypto
+    .createPublicKey(privateKey)
+    .export({ type: "spki", format: "pem" })
+    .toString("utf8")
+    .split(/\r?\n/)
+    .filter((line) => line && !line.includes("BEGIN PUBLIC KEY") && !line.includes("END PUBLIC KEY"))
+    .join("");
+}
+
+function printAuthDebug(options, privateKey, endpoint, payload) {
+  const subpath = buildSubpath(options, endpoint);
+  const body = payload == null ? "" : JSON.stringify(payload);
+  const bodyHash = crypto.createHash("sha256").update(body).digest("base64");
+  const publicKeyBody = getPublicKeyBody(privateKey);
+  const publicKeyFingerprint = crypto.createHash("sha256").update(publicKeyBody).digest("hex");
+
+  console.log("CloudKit auth debug:");
+  console.log(`  container: ${options.container}`);
+  console.log(`  environment: ${options.environment}`);
+  console.log(`  endpoint subpath: ${subpath}`);
+  console.log(`  key id: ${options.keyId}`);
+  console.log(`  request body sha256/base64: ${bodyHash}`);
+  console.log(`  public key body length: ${publicKeyBody.length}`);
+  console.log(`  public key body prefix/suffix: ${publicKeyBody.slice(0, 12)}...${publicKeyBody.slice(-12)}`);
+  console.log(`  public key body sha256: ${publicKeyFingerprint}`);
+}
+
+async function cloudKitRequest(options, privateKey, endpoint, payload, method = "POST") {
   const subpath = buildSubpath(options, endpoint);
   const url = new URL(subpath, options.apiBase);
-  const body = JSON.stringify(payload);
+  const hasBody = payload != null;
+  const body = hasBody ? JSON.stringify(payload) : "";
   const headers = buildSignedHeaders({
     body,
+    hasBody,
     keyId: options.keyId,
     privateKey,
     subpath,
   });
 
   const response = await fetch(url, {
-    method: "POST",
+    method,
     headers,
-    body,
+    ...(hasBody ? { body } : {}),
   });
 
   const responseText = await response.text();
@@ -253,9 +303,9 @@ async function cloudKitRequest(options, privateKey, endpoint, payload) {
   return data;
 }
 
-async function requestWithRetry(options, privateKey, endpoint, payload, attempt = 0) {
+async function requestWithRetry(options, privateKey, endpoint, payload, method = "POST", attempt = 0) {
   try {
-    return await cloudKitRequest(options, privateKey, endpoint, payload);
+    return await cloudKitRequest(options, privateKey, endpoint, payload, method);
   } catch (error) {
     const retryableCodes = new Set([
       "REQUEST_RATE_LIMITED",
@@ -273,7 +323,7 @@ async function requestWithRetry(options, privateKey, endpoint, payload, attempt 
     const waitSeconds = error.retryAfter > 0 ? error.retryAfter : 2 ** (attempt + 1);
     console.warn(`Retrying ${endpoint} after ${waitSeconds}s due to ${serverErrorCode}...`);
     await sleep(waitSeconds * 1000);
-    return requestWithRetry(options, privateKey, endpoint, payload, attempt + 1);
+    return requestWithRetry(options, privateKey, endpoint, payload, method, attempt + 1);
   }
 }
 
@@ -286,7 +336,7 @@ function buildQueryPayload(options, continuationMarker) {
           fieldName: "visibility",
           comparator: "EQUALS",
           fieldValue: {
-            value: "publicRecipe",
+            value: PUBLIC_RECIPE_VISIBILITY,
             type: "STRING",
           },
         },
@@ -389,6 +439,19 @@ async function main() {
   );
   console.log(`Checkpoint file: ${options.checkpointFile}`);
 
+  if (options.authProbe) {
+    if (options.authDebug) {
+      printAuthDebug(options, privateKey, "users/current", null);
+    }
+
+    const probeResponse = await requestWithRetry(options, privateKey, "users/current", null, "GET");
+    console.log("CloudKit server-to-server auth probe succeeded.");
+    if (options.verbose) {
+      console.log(JSON.stringify(probeResponse, null, 2));
+    }
+    return;
+  }
+
   while (true) {
     if (options.maxPages && checkpoint.pageCount >= options.maxPages) {
       console.log(`Stopping after max-pages=${options.maxPages}`);
@@ -401,6 +464,9 @@ async function main() {
     }
 
     const queryPayload = buildQueryPayload(options, checkpoint.continuationMarker);
+    if (options.authDebug && checkpoint.pageCount === 0) {
+      printAuthDebug(options, privateKey, "records/query", queryPayload);
+    }
     const queryResponse = await requestWithRetry(options, privateKey, "records/query", queryPayload);
     const records = Array.isArray(queryResponse.records) ? queryResponse.records : [];
 

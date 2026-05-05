@@ -29,6 +29,7 @@ struct CollectionsListView: View {
                                     CollectionCardView(
                                         collection: collection,
                                         recipeImages: viewModel.recipeImages(for: collection),
+                                        recipeImageSources: viewModel.recipeImageSources(for: collection),
                                         preferredWidth: nil,
                                         dependencies: dependencies
                                     )

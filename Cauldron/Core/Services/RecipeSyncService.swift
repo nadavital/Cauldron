@@ -472,10 +472,25 @@ actor RecipeSyncService {
 
         guard !followedRecipes.isEmpty else { return }
 
+        let sourceRecipeIds = Array(Set(followedRecipes.compactMap(\.originalRecipeId)))
+        let sourceRecipesById: [UUID: Recipe]
+        do {
+            sourceRecipesById = try await recipeCloudService.fetchPublicRecipes(ids: sourceRecipeIds)
+        } catch {
+            logger.warning("Failed to batch fetch followed recipe sources: \(error.localizedDescription)")
+            var fallbackSources: [UUID: Recipe] = [:]
+            for sourceRecipeId in sourceRecipeIds {
+                if let sourceRecipe = try? await recipeCloudService.fetchPublicRecipe(id: sourceRecipeId) {
+                    fallbackSources[sourceRecipeId] = sourceRecipe
+                }
+            }
+            sourceRecipesById = fallbackSources
+        }
+
         for localRecipe in followedRecipes {
             guard let sourceRecipeId = localRecipe.originalRecipeId else { continue }
 
-            guard let sourceRecipe = try await recipeCloudService.fetchPublicRecipe(id: sourceRecipeId) else {
+            guard let sourceRecipe = sourceRecipesById[sourceRecipeId] else {
                 logger.warning("Source recipe not found for saved recipe \(localRecipe.id)")
                 continue
             }

@@ -66,6 +66,9 @@ class DependencyContainer: ObservableObject {
     /// Friend connection cloud operations
     let connectionCloudService: ConnectionCloudService
 
+    /// Shared cached CloudKit reads for public browsing surfaces.
+    let recipeDiscoveryCache: RecipeDiscoveryCache
+
     // MARK: - Layer 3: Local Persistence (Repositories)
 
     let recipeRepository: RecipeRepository
@@ -140,6 +143,10 @@ class DependencyContainer: ObservableObject {
         self.userCloudService = UserCloudService(core: cloudKitCore)
         self.collectionCloudService = CollectionCloudService(core: cloudKitCore)
         self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
+        self.recipeDiscoveryCache = RecipeDiscoveryCache(
+            recipeCloudService: recipeCloudService,
+            userCloudService: userCloudService
+        )
         // Image managers using unified EntityImageManager with domain-specific services
         self.imageManager = createRecipeImageManager(recipeService: recipeCloudService)
         self.profileImageManager = createProfileImageManager(userService: userCloudService)
@@ -202,7 +209,8 @@ class DependencyContainer: ObservableObject {
             recipeRepository: recipeRepository,
             userCloudService: userCloudService,
             connectionCloudService: connectionCloudService,
-            recipeCloudService: recipeCloudService
+            recipeCloudService: recipeCloudService,
+            recipeDiscoveryCache: recipeDiscoveryCache
         )
 
         self.recipeSyncService = RecipeSyncService(

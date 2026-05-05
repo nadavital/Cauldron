@@ -34,7 +34,7 @@ struct RecipeHeaderSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(recipe.title)
+            Text(recipe.title.recipeDetailLineBreakFriendly())
                 .font(.largeTitle.bold())
                 .fontDesign(.serif)
                 .multilineTextAlignment(.leading)
@@ -47,14 +47,14 @@ struct RecipeHeaderSection: View {
                     HStack(spacing: 6) {
                         Image(systemName: "clock")
                             .foregroundColor(.cauldronOrange)
-                        Text(time)
+                        Text(time.recipeDetailLineBreakFriendly())
                     }
                 }
 
                 HStack(spacing: 6) {
                     Image(systemName: "person.2")
                         .foregroundColor(.cauldronOrange)
-                    Text(scaledRecipe.yields)
+                    Text(scaledRecipe.yields.recipeDetailLineBreakFriendly())
                 }
 
                 Spacer()
@@ -94,9 +94,11 @@ struct RecipeHeaderSection: View {
                     HStack {
                         ProfileAvatar(user: user, size: 32, dependencies: dependencies)
 
-                        Text("Shared by \(user.displayName)")
+                        Text("Shared by \(user.displayName)".recipeDetailLineBreakFriendly())
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Image(systemName: "chevron.right")
                             .font(.caption)
@@ -118,9 +120,11 @@ struct RecipeHeaderSection: View {
                     HStack {
                         ProfileAvatar(user: owner, size: 32, dependencies: dependencies)
 
-                        Text(recipe.isFollowingSourceUpdates ? "Saved by \(owner.displayName)" : "Recipe by \(owner.displayName)")
+                        Text((recipe.isFollowingSourceUpdates ? "Saved by \(owner.displayName)" : "Recipe by \(owner.displayName)").recipeDetailLineBreakFriendly())
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Image(systemName: "chevron.right")
                             .font(.caption)
@@ -171,6 +175,7 @@ struct RecipeHeaderSection: View {
                             Text("The original recipe has been updated")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
                         Spacer()
@@ -303,7 +308,7 @@ struct RecipeHeaderSection: View {
                                     .foregroundColor(warning.color)
                                     .font(.caption)
 
-                                Text(warning.message)
+                                Text(warning.message.recipeDetailLineBreakFriendly())
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -330,7 +335,7 @@ struct RecipeHeaderSection: View {
                 .foregroundColor(.cauldronOrange)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Recipe by \(creatorName)")
+                Text("Recipe by \(creatorName)".recipeDetailLineBreakFriendly())
                     .font(.subheadline)
                     .foregroundColor(.primary)
 

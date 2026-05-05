@@ -197,7 +197,7 @@ final class FriendsTabViewModel {
             let uncachedSharerIds = sharerIds.filter { sharerTiers[$0] == nil }
             guard !uncachedSharerIds.isEmpty else { return }
 
-            let counts = try await dependencies.recipeCloudService.batchFetchPublicRecipeCounts(
+            let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
                 forOwnerIds: Array(uncachedSharerIds)
             )
 

@@ -19,7 +19,7 @@ struct RecipeIngredientsSection: View {
             ForEach(sortedSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 8) {
                     if section != "Main" {
-                        Text(section)
+                        Text(section.recipeDetailLineBreakFriendly())
                             .font(.headline)
                             .foregroundColor(.secondary)
                             .padding(.top, 4)
@@ -63,7 +63,7 @@ private struct IngredientRow: View {
                 .padding(.top, 6)
                 .fixedSize()
 
-            Text(ingredient.displayString)
+            Text(ingredient.displayString.recipeDetailLineBreakFriendly())
                 .font(.body)
                 .lineLimit(nil)
                 .multilineTextAlignment(.leading)

@@ -7,9 +7,28 @@
 
 import SwiftUI
 
+struct CollectionRecipeImageSource: Hashable {
+    let recipeId: UUID?
+    let imageURL: URL?
+    let ownerId: UUID?
+    let hasCloudImage: Bool
+
+    init(recipeId: UUID? = nil, imageURL: URL?, ownerId: UUID? = nil, hasCloudImage: Bool = false) {
+        self.recipeId = recipeId
+        self.imageURL = imageURL
+        self.ownerId = ownerId
+        self.hasCloudImage = hasCloudImage
+    }
+
+    var canLoadImage: Bool {
+        imageURL != nil || (recipeId != nil && hasCloudImage)
+    }
+}
+
 struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
+    let recipeImageSources: [CollectionRecipeImageSource]
     let preferredWidth: CGFloat?
     let dependencies: DependencyContainer?
     @State private var customCoverImage: UIImage?
@@ -19,11 +38,15 @@ struct CollectionCardView: View {
     init(
         collection: Collection,
         recipeImages: [URL?],
+        recipeImageSources: [CollectionRecipeImageSource]? = nil,
         preferredWidth: CGFloat? = 200,
         dependencies: DependencyContainer? = nil
     ) {
         self.collection = collection
         self.recipeImages = recipeImages
+        self.recipeImageSources = recipeImageSources ?? recipeImages.map {
+            CollectionRecipeImageSource(imageURL: $0)
+        }
         self.preferredWidth = preferredWidth
         self.dependencies = dependencies
     }
@@ -35,6 +58,10 @@ struct CollectionCardView: View {
     private var customCoverTaskID: String {
         let remoteKey = collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName ?? "no-cover"
         return "\(collection.id.uuidString)|\(collection.coverImageType.rawValue)|\(remoteKey)"
+    }
+
+    private var coverImageSources: [CollectionRecipeImageSource] {
+        Array(recipeImageSources.prefix(4))
     }
 
     var body: some View {
@@ -84,7 +111,7 @@ struct CollectionCardView: View {
         GeometryReader { proxy in
             let tileSize = proxy.size.width / 2
 
-            if collection.recipeCount == 0 || recipeImages.isEmpty || recipeImages.allSatisfy({ $0 == nil }) {
+            if collection.recipeCount == 0 || coverImageSources.isEmpty || coverImageSources.allSatisfy({ !$0.canLoadImage }) {
                 collectionColor
                     .overlay(
                         VStack(spacing: 6) {
@@ -113,13 +140,16 @@ struct CollectionCardView: View {
 
     private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
         Group {
-            if index < recipeImages.count, let imageURL = recipeImages[index] {
+            if index < coverImageSources.count, coverImageSources[index].canLoadImage {
+                let imageSource = coverImageSources[index]
                 RecipeImageView(
-                    previewImageURL: imageURL,
+                    previewImageURL: imageSource.imageURL,
                     showPlaceholderText: false,
-                    recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService
+                    recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService,
+                    recipeId: imageSource.recipeId,
+                    ownerId: imageSource.ownerId
                 )
-                .id(imageURL.absoluteString)
+                .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
                 .frame(width: size, height: size)
                 .clipped()
             } else {

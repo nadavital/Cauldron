@@ -34,11 +34,13 @@ class SharedCollectionLoader {
     ///   - collection: The collection to load recipes from
     ///   - viewerId: The ID of the user viewing the collection
     ///   - isFriend: Whether the viewer is friends with the collection owner
+    ///   - forceRefresh: Whether to bypass cached public recipe records
     /// - Returns: Load result with visible/hidden recipe counts
     func loadRecipes(
         from collection: Collection,
         viewerId: UUID?,
-        isFriend: Bool = false
+        isFriend: Bool = false,
+        forceRefresh: Bool = false
     ) async -> SharedCollectionLoadResult {
         guard !collection.recipeIds.isEmpty else {
             return SharedCollectionLoadResult(
@@ -52,7 +54,10 @@ class SharedCollectionLoader {
         var skippedCount = 0
 
         do {
-            let recipesById = try await dependencies.recipeCloudService.fetchPublicRecipes(ids: collection.recipeIds)
+            let recipesById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(
+                ids: collection.recipeIds,
+                forceRefresh: forceRefresh
+            )
 
             for recipeId in collection.recipeIds {
                 guard let recipe = recipesById[recipeId] else {

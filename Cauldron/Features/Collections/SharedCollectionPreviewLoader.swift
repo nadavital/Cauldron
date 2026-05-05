@@ -18,7 +18,7 @@ enum SharedCollectionPreviewLoader {
         guard !candidateRecipeIds.isEmpty else { return [] }
 
         do {
-            let recipesById = try await dependencies.recipeCloudService.fetchPublicRecipes(ids: candidateRecipeIds)
+            let recipesById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: candidateRecipeIds)
             var previewURLs: [URL?] = []
             previewURLs.reserveCapacity(imageLimit)
 

@@ -245,7 +245,7 @@ struct ContentView: View {
 
                 // 2. If not found locally, fetch from CloudKit public database
                 AppLogger.general.info("🌐 ContentView: Fetching full recipe details from CloudKit")
-                if let fullRecipe = try await dependencies.recipeCloudService.fetchPublicRecipe(id: partialRecipe.id) {
+                if let fullRecipe = try await dependencies.recipeDiscoveryCache.fetchPublicRecipe(id: partialRecipe.id) {
                     AppLogger.general.info("✅ ContentView: Successfully fetched full recipe")
                     await MainActor.run {
                         // Post notification to navigate to the recipe in the Search tab
@@ -353,6 +353,7 @@ struct ContentView: View {
                 // public recipe has actually been backfilled.
                 Task.detached(priority: .utility) {
                     await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
+                    await dependencies.recipeRepository.migratePublicRecipeSearchMetadata()
                 }
             }
 
