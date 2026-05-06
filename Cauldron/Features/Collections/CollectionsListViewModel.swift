@@ -93,7 +93,10 @@ final class CollectionsListViewModel {
             async let fetchedRecipes = dependencies.recipeRepository.fetchAll()
 
             let collections = try await fetchedCollections
-            let recipes = try await fetchedRecipes
+            let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await fetchedRecipes,
+                currentUserId: CurrentUserSession.shared.userId
+            )
             recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
             recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL

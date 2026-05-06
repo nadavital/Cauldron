@@ -7,6 +7,77 @@ import XCTest
 @testable import Cauldron
 
 final class RecipeGroupingServiceTests: XCTestCase {
+    func testDeduplicateLocalLibraryRecipes_RemovesSelfSavedCopyWhenOriginalExists() {
+        let currentUserId = UUID()
+        let sourceId = UUID()
+        let selfSavedCopyId = UUID()
+        let original = makeRecipe(
+            id: sourceId,
+            title: "Roast Chicken",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["chicken"]
+        )
+        let selfSavedCopy = makeRecipe(
+            id: selfSavedCopyId,
+            title: "Roast Chicken",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["chicken"],
+            originalRecipeId: sourceId
+        )
+
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            [selfSavedCopy, original],
+            currentUserId: currentUserId
+        )
+
+        XCTAssertEqual(recipes.map(\.id), [sourceId])
+    }
+
+    func testDeduplicateLocalLibraryRecipes_KeepsExternalSavedCopyWhenSourceIsNotOwnedLocally() {
+        let currentUserId = UUID()
+        let externalSourceId = UUID()
+        let savedCopyId = UUID()
+        let savedCopy = makeRecipe(
+            id: savedCopyId,
+            title: "Lentil Soup",
+            ownerId: currentUserId,
+            tags: ["Soup"],
+            ingredients: ["lentils"],
+            originalRecipeId: externalSourceId
+        )
+
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            [savedCopy],
+            currentUserId: currentUserId
+        )
+
+        XCTAssertEqual(recipes.map(\.id), [savedCopyId])
+    }
+
+    func testDeduplicateLocalLibraryRecipes_KeepsEditedForkOfExternalRecipe() {
+        let currentUserId = UUID()
+        let externalSourceId = UUID()
+        let forkId = UUID()
+        let editedFork = makeRecipe(
+            id: forkId,
+            title: "Spicy Lentil Soup",
+            ownerId: currentUserId,
+            tags: ["Soup"],
+            ingredients: ["lentils"],
+            originalRecipeId: externalSourceId,
+            followsSourceUpdates: false
+        )
+
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            [editedFork],
+            currentUserId: currentUserId
+        )
+
+        XCTAssertEqual(recipes.map(\.id), [forkId])
+    }
+
     func testGroupAndRankRecipes_PrioritizesExactTitleMatch() {
         let currentUserId = UUID()
         let owner1 = UUID()

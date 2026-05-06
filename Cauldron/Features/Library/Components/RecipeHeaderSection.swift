@@ -21,7 +21,6 @@ struct RecipeHeaderSection: View {
     let isLoadingCreator: Bool
 
     let sharedBy: User?
-    let sharedAt: Date?
     let recipeOwner: User?
     let originalCreator: User?
     let dependencies: DependencyContainer
@@ -53,10 +52,6 @@ struct RecipeHeaderSection: View {
                     metadataPill(systemImage: "person.2", text: scaledRecipe.yields.recipeDetailLineBreakFriendly())
 
                     sourcePill
-
-                    if let sharedAt {
-                        metadataPill(systemImage: "calendar", text: "Shared \(sharedAt.timeAgo())")
-                    }
                 }
                 .padding(.trailing, 1)
             }
@@ -193,7 +188,7 @@ struct RecipeHeaderSection: View {
     @ViewBuilder
     private var sourcePill: some View {
         if let user = sharedBy {
-            sourceNavigationPill(user: user, text: "Shared by \(user.displayName)")
+            sourceNavigationPill(user: user, text: user.displayName)
         } else if let owner = recipeOwner, !recipe.isOwnedByCurrentUser() {
             let text = recipe.isFollowingSourceUpdates ? "Saved by \(owner.displayName)" : "Recipe by \(owner.displayName)"
             sourceNavigationPill(user: owner, text: text)

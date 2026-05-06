@@ -279,7 +279,10 @@ struct CollectionFormView: View {
     private func loadRecipes() async {
         do {
             // Load owned recipes from local storage
-            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             AppLogger.general.info("✅ Loaded \(allRecipes.count) owned recipes")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
@@ -502,7 +505,10 @@ struct RecipeSelectorSheet: View {
 
         do {
             // Load owned recipes from local storage
-            recipes = try await dependencies.recipeRepository.fetchAll()
+            recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for selector")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")

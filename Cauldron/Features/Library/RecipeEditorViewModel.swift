@@ -180,10 +180,14 @@ struct NutritionInput {
     var relatedRecipes: [Recipe] = []
     var availableRecipes: [Recipe] = []
     var isRelatedRecipesPickerPresented: Bool = false
+    private var unresolvedRelatedRecipeIds: [UUID] = []
     
     func loadAvailableRecipes() async {
         do {
-            let all = try await dependencies.recipeRepository.fetchAll()
+            let all = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             // Filter out self if editing
             await MainActor.run {
                 availableRecipes = all.filter { $0.id != existingRecipe?.id }
@@ -194,10 +198,13 @@ struct NutritionInput {
     }
     
     func toggleRelatedRecipe(_ recipe: Recipe) {
+        let referenceID = recipe.relatedGraphReferenceID
         if relatedRecipes.contains(where: { $0.id == recipe.id }) {
             relatedRecipes.removeAll(where: { $0.id == recipe.id })
+            unresolvedRelatedRecipeIds.removeAll { $0 == referenceID || $0 == recipe.id }
         } else {
             relatedRecipes.append(recipe)
+            unresolvedRelatedRecipeIds.removeAll { $0 == referenceID || $0 == recipe.id }
         }
     }
     
@@ -218,6 +225,7 @@ struct NutritionInput {
         title = recipe.title
         yields = recipe.yields
         totalMinutes = recipe.totalMinutes
+        unresolvedRelatedRecipeIds = recipe.relatedRecipeIds
         
         // Load tags by matching them to RecipeCategory
         selectedTags = Set(recipe.tags.compactMap { tag in
@@ -255,6 +263,8 @@ struct NutritionInput {
 
                     await MainActor.run {
                         self.relatedRecipes = resolvedRelated
+                        let resolvedReferenceIDs = Set(resolvedRelated.map(\.relatedGraphReferenceID))
+                        self.unresolvedRelatedRecipeIds = recipe.relatedRecipeIds.filter { !resolvedReferenceIDs.contains($0) }
                     }
                 } catch {
                     AppLogger.general.error("Failed to load related recipes: \(error.localizedDescription)")
@@ -664,7 +674,7 @@ struct NutritionInput {
         let recipeTags = selectedTags.map { Tag(name: $0.tagValue) }
         
         // Build related recipe IDs
-        let relatedIds = relatedRecipes.map(\.relatedGraphReferenceID)
+        let relatedIds = relatedRecipeIdsForSave()
         
         // Build nutrition
         let recipeNutrition: Nutrition?
@@ -751,6 +761,19 @@ struct NutritionInput {
         }
 
         return lowerFormatted
+    }
+
+    private func relatedRecipeIdsForSave() -> [UUID] {
+        let selfReferenceID = existingRecipe?.relatedGraphReferenceID ?? existingRecipe?.id
+        let candidateIDs = unresolvedRelatedRecipeIds + relatedRecipes.map(\.relatedGraphReferenceID)
+        var seen = Set<UUID>()
+
+        return candidateIDs.compactMap { id in
+            guard id != selfReferenceID, seen.insert(id).inserted else {
+                return nil
+            }
+            return id
+        }
     }
 
     func updateSelectedImageFromUser(_ image: UIImage?) {

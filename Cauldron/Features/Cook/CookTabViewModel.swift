@@ -165,13 +165,17 @@ private struct CookTabDerivedSections {
         // If we have preloaded data from ContentView, use it immediately to populate arrays
         // BEFORE the view body renders. This ensures the view never sees empty arrays.
         if let preloadedData = preloadedData {
+            let preloadedRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                preloadedData.allRecipes,
+                currentUserId: CurrentUserSession.shared.userId
+            )
             // CRITICAL: Set allRecipes and collections IMMEDIATELY (not in a Task)
             // This happens synchronously during init, so when CookTabView's body renders
             // for the first time, allRecipes and collections are already populated and won't show empty state
-            self.allRecipes = preloadedData.allRecipes
-            self.recentlyAddedRecipes = preloadedData.allRecipes.sorted { $0.createdAt > $1.createdAt }
+            self.allRecipes = preloadedRecipes
+            self.recentlyAddedRecipes = preloadedRecipes.sorted { $0.createdAt > $1.createdAt }
             self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
-            self.recipeImageURLsById = preloadedData.allRecipes.reduce(into: [:]) { partialResult, recipe in
+            self.recipeImageURLsById = preloadedRecipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
             self.hasLoadedInitially = true
@@ -182,12 +186,12 @@ private struct CookTabDerivedSections {
                 let recentIdSet = Set(preloadedData.recentlyCookedIds)
 
                 // Load recently cooked (simple filter, very fast)
-                self.recentlyCookedRecipes = preloadedData.allRecipes.filter {
+                self.recentlyCookedRecipes = preloadedRecipes.filter {
                     recentIdSet.contains($0.id)
                 }
 
                 // Load favorites (simple filter, very fast)
-                self.favoriteRecipes = preloadedData.allRecipes.filter { $0.isFavorite }
+                self.favoriteRecipes = preloadedRecipes.filter { $0.isFavorite }
 
                 // Load smart recommendations
                 self.updateSmartRecommendations()
@@ -249,7 +253,10 @@ private struct CookTabDerivedSections {
     /// Fetch all recipes (owned recipes only - references have been deprecated)
     private func fetchAllRecipesIncludingReferences() async throws -> [Recipe] {
         // Load owned recipes from local storage
-        let recipes = try await dependencies.recipeRepository.fetchAll()
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            try await dependencies.recipeRepository.fetchAll(),
+            currentUserId: CurrentUserSession.shared.userId
+        )
 
         AppLogger.general.info("Total recipes: \(recipes.count)")
 
@@ -441,7 +448,10 @@ private struct CookTabDerivedSections {
     private func reloadLocalLibrary(loadCollections: Bool) async throws {
         async let fetchedRecipes = fetchAllRecipesIncludingReferences()
 
-        let recipes = try await fetchedRecipes
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            try await fetchedRecipes,
+            currentUserId: CurrentUserSession.shared.userId
+        )
         let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
 
         allRecipes = recipes

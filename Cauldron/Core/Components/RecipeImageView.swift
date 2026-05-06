@@ -322,11 +322,16 @@ struct HeroRecipeImageView: View {
     let ownerId: UUID?
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
     @State private var containerWidth: CGFloat = 0
 
     private let cacheVariant = "hero"
+    private var heroHeight: CGFloat {
+        horizontalSizeClass == .regular ? 460 : 380
+    }
+
     private var loadTaskKey: String {
         let recipeKey = recipeId?.uuidString ?? "no-recipe"
         let imageKey = imageURL?.absoluteString ?? "no-image"
@@ -356,7 +361,7 @@ struct HeroRecipeImageView: View {
                     .resizable()
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
-                    .frame(height: imageHeight(for: image))
+                    .frame(height: heroHeight)
                     .clipped()
                     .overlay(alignment: .bottom) {
                         // Bottom gradient for smooth transition to content
@@ -377,6 +382,7 @@ struct HeroRecipeImageView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .frame(height: heroHeight)
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -408,21 +414,9 @@ struct HeroRecipeImageView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(Color.cauldronOrange.opacity(0.3))
         }
-        .frame(height: 380)
+        .frame(height: heroHeight)
         .frame(maxWidth: .infinity)
         .background(Color.cauldronOrange.opacity(0.05))
-    }
-
-    private func imageHeight(for image: UIImage) -> CGFloat {
-        let aspectRatio = image.size.width / image.size.height
-        let estimatedWidth: CGFloat = max(containerWidth, 1)
-
-        // Calculate height based on aspect ratio
-        let calculatedHeight = estimatedWidth / aspectRatio
-
-        // Clamp between min and max values for better UX
-        // Increased max height for hero effect
-        return min(max(calculatedHeight, 300), 500)
     }
 
     private func loadImage() async {

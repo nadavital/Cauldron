@@ -41,6 +41,7 @@ import os
     let dependencies: DependencyContainer
     private let connectionCoordinator: ConnectionInteractionCoordinator
     private var recipeImageURLsById: [UUID: URL?] = [:]
+    private var collectionImageRecipesById: [UUID: Recipe] = [:]
 
     var currentUserId: UUID {
         dependencies.connectionManager.currentUserId
@@ -64,6 +65,20 @@ import os
 
     func loadConnectionStatus() async {
         await updateConnectionState()
+    }
+
+    func loadProfileData(forceRefresh: Bool = false) async {
+        await loadConnectionStatus()
+
+        async let recipes: Void = loadUserRecipes(forceRefresh: forceRefresh)
+        async let collections: Void = loadUserCollections(forceRefresh: forceRefresh)
+
+        if isCurrentUser {
+            async let connections: Void = loadConnections()
+            _ = await (recipes, collections, connections)
+        } else {
+            _ = await (recipes, collections)
+        }
     }
 
     func loadConnections() async {
@@ -194,6 +209,9 @@ import os
             recipeImageURLsById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
             }
+            collectionImageRecipesById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
+                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
+            }
             updateTierFromRecipes()
             return
         }
@@ -203,9 +221,6 @@ import os
 
         do {
             userRecipes = try await fetchUserRecipes()
-            recipeImageURLsById = userRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
-                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
-            }
 
             // Cache the results
             dependencies.profileCacheManager.cacheRecipes(
@@ -243,7 +258,10 @@ import os
 
         // If viewing your own profile, fetch from local storage (same as Cook tab)
         if isCurrentUser {
-            recipes = try await dependencies.recipeRepository.fetchAll()
+            recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
         } else {
             // If viewing someone else's profile, fetch their public recipes from CloudKit
@@ -257,6 +275,13 @@ import os
 
         // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
         // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
+        collectionImageRecipesById = recipes.reduce(into: [:]) { partialResult, recipe in
+            partialResult[recipe.id] = recipe
+        }
+        recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
+            partialResult[recipe.id] = recipe.imageURL
+        }
+
         let referencedIds = Set(recipes.flatMap { $0.relatedRecipeIds })
         let filteredRecipes = recipes.filter { !referencedIds.contains($0.id) }
         AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) recipes (removed \(referencedIds.count) referenced recipes)")
@@ -361,17 +386,24 @@ import os
 
     /// Refreshes all profile data (used for pull-to-refresh)
     func refreshProfile() async {
-        await loadConnectionStatus()
-        await loadUserRecipes(forceRefresh: true)
-        await loadUserCollections(forceRefresh: true)
-        if isCurrentUser {
-            await loadConnections()
-        }
+        await loadProfileData(forceRefresh: true)
     }
 
     /// Get first 4 recipe image URLs for a collection (for grid display)
-    func getRecipeImages(for collection: Collection) async -> [URL?] {
-        Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
+    func getRecipeImages(for collection: Collection) -> [URL?] {
+        Array(collection.recipeIds.compactMap { recipeImageURLsById[$0] ?? nil }.prefix(4).map(Optional.some))
+    }
+
+    func getRecipeImageSources(for collection: Collection) -> [CollectionRecipeImageSource] {
+        collection.recipeIds.prefix(4).map { recipeId in
+            let recipe = collectionImageRecipesById[recipeId]
+            return CollectionRecipeImageSource(
+                recipeId: recipeId,
+                imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
+                ownerId: recipe?.ownerId,
+                hasCloudImage: recipe?.cloudImageRecordName != nil
+            )
+        }
     }
 
     private func rebuildFilteredRecipes() {

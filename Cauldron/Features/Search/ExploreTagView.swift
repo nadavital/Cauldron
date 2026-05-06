@@ -41,10 +41,6 @@ struct ExploreTagView: View {
         horizontalSizeClass == .regular ? 24 : 16
     }
 
-    private var totalRecipeCount: Int {
-        viewModel.allRecipes.count + viewModel.friendRecipes.count + viewModel.publicRecipes.count
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -77,47 +73,13 @@ struct ExploreTagView: View {
             .padding(.bottom, 24)
         }
         .navigationTitle(displayName)
-        .toolbarTitleDisplayMode(.inlineLarge)
-        .toolbar {
-            ToolbarItem(placement: .largeTitle) {
-                largeTitleHeader
-            }
-
-            if totalRecipeCount > 0 {
-                ToolbarItem(placement: .largeSubtitle) {
-                    Text("\(totalRecipeCount) \(totalRecipeCount == 1 ? "recipe" : "recipes")")
-                }
-            }
-        }
+        .toolbarTitleDisplayMode(.inline)
         .task {
             await viewModel.loadRecipes()
         }
         .refreshable {
             await viewModel.loadRecipes(forceRefresh: true)
         }
-    }
-
-    private var largeTitleHeader: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.16))
-                    .frame(width: 34, height: 34)
-
-                if let emoji = emoji {
-                    Text(emoji)
-                        .font(.system(size: 19))
-                } else {
-                    Image(systemName: "tag.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(color)
-                }
-            }
-
-            Text(displayName)
-                .lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
     }
 
     private var allRecipesSection: some View {
@@ -267,24 +229,20 @@ struct ExploreTagView: View {
 
     private var loadingPlaceholder: some View {
         VStack(alignment: .leading, spacing: 24) {
-            ExploreTagSectionPlaceholder(
-                title: "My Recipes",
-                systemImage: "book.fill",
-                color: color,
-                horizontalContentPadding: horizontalContentPadding
-            )
-            ExploreTagSectionPlaceholder(
-                title: "From Friends",
-                systemImage: "person.2.fill",
-                color: color,
-                horizontalContentPadding: horizontalContentPadding
-            )
-            ExploreTagSectionPlaceholder(
-                title: "Community Recipes",
-                systemImage: "globe",
-                color: color,
-                horizontalContentPadding: horizontalContentPadding
-            )
+            HStack(spacing: 8) {
+                if let emoji {
+                    Text(emoji)
+                } else {
+                    Image(systemName: "tag.fill")
+                        .foregroundColor(color)
+                }
+
+                Text("Loading recipes")
+                    .foregroundColor(.secondary)
+            }
+            .font(.headline)
+
+            ExploreTagRecipeCarouselPlaceholder(horizontalContentPadding: horizontalContentPadding)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -303,32 +261,19 @@ struct ExploreTagView: View {
     }
 }
 
-private struct ExploreTagSectionPlaceholder: View {
-    let title: String
-    let systemImage: String
-    let color: Color
+private struct ExploreTagRecipeCarouselPlaceholder: View {
     let horizontalContentPadding: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .foregroundColor(color)
-                Text(title)
-            }
-            .font(.title2)
-            .fontWeight(.bold)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        ExploreTagRecipeCardPlaceholder()
-                    }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) {
+                ForEach(0..<3, id: \.self) { _ in
+                    ExploreTagRecipeCardPlaceholder()
                 }
-                .padding(.horizontal, horizontalContentPadding)
             }
-            .padding(.horizontal, -horizontalContentPadding)
+            .padding(.horizontal, horizontalContentPadding)
         }
+        .padding(.horizontal, -horizontalContentPadding)
     }
 }
 

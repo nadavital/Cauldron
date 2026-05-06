@@ -57,7 +57,11 @@ struct CategoryRecipesListView: View {
             Task {
                 do {
                     let allRecipes = try await dependencies.recipeRepository.fetchAll()
-                    localRecipes = allRecipes.filter { recipe in
+                    let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                        allRecipes,
+                        currentUserId: CurrentUserSession.shared.userId
+                    )
+                    localRecipes = recipes.filter { recipe in
                         recipe.tags.contains(where: { $0.name == categoryName })
                     }
                 } catch {

@@ -16,7 +16,6 @@ struct UserProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
-    @State private var collectionImageCache: [UUID: [URL?]] = [:]  // Cache recipe images by collection ID
     
     // External sharing
     @State private var shareLink: ShareableLink?
@@ -78,13 +77,11 @@ struct UserProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
         .refreshable {
-            collectionImageCache.removeAll()
             await viewModel.refreshProfile()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             // Only refresh if viewing own profile
             if viewModel.isCurrentUser {
-                collectionImageCache.removeAll()
                 Task {
                     await viewModel.loadUserRecipes()
                 }
@@ -95,12 +92,7 @@ struct UserProfileView: View {
             if !hasLoadedInitialData {
                 hasLoadedInitialData = true
                 Task {
-                    await viewModel.loadConnectionStatus()
-                    await viewModel.loadUserRecipes()
-                    await viewModel.loadUserCollections()
-                    if viewModel.isCurrentUser {
-                        await viewModel.loadConnections()
-                    }
+                    await viewModel.loadProfileData()
                 }
             }
         }
@@ -623,17 +615,12 @@ struct UserProfileView: View {
                             )) {
                                 CollectionCardView(
                                     collection: collection,
-                                    recipeImages: collectionImageCache[collection.id] ?? [],
+                                    recipeImages: viewModel.getRecipeImages(for: collection),
+                                    recipeImageSources: viewModel.getRecipeImageSources(for: collection),
                                     dependencies: viewModel.dependencies
                                 )
                             }
                             .buttonStyle(.plain)
-                            .task(id: collection.id) {
-                                if collectionImageCache[collection.id] == nil {
-                                    let images = await viewModel.getRecipeImages(for: collection)
-                                    collectionImageCache[collection.id] = images
-                                }
-                            }
                         }
                     }
                 }

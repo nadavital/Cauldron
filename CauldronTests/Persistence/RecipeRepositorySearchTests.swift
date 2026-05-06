@@ -81,6 +81,43 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(results.map(\.id), [matchingCopy.id])
     }
 
+    func testRemoveSelfSavedRecipeCopiesDeletesFollowingCopyOfOwnedOriginal() async throws {
+        let currentUserId = UUID()
+        let sourceId = UUID()
+        let original = makeRecipe(
+            id: sourceId,
+            title: "Owned Roast Chicken",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            followsSourceUpdates: false,
+            isPreview: false
+        )
+        let selfSavedCopy = makeRecipe(
+            title: "Owned Roast Chicken",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: true,
+            isPreview: false
+        )
+        let externalCopy = makeRecipe(
+            title: "External Soup",
+            ownerId: currentUserId,
+            originalRecipeId: UUID(),
+            followsSourceUpdates: true,
+            isPreview: false
+        )
+
+        try await repository.create(original, skipCloudSync: true)
+        try await repository.create(selfSavedCopy, skipCloudSync: true)
+        try await repository.create(externalCopy, skipCloudSync: true)
+
+        let removedCount = try await repository.removeSelfSavedRecipeCopies(currentUserId: currentUserId)
+        let remainingRecipes = try await repository.fetchAll()
+
+        XCTAssertEqual(removedCount, 1)
+        XCTAssertEqual(Set(remainingRecipes.map(\.id)), Set([sourceId, externalCopy.id]))
+    }
+
     private func makeRecipe(
         title: String,
         tags: [Tag],
@@ -102,12 +139,16 @@ final class RecipeRepositorySearchTests: XCTestCase {
     }
 
     private func makeRecipe(
+        id: UUID = UUID(),
         title: String,
         ownerId: UUID,
         originalRecipeId: UUID?,
+        followsSourceUpdates: Bool? = nil,
         isPreview: Bool
     ) -> Recipe {
-        Recipe(
+        let followsSourceUpdates = followsSourceUpdates ?? (originalRecipeId != nil)
+        return Recipe(
+            id: id,
             title: title,
             ingredients: [
                 Ingredient(name: "Salt", quantity: nil)
@@ -117,6 +158,9 @@ final class RecipeRepositorySearchTests: XCTestCase {
             ],
             ownerId: ownerId,
             originalRecipeId: originalRecipeId,
+            savedAt: originalRecipeId == nil ? nil : Date(timeIntervalSince1970: 1_700_000_000),
+            sourceRecipeUpdatedAt: originalRecipeId == nil ? nil : Date(timeIntervalSince1970: 1_700_000_100),
+            followsSourceUpdates: followsSourceUpdates,
             isPreview: isPreview
         )
     }

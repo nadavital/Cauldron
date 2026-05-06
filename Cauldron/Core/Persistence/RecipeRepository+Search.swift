@@ -70,6 +70,42 @@ extension RecipeRepository {
             return originalRecipeIdSet.contains(originalRecipeId)
         }
     }
+
+    /// Remove impossible self-saved copies created when a user saves their own
+    /// public recipe. The source recipe remains intact.
+    func removeSelfSavedRecipeCopies(currentUserId: UUID) async throws -> Int {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.ownerId == currentUserId && model.isPreview == false
+            }
+        )
+
+        let recipes = try context.fetch(descriptor).map { try $0.toDomain() }
+        let ownedOriginalRecipeIds = Set(
+            recipes
+                .filter { !$0.isFollowingSourceUpdates }
+                .map(\.id)
+        )
+
+        let duplicateIds = recipes.compactMap { recipe -> UUID? in
+            guard recipe.isFollowingSourceUpdates,
+                  let originalRecipeId = recipe.originalRecipeId,
+                  ownedOriginalRecipeIds.contains(originalRecipeId) else {
+                return nil
+            }
+            return recipe.id
+        }
+
+        guard !duplicateIds.isEmpty else { return 0 }
+
+        for duplicateId in duplicateIds {
+            try await delete(id: duplicateId)
+        }
+
+        logger.info("Removed \(duplicateIds.count) self-saved recipe copies")
+        return duplicateIds.count
+    }
     
     /// Fetch recent recipes
     func fetchRecent(limit: Int = 10) async throws -> [Recipe] {

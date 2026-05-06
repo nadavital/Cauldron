@@ -118,7 +118,10 @@ struct GroceryListMergeView: View {
     
     private func loadRecipes() async {
         do {
-            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
         } catch {
             AppLogger.general.error("Failed to load recipes: \(error.localizedDescription)")
         }

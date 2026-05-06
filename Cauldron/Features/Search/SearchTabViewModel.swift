@@ -104,7 +104,10 @@ import os
 
         do {
             // Load user's own recipes
-            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
 
             // Group recipes by tags (using own recipes for category browsing)
             groupRecipesByTags()
@@ -378,7 +381,10 @@ import os
 
     private func refreshRecipeLibrary() async {
         do {
-            allRecipes = try await dependencies.recipeRepository.fetchAll()
+            allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             groupRecipesByTags()
             scheduleRecipeSearchResultsRebuild(
                 filterText: recipeSearchText,

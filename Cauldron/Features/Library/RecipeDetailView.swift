@@ -105,7 +105,6 @@ struct RecipeDetailView: View {
             isUpdatingRecipe: isUpdatingRecipe,
             isLoadingCreator: isLoadingCreator,
             sharedBy: sharedBy,
-            sharedAt: sharedAt,
             recipeOwner: recipeOwner,
             originalCreator: originalCreator,
             dependencies: dependencies,
@@ -396,6 +395,20 @@ struct RecipeDetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
             Menu {
+                Picker("Scale", selection: $scaleFactor) {
+                    Text("1/2x").tag(0.5)
+                    Text("1x").tag(1.0)
+                    Text("2x").tag(2.0)
+                    Text("3x").tag(3.0)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label(scaleFactorLabel, systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+        }
+
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
                 if recipe.visibility == .publicRecipe {
                     Button {
                         Task {
@@ -418,17 +431,9 @@ struct RecipeDetailView: View {
                     Label("Add Ingredients to Groceries", systemImage: "cart.badge.plus")
                 }
 
-                Divider()
-
-                Picker("Scale", selection: $scaleFactor) {
-                    Text("1/2x").tag(0.5)
-                    Text("1x").tag(1.0)
-                    Text("2x").tag(2.0)
-                    Text("3x").tag(3.0)
-                }
-                .pickerStyle(.inline)
-
                 if recipe.isOwnedByCurrentUser() {
+                    Divider()
+
                     Picker("Visibility", selection: visibilitySelection) {
                         ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
                             Label(visibility.displayName, systemImage: visibility.icon)
@@ -479,6 +484,21 @@ struct RecipeDetailView: View {
                 }
             }
         )
+    }
+
+    private var scaleFactorLabel: String {
+        switch scaleFactor {
+        case 0.5:
+            return "1/2x"
+        case 1.0:
+            return "1x"
+        case 2.0:
+            return "2x"
+        case 3.0:
+            return "3x"
+        default:
+            return "\(scaleFactor.formatted(.number.precision(.fractionLength(0...1))))x"
+        }
     }
 }
 

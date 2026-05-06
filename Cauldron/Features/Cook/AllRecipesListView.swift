@@ -320,7 +320,11 @@ struct AllRecipesListView: View {
     private func refreshRecipes() {
         Task {
             do {
-                localRecipes = try await dependencies.recipeRepository.fetchAll()
+                let recipes = try await dependencies.recipeRepository.fetchAll()
+                localRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                    recipes,
+                    currentUserId: CurrentUserSession.shared.userId
+                )
             } catch {
                 AppLogger.general.error("Failed to refresh recipes: \(error.localizedDescription)")
             }

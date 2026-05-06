@@ -239,8 +239,14 @@ extension RecipeDetailView {
     }
 
     func saveRecipeToLibrary() async {
-        guard CurrentUserSession.shared.userId != nil else {
+        guard let userId = CurrentUserSession.shared.userId else {
             AppLogger.general.error("Cannot save recipe - no current user")
+            return
+        }
+
+        if recipe.ownerId == userId {
+            AppLogger.general.info("Skipping save - recipe already belongs to current user: \(recipe.title)")
+            hasOwnedCopy = true
             return
         }
 
@@ -287,6 +293,12 @@ extension RecipeDetailView {
             return
         }
 
+        if recipe.ownerId == userId {
+            AppLogger.general.info("Skipping save - recipe already belongs to current user: \(recipe.title)")
+            hasOwnedCopy = true
+            return
+        }
+
         isSavingRecipe = true
         defer { isSavingRecipe = false }
 
@@ -295,11 +307,59 @@ extension RecipeDetailView {
         do {
             let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
             let sourceImageRecipeID = recipe.sourceAssetReferenceID
+            let sourceRecipeID = recipe.relatedGraphReferenceID
+
+            if let existingLocalRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id),
+               !existingLocalRecipe.isPreview {
+                AppLogger.general.info("Skipping save - recipe already exists locally: \(recipe.title)")
+                withAnimation {
+                    recipe = existingLocalRecipe
+                    currentVisibility = existingLocalRecipe.visibility
+                    localIsFavorite = existingLocalRecipe.isFavorite
+                    hasOwnedCopy = true
+                }
+                return
+            }
+
+            let existingOwnedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+                originalRecipeIds: [sourceRecipeID]
+            )
+            if let existingOwnedCopy = existingOwnedCopies.first {
+                AppLogger.general.info("Skipping save - owned copy already exists: \(recipe.title)")
+                withAnimation {
+                    recipe = existingOwnedCopy
+                    currentVisibility = existingOwnedCopy.visibility
+                    localIsFavorite = existingOwnedCopy.isFavorite
+                    hasOwnedCopy = true
+                }
+                return
+            }
 
             if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
                 AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
 
                 for relatedRecipe in relatedRecipesToSave {
+                    if relatedRecipe.ownerId == userId {
+                        relatedRecipeIdMapping[relatedRecipe.relatedGraphReferenceID] = relatedRecipe.id
+                        AppLogger.general.info("Skipping related recipe save - already belongs to current user: \(relatedRecipe.title)")
+                        continue
+                    }
+
+                    if let localRelated = try await dependencies.recipeRepository.fetch(id: relatedRecipe.id),
+                       !localRelated.isPreview {
+                        relatedRecipeIdMapping[relatedRecipe.relatedGraphReferenceID] = localRelated.id
+                        continue
+                    }
+
+                    let relatedSourceRecipeId = relatedRecipe.relatedGraphReferenceID
+                    let existingRelatedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+                        originalRecipeIds: [relatedSourceRecipeId]
+                    )
+                    if let existingRelatedCopy = existingRelatedCopies.first {
+                        relatedRecipeIdMapping[relatedSourceRecipeId] = existingRelatedCopy.id
+                        continue
+                    }
+
                     let canonicalRelatedIDsForCopy = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: relatedRecipe)
                     let relatedImageSourceRecipeID = relatedRecipe.sourceAssetReferenceID
                     let copiedRelated = relatedRecipe.withOwner(
@@ -310,7 +370,7 @@ extension RecipeDetailView {
                         relatedRecipeIds: canonicalRelatedIDsForCopy
                     ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
                     try await dependencies.recipeRepository.create(copiedRelated)
-                    relatedRecipeIdMapping[relatedRecipe.id] = copiedRelated.id
+                    relatedRecipeIdMapping[relatedSourceRecipeId] = copiedRelated.id
 
                     if relatedRecipe.cloudImageRecordName != nil || relatedImageSourceRecipeID != relatedRecipe.id {
                         do {
@@ -626,6 +686,12 @@ extension RecipeDetailView {
         defer { isCheckingDuplicates = false }
 
         do {
+            if recipe.ownerId == userId {
+                hasOwnedCopy = true
+                AppLogger.general.info("Owned copy check: true for current user's recipe '\(recipe.title)'")
+                return
+            }
+
             hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
                 title: recipe.title,
                 ownerId: userId,

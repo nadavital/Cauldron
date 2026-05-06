@@ -487,7 +487,10 @@ struct ProfileSheet: View {
     private func loadStats() async {
         do {
             // Load recipe count
-            let recipes = try await dependencies.recipeRepository.fetchAll()
+            let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await dependencies.recipeRepository.fetchAll(),
+                currentUserId: CurrentUserSession.shared.userId
+            )
             recipeCount = recipes.count
             tierManager.updateRecipeCount(recipeCount)
 

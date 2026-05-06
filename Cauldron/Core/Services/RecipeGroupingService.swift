@@ -24,6 +24,40 @@ struct SearchRecipeGroup: Identifiable {
 
 /// Service to handle recipe deduplication, grouping, and ranking
 enum RecipeGroupingService {
+    /// Remove redundant local entries where the current user owns both the source
+    /// recipe and a following copy of that same source.
+    nonisolated static func deduplicateLocalLibraryRecipes(
+        _ recipes: [Recipe],
+        currentUserId: UUID?
+    ) -> [Recipe] {
+        guard let currentUserId else { return recipes }
+
+        let ownedOriginalRecipeIds = Set(
+            recipes
+                .filter { recipe in
+                    recipe.ownerId == currentUserId && !recipe.isFollowingSourceUpdates
+                }
+                .map(\.id)
+        )
+
+        guard !ownedOriginalRecipeIds.isEmpty else { return recipes }
+
+        var seenFollowingSourceIds = Set<UUID>()
+        return recipes.filter { recipe in
+            guard recipe.ownerId == currentUserId,
+                  recipe.isFollowingSourceUpdates,
+                  let originalRecipeId = recipe.originalRecipeId else {
+                return true
+            }
+
+            if ownedOriginalRecipeIds.contains(originalRecipeId) {
+                return false
+            }
+
+            return seenFollowingSourceIds.insert(originalRecipeId).inserted
+        }
+    }
+
     nonisolated static func matchesSearchFilters(
         _ recipe: Recipe,
         filterText: String = "",

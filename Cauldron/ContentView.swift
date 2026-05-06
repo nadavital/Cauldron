@@ -318,6 +318,14 @@ struct ContentView: View {
                 if removedCount > 0 {
                     AppLogger.general.info("🧹 Cleaned up \(removedCount) duplicate recipes")
                 }
+                if let userId = userSession.userId {
+                    let removedSelfCopyCount = try await dependencies.recipeRepository.removeSelfSavedRecipeCopies(
+                        currentUserId: userId
+                    )
+                    if removedSelfCopyCount > 0 {
+                        AppLogger.general.info("🧹 Cleaned up \(removedSelfCopyCount) self-saved recipe copies")
+                    }
+                }
             } catch {
                 AppLogger.general.warning("Failed to remove duplicate recipes: \(error.localizedDescription)")
             }
@@ -328,7 +336,10 @@ struct ContentView: View {
             async let localCollections = dependencies.collectionRepository.fetchAll()
 
             // Wait for all to complete in parallel
-            let allRecipes = try await ownedRecipes
+            let allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await ownedRecipes,
+                currentUserId: userSession.userId
+            )
             let recentlyCookedIds = try await cookingHistory
             let collections = try await localCollections
             // Data preloaded successfully (don't log routine operations)
