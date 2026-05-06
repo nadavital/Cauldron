@@ -683,8 +683,6 @@ extension RecipeDetailView {
             }
 
             AppLogger.general.info("Changed recipe '\(recipe.title)' visibility to \(newVisibility.displayName)")
-
-            showingVisibilityPicker = false
         } catch {
             AppLogger.general.error("Failed to change visibility: \(error.localizedDescription)")
             errorMessage = "Failed to change visibility: \(error.localizedDescription)"

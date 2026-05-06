@@ -79,8 +79,14 @@ struct ExploreTagView: View {
         .navigationTitle(displayName)
         .toolbarTitleDisplayMode(.inlineLarge)
         .toolbar {
-            ToolbarItem(placement: .title) {
-                toolbarHeader
+            ToolbarItem(placement: .largeTitle) {
+                largeTitleHeader
+            }
+
+            if totalRecipeCount > 0 {
+                ToolbarItem(placement: .largeSubtitle) {
+                    Text("\(totalRecipeCount) \(totalRecipeCount == 1 ? "recipe" : "recipes")")
+                }
             }
         }
         .task {
@@ -91,8 +97,8 @@ struct ExploreTagView: View {
         }
     }
 
-    private var toolbarHeader: some View {
-        HStack(spacing: 8) {
+    private var largeTitleHeader: some View {
+        HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(color.opacity(0.16))
@@ -108,18 +114,8 @@ struct ExploreTagView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(1)
-
-                if totalRecipeCount > 0 {
-                    Text("\(totalRecipeCount) \(totalRecipeCount == 1 ? "recipe" : "recipes")")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
+            Text(displayName)
+                .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -271,11 +267,25 @@ struct ExploreTagView: View {
 
     private var loadingPlaceholder: some View {
         VStack(alignment: .leading, spacing: 24) {
-            ExploreTagSectionPlaceholder(title: "My Recipes", systemImage: "book.fill", color: color)
-            ExploreTagSectionPlaceholder(title: "From Friends", systemImage: "person.2.fill", color: color)
-            ExploreTagSectionPlaceholder(title: "Community Recipes", systemImage: "globe", color: color)
+            ExploreTagSectionPlaceholder(
+                title: "My Recipes",
+                systemImage: "book.fill",
+                color: color,
+                horizontalContentPadding: horizontalContentPadding
+            )
+            ExploreTagSectionPlaceholder(
+                title: "From Friends",
+                systemImage: "person.2.fill",
+                color: color,
+                horizontalContentPadding: horizontalContentPadding
+            )
+            ExploreTagSectionPlaceholder(
+                title: "Community Recipes",
+                systemImage: "globe",
+                color: color,
+                horizontalContentPadding: horizontalContentPadding
+            )
         }
-        .redacted(reason: .placeholder)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -297,6 +307,7 @@ private struct ExploreTagSectionPlaceholder: View {
     let title: String
     let systemImage: String
     let color: Color
+    let horizontalContentPadding: CGFloat
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -311,13 +322,55 @@ private struct ExploreTagSectionPlaceholder: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(0..<3, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.secondary.opacity(0.16))
-                            .frame(width: 180, height: 230)
+                        ExploreTagRecipeCardPlaceholder()
                     }
                 }
+                .padding(.horizontal, horizontalContentPadding)
             }
+            .padding(.horizontal, -horizontalContentPadding)
         }
+    }
+}
+
+private struct ExploreTagRecipeCardPlaceholder: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var cardWidth: CGFloat {
+        horizontalSizeClass == .regular ? 252 : 240
+    }
+
+    private var cardHeight: CGFloat {
+        horizontalSizeClass == .regular ? 168 : 160
+    }
+
+    private var placeholderFill: Color {
+        Color.secondary.opacity(0.14)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(placeholderFill)
+                .frame(width: cardWidth, height: cardHeight)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(placeholderFill)
+                .frame(width: cardWidth, height: 20)
+
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(placeholderFill)
+                    .frame(width: 72, height: 14)
+
+                Spacer()
+
+                Capsule()
+                    .fill(placeholderFill)
+                    .frame(width: 86, height: 20)
+            }
+            .frame(width: cardWidth, height: 20)
+        }
+        .frame(width: cardWidth)
     }
 }
 

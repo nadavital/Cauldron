@@ -24,7 +24,6 @@ struct RecipeDetailView: View {
     @State var isLoadingOwner = false
     @State var hasOwnedCopy = false
     @State private var showReferenceRemovedToast = false
-    @State var showingVisibilityPicker = false
     @State var currentVisibility: RecipeVisibility
     @State var isChangingVisibility = false
     @State private var showingCollectionPicker = false
@@ -98,8 +97,6 @@ struct RecipeDetailView: View {
             recipe: recipe,
             scaledRecipe: scaledRecipe,
             scaledResult: scaledResult,
-            scaleFactor: $scaleFactor,
-            currentVisibility: $currentVisibility,
             localIsFavorite: $localIsFavorite,
             hasOwnedCopy: hasOwnedCopy,
             isSavingRecipe: isSavingRecipe,
@@ -108,11 +105,11 @@ struct RecipeDetailView: View {
             isUpdatingRecipe: isUpdatingRecipe,
             isLoadingCreator: isLoadingCreator,
             sharedBy: sharedBy,
+            sharedAt: sharedAt,
             recipeOwner: recipeOwner,
             originalCreator: originalCreator,
             dependencies: dependencies,
             onToggleFavorite: toggleFavorite,
-            onChangeVisibility: changeVisibility,
             onSaveRecipe: saveRecipeToLibrary,
             onUpdateRecipe: updateRecipeCopy
         )
@@ -333,16 +330,6 @@ struct RecipeDetailView: View {
                 dismiss()
             }
         }
-        .sheet(isPresented: $showingVisibilityPicker) {
-            RecipeVisibilityPickerSheet(
-                currentVisibility: $currentVisibility,
-                isChanging: $isChangingVisibility,
-                onSave: { newVisibility in
-                    await changeVisibility(to: newVisibility)
-                }
-            )
-            .presentationDetents([.medium])
-        }
         .sheet(isPresented: $showingCollectionPicker) {
             AddToCollectionSheet(recipe: recipe, dependencies: dependencies)
                 .presentationDetents([.medium, .large])
@@ -408,35 +395,51 @@ struct RecipeDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
-            if recipe.visibility == .publicRecipe {
+            Menu {
+                if recipe.visibility == .publicRecipe {
+                    Button {
+                        Task {
+                            await generateShareLink()
+                        }
+                    } label: {
+                        Label(
+                            isGeneratingShareLink ? "Creating Share Link" : "Share Recipe",
+                            systemImage: isGeneratingShareLink ? "hourglass" : "square.and.arrow.up"
+                        )
+                    }
+                    .disabled(isGeneratingShareLink)
+                }
+
                 Button {
                     Task {
-                        await generateShareLink()
+                        await addToGroceryList()
                     }
                 } label: {
-                    if isGeneratingShareLink {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
+                    Label("Add Ingredients to Groceries", systemImage: "cart.badge.plus")
+                }
+
+                Divider()
+
+                Picker("Scale", selection: $scaleFactor) {
+                    Text("1/2x").tag(0.5)
+                    Text("1x").tag(1.0)
+                    Text("2x").tag(2.0)
+                    Text("3x").tag(3.0)
+                }
+                .pickerStyle(.inline)
+
+                if recipe.isOwnedByCurrentUser() {
+                    Picker("Visibility", selection: visibilitySelection) {
+                        ForEach(RecipeVisibility.allCases, id: \.self) { visibility in
+                            Label(visibility.displayName, systemImage: visibility.icon)
+                                .tag(visibility)
+                        }
                     }
-                }
-                .disabled(isGeneratingShareLink)
-            }
-        }
+                    .pickerStyle(.inline)
+                    .disabled(isChangingVisibility)
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                Task {
-                    await addToGroceryList()
-                }
-            } label: {
-                Image(systemName: "cart.badge.plus")
-            }
-        }
+                    Divider()
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            if recipe.isOwnedByCurrentUser() {
-                Menu {
                     Button {
                         showingEditSheet = true
                     } label: {
@@ -455,13 +458,27 @@ struct RecipeDetailView: View {
                         showDeleteConfirmation = true
                     } label: {
                         Label("Delete Recipe", systemImage: "trash")
-                            .foregroundStyle(.red)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
         }
+    }
+
+    private var visibilitySelection: Binding<RecipeVisibility> {
+        Binding(
+            get: { currentVisibility },
+            set: { newVisibility in
+                guard newVisibility != currentVisibility else {
+                    return
+                }
+
+                Task {
+                    await changeVisibility(to: newVisibility)
+                }
+            }
+        )
     }
 }
 
