@@ -30,6 +30,13 @@ ICON_PATH = ROOT / 'cauldroniconpng.png'
 IPHONE_FRAME = Path('/Volumes/Bezel-iPhone-17/PNG/iPhone 17 Pro Max/iPhone 17 Pro Max - Silver - Portrait.png')
 IPAD_FRAME = Path('/Volumes/Bezel-iPad-Pro-M4/PNG/iPad Pro 11 - M4 - Silver - Portrait.png')
 MAC_FRAME = Path('/Volumes/Bezel-MacBook-Pro-M4/PNG/MacBook Pro M4 14-inch Silver.png')
+IPHONE_FRAME_TEMPLATE = Path(
+    os.environ.get(
+        'CAULDRON_IPHONE_FRAME_TEMPLATE',
+        '/Users/nadav/Desktop/playCount/AppStoreScreenshots/Framed-6.9/01-your-music-ranked.png',
+    )
+)
+WEBSITE_CAULDRON_SOURCE = Path('/Users/nadav/Desktop/Website/public/assets/cauldron')
 
 FONT_TITLE = '/Library/Fonts/SF-Pro-Display-Semibold.otf'
 FONT_BODY = '/Library/Fonts/SF-Pro-Text-Medium.otf'
@@ -88,6 +95,22 @@ MAC_SHOTS = (
     Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
     Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
     Shot('collection_view', 'Collections', 'Organize favorites into collections faster.'),
+)
+
+WEBSITE_SOURCE_NAMES = {
+    'cook_tab': 'cook_tab.jpg',
+    'recipe_view': 'recipe_view.jpg',
+    'generate_recipe': 'generate_recipe.jpg',
+    'search_tab': 'explore_tab.jpg',
+    'groceries_tab': 'groceries_tab.jpg',
+}
+
+IPHONE_FALLBACK_SHOTS = (
+    Shot('cook_tab', '', 'Add. Cook. Share.'),
+    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
+    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
+    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('groceries_tab', 'Groceries', 'Build a smart grocery list from any recipe.'),
 )
 
 SPECS = (
@@ -217,7 +240,50 @@ def crop_black_border(img: Image.Image, threshold: int = 10) -> Image.Image:
     return img.crop(bbox) if bbox else img
 
 
+def load_mobile_background(path: Path, size: tuple[int, int]) -> Image.Image:
+    if path.exists():
+        return Image.open(path).convert('RGB')
+
+    w, h = size
+    bg = Image.new('RGB', size)
+    px = bg.load()
+    top = (255, 248, 226)
+    mid = (255, 211, 139)
+    bottom = (222, 126, 44)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        if t < 0.52:
+            u = t / 0.52
+            color = tuple(round(top[i] * (1 - u) + mid[i] * u) for i in range(3))
+        else:
+            u = (t - 0.52) / 0.48
+            color = tuple(round(mid[i] * (1 - u) + bottom[i] * u) for i in range(3))
+        for x in range(w):
+            px[x, y] = color
+    return bg
+
+
+def compose_template_iphone(screenshot_path: Path) -> Image.Image:
+    if not IPHONE_FRAME_TEMPLATE.exists():
+        raise RuntimeError(f'Missing iPhone frame template at {IPHONE_FRAME_TEMPLATE}')
+
+    template_canvas = Image.open(IPHONE_FRAME_TEMPLATE).convert('RGBA')
+    device_box = (145, 530, 145 + 1030, 530 + 2190)
+    screen_box = (39, 42, 39 + 952, 42 + 2072)
+    device = template_canvas.crop(device_box)
+
+    shot = Image.open(screenshot_path).convert('RGB')
+    screen = fit_cover(shot, (952, 2072)).convert('RGBA')
+    mask = rounded_mask((952, 2072), 94)
+    device.paste(Image.new('RGBA', (952, 2072), (0, 0, 0, 255)), (39, 42), mask)
+    device.paste(screen, (39, 42), mask)
+    return device
+
+
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
+    if not frame_path.exists():
+        return compose_template_iphone(screenshot_path)
+
     frame = Image.open(frame_path).convert('RGBA')
     shot = Image.open(screenshot_path).convert('RGB')
     x0, y0, x1, y1 = find_screen_bbox(frame)
@@ -343,7 +409,14 @@ def build_continuous_strip(bg_img: Image.Image, panel_size: tuple[int, int], cou
 
 def source_path(spec: PlatformSpec, key: str) -> Path:
     if spec.name == 'iPhone':
-        return IPHONE_SOURCE / f'{key}{spec.source_ext}'
+        expected = IPHONE_SOURCE / f'{key}{spec.source_ext}'
+        if expected.exists():
+            return expected
+        if key in WEBSITE_SOURCE_NAMES:
+            fallback = WEBSITE_CAULDRON_SOURCE / WEBSITE_SOURCE_NAMES[key]
+            if fallback.exists():
+                return fallback
+        return expected
     if spec.name == 'iPad':
         return IPAD_SOURCE / f'{key}{spec.source_ext}'
     return MAC_SOURCE / f'{key}{spec.source_ext}'
@@ -353,7 +426,7 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
     out_dir = OUT_ROOT / spec.name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    bg = Image.open(spec.bg_path).convert('RGB')
+    bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
 
     mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' else None
@@ -404,9 +477,35 @@ def write_sequence_preview(platform: str) -> None:
 
 def main() -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    icon = Image.open(ICON_PATH).convert('RGBA')
+    icon_path = ICON_PATH
+    if not icon_path.exists():
+        icon_path = ROOT.parent / 'CauldronIcon.png'
+    icon = Image.open(icon_path).convert('RGBA')
 
     for spec in SPECS:
+        if spec.name == 'iPhone' and not IPHONE_SOURCE.exists():
+            spec = PlatformSpec(
+                name=spec.name,
+                canvas_size=spec.canvas_size,
+                top_area=spec.top_area,
+                bottom_area=spec.bottom_area,
+                side_margin=spec.side_margin,
+                title_size=spec.title_size,
+                body_size=spec.body_size,
+                text_left_margin=spec.text_left_margin,
+                icon_size_first=spec.icon_size_first,
+                bg_path=spec.bg_path,
+                frame_path=spec.frame_path,
+                screen_corner_radius=spec.screen_corner_radius,
+                source_ext=spec.source_ext,
+                shots=IPHONE_FALLBACK_SHOTS,
+            )
+
+        missing_sources = [source_path(spec, shot.key) for shot in spec.shots if not source_path(spec, shot.key).exists()]
+        if missing_sources:
+            print(f'skipping {spec.name}: missing {missing_sources[0]}')
+            continue
+
         render_platform(spec, icon)
         write_sequence_preview(spec.name)
 
