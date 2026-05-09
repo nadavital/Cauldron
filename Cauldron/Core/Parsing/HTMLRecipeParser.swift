@@ -49,10 +49,33 @@ actor HTMLRecipeParser: RecipeParser {
     }
 
     nonisolated private static func defaultHTMLFetcher(for url: URL) async throws -> String {
-        let (data, _) = try await URLSession.shared.data(from: url)
-        guard let html = String(data: data, encoding: .utf8) else {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                throw ParsingError.invalidSource
+            }
+
+            if let html = String(data: data, encoding: .utf8) {
+                return html
+            }
+
+            if let html = String(data: data, encoding: .isoLatin1) {
+                return html
+            }
+
             throw ParsingError.invalidSource
+        } catch let error as ParsingError {
+            throw error
+        } catch {
+            throw ParsingError.networkError(error)
         }
-        return html
     }
 }

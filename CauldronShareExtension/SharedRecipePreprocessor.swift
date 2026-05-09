@@ -25,7 +25,8 @@ enum SharedRecipePreprocessor {
             totalMinutes: extraction.totalMinutes,
             sourceURL: url.absoluteString,
             sourceTitle: extraction.pageTitle,
-            imageURL: extraction.imageURL?.absoluteString
+            imageURL: extraction.imageURL?.absoluteString,
+            tagNames: extraction.rawTagNames
         )
     }
 

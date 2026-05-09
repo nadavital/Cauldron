@@ -111,6 +111,25 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
+    func testPreloadText_SetsTextImportModeAndTrimsInput() async {
+        let (viewModel, _) = makeViewModel()
+
+        viewModel.preloadText("  Tomato Soup\n\nIngredients:\nTomatoes\n  ")
+
+        XCTAssertEqual(viewModel.importType, .text)
+        XCTAssertEqual(viewModel.textInput, "Tomato Soup\n\nIngredients:\nTomatoes")
+        XCTAssertTrue(viewModel.canImport)
+    }
+
+    func testPreloadText_IgnoresWhitespaceOnlyText() async {
+        let (viewModel, _) = makeViewModel()
+
+        viewModel.preloadText("    \n\t")
+
+        XCTAssertEqual(viewModel.importType, .url)
+        XCTAssertEqual(viewModel.textInput, "")
+    }
+
     func testCanImport_Image_NoSelection_ReturnsFalse() async {
         let (viewModel, _) = makeViewModel()
 

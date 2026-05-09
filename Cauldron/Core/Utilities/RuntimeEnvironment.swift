@@ -12,6 +12,10 @@ enum RuntimeEnvironment {
         ProcessInfo.processInfo.environment
     }
 
+    nonisolated private static var arguments: [String] {
+        ProcessInfo.processInfo.arguments
+    }
+
     nonisolated static var isRunningTests: Bool {
         return environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
     }
@@ -24,7 +28,16 @@ enum RuntimeEnvironment {
         environment["CAULDRON_DISABLE_CLOUDKIT"] == "1"
     }
 
+    nonisolated static var isSimulatorQAMode: Bool {
+        #if DEBUG
+        environment["CAULDRON_SIMULATOR_QA"] == "1" ||
+            arguments.contains("--cauldron-simulator-qa")
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var canUseCloudKit: Bool {
-        !isRunningTests && !isRunningCI && !isCloudKitForcedOff
+        !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }
 }

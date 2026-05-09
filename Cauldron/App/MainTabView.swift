@@ -40,6 +40,7 @@ struct MainTabView: View {
     private struct SharedImportRequest: Identifiable {
         let id = UUID()
         let initialURL: URL?
+        let initialText: String?
         let preparedRecipe: Recipe?
         let preparedSourceInfo: String?
     }
@@ -89,6 +90,7 @@ struct MainTabView: View {
             ImporterView(
                 dependencies: dependencies,
                 initialURL: request.initialURL,
+                initialText: request.initialText,
                 preparedRecipe: request.preparedRecipe,
                 preparedSourceInfo: request.preparedSourceInfo
             )
@@ -253,7 +255,6 @@ struct MainTabView: View {
                         CollectionsListView(dependencies: dependencies)
                     }
                 }
-                .defaultVisibility(.hidden, for: .sidebar)
             }
 
             if isRegularWidthLayout {
@@ -303,6 +304,12 @@ struct MainTabView: View {
             return
         }
 
+        if let pendingText = ShareExtensionImportStore.consumePendingRecipeText() {
+            AppLogger.general.info("📥 Consumed pending Share Extension text")
+            openImporter(withText: pendingText)
+            return
+        }
+
         guard let pendingURL = ShareExtensionImportStore.consumePendingRecipeURL() else {
             return
         }
@@ -328,6 +335,17 @@ struct MainTabView: View {
         selectedTab = .cook
         sharedImportRequest = SharedImportRequest(
             initialURL: url,
+            initialText: nil,
+            preparedRecipe: nil,
+            preparedSourceInfo: nil
+        )
+    }
+
+    private func openImporter(withText text: String) {
+        selectedTab = .cook
+        sharedImportRequest = SharedImportRequest(
+            initialURL: nil,
+            initialText: text,
             preparedRecipe: nil,
             preparedSourceInfo: nil
         )
@@ -337,6 +355,7 @@ struct MainTabView: View {
         selectedTab = .cook
         sharedImportRequest = SharedImportRequest(
             initialURL: nil,
+            initialText: nil,
             preparedRecipe: recipe,
             preparedSourceInfo: sourceInfo
         )

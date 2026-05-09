@@ -22,6 +22,7 @@ extension RecipeRepository {
         
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { model in
+                model.isPreview == false &&
                 model.title.localizedStandardContains(lowercaseTitle)
             },
             sortBy: [SortDescriptor(\.title)]
@@ -160,6 +161,9 @@ extension RecipeRepository {
     func fetchRecent(limit: Int = 10) async throws -> [Recipe] {
         let context = ModelContext(modelContainer)
         var descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.isPreview == false
+            },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
         descriptor.fetchLimit = limit

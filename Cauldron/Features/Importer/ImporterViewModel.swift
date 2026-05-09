@@ -55,6 +55,14 @@ import os
         urlString = url.absoluteString
     }
 
+    func preloadText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        importType = .text
+        textInput = trimmed
+    }
+
     func normalizedURLInput() -> URL? {
         let trimmedInput = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedInput.isEmpty else {

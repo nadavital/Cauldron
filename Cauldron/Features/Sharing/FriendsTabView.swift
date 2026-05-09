@@ -16,9 +16,11 @@ enum FriendsTabDestination: Hashable {
 
 /// Friends tab - showing shared recipes and connections
 struct FriendsTabView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Bindable private var viewModel = FriendsTabViewModel.shared
     @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
+    @State private var sidebarSelection: FriendsTabDestination?
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
     @State private var showingInviteSheet = false
@@ -31,7 +33,7 @@ struct FriendsTabView: View {
     }
 
     var body: some View {
-        compactView
+        contentView
         .sheet(isPresented: $showingProfileSheet) {
             NavigationStack {
                 if let user = userSession.currentUser {
@@ -78,6 +80,15 @@ struct FriendsTabView: View {
         }
     }
 
+    @ViewBuilder
+    private var contentView: some View {
+        if horizontalSizeClass == .regular {
+            regularView
+        } else {
+            compactView
+        }
+    }
+
     private var compactView: some View {
         NavigationStack(path: $navigationPath) {
             combinedFeedSection
@@ -93,6 +104,81 @@ struct FriendsTabView: View {
                     case .profile(let user):
                         UserProfileView(user: user, dependencies: dependencies)
                     }
+                }
+        }
+    }
+
+    private var regularView: some View {
+        NavigationSplitView {
+            List(selection: $sidebarSelection) {
+                Section("Friends") {
+                    Button {
+                        sidebarSelection = nil
+                    } label: {
+                        Label("Shared Recipes", systemImage: "book.fill")
+                    }
+
+                    NavigationLink(value: FriendsTabDestination.connections) {
+                        Label("Connections", systemImage: "person.2.fill")
+                    }
+
+                    Button {
+                        showingInviteSheet = true
+                    } label: {
+                        Label("Invite Friends", systemImage: "gift.fill")
+                    }
+
+                    Button {
+                        showingPeopleSearch = true
+                    } label: {
+                        Label("Find People", systemImage: "person.badge.plus")
+                    }
+                }
+            }
+            .navigationTitle("Friends")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if let user = userSession.currentUser {
+                        Button {
+                            sidebarSelection = .profile(user)
+                        } label: {
+                            ProfileAvatar(user: user, size: 32, dependencies: dependencies)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        } detail: {
+            NavigationStack(path: $navigationPath) {
+                regularDetailContent
+                    .navigationDestination(for: FriendsTabDestination.self) { destination in
+                        switch destination {
+                        case .connections:
+                            ConnectionsView(dependencies: dependencies)
+                        case .profile(let user):
+                            UserProfileView(user: user, dependencies: dependencies)
+                        }
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var regularDetailContent: some View {
+        switch sidebarSelection {
+        case .connections:
+            ConnectionsView(dependencies: dependencies)
+                .navigationTitle("Connections")
+        case .profile(let user):
+            UserProfileView(user: user, dependencies: dependencies)
+        case nil:
+            combinedFeedSection
+                .frame(maxWidth: 980, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .navigationTitle("Friends")
+                .toolbar { friendsToolbar }
+                .refreshable {
+                    await refreshFriendsContent()
                 }
         }
     }
@@ -134,15 +220,18 @@ struct FriendsTabView: View {
     }
 
     private func handleConnectionsNavigation() {
-        navigationPath = NavigationPath()
-        navigationPath.append(FriendsTabDestination.connections)
+        if horizontalSizeClass == .regular {
+            sidebarSelection = .connections
+        } else {
+            navigationPath = NavigationPath()
+            navigationPath.append(FriendsTabDestination.connections)
+        }
     }
 
     private func handleReferralProfileNavigation(userId: UUID) async {
         // First try local cache for immediate navigation.
         if let cachedUser = try? await dependencies.sharingRepository.fetchUser(id: userId) {
-            navigationPath = NavigationPath()
-            navigationPath.append(FriendsTabDestination.profile(cachedUser))
+            navigateToProfile(cachedUser)
             return
         }
 
@@ -150,8 +239,7 @@ struct FriendsTabView: View {
         do {
             if let cloudUser = try await dependencies.userCloudService.fetchUser(byUserId: userId) {
                 try? await dependencies.sharingRepository.save(cloudUser)
-                navigationPath = NavigationPath()
-                navigationPath.append(FriendsTabDestination.profile(cloudUser))
+                navigateToProfile(cloudUser)
                 return
             }
         } catch {
@@ -160,6 +248,15 @@ struct FriendsTabView: View {
 
         // If profile data isn't available yet, still open Connections.
         handleConnectionsNavigation()
+    }
+
+    private func navigateToProfile(_ user: User) {
+        if horizontalSizeClass == .regular {
+            sidebarSelection = .profile(user)
+        } else {
+            navigationPath = NavigationPath()
+            navigationPath.append(FriendsTabDestination.profile(user))
+        }
     }
 
     private var combinedFeedSection: some View {

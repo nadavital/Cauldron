@@ -401,6 +401,7 @@
 /* Begin PBXTargetDependency section */
 		AE678DB42EB9545C00786709 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = AE678D9E2EB9545B00786709 /* CauldronWidgetExtension */;
 			targetProxy = AE678DB32EB9545C00786709 /* PBXContainerItemProxy */;
 		};
@@ -411,6 +412,7 @@
 		};
 		B1A2B3C42F00000100AAA00A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = B1A2B3C42F00000100AAA007 /* CauldronShareExtension */;
 			targetProxy = B1A2B3C42F00000100AAA002 /* PBXContainerItemProxy */;
 		};

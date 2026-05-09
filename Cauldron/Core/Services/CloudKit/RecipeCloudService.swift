@@ -31,6 +31,10 @@ actor RecipeCloudService {
         self.core = core
     }
 
+    nonisolated static func privateRecipeRecordID(recordName: String, zoneID: CKRecordZone.ID) -> CKRecord.ID {
+        CKRecord.ID(recordName: recordName, zoneID: zoneID)
+    }
+
     // MARK: - Account Status (delegated to core)
 
     func checkAccountStatus() async -> CloudKitAccountStatus {
@@ -52,9 +56,9 @@ actor RecipeCloudService {
         // Create record ID in custom zone
         let recordID: CKRecord.ID
         if let cloudRecordName = recipe.cloudRecordName {
-            recordID = CKRecord.ID(recordName: cloudRecordName, zoneID: zoneID)
+            recordID = Self.privateRecipeRecordID(recordName: cloudRecordName, zoneID: zoneID)
         } else {
-            recordID = CKRecord.ID(recordName: recipe.id.uuidString, zoneID: zoneID)
+            recordID = Self.privateRecipeRecordID(recordName: recipe.id.uuidString, zoneID: zoneID)
         }
 
         let record = try await fetchOrCreateRecord(
@@ -137,7 +141,8 @@ actor RecipeCloudService {
             return
         }
 
-        let recordID = CKRecord.ID(recordName: cloudRecordName)
+        let zoneID = try await core.getCustomZoneID()
+        let recordID = Self.privateRecipeRecordID(recordName: cloudRecordName, zoneID: zoneID)
         let database = try await core.getPrivateDatabase()
 
         do {

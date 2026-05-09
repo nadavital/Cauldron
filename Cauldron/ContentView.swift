@@ -148,6 +148,12 @@ struct ContentView: View {
             // Step 1: Initialize user session (determines which view to show)
             await userSession.initialize(dependencies: dependencies)
 
+            #if DEBUG
+            if RuntimeEnvironment.isSimulatorQAMode {
+                await SimulatorQASeed.seedIfNeeded(dependencies: dependencies)
+            }
+            #endif
+
             // Step 2: Preload ALL recipe data BEFORE showing UI
             // This is the key to preventing empty state flash - we load everything
             // synchronously before setting isDataReady = true
@@ -461,7 +467,9 @@ struct ContentView: View {
                 for await (warmedUserId, image) in group {
                     if let image {
                         let cacheKey = ImageCache.profileImageKey(userId: warmedUserId)
-                        ImageCache.shared.set(cacheKey, image: image)
+                        await MainActor.run {
+                            ImageCache.shared.set(cacheKey, image: image)
+                        }
                     }
                 }
             }

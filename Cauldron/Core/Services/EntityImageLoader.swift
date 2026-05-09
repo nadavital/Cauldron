@@ -125,7 +125,8 @@ final class EntityImageLoader {
                 group.addTask {
                     let cacheKey = ImageCache.profileImageKey(userId: user.id)
 
-                    if !forceRefresh, ImageCache.shared.get(cacheKey) != nil {
+                    if !forceRefresh,
+                       await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
                         return (user.id, nil)
                     }
 
@@ -156,7 +157,9 @@ final class EntityImageLoader {
             for await (userId, image) in group {
                 if let image = image {
                     let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    ImageCache.shared.set(cacheKey, image: image)
+                    await MainActor.run {
+                        ImageCache.shared.set(cacheKey, image: image)
+                    }
                 }
             }
         }
@@ -181,7 +184,7 @@ final class EntityImageLoader {
                 let recipeId = sharedRecipe.recipe.id
                 group.addTask {
                     let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: "thumbnail")
-                    if ImageCache.shared.get(cacheKey) != nil {
+                    if await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
                         return (cacheKey, nil)
                     }
                     if let image = await ImageCache.shared.getFromDisk(cacheKey) {
@@ -199,7 +202,7 @@ final class EntityImageLoader {
                 let userId = sharedRecipe.sharedBy.id
                 group.addTask {
                     let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    if ImageCache.shared.get(cacheKey) != nil {
+                    if await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
                         return (cacheKey, nil)
                     }
                     if let image = await ImageCache.shared.getFromDisk(cacheKey) {
@@ -214,7 +217,9 @@ final class EntityImageLoader {
 
             for await (cacheKey, image) in group {
                 if let image = image {
-                    ImageCache.shared.set(cacheKey, image: image)
+                    await MainActor.run {
+                        ImageCache.shared.set(cacheKey, image: image)
+                    }
                 }
             }
         }

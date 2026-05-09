@@ -1,49 +1,8 @@
 # CauldronTests
 
-Comprehensive test suite for the Cauldron iOS app.
+Comprehensive test suite for the Cauldron app. The `CauldronTests` target is already part of the Xcode project and uses synchronized filesystem groups, so new files under `CauldronTests/` are discovered by the target.
 
-## Setup Instructions
-
-### 1. Add Test Target to Xcode
-
-Since the test files have been created, you need to add the test target to the Xcode project:
-
-1. Open **Cauldron.xcodeproj** in Xcode
-2. Go to **File > New > Target**
-3. Select **iOS > Test > Unit Testing Bundle**
-4. Click **Next**
-5. Set the following:
-   - **Product Name:** CauldronTests
-   - **Team:** (Your team)
-   - **Organization Identifier:** (Your org ID)
-   - **Project:** Cauldron
-   - **Target to be Tested:** Cauldron
-6. Click **Finish**
-
-### 2. Configure Test Target
-
-1. Select the **CauldronTests** target in project settings
-2. Go to **Build Phases**
-3. In **Dependencies**, ensure **Cauldron** is listed
-4. Go to **Build Settings**
-   - Set **iOS Deployment Target** to match main app (iOS 17.0+)
-   - Verify **TEST_HOST** is set to `$(BUILT_PRODUCTS_DIR)/Cauldron.app/$(BUNDLE_EXECUTABLE_PATH)`
-5. Go to **General**
-   - Set **Host Application** to **Cauldron**
-
-### 3. Add Test Files to Target
-
-The test files are already created in the `CauldronTests/` directory. You need to add them to the target:
-
-1. In Xcode, right-click the project navigator
-2. Select **Add Files to "Cauldron"...**
-3. Navigate to the `CauldronTests` folder
-4. Select the folder and click **Add**
-5. Make sure **CauldronTests** target is checked
-
-Alternatively, drag the files from Finder into the Xcode project navigator.
-
-### 4. Enable Code Coverage
+## Optional Code Coverage
 
 1. Edit the **Cauldron** scheme (Product > Scheme > Edit Scheme)
 2. Select **Test** in the sidebar
@@ -62,7 +21,9 @@ Alternatively, drag the files from Finder into the Xcode project navigator.
 xcodebuild test \
   -project Cauldron.xcodeproj \
   -scheme Cauldron \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO
 ```
 
 ### Run Specific Test Class
@@ -70,7 +31,9 @@ xcodebuild test \
 xcodebuild test \
   -project Cauldron.xcodeproj \
   -scheme Cauldron \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
   -only-testing:CauldronTests/SocialRecipeParserArchitectureTests
 ```
 
@@ -79,7 +42,9 @@ xcodebuild test \
 xcodebuild test \
   -project Cauldron.xcodeproj \
   -scheme Cauldron \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
   -only-testing:CauldronTests/SocialRecipeParserArchitectureTests/testSocialParserExists
 ```
 
@@ -110,12 +75,11 @@ xcodebuild test \
 
 ### 🔜 Next Steps
 
-1. **Add test target to Xcode** (follow instructions above)
-2. **Run tests and fix any compilation issues**
-3. **Write remaining Phase 1 tests:**
+1. **Run tests and fix any compilation issues**
+2. **Write remaining Phase 1 tests:**
    - QuantityParserTests (if separate component exists)
    - TimerExtractorTests
-4. **Move to Phase 2:** Repository tests with mocking
+3. **Move to Phase 2:** Repository tests with mocking
 
 ## Test Structure
 

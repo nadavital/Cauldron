@@ -7,6 +7,267 @@ const db = admin.firestore();
 
 // --- Utilities ---
 
+const MAX_TITLE_LENGTH = 160;
+const MAX_DISPLAY_NAME_LENGTH = 80;
+const MAX_TAG_COUNT = 20;
+const MAX_TAG_LENGTH = 48;
+const MAX_RECIPE_IDS_PER_COLLECTION = 200;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const usernamePattern = /^[A-Za-z0-9_]{3,20}$/;
+
+type ValidationResult<T> =
+    | { ok: true; value: T }
+    | { ok: false; error: string };
+
+type SanitizedRecipeShare = {
+    recipeId: string;
+    ownerId: string;
+    title: string;
+    imageURL: string | null;
+    ingredientCount: number;
+    totalMinutes: number | null;
+    tags: string[];
+};
+
+type SanitizedProfileShare = {
+    userId: string;
+    username: string;
+    displayName: string;
+    profileImageURL: string | null;
+    recipeCount: number;
+};
+
+type SanitizedCollectionShare = {
+    collectionId: string;
+    ownerId: string;
+    title: string;
+    coverImageURL: string | null;
+    recipeCount: number;
+    recipeIds: string[];
+};
+
+export function escapeHtml(value: unknown): string {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+export function safeImageURL(rawURL: unknown): string | null {
+    if (typeof rawURL !== "string") {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(rawURL);
+        return parsed.protocol === "https:" ? parsed.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
+export function isValidUUID(value: unknown): value is string {
+    return typeof value === "string" && uuidPattern.test(value);
+}
+
+function requiredBoundedString(value: unknown, field: string, maxLength: number): ValidationResult<string> {
+    if (typeof value !== "string") {
+        return { ok: false, error: `${field} must be a string` };
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return { ok: false, error: `${field} is required` };
+    }
+
+    if (trimmed.length > maxLength) {
+        return { ok: false, error: `${field} is too long` };
+    }
+
+    return { ok: true, value: trimmed };
+}
+
+function optionalNonNegativeInteger(value: unknown, fallback: number, max: number): number {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+        return fallback;
+    }
+
+    return Math.min(value, max);
+}
+
+function optionalPositiveInteger(value: unknown, max: number): number | null {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        return null;
+    }
+
+    return Math.min(value, max);
+}
+
+function sanitizedTagList(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const tags: string[] = [];
+
+    for (const item of value) {
+        if (typeof item !== "string") {
+            continue;
+        }
+
+        const trimmed = item.trim().slice(0, MAX_TAG_LENGTH);
+        const key = trimmed.toLocaleLowerCase();
+        if (!trimmed || seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        tags.push(trimmed);
+        if (tags.length >= MAX_TAG_COUNT) {
+            break;
+        }
+    }
+
+    return tags;
+}
+
+function sanitizedUUIDList(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const ids: string[] = [];
+
+    for (const item of value) {
+        if (!isValidUUID(item) || seen.has(item)) {
+            continue;
+        }
+
+        seen.add(item);
+        ids.push(item);
+        if (ids.length >= MAX_RECIPE_IDS_PER_COLLECTION) {
+            break;
+        }
+    }
+
+    return ids;
+}
+
+export function sanitizeRecipeShareInput(input: Record<string, unknown>): ValidationResult<SanitizedRecipeShare> {
+    if (!isValidUUID(input.recipeId)) {
+        return { ok: false, error: "recipeId must be a UUID" };
+    }
+    if (!isValidUUID(input.ownerId)) {
+        return { ok: false, error: "ownerId must be a UUID" };
+    }
+
+    const title = requiredBoundedString(input.title, "title", MAX_TITLE_LENGTH);
+    if (!title.ok) {
+        return title;
+    }
+
+    return {
+        ok: true,
+        value: {
+            recipeId: input.recipeId,
+            ownerId: input.ownerId,
+            title: title.value,
+            imageURL: safeImageURL(input.imageURL),
+            ingredientCount: optionalNonNegativeInteger(input.ingredientCount, 0, 500),
+            totalMinutes: optionalPositiveInteger(input.totalMinutes, 1440),
+            tags: sanitizedTagList(input.tags),
+        },
+    };
+}
+
+export function sanitizeProfileShareInput(input: Record<string, unknown>): ValidationResult<SanitizedProfileShare> {
+    if (!isValidUUID(input.userId)) {
+        return { ok: false, error: "userId must be a UUID" };
+    }
+    if (typeof input.username !== "string" || !usernamePattern.test(input.username)) {
+        return { ok: false, error: "username is invalid" };
+    }
+
+    const displayName = requiredBoundedString(
+        input.displayName || input.username,
+        "displayName",
+        MAX_DISPLAY_NAME_LENGTH
+    );
+    if (!displayName.ok) {
+        return displayName;
+    }
+
+    return {
+        ok: true,
+        value: {
+            userId: input.userId,
+            username: input.username.toLocaleLowerCase(),
+            displayName: displayName.value,
+            profileImageURL: safeImageURL(input.profileImageURL),
+            recipeCount: optionalNonNegativeInteger(input.recipeCount, 0, 10000),
+        },
+    };
+}
+
+export function sanitizeCollectionShareInput(input: Record<string, unknown>): ValidationResult<SanitizedCollectionShare> {
+    if (!isValidUUID(input.collectionId)) {
+        return { ok: false, error: "collectionId must be a UUID" };
+    }
+    if (!isValidUUID(input.ownerId)) {
+        return { ok: false, error: "ownerId must be a UUID" };
+    }
+
+    const title = requiredBoundedString(input.title, "title", MAX_TITLE_LENGTH);
+    if (!title.ok) {
+        return title;
+    }
+
+    const recipeIds = sanitizedUUIDList(input.recipeIds);
+
+    return {
+        ok: true,
+        value: {
+            collectionId: input.collectionId,
+            ownerId: input.ownerId,
+            title: title.value,
+            coverImageURL: safeImageURL(input.coverImageURL),
+            recipeCount: optionalNonNegativeInteger(input.recipeCount, recipeIds.length, 10000),
+            recipeIds,
+        },
+    };
+}
+
+async function rejectExistingIdentityMismatch(
+    collection: string,
+    shareId: string,
+    ownerId: string,
+    identityFields: Record<string, string>
+): Promise<boolean> {
+    const existing = await db.collection(collection).doc(shareId).get();
+    if (!existing.exists) {
+        return false;
+    }
+
+    const data = existing.data() ?? {};
+    const existingOwnerId = data.ownerId;
+    if (typeof existingOwnerId === "string" && existingOwnerId !== ownerId) {
+        return true;
+    }
+
+    return Object.entries(identityFields).some(([field, expectedValue]) => {
+        const existingValue = data[field];
+        return typeof existingValue === "string" && existingValue !== expectedValue;
+    });
+}
+
 // function generateShareId(): string {
 //     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
 //     let result = '';
@@ -44,30 +305,27 @@ export const shareRecipe = onRequest({ cors: true, invoker: 'public' }, async (r
     }
 
     try {
-        const {
-            recipeId,
-            ownerId,
-            title,
-            imageURL,
-            ingredientCount,
-            totalMinutes,
-            tags,
-        } = req.body;
+        const sanitized = sanitizeRecipeShareInput(req.body ?? {});
+        if (!sanitized.ok) {
+            res.status(400).json({ error: sanitized.error });
+            return;
+        }
+        const share = sanitized.value;
 
-        if (!recipeId || !ownerId || !title) {
-            res.status(400).json({ error: 'Missing required fields' });
+        const shareId = share.recipeId; // Use the recipe UUID as the share ID
+        if (await rejectExistingIdentityMismatch('shared_recipes', shareId, share.ownerId, { recipeId: share.recipeId })) {
+            res.status(403).json({ error: 'Owner mismatch for existing share' });
             return;
         }
 
-        const shareId = recipeId; // Use the recipe UUID as the share ID
         const shareData = {
-            recipeId,
-            ownerId,
-            title,
-            imageURL: imageURL || null,
-            ingredientCount: ingredientCount || 0,
-            totalMinutes: totalMinutes || null,
-            tags: tags || [],
+            recipeId: share.recipeId,
+            ownerId: share.ownerId,
+            title: share.title,
+            imageURL: share.imageURL,
+            ingredientCount: share.ingredientCount,
+            totalMinutes: share.totalMinutes,
+            tags: share.tags,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             // Don't overwrite viewCount if it exists
         };
@@ -100,27 +358,27 @@ export const shareProfile = onRequest({ cors: true, invoker: 'public' }, async (
     }
 
     try {
-        const {
-            userId,
-            username,
-            displayName,
-            profileImageURL,
-            recipeCount,
-        } = req.body;
+        const sanitized = sanitizeProfileShareInput(req.body ?? {});
+        if (!sanitized.ok) {
+            res.status(400).json({ error: sanitized.error });
+            return;
+        }
+        const share = sanitized.value;
 
-        if (!userId || !username) {
-            res.status(400).json({ error: 'Missing required fields' });
+        // Use username as the share ID for profiles
+        const shareId = share.username;
+        if (await rejectExistingIdentityMismatch('shared_profiles', shareId, share.userId, { userId: share.userId, username: share.username })) {
+            res.status(403).json({ error: 'Owner mismatch for existing share' });
             return;
         }
 
-        // Use username as the share ID for profiles
-        const shareId = username;
         const shareData = {
-            userId,
-            username,
-            displayName: displayName || username,
-            profileImageURL: profileImageURL || null,
-            recipeCount: recipeCount || 0,
+            userId: share.userId,
+            ownerId: share.userId,
+            username: share.username,
+            displayName: share.displayName,
+            profileImageURL: share.profileImageURL,
+            recipeCount: share.recipeCount,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             // Don't overwrite viewCount if it exists
         };
@@ -148,28 +406,26 @@ export const shareCollection = onRequest({ cors: true, invoker: 'public' }, asyn
     }
 
     try {
-        const {
-            collectionId,
-            ownerId,
-            title,
-            coverImageURL,
-            recipeCount,
-            recipeIds,
-        } = req.body;
+        const sanitized = sanitizeCollectionShareInput(req.body ?? {});
+        if (!sanitized.ok) {
+            res.status(400).json({ error: sanitized.error });
+            return;
+        }
+        const share = sanitized.value;
 
-        if (!collectionId || !ownerId || !title) {
-            res.status(400).json({ error: 'Missing required fields' });
+        const shareId = share.collectionId; // Use collection UUID
+        if (await rejectExistingIdentityMismatch('shared_collections', shareId, share.ownerId, { collectionId: share.collectionId })) {
+            res.status(403).json({ error: 'Owner mismatch for existing share' });
             return;
         }
 
-        const shareId = collectionId; // Use collection UUID
         const shareData = {
-            collectionId,
-            ownerId,
-            title,
-            coverImageURL: coverImageURL || null,
-            recipeCount: recipeCount || 0,
-            recipeIds: recipeIds || [],
+            collectionId: share.collectionId,
+            ownerId: share.ownerId,
+            title: share.title,
+            coverImageURL: share.coverImageURL,
+            recipeCount: share.recipeCount,
+            recipeIds: share.recipeIds,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             // Don't overwrite viewCount
         };
@@ -223,9 +479,11 @@ export const api = onRequest({ cors: true, invoker: 'public' }, async (req, res)
                 return;
             }
 
-            // Increment view count
-            await doc.ref.update({
+            // View counts are analytics only; keep import response latency independent from this write.
+            void doc.ref.update({
                 viewCount: admin.firestore.FieldValue.increment(1),
+            }).catch((error) => {
+                logger.warn('Failed to increment share view count:', error);
             });
 
             res.status(200).json({
@@ -260,7 +518,12 @@ export const api = onRequest({ cors: true, invoker: 'public' }, async (req, res)
 
 function generatePreviewHtml(title: string, description: string, imageURL: string | null, appURL: string, downloadURL: string): string {
     // Use default icon for meta tags if no specific image is available
-    const metaImageURL = imageURL || 'https://cauldron-f900a.web.app/icon-light.svg';
+    const safeTitle = escapeHtml(title);
+    const safeDescription = escapeHtml(description);
+    const safeAppURL = escapeHtml(appURL);
+    const safeDownloadURL = escapeHtml(downloadURL);
+    const metaImageURL = safeImageURL(imageURL) || 'https://cauldron-f900a.web.app/icon-light.svg';
+    const safeMetaImageURL = escapeHtml(metaImageURL);
 
     return `
 <!DOCTYPE html>
@@ -268,21 +531,21 @@ function generatePreviewHtml(title: string, description: string, imageURL: strin
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title} - Cauldron</title>
+    <title>${safeTitle} - Cauldron</title>
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="article">
-    <meta property="og:title" content="${title}">
-    <meta property="og:description" content="${description}">
-    <meta property="og:image" content="${metaImageURL}">
-    <meta property="og:url" content="${appURL}">
+    <meta property="og:title" content="${safeTitle}">
+    <meta property="og:description" content="${safeDescription}">
+    <meta property="og:image" content="${safeMetaImageURL}">
+    <meta property="og:url" content="${safeAppURL}">
     <meta property="og:site_name" content="Cauldron">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="${title}">
-    <meta name="twitter:description" content="${description}">
-    <meta name="twitter:image" content="${metaImageURL}">
+    <meta name="twitter:title" content="${safeTitle}">
+    <meta name="twitter:description" content="${safeDescription}">
+    <meta name="twitter:image" content="${safeMetaImageURL}">
     <meta name="twitter:app:name:iphone" content="Cauldron">
     <meta name="twitter:app:id:iphone" content="6468697878">
 
@@ -411,13 +674,13 @@ function generatePreviewHtml(title: string, description: string, imageURL: strin
     <div class="container">
         <div class="logo"></div>
         
-        ${imageURL ? `<img src="${imageURL}" alt="${title}" class="preview-image" onerror="this.style.display='none'">` : ''}
+        ${metaImageURL !== 'https://cauldron-f900a.web.app/icon-light.svg' ? `<img src="${safeMetaImageURL}" alt="${safeTitle}" class="preview-image" onerror="this.style.display='none'">` : ''}
         
-        <h1>${title}</h1>
-        <p class="description">${description}</p>
+        <h1>${safeTitle}</h1>
+        <p class="description">${safeDescription}</p>
         
-        <a href="${appURL}" class="button">Open in Cauldron</a>
-        <a href="${downloadURL}" class="button secondary">Download App</a>
+        <a href="${safeAppURL}" class="button">Open in Cauldron</a>
+        <a href="${safeDownloadURL}" class="button secondary">Download App</a>
     </div>
 </body>
 </html>
@@ -715,6 +978,7 @@ export const previewRecipe = onRequest({ cors: true, invoker: 'public' }, async 
         const appURL = `cauldron://import/recipe/${recipeId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
+        res.set("Cache-Control", "public, max-age=300, s-maxage=600");
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
         logger.error('Error loading recipe preview:', error);
@@ -753,6 +1017,7 @@ export const previewProfile = onRequest({ cors: true, invoker: 'public' }, async
         const appURL = `cauldron://import/profile/${shareId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
+        res.set("Cache-Control", "public, max-age=300, s-maxage=600");
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
         logger.error('Error loading profile preview:', error);
@@ -784,6 +1049,7 @@ export const previewCollection = onRequest({ cors: true, invoker: 'public' }, as
         const appURL = `cauldron://import/collection/${shareId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
+        res.set("Cache-Control", "public, max-age=300, s-maxage=600");
         res.send(generatePreviewHtml(title, description, imageURL, appURL, downloadURL));
     } catch (error) {
         logger.error('Error loading collection preview:', error);

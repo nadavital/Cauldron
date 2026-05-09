@@ -113,6 +113,7 @@ import os
             return
         }
 
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
         connectionState = connectionCoordinator.relationshipState(with: user.id)
     }
 

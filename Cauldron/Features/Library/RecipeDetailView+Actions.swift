@@ -742,11 +742,11 @@ extension RecipeDetailView {
                 return
             }
 
-            hasOwnedCopy = try await dependencies.recipeRepository.hasSimilarRecipe(
-                title: recipe.title,
-                ownerId: userId,
-                ingredientCount: recipe.ingredients.count
+            let sourceRecipeID = recipe.relatedGraphReferenceID
+            let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+                originalRecipeIds: [sourceRecipeID]
             )
+            hasOwnedCopy = ownedCopies.contains { $0.ownerId == userId }
             AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")
         } catch {
             AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")

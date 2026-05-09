@@ -84,7 +84,7 @@ extension RecipeRepository {
             await self.operationQueueService.markInProgress(operationId: recipeToSave.id)
 
             // Attempt sync
-            await self.syncRecipeToCloudKit(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            let didSyncPrivate = await self.syncRecipeToCloudKit(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Upload image to CloudKit if exists
             if recipeToSave.imageURL != nil {
@@ -92,13 +92,19 @@ extension RecipeRepository {
             }
 
             // If visibility is public, also copy to PUBLIC database for sharing
-            await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            let publicSyncResult = await self.syncRecipeToPublicDatabase(recipeToSave, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: recipeToSave.id,
-                entityType: .recipe
-            )
+            if didSyncPrivate, publicSyncResult.isSuccess {
+                await self.operationQueueService.markCompleted(
+                    entityId: recipeToSave.id,
+                    entityType: .recipe
+                )
+            } else {
+                await self.operationQueueService.markFailed(
+                    operationId: recipeToSave.id,
+                    error: "CloudKit sync incomplete for recipe create"
+                )
+            }
         }
     }
     
@@ -307,10 +313,10 @@ extension RecipeRepository {
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             // Sync recipe metadata to CloudKit FIRST (recipe record must exist before image can be attached)
-            await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            var didSyncPrivate = await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Sync to public database if needed
-            await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            var publicSyncResult = await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
             // Sync image changes only if not skipped (returns updated recipe with cloud metadata)
             if !skipImageSync {
@@ -322,19 +328,25 @@ extension RecipeRepository {
                 // If image metadata was updated, sync the updated recipe to CloudKit again
                 if let recipeWithImageMetadata = recipeWithImageMetadata,
                    recipeWithImageMetadata.cloudImageRecordName != recipe.cloudImageRecordName {
-                    await self.syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+                    didSyncPrivate = await self.syncRecipeToCloudKit(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
                     if recipeWithImageMetadata.visibility == .publicRecipe {
-                        await self.syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+                        publicSyncResult = await self.syncRecipeToPublicDatabase(recipeWithImageMetadata, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
                     }
                 }
             }
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: recipe.id,
-                entityType: .recipe
-            )
+            if didSyncPrivate, publicSyncResult.isSuccess {
+                await self.operationQueueService.markCompleted(
+                    entityId: recipe.id,
+                    entityType: .recipe
+                )
+            } else {
+                await self.operationQueueService.markFailed(
+                    operationId: recipe.id,
+                    error: "CloudKit sync incomplete for recipe update"
+                )
+            }
         }
     }
     
@@ -421,14 +433,20 @@ extension RecipeRepository {
             guard let self = self else { return }
 
             // Sync to CloudKit
-            await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
-            await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            let didSyncPrivate = await self.syncRecipeToCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            let publicSyncResult = await self.syncRecipeToPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: id,
-                entityType: .recipe
-            )
+            if didSyncPrivate, publicSyncResult.isSuccess {
+                await self.operationQueueService.markCompleted(
+                    entityId: id,
+                    entityType: .recipe
+                )
+            } else {
+                await self.operationQueueService.markFailed(
+                    operationId: id,
+                    error: "CloudKit sync incomplete for favorite update"
+                )
+            }
         }
     }
 
@@ -607,6 +625,7 @@ extension RecipeRepository {
             await self.operationQueueService.markInProgress(operationId: recipe.id)
 
             var privateDeleteSucceeded = true
+            var publicDeleteSucceeded = true
             // Delete image from CloudKit if exists
             // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
             if recipe.imageURL != nil && !recipe.isPreview {
@@ -638,7 +657,7 @@ extension RecipeRepository {
                 do {
                     try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
                 } catch {
-                    // Only mark failed if private also failed (public deletion is best-effort)
+                    publicDeleteSucceeded = false
                     if !privateDeleteSucceeded {
                         await self.operationQueueService.markFailed(
                             operationId: recipe.id,
@@ -648,11 +667,15 @@ extension RecipeRepository {
                 }
             }
 
-            // Only mark completed if at least private deletion succeeded
-            if privateDeleteSucceeded {
+            if privateDeleteSucceeded, publicDeleteSucceeded {
                 await self.operationQueueService.markCompleted(
                     entityId: recipe.id,
                     entityType: .recipe
+                )
+            } else if privateDeleteSucceeded {
+                await self.operationQueueService.markFailed(
+                    operationId: recipe.id,
+                    error: "Public DB deletion failed"
                 )
             }
         }

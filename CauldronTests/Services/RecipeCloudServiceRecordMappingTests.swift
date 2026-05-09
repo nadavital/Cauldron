@@ -9,6 +9,18 @@ import XCTest
 
 @MainActor
 final class RecipeCloudServiceRecordMappingTests: XCTestCase {
+    func testPrivateRecipeRecordIDUsesCustomZone() {
+        let zoneID = CKRecordZone.ID(zoneName: "CauldronCustomZone", ownerName: CKCurrentUserDefaultName)
+        let recordID = RecipeCloudService.privateRecipeRecordID(
+            recordName: "recipe-record",
+            zoneID: zoneID
+        )
+
+        XCTAssertEqual(recordID.recordName, "recipe-record")
+        XCTAssertEqual(recordID.zoneID.zoneName, "CauldronCustomZone")
+        XCTAssertEqual(recordID.zoneID.ownerName, CKCurrentUserDefaultName)
+    }
+
     func testPopulateAndDecodeRecipeRecordPreservesSourceLineageAndPreviewState() async throws {
         let service = RecipeCloudService(core: CloudKitCore())
         let ownerId = UUID()

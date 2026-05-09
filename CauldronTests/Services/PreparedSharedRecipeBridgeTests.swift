@@ -115,7 +115,8 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
             totalMinutes: 12,
             sourceURL: "https://example.com/pasta",
             sourceTitle: "Example Pasta",
-            imageURL: "https://example.com/pasta.jpg"
+            imageURL: "https://example.com/pasta.jpg",
+            tagNames: ["Dinner", "Pasta"]
         )
 
         let data = try JSONEncoder().encode(payload)
@@ -126,6 +127,7 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
         XCTAssertEqual(prepared?.recipe.steps.map(\.text), ["Boil pasta", "Stir in butter"])
         XCTAssertEqual(prepared?.recipe.totalMinutes, 12)
         XCTAssertEqual(prepared?.recipe.sourceURL?.absoluteString, "https://example.com/pasta")
+        XCTAssertEqual(prepared?.recipe.tags.map(\.name), ["Dinner", "Pasta"])
         XCTAssertEqual(prepared?.sourceInfo, "Imported from https://example.com/pasta")
     }
 

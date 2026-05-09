@@ -50,6 +50,60 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(results.map(\.id), [ownedRecipe.id])
     }
 
+    func testSearchByTitleExcludesPreviewRecipes() async throws {
+        let ownedRecipe = makeRecipe(
+            title: "Lemon Pasta",
+            tags: [],
+            ownerId: UUID(),
+            isPreview: false
+        )
+        let previewRecipe = makeRecipe(
+            title: "Lemon Pasta Preview",
+            tags: [],
+            ownerId: UUID(),
+            isPreview: true
+        )
+
+        try await repository.create(ownedRecipe, skipCloudSync: true)
+        try await repository.create(previewRecipe, skipCloudSync: true)
+
+        let results = try await repository.search(title: "Lemon")
+
+        XCTAssertEqual(results.map(\.id), [ownedRecipe.id])
+    }
+
+    func testFetchRecentExcludesPreviewRecipes() async throws {
+        let oldOwnedRecipe = makeRecipe(
+            title: "Old Soup",
+            ownerId: UUID(),
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let recentPreviewRecipe = makeRecipe(
+            title: "Recent Preview Soup",
+            ownerId: UUID(),
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            isPreview: true
+        )
+        let recentOwnedRecipe = makeRecipe(
+            title: "Recent Soup",
+            ownerId: UUID(),
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        try await repository.create(oldOwnedRecipe, skipCloudSync: true)
+        try await repository.create(recentPreviewRecipe, skipCloudSync: true)
+        try await repository.create(recentOwnedRecipe, skipCloudSync: true)
+
+        let results = try await repository.fetchRecent(limit: 10)
+
+        XCTAssertEqual(results.map(\.id), [recentOwnedRecipe.id, oldOwnedRecipe.id])
+    }
+
     func testFetchOwnedCopiesReturnsOnlyMatchingNonPreviewCopies() async throws {
         let sourceId = UUID()
         let otherSourceId = UUID()
@@ -79,6 +133,22 @@ final class RecipeRepositorySearchTests: XCTestCase {
         let results = try await repository.fetchOwnedCopies(originalRecipeIds: [sourceId])
 
         XCTAssertEqual(results.map(\.id), [matchingCopy.id])
+    }
+
+    func testFetchOwnedCopiesDoesNotTreatSameTitleAndIngredientCountAsSavedCopy() async throws {
+        let sourceId = UUID()
+        let unrelatedSameShape = makeRecipe(
+            title: "Saved Soup",
+            ownerId: UUID(),
+            originalRecipeId: UUID(),
+            isPreview: false
+        )
+
+        try await repository.create(unrelatedSameShape, skipCloudSync: true)
+
+        let results = try await repository.fetchOwnedCopies(originalRecipeIds: [sourceId])
+
+        XCTAssertTrue(results.isEmpty)
     }
 
     func testResolveLocalRelatedRecipesPrefersOwnedCopyOverPreview() async throws {
@@ -193,6 +263,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
         ownerId: UUID,
         originalRecipeId: UUID?,
         followsSourceUpdates: Bool? = nil,
+        updatedAt: Date = Date(),
         isPreview: Bool
     ) -> Recipe {
         let followsSourceUpdates = followsSourceUpdates ?? (originalRecipeId != nil)
@@ -206,6 +277,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
                 CookStep(index: 0, text: "Season.", timers: [])
             ],
             ownerId: ownerId,
+            updatedAt: updatedAt,
             originalRecipeId: originalRecipeId,
             savedAt: originalRecipeId == nil ? nil : Date(timeIntervalSince1970: 1_700_000_000),
             sourceRecipeUpdatedAt: originalRecipeId == nil ? nil : Date(timeIntervalSince1970: 1_700_000_100),

@@ -36,7 +36,7 @@ actor OperationQueueService {
         let env = ProcessInfo.processInfo.environment
         let isRunningTests = env["XCTestConfigurationFilePath"] != nil
         let isCI = env["CI"] == "true"
-        if isRunningTests || isCI {
+        if isRunningTests || isCI || RuntimeEnvironment.isSimulatorQAMode {
             // Keep queue persistence process-local in tests to avoid leaking operations
             // across test cases and causing nondeterministic retries.
             self.persistenceKey = "com.cauldron.operationQueue.operations.test.\(UUID().uuidString)"
@@ -50,7 +50,7 @@ actor OperationQueueService {
         }
         self.eventContinuation = continuation
 
-        if !RuntimeEnvironment.isRunningTests {
+        if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
             // Load persisted operations
             Task {
                 await self.loadPersistedOperations()

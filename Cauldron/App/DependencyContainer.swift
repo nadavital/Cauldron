@@ -22,6 +22,12 @@ import Combine
 @MainActor
 class DependencyContainer: ObservableObject {
     private static let sharedInstance: DependencyContainer = {
+        #if DEBUG
+        if RuntimeEnvironment.isSimulatorQAMode {
+            return DependencyContainer.preview()
+        }
+        #endif
+
         if RuntimeEnvironment.isRunningTests {
             return DependencyContainer.preview()
         }
@@ -251,7 +257,7 @@ class DependencyContainer: ObservableObject {
         // Note: lazy properties (imageSyncViewModel, operationQueueViewModel,
         // cookModeCoordinator, connectionManager) are initialized on first access
 
-        if !RuntimeEnvironment.isRunningTests {
+        if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
             // Start periodic sync after initialization
             self.recipeSyncService.startPeriodicSync()
 

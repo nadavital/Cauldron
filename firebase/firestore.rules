@@ -9,7 +9,7 @@ service cloud.firestore {
     // Shared Recipes
     match /shared_recipes/{shareId} {
       allow read: if true; // Publicly readable
-      allow create: if true; // Anyone can share (for now, ideally authenticated)
+      allow create: if false; // Writes must go through validated Cloud Functions
       allow update: if false; // Immutable once shared
       allow delete: if false;
     }
@@ -17,7 +17,7 @@ service cloud.firestore {
     // Shared Profiles
     match /shared_profiles/{shareId} {
       allow read: if true;
-      allow create: if true;
+      allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
@@ -25,7 +25,7 @@ service cloud.firestore {
     // Shared Collections
     match /shared_collections/{shareId} {
       allow read: if true;
-      allow create: if true;
+      allow create: if false;
       allow update: if false;
       allow delete: if false;
     }

@@ -14,6 +14,13 @@ import UIKit
 enum PublicRecipeSyncResult {
     case success
     case retryNeeded
+
+    nonisolated var isSuccess: Bool {
+        if case .success = self {
+            return true
+        }
+        return false
+    }
 }
 
 extension RecipeRepository {
@@ -49,11 +56,12 @@ extension RecipeRepository {
     /// Sync a recipe to CloudKit with proper error tracking
     /// Note: ALL recipes are synced to iCloud (including private ones) for backup/sync across devices.
     /// Visibility only controls who else can see the recipe, not whether it syncs.
-    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
+    @discardableResult
+    func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
         // Only sync if we have an owner ID and CloudKit is available
         guard let ownerId = recipe.ownerId else {
             logger.info("Skipping CloudKit sync - no owner ID for recipe: \(recipe.title)")
-            return
+            return true
         }
 
         // Check if CloudKit is available
@@ -61,7 +69,7 @@ extension RecipeRepository {
         guard isAvailable else {
             logger.warning("CloudKit not available - recipe will sync later: \(recipe.title)")
             pendingSyncRecipes.insert(recipe.id)
-            return
+            return false
         }
 
         // Sync ALL recipes to iCloud, regardless of visibility
@@ -73,30 +81,34 @@ extension RecipeRepository {
 
             // Remove from pending if it was there
             pendingSyncRecipes.remove(recipe.id)
+            return true
         } catch {
             logger.error("❌ CloudKit sync failed for recipe '\(recipe.title)': \(error.localizedDescription)")
 
             // Add to pending sync queue for retry
             pendingSyncRecipes.insert(recipe.id)
+            return false
         }
     }
     
     /// Delete a recipe from CloudKit with proper error handling
-    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
+    @discardableResult
+    func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete recipe from cloud: \(recipe.title)")
-            return
+            return false
         }
 
         do {
             logger.info("Deleting recipe from CloudKit: \(recipe.title)")
             try await recipeCloudService.deleteRecipe(recipe)
             logger.info("✅ Successfully deleted recipe from CloudKit: \(recipe.title)")
+            return true
         } catch {
             logger.error("❌ CloudKit deletion failed for recipe '\(recipe.title)': \(error.localizedDescription)")
-            // Note: We don't add to pending sync since the recipe is deleted locally
+            return false
         }
     }
     
@@ -120,12 +132,12 @@ extension RecipeRepository {
             }
 
             // If recipe was made private, delete from PUBLIC database (including image)
-            await deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+            let didDeletePublicRecipe = await deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
             // Delete image from public database
             if recipe.imageURL != nil {
                 await deleteRecipeImageFromPublic(recipe)
             }
-            return .success
+            return didDeletePublicRecipe ? .success : .retryNeeded
         }
 
         // Check if CloudKit is available
@@ -162,25 +174,28 @@ extension RecipeRepository {
     }
     
     /// Delete recipe from PUBLIC database
-    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async {
+    @discardableResult
+    func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot delete recipe from PUBLIC database: \(recipe.title)")
-            return
+            return false
         }
 
         guard recipe.ownerId != nil else {
             logger.warning("Cannot delete from PUBLIC database - missing ownerId: \(recipe.title)")
-            return
+            return true
         }
 
         do {
             logger.info("Deleting recipe from PUBLIC database: \(recipe.title)")
             try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
             logger.info("✅ Successfully deleted recipe from PUBLIC database")
+            return true
         } catch {
             logger.error("❌ PUBLIC database deletion failed for recipe '\(recipe.title)': \(error.localizedDescription)")
+            return false
         }
     }
     

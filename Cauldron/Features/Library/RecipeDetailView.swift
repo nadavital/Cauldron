@@ -186,6 +186,8 @@ struct RecipeDetailView: View {
         .padding(.horizontal, 20)
         .padding(.top, hasHeroImage ? 0 : 20)
         .padding(.bottom, 100)
+        .frame(maxWidth: 1_080, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     var body: some View {

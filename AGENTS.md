@@ -24,6 +24,8 @@ Guidance for coding agents working in this repository.
   - `xcodebuild test -scheme Cauldron -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO`
 - Mac Catalyst tests:
   - `xcodebuild test -scheme Cauldron -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac' -configuration Debug CODE_SIGNING_ALLOWED=NO`
+- Simulator QA mode:
+  - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
 
 ## Current Product Priorities
 - Maintain first-class iPad and Mac experiences (not only iPhone layouts)
@@ -58,7 +60,7 @@ Guidance for coding agents working in this repository.
 
 ## Platform Notes
 - Mac app path is Mac Catalyst-enabled in the main target.
-- Embedded iOS extensions are filtered for iOS-only embedding in project settings.
+- Embedded iOS extensions and their target dependencies are filtered for iOS-only builds in project settings.
 - ActivityKit/Live Activities are conditionally excluded from Mac Catalyst code paths.
 
 ## Working Norms

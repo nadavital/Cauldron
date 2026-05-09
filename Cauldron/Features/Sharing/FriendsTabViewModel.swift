@@ -50,6 +50,11 @@ final class FriendsTabViewModel {
             return
         }
 
+        if RuntimeEnvironment.isSimulatorQAMode {
+            await loadSimulatorQAContent(dependencies: dependencies)
+            return
+        }
+
         // On first load, try to use cached data for instant display
         if !hasLoadedOnce {
             if let cached = await dependencies.sharingService.getCachedSharedRecipes() {
@@ -128,6 +133,30 @@ final class FriendsTabViewModel {
             sharedCollections = Array(deduped.values).sorted { $0.updatedAt > $1.updatedAt }
         } catch {
             AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
+            sharedCollections = []
+        }
+    }
+
+    private func loadSimulatorQAContent(dependencies: DependencyContainer) async {
+        isLoading = true
+        defer {
+            isLoading = false
+            hasLoadedOnce = true
+        }
+
+        do {
+            sharedRecipes = try await dependencies.sharingRepository.fetchAllSharedRecipes()
+            sharedCollections = try await dependencies.collectionRepository.fetchAll()
+                .filter { $0.userId != CurrentUserSession.shared.currentUser?.id }
+                .sorted { $0.updatedAt > $1.updatedAt }
+            sharerTiers = Dictionary(
+                uniqueKeysWithValues: Set(sharedRecipes.map(\.sharedBy.id)).map { ($0, UserTier.apprentice) }
+            )
+            organizeRecipesIntoSections()
+            await preloadImagesForSharedRecipes()
+        } catch {
+            AppLogger.general.error("Failed to load simulator QA shared recipes: \(error.localizedDescription)")
+            sharedRecipes = []
             sharedCollections = []
         }
     }

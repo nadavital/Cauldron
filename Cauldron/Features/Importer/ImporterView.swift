@@ -19,6 +19,7 @@ struct ImporterView: View {
     @State private var showingOCRSourceDialog = false
     @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
     private let autoImportFromInitialURL: Bool
+    private let autoImportFromInitialText: Bool
     private let hasPreparedRecipe: Bool
 
     private struct PreviewContext: Identifiable {
@@ -30,6 +31,7 @@ struct ImporterView: View {
     init(
         dependencies: DependencyContainer,
         initialURL: URL? = nil,
+        initialText: String? = nil,
         preparedRecipe: Recipe? = nil,
         preparedSourceInfo: String? = nil
     ) {
@@ -37,10 +39,14 @@ struct ImporterView: View {
         if let initialURL {
             viewModel.preloadURL(initialURL)
         }
+        if let initialText {
+            viewModel.preloadText(initialText)
+        }
         if let preparedRecipe, let preparedSourceInfo {
             viewModel.preloadImportedRecipe(preparedRecipe, sourceInfo: preparedSourceInfo)
         }
         self.autoImportFromInitialURL = initialURL != nil
+        self.autoImportFromInitialText = initialText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         self.hasPreparedRecipe = preparedRecipe != nil
         _viewModel = State(initialValue: viewModel)
     }
@@ -168,7 +174,13 @@ struct ImporterView: View {
         if hasPreparedRecipe {
             return "Preparing shared recipe..."
         }
-        return autoImportFromInitialURL && viewModel.importType == .url ? "Importing shared link..." : "Importing..."
+        if autoImportFromInitialURL && viewModel.importType == .url {
+            return "Importing shared link..."
+        }
+        if autoImportFromInitialText && viewModel.importType == .text {
+            return "Importing shared text..."
+        }
+        return "Importing..."
     }
     
     private var headerSection: some View {
@@ -417,9 +429,8 @@ struct ImporterView: View {
             return
         }
 
-        guard autoImportFromInitialURL,
+        guard autoImportFromInitialURL || autoImportFromInitialText,
               !hasTriggeredAutoImport,
-              viewModel.importType == .url,
               viewModel.canImport else {
             return
         }

@@ -82,6 +82,13 @@ class CurrentUserSession: ObservableObject {
 
     /// Initialize user session on app launch
     func initialize(dependencies: DependencyContainer) async {
+        #if DEBUG
+        if RuntimeEnvironment.isSimulatorQAMode {
+            SimulatorQASeed.configureUserSession(self)
+            return
+        }
+        #endif
+
         ReferralManager.shared.configure(userCloudService: dependencies.userCloudService, connectionCloudService: dependencies.connectionCloudService)
 
         // Step 1: Check iCloud account status

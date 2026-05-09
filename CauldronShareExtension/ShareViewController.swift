@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 final class ShareViewController: UIViewController {
     private var hasProcessedShare = false
     private var sharedURL: URL?
+    private var sharedText: String?
     private var preparedPayload: PreparedShareRecipePayload?
     private var imageLoadTask: Task<Void, Never>?
     private var hasSavedPayload = false
@@ -245,29 +246,37 @@ final class ShareViewController: UIViewController {
     private func processSharedContent() async {
         setProcessingState(message: "Analyzing shared recipe...")
 
-        guard let url = await extractSharedURL() else {
-            setFailureState(message: "No webpage URL found in this share.")
-            return
-        }
-
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            setFailureState(message: "This link type is not supported.")
-            return
-        }
-
-        sharedURL = url
-
-        let payload = await SharedRecipePreprocessor.prepareRecipePayload(from: url)
-        preparedPayload = payload
-
-        await MainActor.run { [weak self] in
-            guard let self else { return }
-            if let payload {
-                self.setReadyState(with: payload, sourceURL: url)
-                self.loadPreviewImageIfAvailable(from: payload.imageURL)
-            } else {
-                self.setFallbackReadyState(sourceURL: url)
+        if let url = await extractSharedURL() {
+            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+                setFailureState(message: "This link type is not supported.")
+                return
             }
+
+            sharedURL = url
+
+            let payload = await SharedRecipePreprocessor.prepareRecipePayload(from: url)
+            preparedPayload = payload
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if let payload {
+                    self.setReadyState(with: payload, sourceURL: url)
+                    self.loadPreviewImageIfAvailable(from: payload.imageURL)
+                } else {
+                    self.setFallbackReadyState(sourceURL: url)
+                }
+            }
+            return
+        }
+
+        guard let text = await extractSharedText() else {
+            setFailureState(message: "No webpage URL or recipe text found in this share.")
+            return
+        }
+
+        sharedText = text
+        await MainActor.run { [weak self] in
+            self?.setTextReadyState(text: text)
         }
     }
 
@@ -289,6 +298,30 @@ final class ShareViewController: UIViewController {
                    let text = await loadText(from: provider),
                    let url = extractFirstURL(from: text) {
                     return url
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func extractSharedText() async -> String? {
+        guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+            return nil
+        }
+
+        for item in extensionItems {
+            guard let attachments = item.attachments else { continue }
+
+            for provider in attachments {
+                guard provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
+                      let text = await loadText(from: provider) else {
+                    continue
+                }
+
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
                 }
             }
         }
@@ -510,6 +543,27 @@ final class ShareViewController: UIViewController {
         primaryButton.configuration = primaryConfig
     }
 
+    private func setTextReadyState(text: String) {
+        activityIndicator.stopAnimating()
+        activityIndicator.isHidden = true
+
+        statusLabel.text = "Save this recipe text and Cauldron will finish import."
+        shouldPrimaryDismissOnTap = false
+
+        recipeTitleLabel.text = String(text.prefix(240))
+        recipeTitleLabel.isHidden = false
+        recipeMetaLabel.isHidden = true
+        recipeSourceLabel.text = "Source: shared text"
+        recipeSourceLabel.isHidden = false
+        previewImageView.isHidden = true
+
+        primaryButton.isEnabled = true
+        var primaryConfig = primaryButton.configuration
+        primaryConfig?.title = "Send Text to Cauldron"
+        primaryConfig?.showsActivityIndicator = false
+        primaryButton.configuration = primaryConfig
+    }
+
     private func setFailureState(message: String) {
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
@@ -538,17 +592,25 @@ final class ShareViewController: UIViewController {
             return
         }
 
-        guard let sharedURL else {
-            setFailureState(message: "Missing shared URL. Try sharing again.")
+        guard sharedURL != nil || sharedText != nil else {
+            setFailureState(message: "Missing shared content. Try sharing again.")
             return
         }
 
         setSavingState()
-        persistPendingURL(sharedURL)
+        if let sharedURL {
+            persistPendingURL(sharedURL)
+        }
 
         if let preparedPayload {
             persistPreparedRecipePayload(preparedPayload)
+            clearPendingText()
+        } else if let sharedText {
+            persistPendingText(sharedText)
+            clearPendingURL()
+            clearPreparedRecipePayload()
         } else {
+            clearPendingText()
             clearPreparedRecipePayload()
         }
 
@@ -559,6 +621,11 @@ final class ShareViewController: UIViewController {
     private func persistPendingURL(_ url: URL) {
         guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
         defaults.set(url.absoluteString, forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+    }
+
+    private func persistPendingText(_ text: String) {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        defaults.set(text, forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
     private func persistPreparedRecipePayload(_ payload: PreparedShareRecipePayload) {
@@ -573,6 +640,16 @@ final class ShareViewController: UIViewController {
     private func clearPreparedRecipePayload() {
         guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
         defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+    }
+
+    private func clearPendingURL() {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+    }
+
+    private func clearPendingText() {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
     private func completeRequest(after delay: TimeInterval) {

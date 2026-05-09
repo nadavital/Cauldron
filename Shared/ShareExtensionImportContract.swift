@@ -4,6 +4,7 @@ import Foundation
 enum ShareExtensionImportContract {
     static let appGroupID = "group.Nadav.Cauldron"
     static let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
+    static let pendingRecipeTextKey = "shareExtension.pendingRecipeText"
     static let preparedRecipePayloadKey = "shareExtension.preparedRecipePayload"
 }
 
@@ -17,6 +18,7 @@ struct PreparedShareRecipePayload: Codable, Sendable {
     let sourceURL: String?
     let sourceTitle: String?
     let imageURL: String?
+    let tagNames: [String]
 
     private enum CodingKeys: String, CodingKey {
         case title
@@ -27,6 +29,7 @@ struct PreparedShareRecipePayload: Codable, Sendable {
         case sourceURL
         case sourceTitle
         case imageURL
+        case tagNames
     }
 
     nonisolated init(
@@ -37,7 +40,8 @@ struct PreparedShareRecipePayload: Codable, Sendable {
         totalMinutes: Int? = nil,
         sourceURL: String? = nil,
         sourceTitle: String? = nil,
-        imageURL: String? = nil
+        imageURL: String? = nil,
+        tagNames: [String] = []
     ) {
         self.title = title
         self.ingredients = ingredients
@@ -47,6 +51,7 @@ struct PreparedShareRecipePayload: Codable, Sendable {
         self.sourceURL = sourceURL
         self.sourceTitle = sourceTitle
         self.imageURL = imageURL
+        self.tagNames = tagNames
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -59,6 +64,7 @@ struct PreparedShareRecipePayload: Codable, Sendable {
         self.sourceURL = try container.decodeIfPresent(String.self, forKey: .sourceURL)
         self.sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
         self.imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
+        self.tagNames = try container.decodeIfPresent([String].self, forKey: .tagNames) ?? []
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -71,5 +77,8 @@ struct PreparedShareRecipePayload: Codable, Sendable {
         try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
         try container.encodeIfPresent(sourceTitle, forKey: .sourceTitle)
         try container.encodeIfPresent(imageURL, forKey: .imageURL)
+        if !tagNames.isEmpty {
+            try container.encode(tagNames, forKey: .tagNames)
+        }
     }
 }

@@ -46,7 +46,7 @@ actor CollectionRepository {
             setupRecipeVisibilityObserver()
         }
 
-        if !RuntimeEnvironment.isRunningTests {
+        if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
             // Start retry mechanism for failed syncs after actor initialization completes
             Task {
                 await self.startSyncRetryTask()

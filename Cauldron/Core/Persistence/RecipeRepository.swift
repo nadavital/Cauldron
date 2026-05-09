@@ -53,7 +53,7 @@ actor RecipeRepository {
         self.operationQueueService = operationQueueService
         self.externalShareService = externalShareService
 
-        if !RuntimeEnvironment.isRunningTests {
+        if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
             // Start retry mechanism for failed syncs
             Task {
                 await self.startSyncRetryTask()

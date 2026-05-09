@@ -131,15 +131,15 @@ class ImageCache {
         remove(keys: trackedKeysSnapshot().filter { $0.hasPrefix("recipe_") || $0.hasPrefix("image_") })
     }
 
-    static func profileImageKey(userId: UUID) -> String {
+    nonisolated static func profileImageKey(userId: UUID) -> String {
         "profile_\(userId.uuidString)"
     }
 
-    static func recipeImageKey(recipeId: UUID, variant: String = "default") -> String {
+    nonisolated static func recipeImageKey(recipeId: UUID, variant: String = "default") -> String {
         "recipe_\(recipeId.uuidString)_\(variant)"
     }
 
-    static func collectionImageKey(collectionId: UUID) -> String {
+    nonisolated static func collectionImageKey(collectionId: UUID) -> String {
         "collection_\(collectionId.uuidString)"
     }
 

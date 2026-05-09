@@ -134,29 +134,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     /// Check if URL is an external share link (from Firebase)
     private func isExternalShareURL(_ url: URL) -> Bool {
-        // Check for Firebase hosting domain pattern
-        guard let host = url.host else { return false }
-
-        // Check for Firebase domains
-        if host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app" {
-            // Continue to check path
-        } else {
-            return false
-        }
-
-        // Check if path matches share URL pattern: /recipe/*, /profile/*, /collection/*
-        let pathComponents = url.pathComponents
-        guard pathComponents.count >= 3 else { return false }
-
-        let shareTypes = ["recipe", "profile", "collection"]
-        return shareTypes.contains(pathComponents[1])
+        ExternalShareURLClassifier.isExternalShareURL(url)
     }
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        if RuntimeEnvironment.isRunningTests {
+        if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isSimulatorQAMode {
             return true
         }
 
@@ -568,23 +553,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
 
     /// Check if URL is an external share link (from Firebase)
     private func isExternalShareURL(_ url: URL) -> Bool {
-        // Check for Firebase hosting domain pattern
-        // Matches: *.web.app, *.firebaseapp.com, or custom domain like cauldron.app
-        guard let host = url.host else { return false }
-        
-        // Check for Firebase domains
-        if host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app" {
-            // Continue to check path
-        } else {
-            return false
-        }
-
-        // Check if path matches share URL pattern: /recipe/*, /profile/*, /collection/*
-        let pathComponents = url.pathComponents
-        guard pathComponents.count >= 3 else { return false }
-
-        let shareTypes = ["recipe", "profile", "collection"]
-        return shareTypes.contains(pathComponents[1])
+        ExternalShareURLClassifier.isExternalShareURL(url)
     }
 
     private func handleURL(_ url: URL) {

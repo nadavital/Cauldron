@@ -9,7 +9,11 @@ import Foundation
 
 enum ShareExtensionImportStore {
     static func pendingRecipeURL() -> URL? {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
+        pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func pendingRecipeURL(in defaults: UserDefaults?) -> URL? {
+        guard let defaults,
               let urlString = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) else {
             return nil
         }
@@ -17,8 +21,12 @@ enum ShareExtensionImportStore {
     }
 
     static func consumePendingRecipeURL() -> URL? {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
-              let url = pendingRecipeURL() else {
+        consumePendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func consumePendingRecipeURL(in defaults: UserDefaults?) -> URL? {
+        guard let defaults,
+              let url = pendingRecipeURL(in: defaults) else {
             return nil
         }
 
@@ -26,8 +34,26 @@ enum ShareExtensionImportStore {
         return url
     }
 
+    static func consumePendingRecipeText() -> String? {
+        consumePendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func consumePendingRecipeText(in defaults: UserDefaults?) -> String? {
+        guard let defaults,
+              let text = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) else {
+            return nil
+        }
+
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+        return text
+    }
+
     static func consumePreparedRecipe() -> PreparedSharedRecipe? {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
+        consumePreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func consumePreparedRecipe(in defaults: UserDefaults?) -> PreparedSharedRecipe? {
+        guard let defaults,
               let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
             return nil
         }
@@ -40,6 +66,7 @@ enum ShareExtensionImportStore {
         defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
         // Prepared payload supersedes a plain pending URL.
         defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
         return preparedRecipe
     }
 
@@ -200,6 +227,10 @@ extension PreparedShareRecipePayload {
         let stepModels = cleanedSteps.enumerated().map { index, text in
             CookStep(index: index, text: text)
         }
+        let tags = tagNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { Tag(name: $0) }
         let resolvedYields: String = {
             guard let yields else { return "4 servings" }
             let cleaned = yields.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -212,6 +243,7 @@ extension PreparedShareRecipePayload {
             steps: stepModels,
             yields: resolvedYields,
             totalMinutes: totalMinutes,
+            tags: tags,
             sourceURL: parsedSourceURL,
             sourceTitle: sourceTitle,
             imageURL: parsedImageURL
