@@ -106,7 +106,8 @@ import os
             // Load user's own recipes
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                 try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
+                currentUserId: CurrentUserSession.shared.userId,
+                hidingRelatedRecipeReferences: true
             )
 
             // Group recipes by tags (using own recipes for category browsing)
@@ -383,7 +384,8 @@ import os
         do {
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                 try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
+                currentUserId: CurrentUserSession.shared.userId,
+                hidingRelatedRecipeReferences: true
             )
             groupRecipesByTags()
             scheduleRecipeSearchResultsRebuild(

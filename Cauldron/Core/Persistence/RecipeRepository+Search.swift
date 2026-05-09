@@ -71,6 +71,55 @@ extension RecipeRepository {
         }
     }
 
+    /// Resolve related recipe references against local storage, preferring real
+    /// library recipes over temporary preview records.
+    func resolveLocalRelatedRecipes(
+        referenceIds: [UUID],
+        includePreviews: Bool
+    ) async throws -> (recipes: [Recipe], missingIds: [UUID]) {
+        guard !referenceIds.isEmpty else {
+            return ([], [])
+        }
+
+        let directMatches = try await fetch(ids: referenceIds)
+        let directMatchesById = Dictionary(uniqueKeysWithValues: directMatches.map { ($0.id, $0) })
+
+        let missingNonPreviewIds = referenceIds.filter { referenceId in
+            guard let directMatch = directMatchesById[referenceId] else {
+                return true
+            }
+
+            return directMatch.isPreview
+        }
+
+        let ownedCopies = try await fetchOwnedCopies(originalRecipeIds: missingNonPreviewIds)
+        var ownedCopiesByOriginalId: [UUID: Recipe] = [:]
+        for ownedCopy in ownedCopies {
+            guard let originalRecipeId = ownedCopy.originalRecipeId else {
+                continue
+            }
+
+            ownedCopiesByOriginalId[originalRecipeId] = ownedCopiesByOriginalId[originalRecipeId] ?? ownedCopy
+        }
+
+        var resolvedRecipes: [Recipe] = []
+        var missingIds: [UUID] = []
+
+        for referenceId in referenceIds {
+            if let directMatch = directMatchesById[referenceId], !directMatch.isPreview {
+                resolvedRecipes.append(directMatch)
+            } else if let ownedCopy = ownedCopiesByOriginalId[referenceId] {
+                resolvedRecipes.append(ownedCopy)
+            } else if includePreviews, let preview = directMatchesById[referenceId] {
+                resolvedRecipes.append(preview)
+            } else {
+                missingIds.append(referenceId)
+            }
+        }
+
+        return (resolvedRecipes, missingIds)
+    }
+
     /// Remove impossible self-saved copies created when a user saves their own
     /// public recipe. The source recipe remains intact.
     func removeSelfSavedRecipeCopies(currentUserId: UUID) async throws -> Int {

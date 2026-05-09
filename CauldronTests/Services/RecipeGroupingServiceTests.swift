@@ -78,6 +78,111 @@ final class RecipeGroupingServiceTests: XCTestCase {
         XCTAssertEqual(recipes.map(\.id), [forkId])
     }
 
+    func testDeduplicateLocalLibraryRecipes_CanHideRelatedReferenceRecipes() {
+        let currentUserId = UUID()
+        let parentId = UUID()
+        let relatedId = UUID()
+        let parent = makeRecipe(
+            id: parentId,
+            title: "Pasta Dinner",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["pasta"],
+            relatedRecipeIds: [relatedId]
+        )
+        let related = makeRecipe(
+            id: relatedId,
+            title: "Tomato Sauce",
+            ownerId: currentUserId,
+            tags: ["Sauce"],
+            ingredients: ["tomato"]
+        )
+
+        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            [related, parent],
+            currentUserId: currentUserId,
+            hidingRelatedRecipeReferences: true
+        )
+
+        XCTAssertEqual(recipes.map(\.id), [parentId])
+    }
+
+    func testHideRelatedRecipeReferences_UsesCanonicalSourceIdForOwnedCopies() {
+        let currentUserId = UUID()
+        let canonicalRelatedId = UUID()
+        let ownedCopyId = UUID()
+        let parent = makeRecipe(
+            title: "Dinner Plate",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["rice"],
+            relatedRecipeIds: [canonicalRelatedId]
+        )
+        let ownedRelatedCopy = makeRecipe(
+            id: ownedCopyId,
+            title: "Saved Sauce",
+            ownerId: currentUserId,
+            tags: ["Sauce"],
+            ingredients: ["tomato"],
+            originalRecipeId: canonicalRelatedId
+        )
+
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences([ownedRelatedCopy, parent])
+
+        XCTAssertEqual(recipes.map(\.id), [parent.id])
+    }
+
+    func testHideRelatedRecipeReferences_UsesLocalCopyIdForRemappedRelatedIds() {
+        let currentUserId = UUID()
+        let canonicalRelatedId = UUID()
+        let ownedCopyId = UUID()
+        let parent = makeRecipe(
+            title: "Dinner Plate",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["rice"],
+            relatedRecipeIds: [ownedCopyId]
+        )
+        let ownedRelatedCopy = makeRecipe(
+            id: ownedCopyId,
+            title: "Saved Sauce",
+            ownerId: currentUserId,
+            tags: ["Sauce"],
+            ingredients: ["tomato"],
+            originalRecipeId: canonicalRelatedId
+        )
+
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences([ownedRelatedCopy, parent])
+
+        XCTAssertEqual(recipes.map(\.id), [parent.id])
+    }
+
+    func testHideRelatedRecipeReferences_DoesNotReturnEmptyLibraryForCycles() {
+        let currentUserId = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        let first = makeRecipe(
+            id: firstId,
+            title: "First",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["rice"],
+            relatedRecipeIds: [secondId]
+        )
+        let second = makeRecipe(
+            id: secondId,
+            title: "Second",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["beans"],
+            relatedRecipeIds: [firstId]
+        )
+
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences([first, second])
+
+        XCTAssertEqual(Set(recipes.map(\.id)), Set([firstId, secondId]))
+    }
+
     func testGroupAndRankRecipes_PrioritizesExactTitleMatch() {
         let currentUserId = UUID()
         let owner1 = UUID()
@@ -364,7 +469,8 @@ final class RecipeGroupingServiceTests: XCTestCase {
         originalRecipeId: UUID? = nil,
         followsSourceUpdates: Bool? = nil,
         savedAt: Date? = nil,
-        sourceRecipeUpdatedAt: Date? = nil
+        sourceRecipeUpdatedAt: Date? = nil,
+        relatedRecipeIds: [UUID] = []
     ) -> Recipe {
         let isFollowingCopy = followsSourceUpdates ?? (originalRecipeId != nil)
         return Recipe(
@@ -379,7 +485,8 @@ final class RecipeGroupingServiceTests: XCTestCase {
             originalRecipeId: originalRecipeId,
             savedAt: originalRecipeId == nil ? savedAt : (savedAt ?? Date(timeIntervalSince1970: 1_700_000_000)),
             sourceRecipeUpdatedAt: originalRecipeId == nil ? sourceRecipeUpdatedAt : (sourceRecipeUpdatedAt ?? Date(timeIntervalSince1970: 1_700_000_100)),
-            followsSourceUpdates: isFollowingCopy
+            followsSourceUpdates: isFollowingCopy,
+            relatedRecipeIds: relatedRecipeIds
         )
     }
 }

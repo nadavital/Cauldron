@@ -282,9 +282,8 @@ import os
             partialResult[recipe.id] = recipe.imageURL
         }
 
-        let referencedIds = Set(recipes.flatMap { $0.relatedRecipeIds })
-        let filteredRecipes = recipes.filter { !referencedIds.contains($0.id) }
-        AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) recipes (removed \(referencedIds.count) referenced recipes)")
+        let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(recipes)
+        AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) visible profile recipes")
 
         // Convert to SharedRecipe
         let sharedRecipes = filteredRecipes.map { recipe in

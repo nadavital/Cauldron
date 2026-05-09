@@ -238,28 +238,11 @@ struct NutritionInput {
         Task {
             if !recipe.relatedRecipeIds.isEmpty {
                 do {
-                    let directMatches = try await dependencies.recipeRepository.fetch(ids: recipe.relatedRecipeIds)
-                    let directMatchIDs = Set(directMatches.map(\.id))
-                    let missingCanonicalIDs = recipe.relatedRecipeIds.filter { !directMatchIDs.contains($0) }
-
-                    var resolvedRelated = directMatches
-                    if !missingCanonicalIDs.isEmpty {
-                        let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
-                            originalRecipeIds: missingCanonicalIDs
-                        )
-                        var ownedCopiesByOriginalID: [UUID: Recipe] = [:]
-                        for ownedCopy in ownedCopies {
-                            if let originalRecipeId = ownedCopy.originalRecipeId {
-                                ownedCopiesByOriginalID[originalRecipeId] = ownedCopiesByOriginalID[originalRecipeId] ?? ownedCopy
-                            }
-                        }
-
-                        for canonicalID in missingCanonicalIDs {
-                            if let ownedCopy = ownedCopiesByOriginalID[canonicalID] {
-                                resolvedRelated.append(ownedCopy)
-                            }
-                        }
-                    }
+                    let localResolution = try await dependencies.recipeRepository.resolveLocalRelatedRecipes(
+                        referenceIds: recipe.relatedRecipeIds,
+                        includePreviews: true
+                    )
+                    let resolvedRelated = localResolution.recipes
 
                     await MainActor.run {
                         self.relatedRecipes = resolvedRelated

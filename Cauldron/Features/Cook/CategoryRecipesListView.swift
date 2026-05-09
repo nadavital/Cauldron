@@ -59,7 +59,8 @@ struct CategoryRecipesListView: View {
                     let allRecipes = try await dependencies.recipeRepository.fetchAll()
                     let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                         allRecipes,
-                        currentUserId: CurrentUserSession.shared.userId
+                        currentUserId: CurrentUserSession.shared.userId,
+                        hidingRelatedRecipeReferences: true
                     )
                     localRecipes = recipes.filter { recipe in
                         recipe.tags.contains(where: { $0.name == categoryName })

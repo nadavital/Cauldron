@@ -323,7 +323,8 @@ struct AllRecipesListView: View {
                 let recipes = try await dependencies.recipeRepository.fetchAll()
                 localRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                     recipes,
-                    currentUserId: CurrentUserSession.shared.userId
+                    currentUserId: CurrentUserSession.shared.userId,
+                    hidingRelatedRecipeReferences: true
                 )
             } catch {
                 AppLogger.general.error("Failed to refresh recipes: \(error.localizedDescription)")

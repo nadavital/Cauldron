@@ -81,6 +81,55 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(results.map(\.id), [matchingCopy.id])
     }
 
+    func testResolveLocalRelatedRecipesPrefersOwnedCopyOverPreview() async throws {
+        let sourceId = UUID()
+        let preview = makeRecipe(
+            id: sourceId,
+            title: "Preview Sauce",
+            ownerId: UUID(),
+            originalRecipeId: nil,
+            isPreview: true
+        )
+        let ownedCopy = makeRecipe(
+            title: "Saved Sauce",
+            ownerId: UUID(),
+            originalRecipeId: sourceId,
+            isPreview: false
+        )
+
+        try await repository.create(preview, skipCloudSync: true)
+        try await repository.create(ownedCopy, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: true
+        )
+
+        XCTAssertEqual(resolution.recipes.map(\.id), [ownedCopy.id])
+        XCTAssertTrue(resolution.missingIds.isEmpty)
+    }
+
+    func testResolveLocalRelatedRecipesCanTreatPreviewAsMissing() async throws {
+        let sourceId = UUID()
+        let preview = makeRecipe(
+            id: sourceId,
+            title: "Preview Sauce",
+            ownerId: UUID(),
+            originalRecipeId: nil,
+            isPreview: true
+        )
+
+        try await repository.create(preview, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: false
+        )
+
+        XCTAssertTrue(resolution.recipes.isEmpty)
+        XCTAssertEqual(resolution.missingIds, [sourceId])
+    }
+
     func testRemoveSelfSavedRecipeCopiesDeletesFollowingCopyOfOwnedOriginal() async throws {
         let currentUserId = UUID()
         let sourceId = UUID()

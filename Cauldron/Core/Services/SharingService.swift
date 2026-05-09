@@ -163,8 +163,7 @@ actor SharingService {
 
             // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
             // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
-            let referencedIds = Set(friendsPublicRecipes.flatMap { $0.relatedRecipeIds })
-            let filteredRecipes = friendsPublicRecipes.filter { !referencedIds.contains($0.id) }
+            let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(friendsPublicRecipes)
 
             // Batch fetch all owners at once to avoid N+1 queries
             let ownerIds = Set(filteredRecipes.compactMap { $0.ownerId })

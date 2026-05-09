@@ -28,9 +28,14 @@ enum RecipeGroupingService {
     /// recipe and a following copy of that same source.
     nonisolated static func deduplicateLocalLibraryRecipes(
         _ recipes: [Recipe],
-        currentUserId: UUID?
+        currentUserId: UUID?,
+        hidingRelatedRecipeReferences: Bool = false
     ) -> [Recipe] {
-        guard let currentUserId else { return recipes }
+        let deduplicatedRecipes: [Recipe]
+        guard let currentUserId else {
+            deduplicatedRecipes = recipes
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+        }
 
         let ownedOriginalRecipeIds = Set(
             recipes
@@ -40,10 +45,12 @@ enum RecipeGroupingService {
                 .map(\.id)
         )
 
-        guard !ownedOriginalRecipeIds.isEmpty else { return recipes }
+        guard !ownedOriginalRecipeIds.isEmpty else {
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(recipes) : recipes
+        }
 
         var seenFollowingSourceIds = Set<UUID>()
-        return recipes.filter { recipe in
+        deduplicatedRecipes = recipes.filter { recipe in
             guard recipe.ownerId == currentUserId,
                   recipe.isFollowingSourceUpdates,
                   let originalRecipeId = recipe.originalRecipeId else {
@@ -56,6 +63,21 @@ enum RecipeGroupingService {
 
             return seenFollowingSourceIds.insert(originalRecipeId).inserted
         }
+
+        return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+    }
+
+    /// Hide recipes that are only displayed as related children of another recipe.
+    nonisolated static func hideRelatedRecipeReferences(_ recipes: [Recipe]) -> [Recipe] {
+        let referencedIds = Set(recipes.flatMap(\.relatedRecipeIds))
+        guard !referencedIds.isEmpty else { return recipes }
+
+        let visibleRecipes = recipes.filter { recipe in
+            !referencedIds.contains(recipe.id) && !referencedIds.contains(recipe.relatedGraphReferenceID)
+        }
+
+        // Avoid an empty library if legacy/cyclic data references every recipe.
+        return visibleRecipes.isEmpty ? recipes : visibleRecipes
     }
 
     nonisolated static func matchesSearchFilters(

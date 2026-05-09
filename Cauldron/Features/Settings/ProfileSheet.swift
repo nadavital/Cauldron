@@ -489,7 +489,8 @@ struct ProfileSheet: View {
             // Load recipe count
             let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                 try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
+                currentUserId: CurrentUserSession.shared.userId,
+                hidingRelatedRecipeReferences: true
             )
             recipeCount = recipes.count
             tierManager.updateRecipeCount(recipeCount)

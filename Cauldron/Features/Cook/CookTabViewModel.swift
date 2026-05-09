@@ -165,17 +165,18 @@ private struct CookTabDerivedSections {
         // If we have preloaded data from ContentView, use it immediately to populate arrays
         // BEFORE the view body renders. This ensures the view never sees empty arrays.
         if let preloadedData = preloadedData {
-            let preloadedRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+            let preloadedLibraryRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                 preloadedData.allRecipes,
                 currentUserId: CurrentUserSession.shared.userId
             )
+            let preloadedRecipes = RecipeGroupingService.hideRelatedRecipeReferences(preloadedLibraryRecipes)
             // CRITICAL: Set allRecipes and collections IMMEDIATELY (not in a Task)
             // This happens synchronously during init, so when CookTabView's body renders
             // for the first time, allRecipes and collections are already populated and won't show empty state
             self.allRecipes = preloadedRecipes
             self.recentlyAddedRecipes = preloadedRecipes.sorted { $0.createdAt > $1.createdAt }
             self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
-            self.recipeImageURLsById = preloadedRecipes.reduce(into: [:]) { partialResult, recipe in
+            self.recipeImageURLsById = preloadedLibraryRecipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
             self.hasLoadedInitially = true
@@ -338,6 +339,7 @@ private struct CookTabDerivedSections {
                 }
                 return true
             }
+            filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(filteredRecipes)
 
             // Fetch owner tiers and user objects for display
             await fetchOwnerTiersAndUsers(for: filteredRecipes, forceRefresh: forceRefresh)
@@ -440,7 +442,11 @@ private struct CookTabDerivedSections {
     }
 
     private func rebuildRecipeImageLookup() {
-        recipeImageURLsById = allRecipes.reduce(into: [:]) { partialResult, recipe in
+        rebuildRecipeImageLookup(from: allRecipes)
+    }
+
+    private func rebuildRecipeImageLookup(from recipes: [Recipe]) {
+        recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
             partialResult[recipe.id] = recipe.imageURL
         }
     }
@@ -448,15 +454,13 @@ private struct CookTabDerivedSections {
     private func reloadLocalLibrary(loadCollections: Bool) async throws {
         async let fetchedRecipes = fetchAllRecipesIncludingReferences()
 
-        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-            try await fetchedRecipes,
-            currentUserId: CurrentUserSession.shared.userId
-        )
+        let libraryRecipes = try await fetchedRecipes
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(libraryRecipes)
         let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
 
         allRecipes = recipes
         recentlyAddedRecipes = recipes.sorted { $0.createdAt > $1.createdAt }
-        rebuildRecipeImageLookup()
+        rebuildRecipeImageLookup(from: libraryRecipes)
         recentlyCookedRecipes = recipes.filter { recentIdSet.contains($0.id) }
         favoriteRecipes = recipes.filter { $0.isFavorite }
         updateSmartRecommendations()

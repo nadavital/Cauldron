@@ -89,7 +89,7 @@ struct RecipeDetailView: View {
     }
 
     private var hasHeroImage: Bool {
-        recipe.imageURL != nil || recipe.cloudImageRecordName != nil
+        RecipeDetailDisplayPolicy.hasHeroImage(recipe)
     }
 
     private var recipeHeaderSection: some View {
@@ -365,8 +365,13 @@ struct RecipeDetailView: View {
             }
         }
         .task {
-            if !recipe.isOwnedByCurrentUser() && !recipe.isPreview {
-                await saveAsPreviewIfNeeded()
+            let currentUserId = CurrentUserSession.shared.userId
+            if RecipeDetailDisplayPolicy.shouldRefreshPublicRecipeOnOpen(recipe, currentUserId: currentUserId) {
+                await refreshPublicRecipeIfNeeded()
+
+                if RecipeDetailDisplayPolicy.shouldSaveAsPreviewOnOpen(recipe, currentUserId: currentUserId) {
+                    await saveAsPreviewIfNeeded()
+                }
             }
 
             if !recipe.isOwnedByCurrentUser() {
