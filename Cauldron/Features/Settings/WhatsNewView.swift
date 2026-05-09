@@ -30,7 +30,7 @@ struct WhatsNewView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
 
-                        Text("Major upgrades just dropped!")
+                        Text("Reliability and sharing polish just landed.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,28 +38,28 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         FeatureRow(
-                            symbol: "wand.and.stars.inverse",
-                            color: .orange,
-                            title: "Model-Based Recipe Parser",
-                            detail: "Imports now use a model-backed parser for more reliable ingredient, step, and metadata extraction."
-                        )
-                        FeatureRow(
                             symbol: "person.3.fill",
                             color: .green,
-                            title: "Invite Links and Better Referrals",
-                            detail: "Invite behavior was improved with more reliable link handling and smoother referral onboarding."
+                            title: "Safer Sharing and Profiles",
+                            detail: "Shared recipe and profile links now route more consistently, with better save detection and connection loading."
+                        )
+                        FeatureRow(
+                            symbol: "icloud.and.arrow.up.fill",
+                            color: .blue,
+                            title: "Stronger Offline Sync",
+                            detail: "Recipe changes and deletes are queued more durably so CloudKit interruptions can retry cleanly."
                         )
                         FeatureRow(
                             symbol: "ipad",
                             color: .indigo,
-                            title: "New iPad and Mac Apps",
-                            detail: "The brand new Cauldron iPad and Mac app is out, with layout and navigation optimizations across core recipe and collection screens."
+                            title: "Better iPad and Mac Layouts",
+                            detail: "Friends, collections, and recipe details are more comfortable on larger screens."
                         )
                         FeatureRow(
                             symbol: "square.and.arrow.up.fill",
                             color: .red,
-                            title: "New Share Extension",
-                            detail: "Click share then Cauldron while browsing the web or any app to send your recipes right to Cauldron!"
+                            title: "More Reliable Imports",
+                            detail: "Share extension, text, and URL imports now follow a more consistent recipe handoff path."
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
