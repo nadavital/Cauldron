@@ -25,6 +25,7 @@ struct CollectionFormView: View {
     @State private var showingRecipeSelector = false
     @State private var showingDeleteConfirmation = false
     @State private var allRecipes: [Recipe] = []
+    @FocusState private var isNameFieldFocused: Bool
 
     init(collectionToEdit: Collection? = nil) {
         self.collectionToEdit = collectionToEdit
@@ -48,78 +49,88 @@ struct CollectionFormView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Preview Section (moved to top)
                 Section {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 12) {
-                            ZStack {
+                    VStack(spacing: 18) {
+                        Menu {
+                            ForEach(Self.availableSymbolNames, id: \.self) { symbol in
+                                Button {
+                                    symbolName = symbol
+                                } label: {
+                                    Label(symbolDisplayName(for: symbol), systemImage: symbol)
+                                }
+                            }
+                        } label: {
+                            ZStack(alignment: .bottomTrailing) {
                                 Circle()
                                     .fill(selectedColor.opacity(0.15))
-                                    .frame(width: 80, height: 80)
+                                    .frame(width: 88, height: 88)
 
                                 Image(systemName: selectedSymbolName)
-                                    .font(.system(size: 40))
+                                    .font(.system(size: 42, weight: .semibold))
                                     .foregroundColor(selectedColor)
-                            }
 
-                            Text(name.isEmpty ? "Collection Name" : name)
-                                .font(.headline)
-                                .foregroundColor(name.isEmpty ? .secondary : .primary)
-
-                            if !selectedRecipeIds.isEmpty {
-                                Text("\(selectedRecipeIds.count) recipe\(selectedRecipeIds.count == 1 ? "" : "s")")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                Image(systemName: "pencil.circle.fill")
+                                    .font(.title3)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, selectedColor)
+                                    .background(Circle().fill(Color(.systemBackground)))
+                                    .offset(x: 2, y: 2)
                             }
                         }
-                        .padding(.vertical, 8)
-                        Spacer()
-                    }
-                } header: {
-                    Text("Preview")
-                }
+                        .buttonStyle(.plain)
 
-                // Basic Info Section
-                Section {
-                    TextField("Collection Name", text: $name)
-                        .font(.body)
+                        TextField("Collection Name", text: $name)
+                            .font(.title3.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .textFieldStyle(.plain)
+                            .submitLabel(.done)
+                            .focused($isNameFieldFocused)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(.secondarySystemGroupedBackground))
+                            )
 
-                    // Color picker
-                    HStack {
-                        Text("Color")
-                            .foregroundColor(.primary)
+                        Text("\(selectedRecipeIds.count) recipe\(selectedRecipeIds.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
 
-                        Spacer()
-
-                        ColorPicker("", selection: Binding(
-                            get: {
-                                if let colorHex = color {
-                                    return Color(hex: colorHex) ?? .cauldronOrange
+                        HStack(spacing: 12) {
+                            ForEach(Self.availableColorHexes, id: \.self) { colorHex in
+                                Button {
+                                    color = colorHex
+                                } label: {
+                                    Circle()
+                                        .fill(Color(hex: colorHex) ?? .cauldronOrange)
+                                        .frame(width: 26, height: 26)
+                                        .overlay {
+                                            if resolvedColorHex == colorHex {
+                                                Image(systemName: "checkmark")
+                                                    .font(.caption.weight(.bold))
+                                                    .foregroundStyle(.white)
+                                            }
+                                        }
                                 }
-                                return .cauldronOrange
-                            },
-                            set: { newColor in
-                                color = newColor.toHex()
+                                .buttonStyle(.plain)
                             }
-                        ))
-                        .labelsHidden()
-                    }
 
-                    Picker("Symbol", selection: Binding(
-                        get: { selectedSymbolName },
-                        set: { symbolName = $0 }
-                    )) {
-                        ForEach(Self.availableSymbolNames, id: \.self) { symbol in
-                            Label(symbolDisplayName(for: symbol), systemImage: symbol)
-                                .tag(symbol)
+                            ColorPicker(
+                                "",
+                                selection: Binding(
+                                    get: { selectedColor },
+                                    set: { color = $0.toHex() }
+                                )
+                            )
+                            .labelsHidden()
+                            .frame(width: 30, height: 30)
                         }
+                        .padding(.top, 2)
                     }
-                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
                 } header: {
-                    Text("Details")
-                } footer: {
-                    Text("Collections always use a recipe grid cover for consistency.")
+                    Text("Collection")
                 }
 
                 // Recipes Section
@@ -203,7 +214,7 @@ struct CollectionFormView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     case .publicRecipe:
-                        Text("Everyone can see and save this collection")
+                        Text("Everyone can see this collection")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -371,6 +382,17 @@ struct CollectionFormView: View {
     }
 
     private static let defaultSymbolName = "folder.fill"
+    private static let defaultColorHex = "#FF9933"
+    private static let availableColorHexes = [
+        "#FF9933",
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#A78BFA",
+        "#F7B731",
+        "#5F27CD"
+    ]
     private static let availableSymbolNames = [
         "folder.fill",
         "fork.knife",
@@ -388,6 +410,7 @@ struct CollectionFormView: View {
 
     private var defaultSymbolName: String { Self.defaultSymbolName }
     private var selectedSymbolName: String { symbolName ?? defaultSymbolName }
+    private var resolvedColorHex: String { color ?? Self.defaultColorHex }
 
     private func symbolDisplayName(for symbol: String) -> String {
         switch symbol {

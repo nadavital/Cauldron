@@ -30,6 +30,7 @@ actor CollectionRepository {
     // Track collections pending sync
     private var pendingSyncCollections = Set<UUID>()
     private var syncRetryTask: Task<Void, Never>?
+    private var operationQueueReplayTask: Task<Void, Never>?
 
     init(
         modelContainer: ModelContainer,
@@ -50,7 +51,28 @@ actor CollectionRepository {
             // Start retry mechanism for failed syncs after actor initialization completes
             Task {
                 await self.startSyncRetryTask()
+                await self.startOperationQueueReplayTask()
             }
+        }
+    }
+
+    private func canModify(_ collection: Collection) async -> Bool {
+        if RuntimeEnvironment.isRunningTests {
+            let currentUserId = await MainActor.run { CurrentUserSession.shared.userId }
+            return currentUserId.map { collection.userId == $0 } ?? true
+        }
+
+        guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            return false
+        }
+
+        return collection.userId == currentUserId
+    }
+
+    private func assertCanModify(_ collection: Collection) async throws {
+        guard await canModify(collection) else {
+            logger.warning("Blocked mutation of non-owned collection: \(collection.id)")
+            throw CollectionRepositoryError.notAuthorized
         }
     }
 
@@ -84,10 +106,20 @@ actor CollectionRepository {
 
     /// Create a new collection (optimistic - returns immediately)
     func create(_ collection: Collection) async throws {
+        try await assertCanModify(collection)
+
         // 1. Save locally (immediate)
         let context = ModelContext(modelContainer)
         let model = try CollectionModel.from(collection)
         context.insert(model)
+        try upsertLocalMembershipEdges(
+            activeRecipeIds: collection.recipeIds,
+            removedRecipeIds: [],
+            collectionId: collection.id,
+            ownerId: collection.userId,
+            baseSortOrder: 0,
+            context: context
+        )
         try context.save()
 
         // Created collection locally
@@ -120,12 +152,21 @@ actor CollectionRepository {
 
             // Sync to CloudKit PUBLIC database (for sharing)
             await self.syncCollectionToCloudKit(collection)
+            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
+            let metadataPending = await self.isPendingSync(collectionId: collection.id)
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: collection.id,
-                entityType: .collection
-            )
+            if metadataPending || !membershipSynced {
+                await self.operationQueueService.markFailed(
+                    operationId: collection.id,
+                    error: "Collection create sync incomplete"
+                )
+            } else {
+                // Mark operation as completed
+                await self.operationQueueService.markCompleted(
+                    entityId: collection.id,
+                    entityType: .collection
+                )
+            }
         }
     }
 
@@ -139,7 +180,7 @@ actor CollectionRepository {
         )
 
         let models = try context.fetch(descriptor)
-        return try models.map { try $0.toDomain() }
+        return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)
     }
 
     /// Fetch collections for a specific visibility without loading the full table first.
@@ -152,7 +193,7 @@ actor CollectionRepository {
         )
 
         let models = try context.fetch(descriptor)
-        return try models.map { try $0.toDomain() }
+        return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)
     }
 
     /// Fetch a specific collection by ID
@@ -167,7 +208,7 @@ actor CollectionRepository {
             return nil
         }
 
-        return try model.toDomain()
+        return try applyMembershipOverlay(to: [model.toDomain()], context: context).first
     }
 
     /// Fetch collections containing a specific recipe
@@ -182,7 +223,12 @@ actor CollectionRepository {
     /// - Parameters:
     ///   - collection: The collection to update
     ///   - shouldUpdateTimestamp: Whether to set updatedAt to current time. Default true for user edits, false for sync operations.
-    func update(_ collection: Collection, shouldUpdateTimestamp: Bool = true) async throws {
+    func update(
+        _ collection: Collection,
+        shouldUpdateTimestamp: Bool = true,
+        updateMembershipEdges: Bool = true,
+        queueCloudSync: Bool = true
+    ) async throws {
         let context = ModelContext(modelContainer)
 
         // Find existing model
@@ -196,15 +242,21 @@ actor CollectionRepository {
             throw CollectionRepositoryError.collectionNotFound
         }
 
-        // Capture old state for change detection
+        // Capture old state for change detection. Use membership-overlaid recipe IDs
+        // because the legacy recipeIds blob may be stale after multi-device sync.
+        let oldCollection = try applyMembershipOverlay(
+            to: [existingModel.toDomain()],
+            context: context
+        ).first ?? existingModel.toDomain()
         let oldVisibility = RecipeVisibility(rawValue: existingModel.visibility) ?? .publicRecipe
-        let oldRecipeIds = (try? JSONDecoder().decode([UUID].self, from: existingModel.recipeIdsBlob)) ?? []
+        let oldRecipeIds = oldCollection.recipeIds
         let oldName = existingModel.name
         let oldEmoji = existingModel.emoji
         let oldSymbolName = existingModel.symbolName
         let oldColor = existingModel.color
         let oldDescription = existingModel.descriptionText
         let oldCoverImageType = existingModel.coverImageType
+        try await assertCanModify(oldCollection)
 
         // 1. Update locally (immediate)
         let updatedModel = try CollectionModel.from(collection)
@@ -220,8 +272,26 @@ actor CollectionRepository {
         existingModel.symbolName = updatedModel.symbolName
         existingModel.color = updatedModel.color
         existingModel.coverImageType = updatedModel.coverImageType
+        existingModel.originalCollectionId = updatedModel.originalCollectionId
+        existingModel.originalCollectionOwnerId = updatedModel.originalCollectionOwnerId
+        existingModel.originalCollectionName = updatedModel.originalCollectionName
+        existingModel.savedAt = updatedModel.savedAt
+        existingModel.sourceCollectionUpdatedAt = updatedModel.sourceCollectionUpdatedAt
+        existingModel.followsSourceUpdates = updatedModel.followsSourceUpdates
         // Only update timestamp for user actions, not sync operations
         existingModel.updatedAt = shouldUpdateTimestamp ? Date() : collection.updatedAt
+
+        if updateMembershipEdges {
+            let removedRecipeIds = oldRecipeIds.filter { !collection.recipeIds.contains($0) }
+            try upsertLocalMembershipEdges(
+                activeRecipeIds: collection.recipeIds,
+                removedRecipeIds: removedRecipeIds,
+                collectionId: collection.id,
+                ownerId: collection.userId,
+                baseSortOrder: 0,
+                context: context
+            )
+        }
 
         try context.save()
         // Updated collection in local database
@@ -245,7 +315,7 @@ actor CollectionRepository {
             )
         }
 
-        if oldRecipeIds != collection.recipeIds {
+        if updateMembershipEdges && oldRecipeIds != collection.recipeIds {
             NotificationCenter.default.post(
                 name: NSNotification.Name("CollectionRecipesChanged"),
                 object: nil,
@@ -274,7 +344,7 @@ actor CollectionRepository {
             )
         }
 
-        guard !RuntimeEnvironment.isRunningTests else {
+        guard queueCloudSync, !RuntimeEnvironment.isRunningTests else {
             return
         }
 
@@ -294,12 +364,21 @@ actor CollectionRepository {
 
             // Sync to CloudKit
             await self.syncCollectionToCloudKit(collection)
+            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
+            let metadataPending = await self.isPendingSync(collectionId: collection.id)
 
-            // Mark operation as completed
-            await self.operationQueueService.markCompleted(
-                entityId: collection.id,
-                entityType: .collection
-            )
+            if metadataPending || !membershipSynced {
+                await self.operationQueueService.markFailed(
+                    operationId: collection.id,
+                    error: "Collection update sync incomplete"
+                )
+            } else {
+                // Mark operation as completed
+                await self.operationQueueService.markCompleted(
+                    entityId: collection.id,
+                    entityType: .collection
+                )
+            }
         }
     }
 
@@ -329,14 +408,175 @@ actor CollectionRepository {
 
     /// Remove a recipe from all collections (called when recipe is deleted)
     func removeRecipeFromAllCollections(_ recipeId: UUID) async throws {
-        let collections = try await fetchCollections(containingRecipe: recipeId)
+        try await removeRecipesFromAllCollections([recipeId])
+    }
 
+    /// Remove recipes from all collections in one pass. This is used after
+    /// tombstone sync so deletion wins over stale collection membership edges.
+    func removeRecipesFromAllCollections(_ recipeIds: Set<UUID>) async throws {
+        guard !recipeIds.isEmpty else { return }
+
+        let collections = try await fetchAll()
         for collection in collections {
-            let updated = collection.removingRecipe(recipeId)
+            guard await canModify(collection) else {
+                logger.info("Skipping deleted recipe cleanup for non-owned collection: \(collection.id)")
+                continue
+            }
+
+            let filteredRecipeIds = collection.recipeIds.filter { !recipeIds.contains($0) }
+            guard filteredRecipeIds.count != collection.recipeIds.count else { continue }
+
+            let updated = collectionWithRecipeIds(collection, filteredRecipeIds)
             try await update(updated)
         }
 
-        // Removed recipe from collections
+        // Removed recipes from collections
+    }
+
+    private func applyMembershipOverlay(
+        to collections: [Collection],
+        context: ModelContext
+    ) throws -> [Collection] {
+        guard !collections.isEmpty else { return [] }
+
+        let membershipModels = try context.fetch(FetchDescriptor<CollectionMembershipModel>())
+        guard !membershipModels.isEmpty else { return collections }
+
+        let edgesByCollection = Dictionary(grouping: membershipModels.map { $0.toDomain() }, by: \.collectionId)
+
+        return collections.map { collection in
+            guard let edges = edgesByCollection[collection.id], !edges.isEmpty else {
+                return collection
+            }
+
+            return collectionWithRecipeIds(collection, activeRecipeIds(from: edges))
+        }
+    }
+
+    private func activeRecipeIds(from edges: [CollectionMembershipEdge]) -> [UUID] {
+        let latestEdgesByRecipe = Dictionary(grouping: edges, by: \.recipeId)
+            .compactMapValues { recipeEdges in
+                recipeEdges.max { lhs, rhs in
+                    lhs.updatedAt < rhs.updatedAt
+                }
+            }
+
+        return latestEdgesByRecipe.values
+            .filter { $0.status == .active }
+            .sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.updatedAt < $1.updatedAt
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+            .map(\.recipeId)
+    }
+
+    private func collectionWithRecipeIds(_ collection: Collection, _ recipeIds: [UUID]) -> Collection {
+        Collection(
+            id: collection.id,
+            name: collection.name,
+            description: collection.description,
+            userId: collection.userId,
+            recipeIds: recipeIds,
+            visibility: collection.visibility,
+            emoji: collection.emoji,
+            symbolName: collection.symbolName,
+            color: collection.color,
+            coverImageType: collection.coverImageType,
+            coverImageURL: collection.coverImageURL,
+            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
+            coverImageModifiedAt: collection.coverImageModifiedAt,
+            cloudRecordName: collection.cloudRecordName,
+            originalCollectionId: collection.originalCollectionId,
+            originalCollectionOwnerId: collection.originalCollectionOwnerId,
+            originalCollectionName: collection.originalCollectionName,
+            savedAt: collection.savedAt,
+            sourceCollectionUpdatedAt: collection.sourceCollectionUpdatedAt,
+            followsSourceUpdates: collection.followsSourceUpdates,
+            createdAt: collection.createdAt,
+            updatedAt: collection.updatedAt
+        )
+    }
+
+    private func upsertLocalMembershipEdges(
+        activeRecipeIds: [UUID],
+        removedRecipeIds: [UUID],
+        collectionId: UUID,
+        ownerId: UUID,
+        baseSortOrder: Int,
+        context: ModelContext
+    ) throws {
+        for (offset, recipeId) in activeRecipeIds.enumerated() {
+            let edge = CollectionMembershipEdge(
+                collectionId: collectionId,
+                recipeId: recipeId,
+                ownerId: ownerId,
+                status: .active,
+                sortOrder: baseSortOrder + offset,
+                sourceDeviceId: SyncDeviceIdentifier.current()
+            )
+            try upsertLocalMembershipEdge(edge, context: context)
+        }
+
+        for recipeId in removedRecipeIds {
+            let edge = CollectionMembershipEdge(
+                collectionId: collectionId,
+                recipeId: recipeId,
+                ownerId: ownerId,
+                status: .removed,
+                sortOrder: baseSortOrder,
+                sourceDeviceId: SyncDeviceIdentifier.current()
+            )
+            try upsertLocalMembershipEdge(edge, context: context)
+        }
+    }
+
+    private func upsertLocalMembershipEdge(
+        _ edge: CollectionMembershipEdge,
+        context: ModelContext
+    ) throws {
+        let collectionId = edge.collectionId
+        let recipeId = edge.recipeId
+        let descriptor = FetchDescriptor<CollectionMembershipModel>(
+            predicate: #Predicate { model in
+                model.collectionId == collectionId && model.recipeId == recipeId
+            }
+        )
+
+        if let existing = try context.fetch(descriptor).first {
+            guard existing.updatedAt <= edge.updatedAt else { return }
+            existing.ownerId = edge.ownerId
+            existing.status = edge.status.rawValue
+            existing.updatedAt = edge.updatedAt
+            existing.sortOrder = edge.sortOrder
+            existing.sourceDeviceId = edge.sourceDeviceId
+            existing.schemaVersion = edge.schemaVersion
+        } else {
+            context.insert(CollectionMembershipModel.from(edge))
+        }
+    }
+
+    private func insertSyncedCollection(
+        _ collection: Collection,
+        seedMembershipEdges: Bool
+    ) async throws {
+        let context = ModelContext(modelContainer)
+        let model = try CollectionModel.from(collection)
+        context.insert(model)
+
+        if seedMembershipEdges {
+            try upsertLocalMembershipEdges(
+                activeRecipeIds: collection.recipeIds,
+                removedRecipeIds: [],
+                collectionId: collection.id,
+                ownerId: collection.userId,
+                baseSortOrder: 0,
+                context: context
+            )
+        }
+
+        try context.save()
     }
 
     // MARK: - Delete
@@ -353,6 +593,9 @@ actor CollectionRepository {
         guard let model = try context.fetch(descriptor).first else {
             throw CollectionRepositoryError.collectionNotFound
         }
+
+        let collection = try model.toDomain()
+        try await assertCanModify(collection)
 
         // 1. Delete locally (immediate)
         context.delete(model)
@@ -445,6 +688,28 @@ actor CollectionRepository {
         }
     }
 
+    private func syncPendingMembershipEdgesToCloudKit(collectionId: UUID) async -> Bool {
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else { return false }
+
+        do {
+            let context = ModelContext(modelContainer)
+            let descriptor = FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate { $0.collectionId == collectionId }
+            )
+            let edges = try context.fetch(descriptor).map { $0.toDomain() }
+            try await collectionCloudService.saveMembershipEdges(edges)
+            return true
+        } catch {
+            logger.warning("Failed to sync collection membership edges: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func isPendingSync(collectionId: UUID) -> Bool {
+        pendingSyncCollections.contains(collectionId)
+    }
+
     /// Start background task to retry failed syncs
     private func startSyncRetryTask() {
         syncRetryTask?.cancel()
@@ -458,6 +723,87 @@ actor CollectionRepository {
                 // Retry pending syncs
                 await retryPendingSyncs()
             }
+        }
+    }
+
+    private func startOperationQueueReplayTask() {
+        operationQueueReplayTask?.cancel()
+        operationQueueReplayTask = Task {
+            await replayReadyCollectionOperations()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { break }
+                await replayReadyCollectionOperations()
+            }
+        }
+    }
+
+    private func replayReadyCollectionOperations() async {
+        let operations = await operationQueueService.getAllOperations()
+            .filter { operation in
+                operation.entityType == .collection &&
+                (operation.status == .pending || operation.isReadyForRetry)
+            }
+
+        guard !operations.isEmpty else { return }
+
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else {
+            logger.info("CloudKit still not available - collection operation replay will retry later")
+            return
+        }
+
+        for operation in operations {
+            guard !Task.isCancelled else { break }
+            await replayCollectionOperation(operation)
+        }
+    }
+
+    private func replayCollectionOperation(_ operation: SyncOperation) async {
+        await operationQueueService.markInProgress(operationId: operation.id)
+
+        switch operation.type {
+        case .create, .update:
+            do {
+                guard let collection = try await fetch(id: operation.entityId) else {
+                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+                    return
+                }
+
+                await syncCollectionToCloudKit(collection)
+                let membershipSynced = await syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
+                if pendingSyncCollections.contains(operation.entityId) || !membershipSynced {
+                    await operationQueueService.markFailed(
+                        operationId: operation.id,
+                        error: "Collection replay sync incomplete"
+                    )
+                } else {
+                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+                }
+            } catch {
+                await operationQueueService.markFailed(
+                    operationId: operation.id,
+                    error: "Collection replay failed: \(error.localizedDescription)"
+                )
+            }
+
+        case .delete:
+            do {
+                try await collectionCloudService.deleteCollection(operation.entityId)
+                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+            } catch {
+                await operationQueueService.markFailed(
+                    operationId: operation.id,
+                    error: "Collection delete replay failed: \(error.localizedDescription)"
+                )
+            }
+
+        case .acceptConnection, .rejectConnection:
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Unsupported collection queue operation: \(operation.type.rawValue)"
+            )
         }
     }
 
@@ -485,8 +831,11 @@ actor CollectionRepository {
                 }
 
                 try await collectionCloudService.saveCollection(collection)
-                self.pendingSyncCollections.remove(collectionId)
-                // Retry successful for collection
+                let membershipSynced = await syncPendingMembershipEdgesToCloudKit(collectionId: collectionId)
+                if membershipSynced {
+                    self.pendingSyncCollections.remove(collectionId)
+                    // Retry successful for collection
+                }
             } catch {
                 logger.error("❌ Retry failed for collection: \(error.localizedDescription)")
             }
@@ -543,6 +892,15 @@ actor CollectionRepository {
 
         do {
             let cloudCollections = try await collectionCloudService.fetchCollections(forUserId: userId)
+            let cloudMembershipEdges = try await collectionCloudService.fetchMembershipEdges(forUserId: userId)
+            let cloudMembershipEdgesByCollection = Dictionary(grouping: cloudMembershipEdges, by: \.collectionId)
+            let context = ModelContext(modelContainer)
+            for edge in cloudMembershipEdges {
+                try upsertLocalMembershipEdge(edge, context: context)
+            }
+            if !cloudMembershipEdges.isEmpty {
+                try context.save()
+            }
             // Fetched collections from CloudKit
 
             // Merge with local collections
@@ -552,12 +910,26 @@ actor CollectionRepository {
                 if let local = localCollection {
                     // Update if cloud version is newer (don't update timestamp - sync operation)
                     if cloudCollection.updatedAt > local.updatedAt {
-                        try await update(cloudCollection, shouldUpdateTimestamp: false)
+                        let metadataOnlyCollection = collectionWithRecipeIds(cloudCollection, local.recipeIds)
+                        try await update(
+                            metadataOnlyCollection,
+                            shouldUpdateTimestamp: false,
+                            updateMembershipEdges: false,
+                            queueCloudSync: false
+                        )
                         // Updated collection from cloud
                     }
                 } else {
                     // Insert new collection from cloud
-                    try await create(cloudCollection)
+                    if let membershipEdges = cloudMembershipEdgesByCollection[cloudCollection.id], !membershipEdges.isEmpty {
+                        let collectionWithCloudMembership = collectionWithRecipeIds(
+                            cloudCollection,
+                            activeRecipeIds(from: membershipEdges)
+                        )
+                        try await insertSyncedCollection(collectionWithCloudMembership, seedMembershipEdges: false)
+                    } else {
+                        try await insertSyncedCollection(cloudCollection, seedMembershipEdges: true)
+                    }
                     // Added new collection from cloud
                 }
             }
@@ -598,6 +970,7 @@ actor CollectionRepository {
 enum CollectionRepositoryError: LocalizedError {
     case collectionNotFound
     case invalidData
+    case notAuthorized
 
     var errorDescription: String? {
         switch self {
@@ -605,6 +978,8 @@ enum CollectionRepositoryError: LocalizedError {
             return "Collection not found"
         case .invalidData:
             return "Invalid collection data"
+        case .notAuthorized:
+            return "You can only edit your own collections"
         }
     }
 }

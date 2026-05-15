@@ -95,6 +95,8 @@ class DependencyContainer: ObservableObject {
     let recipeOCRService: RecipeOCRService
     let recipeLineClassificationService: RecipeLineClassificationService
     let sharingService: SharingService
+    let recipeSaveService: RecipeSaveService
+    let collectionSaveService: CollectionSaveService
     let externalShareService: ExternalShareService
     let recipeSyncService: RecipeSyncService
     let imageMigrationService: CloudImageMigration
@@ -210,6 +212,17 @@ class DependencyContainer: ObservableObject {
             unitsService: unitsService
         )
 
+        self.recipeSaveService = RecipeSaveService(
+            recipeRepository: recipeRepository,
+            recipeCloudService: recipeCloudService,
+            recipeDiscoveryCache: recipeDiscoveryCache,
+            imageManager: imageManager
+        )
+        self.collectionSaveService = CollectionSaveService(
+            collectionRepository: collectionRepository,
+            recipeSaveService: recipeSaveService
+        )
+
         self.sharingService = SharingService(
             sharingRepository: sharingRepository,
             recipeRepository: recipeRepository,
@@ -224,6 +237,7 @@ class DependencyContainer: ObservableObject {
             recipeCloudService: recipeCloudService,
             recipeRepository: recipeRepository,
             deletedRecipeRepository: deletedRecipeRepository,
+            collectionRepository: collectionRepository,
             imageManager: imageManager
         )
 
@@ -289,7 +303,8 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self
+            CollectionModel.self,
+            CollectionMembershipModel.self
         ])
 
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -311,7 +326,8 @@ class DependencyContainer: ObservableObject {
             UserModel.self,
             SharedRecipeModel.self,
             ConnectionModel.self,
-            CollectionModel.self
+            CollectionModel.self,
+            CollectionMembershipModel.self
         ])
 
         // Ensure Application Support directory exists

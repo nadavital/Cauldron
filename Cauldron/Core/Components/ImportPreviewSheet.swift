@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 /// View model for import preview sheet
 @MainActor
@@ -45,43 +44,15 @@ final class ImportPreviewViewModel {
     }
 
     func importRecipe(_ recipe: Recipe, originalCreator: User?) async throws {
-        // Add recipe to user's library
-        guard let userId = CurrentUserSession.shared.userId else {
+        guard CurrentUserSession.shared.userId != nil else {
             throw NSError(domain: "ImportPreview", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
 
-        // Create a copy of the recipe with attribution using the helper method
-        let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
-        let importedRecipe = recipe.withOwner(
-            userId,
+        _ = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            recipe,
             originalCreatorId: originalCreator?.id,
-            originalCreatorName: originalCreator?.displayName,
-            relatedRecipeIds: canonicalRelatedRecipeIDs
+            originalCreatorName: originalCreator?.displayName
         )
-        let sourceImageRecipeID = recipe.sourceAssetReferenceID
-
-        try await dependencies.recipeRepository.create(importedRecipe)
-
-        do {
-            if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                recipeId: sourceImageRecipeID,
-                fromPublic: true
-            ), let image = UIImage(data: imageData) {
-                let filename = try await dependencies.imageManager.saveImage(image, recipeId: importedRecipe.id)
-                let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                let updatedRecipe = importedRecipe.withImageState(
-                    imageURL: imageURL,
-                    cloudImageRecordName: nil,
-                    imageModifiedAt: nil
-                )
-                try await dependencies.recipeRepository.update(
-                    updatedRecipe,
-                    shouldUpdateTimestamp: false
-                )
-            }
-        } catch {
-            AppLogger.general.warning("Failed to localize imported shared recipe image: \(error.localizedDescription)")
-        }
     }
 }
 

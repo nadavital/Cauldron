@@ -49,8 +49,10 @@ actor CloudKitCore {
     enum RecordType {
         static let user = "User"
         static let recipe = "Recipe"
+        static let deletedRecipe = "DeletedRecipe"
         static let sharedRecipe = "SharedRecipe"
         static let collection = "Collection"
+        static let collectionMembership = "CollectionMembership"
         static let connection = "Connection"
         static let profileImage = "ProfileImage"
         static let referralSignup = "ReferralSignup"

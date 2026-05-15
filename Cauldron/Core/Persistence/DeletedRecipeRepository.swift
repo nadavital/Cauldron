@@ -19,14 +19,25 @@ actor DeletedRecipeRepository {
     }
 
     /// Mark a recipe as deleted (create tombstone)
-    func markAsDeleted(recipeId: UUID, cloudRecordName: String?) async throws {
+    func markAsDeleted(
+        recipeId: UUID,
+        cloudRecordName: String?,
+        deletedAt: Date = Date(),
+        sourceDeviceId: String? = SyncDeviceIdentifier.current()
+    ) async throws {
         let context = ModelContext(modelContainer)
 
         // Check if already marked as deleted (fetch all and check manually since no unique constraint)
         let descriptor = FetchDescriptor<DeletedRecipeModel>()
         let existing = try context.fetch(descriptor).first { $0.recipeId == recipeId }
 
-        if existing != nil {
+        if let existing {
+            if existing.deletedAt == nil || existing.deletedAt! <= deletedAt {
+                existing.deletedAt = deletedAt
+                existing.cloudRecordName = existing.cloudRecordName ?? cloudRecordName
+                existing.sourceDeviceId = existing.sourceDeviceId ?? sourceDeviceId
+                try context.save()
+            }
             logger.info("Recipe \(recipeId) already marked as deleted")
             return
         }
@@ -34,8 +45,9 @@ actor DeletedRecipeRepository {
         // Create tombstone
         let tombstone = DeletedRecipeModel(
             recipeId: recipeId,
-            deletedAt: Date(),
-            cloudRecordName: cloudRecordName
+            deletedAt: deletedAt,
+            cloudRecordName: cloudRecordName,
+            sourceDeviceId: sourceDeviceId
         )
         context.insert(tombstone)
         try context.save()

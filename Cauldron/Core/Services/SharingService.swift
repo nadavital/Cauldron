@@ -200,34 +200,6 @@ actor SharingService {
         return allSharedRecipes
     }
     
-    /// Copy a shared recipe to the user's personal collection
-    func copySharedRecipeToPersonal(_ sharedRecipe: SharedRecipe) async throws -> Recipe {
-        // Get current user ID
-        let userId = await MainActor.run {
-            CurrentUserSession.shared.userId
-        }
-
-        guard let userId = userId else {
-            logger.error("Cannot copy recipe - no current user")
-            throw NSError(domain: "SharingService", code: 2, userInfo: [NSLocalizedDescriptionKey: "No current user found"])
-        }
-
-        // Create a copy using withOwner(), preserving attribution to the shared recipe creator
-        let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: sharedRecipe.recipe)
-        let personalCopy = sharedRecipe.recipe.withOwner(
-            userId,
-            originalCreatorId: sharedRecipe.sharedBy.id,
-            originalCreatorName: sharedRecipe.sharedBy.displayName,
-            visibility: .publicRecipe,
-            relatedRecipeIds: canonicalRelatedRecipeIDs
-        )
-        try await recipeRepository.create(personalCopy)
-        logger.info("Copied shared recipe '\(personalCopy.title)' to personal collection with ownerId: \(userId)")
-        return personalCopy
-    }
-    
-
-    
     /// Get a specific shared recipe by ID
     func getSharedRecipe(id: UUID) async throws -> SharedRecipe? {
         try await sharingRepository.fetchSharedRecipe(id: id)

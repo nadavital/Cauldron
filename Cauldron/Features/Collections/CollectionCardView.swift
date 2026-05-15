@@ -111,18 +111,20 @@ struct CollectionCardView: View {
         GeometryReader { proxy in
             let tileSize = proxy.size.width / 2
 
-            if collection.recipeCount == 0 || coverImageSources.isEmpty || coverImageSources.allSatisfy({ !$0.canLoadImage }) {
+            if collection.recipeCount == 0 {
                 collectionColor
                     .overlay(
                         VStack(spacing: 6) {
                             Image(systemName: collectionSymbolName)
                                 .font(.system(size: 28))
                                 .foregroundStyle(.white.opacity(0.7))
-                            Text(collection.recipeCount == 0 ? "No recipes" : "\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
+                            Text("No recipes")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.85))
                         }
                     )
+            } else if coverImageSources.isEmpty || coverImageSources.allSatisfy({ !$0.canLoadImage }) {
+                placeholderGridView(tileSize: tileSize)
             } else {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
@@ -134,6 +136,19 @@ struct CollectionCardView: View {
                         recipeImageTile(at: 3, size: tileSize)
                     }
                 }
+            }
+        }
+    }
+
+    private func placeholderGridView(tileSize: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                placeholderTile(at: 0, size: tileSize)
+                placeholderTile(at: 1, size: tileSize)
+            }
+            HStack(spacing: 0) {
+                placeholderTile(at: 2, size: tileSize)
+                placeholderTile(at: 3, size: tileSize)
             }
         }
     }
@@ -153,7 +168,7 @@ struct CollectionCardView: View {
                 .frame(width: size, height: size)
                 .clipped()
             } else {
-                placeholderTile(size: size)
+                placeholderTile(at: index, size: size)
             }
         }
         .overlay {
@@ -169,14 +184,17 @@ struct CollectionCardView: View {
         }
     }
 
-    private func placeholderTile(size: CGFloat) -> some View {
-        Rectangle()
-            .fill(collectionColor.opacity(0.3))
+    private func placeholderTile(at index: Int, size: CGFloat) -> some View {
+        let symbols = [collectionSymbolName, "fork.knife", "book.closed.fill", "sparkles"]
+        let opacity = [0.28, 0.22, 0.18, 0.24][min(index, 3)]
+
+        return Rectangle()
+            .fill(collectionColor.opacity(opacity))
             .frame(width: size, height: size)
             .overlay(
-                Image(systemName: "fork.knife")
-                    .font(.system(size: size * 0.3))
-                    .foregroundStyle(.white.opacity(0.5))
+                Image(systemName: symbols[min(index, symbols.count - 1)])
+                    .font(.system(size: size * 0.28, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
             )
     }
 

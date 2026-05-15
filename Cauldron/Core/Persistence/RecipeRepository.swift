@@ -28,6 +28,7 @@ actor RecipeRepository {
     internal var pendingSyncRecipes = Set<UUID>()
     internal var syncRetryTask: Task<Void, Never>?
     internal var imageSyncRetryTask: Task<Void, Never>?
+    internal var operationQueueReplayTask: Task<Void, Never>?
 
     // Track retry attempts for exponential backoff
     internal var imageRetryAttempts: [UUID: Int] = [:]
@@ -58,6 +59,7 @@ actor RecipeRepository {
             Task {
                 await self.startSyncRetryTask()
                 await self.startImageSyncRetryTask()
+                await self.startOperationQueueReplayTask()
             }
         }
     }

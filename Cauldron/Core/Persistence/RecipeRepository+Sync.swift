@@ -23,6 +23,34 @@ enum PublicRecipeSyncResult {
     }
 }
 
+nonisolated struct RecipeDeleteOperationPayload: Codable, Sendable, Equatable {
+    let recipeId: UUID
+    let ownerId: UUID?
+    let cloudRecordName: String?
+    let visibility: RecipeVisibility
+    let hadImage: Bool
+    let wasPreview: Bool
+    let sourceDeviceId: String?
+
+    nonisolated init(
+        recipeId: UUID,
+        ownerId: UUID?,
+        cloudRecordName: String?,
+        visibility: RecipeVisibility,
+        hadImage: Bool,
+        wasPreview: Bool,
+        sourceDeviceId: String? = SyncDeviceIdentifier.current()
+    ) {
+        self.recipeId = recipeId
+        self.ownerId = ownerId
+        self.cloudRecordName = cloudRecordName
+        self.visibility = visibility
+        self.hadImage = hadImage
+        self.wasPreview = wasPreview
+        self.sourceDeviceId = sourceDeviceId
+    }
+}
+
 extension RecipeRepository {
     private var publicRecipeMigrationCompletedKey: String {
         "hasMigratedPublicRecipesToPublicDB_v4"
@@ -322,6 +350,187 @@ extension RecipeRepository {
                 // Retry pending syncs
                 await retryPendingSyncs()
             }
+        }
+    }
+
+    func startOperationQueueReplayTask() {
+        operationQueueReplayTask?.cancel()
+        operationQueueReplayTask = Task {
+            await replayReadyRecipeOperations()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { break }
+                await replayReadyRecipeOperations()
+            }
+        }
+    }
+
+    private func replayReadyRecipeOperations() async {
+        let operations = await operationQueueService.getAllOperations()
+            .filter { operation in
+                operation.entityType == .recipe &&
+                (operation.status == .pending || operation.isReadyForRetry)
+            }
+
+        guard !operations.isEmpty else { return }
+
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else {
+            logger.info("CloudKit still not available - recipe operation replay will retry later")
+            return
+        }
+
+        for operation in operations {
+            guard !Task.isCancelled else { break }
+            await replayRecipeOperation(operation)
+        }
+    }
+
+    private func replayRecipeOperation(_ operation: SyncOperation) async {
+        await operationQueueService.markInProgress(operationId: operation.id)
+
+        switch operation.type {
+        case .create, .update:
+            await replayRecipeUpsertOperation(operation)
+        case .delete:
+            await replayRecipeDeleteOperation(operation)
+        case .acceptConnection, .rejectConnection:
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Unsupported recipe queue operation: \(operation.type.rawValue)"
+            )
+        }
+    }
+
+    private func replayRecipeUpsertOperation(_ operation: SyncOperation) async {
+        do {
+            guard let recipe = try await fetch(id: operation.entityId) else {
+                if try await deletedRecipeRepository.isDeleted(recipeId: operation.entityId) {
+                    await replayRecipeDeleteOperation(operation)
+                } else {
+                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                }
+                return
+            }
+
+            let didSyncPrivate = await syncRecipeToCloudKit(
+                recipe,
+                cloudKitCore: cloudKitCore,
+                recipeCloudService: recipeCloudService
+            )
+            let publicSyncResult = await syncRecipeToPublicDatabase(
+                recipe,
+                cloudKitCore: cloudKitCore,
+                recipeCloudService: recipeCloudService
+            )
+
+            if didSyncPrivate, publicSyncResult.isSuccess {
+                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+            } else {
+                await operationQueueService.markFailed(
+                    operationId: operation.id,
+                    error: "Recipe replay sync incomplete"
+                )
+            }
+        } catch {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe replay failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func replayRecipeDeleteOperation(_ operation: SyncOperation) async {
+        let payload = operation.payload.flatMap {
+            try? JSONDecoder().decode(RecipeDeleteOperationPayload.self, from: $0)
+        }
+
+        do {
+            if let payload {
+                try await replayRecipeDeleteOperation(operation, payload: payload)
+                return
+            }
+
+            if let recipe = try await fetch(id: operation.entityId) {
+                let payload = RecipeDeleteOperationPayload(
+                    recipeId: recipe.id,
+                    ownerId: recipe.ownerId,
+                    cloudRecordName: recipe.cloudRecordName,
+                    visibility: recipe.visibility,
+                    hadImage: recipe.imageURL != nil,
+                    wasPreview: recipe.isPreview
+                )
+                try await replayRecipeDeleteOperation(operation, payload: payload)
+                return
+            }
+
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Missing recipe delete payload"
+            )
+        } catch {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe delete replay failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func replayRecipeDeleteOperation(
+        _ operation: SyncOperation,
+        payload: RecipeDeleteOperationPayload
+    ) async throws {
+        var tombstoneSucceeded = true
+        var privateDeleteSucceeded = true
+        var publicDeleteSucceeded = true
+
+        if !payload.wasPreview, let ownerId = payload.ownerId {
+            do {
+                try await recipeCloudService.saveDeletedRecipeTombstone(
+                    DeletedRecipeTombstone(
+                        recipeId: payload.recipeId,
+                        ownerId: ownerId,
+                        cloudRecordName: payload.cloudRecordName,
+                        sourceDeviceId: payload.sourceDeviceId
+                    )
+                )
+            } catch {
+                tombstoneSucceeded = false
+            }
+        }
+
+        if !payload.wasPreview {
+            if let cloudRecordName = payload.cloudRecordName, let ownerId = payload.ownerId {
+                let deletionRecipe = Recipe(
+                    id: payload.recipeId,
+                    title: "Deleted Recipe",
+                    ingredients: [],
+                    steps: [],
+                    ownerId: ownerId,
+                    cloudRecordName: cloudRecordName
+                )
+                do {
+                    try await recipeCloudService.deleteRecipe(deletionRecipe)
+                } catch {
+                    privateDeleteSucceeded = false
+                }
+            }
+
+            do {
+                try await recipeCloudService.deletePublicRecipe(recipeId: payload.recipeId)
+            } catch {
+                publicDeleteSucceeded = false
+            }
+        }
+
+        if tombstoneSucceeded, privateDeleteSucceeded, publicDeleteSucceeded {
+            await operationQueueService.markCompleted(entityId: payload.recipeId, entityType: .recipe)
+        } else {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe delete replay incomplete"
+            )
         }
     }
 

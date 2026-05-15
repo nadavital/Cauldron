@@ -128,8 +128,21 @@ extension RecipeRepository {
         for (id, recipes) in recipesByID {
             if recipes.count > 1 {
                 logger.warning("🔄 Found \(recipes.count) duplicates for recipe ID: \(id)")
-                // Keep the first one (most recent by insertion order), delete the rest
-                for recipe in recipes.dropFirst() {
+
+                let canonical = recipes.max(by: { lhs, rhs in
+                    let lhsScore = duplicateRepairScore(lhs)
+                    let rhsScore = duplicateRepairScore(rhs)
+                    if lhsScore == rhsScore {
+                        return lhs.updatedAt < rhs.updatedAt
+                    }
+                    return lhsScore < rhsScore
+                }) ?? recipes[0]
+
+                for recipe in recipes where recipe !== canonical {
+                    mergeDuplicateRecipe(recipe, into: canonical)
+                }
+
+                for recipe in recipes where recipe !== canonical {
                     context.delete(recipe)
                     removedCount += 1
                 }
@@ -142,6 +155,75 @@ extension RecipeRepository {
         }
 
         return removedCount
+    }
+
+    private func duplicateRepairScore(_ recipe: RecipeModel) -> Int {
+        var score = 0
+        if !recipe.isPreview { score += 10_000 }
+        if recipe.ownerId != nil { score += 5_000 }
+        if recipe.cloudRecordName != nil { score += 2_500 }
+        if recipe.cloudImageRecordName != nil { score += 1_000 }
+        if recipe.imageURL != nil { score += 750 }
+        if recipe.isFavorite { score += 250 }
+        score += min(recipe.ingredientsBlob.count, 2_000)
+        score += min(recipe.stepsBlob.count, 2_000)
+        score += min(recipe.tagsBlob.count, 500)
+        return score
+    }
+
+    private func mergeDuplicateRecipe(_ duplicate: RecipeModel, into canonical: RecipeModel) {
+        canonical.isFavorite = canonical.isFavorite || duplicate.isFavorite
+        canonical.createdAt = min(canonical.createdAt, duplicate.createdAt)
+        canonical.updatedAt = max(canonical.updatedAt, duplicate.updatedAt)
+
+        if canonical.ownerId == nil {
+            canonical.ownerId = duplicate.ownerId
+        }
+        if canonical.cloudRecordName == nil {
+            canonical.cloudRecordName = duplicate.cloudRecordName
+        }
+        if canonical.cloudImageRecordName == nil {
+            canonical.cloudImageRecordName = duplicate.cloudImageRecordName
+        }
+        if canonical.imageModifiedAt == nil {
+            canonical.imageModifiedAt = duplicate.imageModifiedAt
+        }
+        if canonical.imageURL == nil {
+            canonical.imageURL = duplicate.imageURL
+        }
+        if canonical.sourceURL == nil {
+            canonical.sourceURL = duplicate.sourceURL
+        }
+        if canonical.sourceTitle == nil {
+            canonical.sourceTitle = duplicate.sourceTitle
+        }
+        if canonical.notes == nil {
+            canonical.notes = duplicate.notes
+        }
+        if canonical.originalRecipeId == nil {
+            canonical.originalRecipeId = duplicate.originalRecipeId
+        }
+        if canonical.originalCreatorId == nil {
+            canonical.originalCreatorId = duplicate.originalCreatorId
+        }
+        if canonical.originalCreatorName == nil {
+            canonical.originalCreatorName = duplicate.originalCreatorName
+        }
+        if canonical.savedAt == nil {
+            canonical.savedAt = duplicate.savedAt
+        }
+        if canonical.sourceRecipeUpdatedAt == nil {
+            canonical.sourceRecipeUpdatedAt = duplicate.sourceRecipeUpdatedAt
+        }
+        canonical.followsSourceUpdates = canonical.followsSourceUpdates || duplicate.followsSourceUpdates
+        canonical.isPreview = canonical.isPreview && duplicate.isPreview
+
+        if canonical.nutritionBlob == nil {
+            canonical.nutritionBlob = duplicate.nutritionBlob
+        }
+        if canonical.relatedRecipeIdsBlob.isEmpty {
+            canonical.relatedRecipeIdsBlob = duplicate.relatedRecipeIdsBlob
+        }
     }
 
     /// Save a public recipe with its image
@@ -580,21 +662,14 @@ extension RecipeRepository {
             try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
         }
 
-        // Mark as deleted (create tombstone) to prevent re-downloading from CloudKit
-        try await deletedRecipeRepository.markAsDeleted(
-            recipeId: recipe.id,
-            cloudRecordName: recipe.cloudRecordName
-        )
+        if !recipe.isPreview {
+            // Mark as deleted (create tombstone) to prevent re-downloading from CloudKit.
+            try await deletedRecipeRepository.markAsDeleted(
+                recipeId: recipe.id,
+                cloudRecordName: recipe.cloudRecordName
+            )
+        }
 
-        // Remove from pending sync if it was there
-        // Note: access pendingSyncRecipes via self since it is on the actor
-        // We will likely need to expose pendingSyncRecipes as internal or move the logic
-        // For now, let's assume we can expose a method or property.
-        // ACTUALLY: Extensions can't access private properties. I will need to make `pendingSyncRecipes` internal.
-        // I will fix access control in the main file cleanup step.
-        // For now, code assumes access.
-        // pendingSyncRecipes.remove(id) -> Needs access.
-        
         // Delete local image file immediately
         if recipe.imageURL != nil {
             await imageManager.deleteImage(recipeId: recipe.id)
@@ -604,17 +679,34 @@ extension RecipeRepository {
         // Post notification that recipe was deleted
         NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
 
-        logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
+        if recipe.isPreview {
+            logger.info("Removed local preview recipe cache: \(recipe.title)")
+        } else {
+            logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
+        }
+
+        guard !recipe.isPreview else {
+            return
+        }
 
         guard !RuntimeEnvironment.isRunningTests else {
             return
         }
 
         // 2. Queue operation for background sync
+        let deletePayload = RecipeDeleteOperationPayload(
+            recipeId: recipe.id,
+            ownerId: recipe.ownerId,
+            cloudRecordName: recipe.cloudRecordName,
+            visibility: recipe.visibility,
+            hadImage: recipe.imageURL != nil,
+            wasPreview: recipe.isPreview
+        )
         await operationQueueService.addOperation(
             type: .delete,
             entityType: .recipe,
-            entityId: recipe.id
+            entityId: recipe.id,
+            payload: try? JSONEncoder().encode(deletePayload)
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
@@ -626,6 +718,26 @@ extension RecipeRepository {
 
             var privateDeleteSucceeded = true
             var publicDeleteSucceeded = true
+            var tombstoneSucceeded = true
+
+            if !recipe.isPreview, let ownerId = recipe.ownerId {
+                do {
+                    let tombstone = DeletedRecipeTombstone(
+                        recipeId: recipe.id,
+                        ownerId: ownerId,
+                        cloudRecordName: recipe.cloudRecordName,
+                        sourceDeviceId: deletePayload.sourceDeviceId
+                    )
+                    try await recipeCloudService.saveDeletedRecipeTombstone(tombstone)
+                } catch {
+                    tombstoneSucceeded = false
+                    await self.operationQueueService.markFailed(
+                        operationId: recipe.id,
+                        error: "Deleted recipe tombstone save failed: \(error.localizedDescription)"
+                    )
+                }
+            }
+
             // Delete image from CloudKit if exists
             // IMPORTANT: Only delete from cloud if this is the user's own recipe, NOT a preview
             if recipe.imageURL != nil && !recipe.isPreview {
@@ -667,7 +779,7 @@ extension RecipeRepository {
                 }
             }
 
-            if privateDeleteSucceeded, publicDeleteSucceeded {
+            if tombstoneSucceeded, privateDeleteSucceeded, publicDeleteSucceeded {
                 await self.operationQueueService.markCompleted(
                     entityId: recipe.id,
                     entityType: .recipe
@@ -675,10 +787,39 @@ extension RecipeRepository {
             } else if privateDeleteSucceeded {
                 await self.operationQueueService.markFailed(
                     operationId: recipe.id,
-                    error: "Public DB deletion failed"
+                    error: tombstoneSucceeded ? "Public DB deletion failed" : "Deleted recipe tombstone save failed"
                 )
             }
         }
+    }
+
+    /// Remove a local active recipe after a remote deletion tombstone wins during sync.
+    /// This avoids re-queuing the same delete while still cleaning local collection membership.
+    internal func removeLocalRecipeAfterRemoteDeletion(id: UUID) async throws {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.id == id }
+        )
+
+        guard let model = try context.fetch(descriptor).first else {
+            return
+        }
+
+        let recipe = try model.toDomain()
+        context.delete(model)
+        try context.save()
+
+        if let collectionRepository = collectionRepository {
+            try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
+        }
+
+        if recipe.imageURL != nil {
+            await imageManager.deleteImage(recipeId: recipe.id)
+            await imageSyncManager.removePendingUpload(recipe.id)
+        }
+
+        NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
+        logger.info("Removed local recipe suppressed by remote tombstone: \(recipe.title)")
     }
     
     // MARK: - Account Deletion

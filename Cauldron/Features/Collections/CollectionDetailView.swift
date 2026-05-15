@@ -529,7 +529,7 @@ struct CollectionDetailView: View {
         Group {
             let size: CGFloat = 60  // 120 / 2 for the 2x2 grid
 
-            if collection.recipeCount == 0 || recipeImageSources.isEmpty || recipeImageSources.allSatisfy({ !$0.canLoadImage }) {
+            if collection.recipeCount == 0 {
                 // Show placeholder
                 collectionColor
                     .overlay(
@@ -544,6 +544,8 @@ struct CollectionDetailView: View {
                             }
                         }
                     )
+            } else if recipeImageSources.isEmpty || recipeImageSources.allSatisfy({ !$0.canLoadImage }) {
+                placeholderGridView(tileSize: size)
             } else {
                 // Show 2x2 grid of recipe images
                 VStack(spacing: 0) {
@@ -556,6 +558,19 @@ struct CollectionDetailView: View {
                         recipeImageTile(at: 3, size: size)
                     }
                 }
+            }
+        }
+    }
+
+    private func placeholderGridView(tileSize: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                placeholderTile(at: 0, size: tileSize)
+                placeholderTile(at: 1, size: tileSize)
+            }
+            HStack(spacing: 0) {
+                placeholderTile(at: 2, size: tileSize)
+                placeholderTile(at: 3, size: tileSize)
             }
         }
     }
@@ -575,19 +590,22 @@ struct CollectionDetailView: View {
                 .frame(width: size, height: size)
                 .clipped()
             } else {
-                placeholderTile(size: size)
+                placeholderTile(at: index, size: size)
             }
         }
     }
 
-    private func placeholderTile(size: CGFloat) -> some View {
-        Rectangle()
-            .fill(collectionColor.opacity(0.3))
+    private func placeholderTile(at index: Int, size: CGFloat) -> some View {
+        let symbols = [collection.symbolName ?? "folder.fill", "fork.knife", "book.closed.fill", "sparkles"]
+        let opacity = [0.28, 0.22, 0.18, 0.24][min(index, 3)]
+
+        return Rectangle()
+            .fill(collectionColor.opacity(opacity))
             .frame(width: size, height: size)
             .overlay(
-                Image(systemName: "fork.knife")
-                    .font(.system(size: size * 0.3))
-                    .foregroundColor(.white.opacity(0.5))
+                Image(systemName: symbols[min(index, symbols.count - 1)])
+                    .font(.system(size: size * 0.28, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.58))
             )
     }
 
@@ -910,7 +928,7 @@ struct CollectionRecipeSelectorSheet: View {
     }
 
     private func copyAndAddRecipe(_ recipe: Recipe) async {
-        guard let userId = CurrentUserSession.shared.userId else {
+        guard CurrentUserSession.shared.userId != nil else {
             AppLogger.general.error("Cannot copy recipe - no current user")
             return
         }
@@ -937,24 +955,16 @@ struct CollectionRecipeSelectorSheet: View {
                 }
             }
 
-            // Create a copy of the recipe owned by the current user using withOwner()
-            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
-            let copiedRecipe = recipe.withOwner(
-                userId,
+            let saveResult = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+                recipe,
                 originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipeOwner?.displayName,
-                visibility: .publicRecipe,
-                relatedRecipeIds: canonicalRelatedRecipeIDs
+                originalCreatorName: recipeOwner?.displayName
             )
 
-            // Save the copied recipe
-            try await dependencies.recipeRepository.create(copiedRecipe)
-
-            // Add the copied recipe to the collection
-            try await dependencies.collectionRepository.addRecipe(copiedRecipe.id, to: collection.id)
+            try await dependencies.collectionRepository.addRecipe(saveResult.recipe.id, to: collection.id)
 
             // Update selected recipes to include the new copy
-            selectedRecipeIds.insert(copiedRecipe.id)
+            selectedRecipeIds.insert(saveResult.recipe.id)
 
             // Reload recipes to show the new copy
             await loadRecipes()

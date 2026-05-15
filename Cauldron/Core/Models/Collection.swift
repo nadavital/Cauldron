@@ -44,6 +44,14 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     // CloudKit sync
     let cloudRecordName: String?
 
+    // Copy-on-write source tracking
+    let originalCollectionId: UUID?
+    let originalCollectionOwnerId: UUID?
+    let originalCollectionName: String?
+    let savedAt: Date?
+    let sourceCollectionUpdatedAt: Date?
+    let followsSourceUpdates: Bool
+
     // Timestamps
     let createdAt: Date
     let updatedAt: Date
@@ -63,6 +71,12 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         cloudCoverImageRecordName: String? = nil,
         coverImageModifiedAt: Date? = nil,
         cloudRecordName: String? = nil,
+        originalCollectionId: UUID? = nil,
+        originalCollectionOwnerId: UUID? = nil,
+        originalCollectionName: String? = nil,
+        savedAt: Date? = nil,
+        sourceCollectionUpdatedAt: Date? = nil,
+        followsSourceUpdates: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -80,6 +94,12 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         self.cloudCoverImageRecordName = cloudCoverImageRecordName
         self.coverImageModifiedAt = coverImageModifiedAt
         self.cloudRecordName = cloudRecordName
+        self.originalCollectionId = originalCollectionId
+        self.originalCollectionOwnerId = originalCollectionOwnerId
+        self.originalCollectionName = originalCollectionName
+        self.savedAt = savedAt
+        self.sourceCollectionUpdatedAt = sourceCollectionUpdatedAt
+        self.followsSourceUpdates = followsSourceUpdates
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -123,9 +143,19 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
             cloudCoverImageRecordName: clearCoverImageMetadata ? nil : (cloudCoverImageRecordName ?? self.cloudCoverImageRecordName),
             coverImageModifiedAt: clearCoverImageMetadata ? nil : (coverImageModifiedAt ?? self.coverImageModifiedAt),
             cloudRecordName: self.cloudRecordName,
+            originalCollectionId: self.originalCollectionId,
+            originalCollectionOwnerId: self.originalCollectionOwnerId,
+            originalCollectionName: self.originalCollectionName,
+            savedAt: self.savedAt,
+            sourceCollectionUpdatedAt: self.sourceCollectionUpdatedAt,
+            followsSourceUpdates: self.followsSourceUpdates,
             createdAt: self.createdAt,
             updatedAt: Date()
         )
+    }
+
+    nonisolated var sourceCollectionReferenceId: UUID {
+        originalCollectionId ?? id
     }
 
     /// Add a recipe to this collection

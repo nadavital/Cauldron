@@ -264,24 +264,11 @@ extension RecipeDetailView {
         }
 
         do {
-            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
-            if !canonicalRelatedRecipeIDs.isEmpty {
-                let localResolution = try await dependencies.recipeRepository.resolveLocalRelatedRecipes(
-                    referenceIds: canonicalRelatedRecipeIDs,
-                    includePreviews: false
-                )
-                let missingIds = Set(localResolution.missingIds)
-
-                if !missingIds.isEmpty {
-                    let fetchedRelatedById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: Array(missingIds))
-                    let fetchedRelated = canonicalRelatedRecipeIDs.compactMap { fetchedRelatedById[$0] }
-
-                    if !fetchedRelated.isEmpty {
-                        relatedRecipesToSave = fetchedRelated
-                        showSaveRelatedRecipesPrompt = true
-                        return
-                    }
-                }
+            let missingRelatedRecipes = try await dependencies.recipeSaveService.missingRelatedRecipesForSave(recipe)
+            if !missingRelatedRecipes.isEmpty {
+                relatedRecipesToSave = missingRelatedRecipes
+                showSaveRelatedRecipesPrompt = true
+                return
             }
         } catch {
             AppLogger.general.warning("Failed to check for related recipes: \(error.localizedDescription)")
@@ -305,263 +292,21 @@ extension RecipeDetailView {
         isSavingRecipe = true
         defer { isSavingRecipe = false }
 
-        var relatedRecipeIdMapping: [UUID: UUID] = [:]
-
         do {
-            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
-            let sourceImageRecipeID = recipe.sourceAssetReferenceID
-            let sourceRecipeID = recipe.relatedGraphReferenceID
-
-            if let existingLocalRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id),
-               !existingLocalRecipe.isPreview {
-                AppLogger.general.info("Skipping save - recipe already exists locally: \(recipe.title)")
-                withAnimation {
-                    recipe = existingLocalRecipe
-                    currentVisibility = existingLocalRecipe.visibility
-                    localIsFavorite = existingLocalRecipe.isFavorite
-                    hasOwnedCopy = true
-                }
-                return
-            }
-
-            let existingOwnedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
-                originalRecipeIds: [sourceRecipeID]
+            let result = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+                recipe,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipeOwner?.displayName,
+                relatedRecipesToSave: saveRelatedRecipes ? relatedRecipesToSave : []
             )
-            if let existingOwnedCopy = existingOwnedCopies.first {
-                AppLogger.general.info("Skipping save - owned copy already exists: \(recipe.title)")
-                withAnimation {
-                    recipe = existingOwnedCopy
-                    currentVisibility = existingOwnedCopy.visibility
-                    localIsFavorite = existingOwnedCopy.isFavorite
-                    hasOwnedCopy = true
-                }
-                return
-            }
-
-            if saveRelatedRecipes && !relatedRecipesToSave.isEmpty {
-                AppLogger.general.info("📥 Saving \(relatedRecipesToSave.count) related recipes...")
-
-                for relatedRecipe in relatedRecipesToSave {
-                    if relatedRecipe.ownerId == userId {
-                        relatedRecipeIdMapping[relatedRecipe.relatedGraphReferenceID] = relatedRecipe.id
-                        AppLogger.general.info("Skipping related recipe save - already belongs to current user: \(relatedRecipe.title)")
-                        continue
-                    }
-
-                    if let localRelated = try await dependencies.recipeRepository.fetch(id: relatedRecipe.id),
-                       !localRelated.isPreview {
-                        relatedRecipeIdMapping[relatedRecipe.relatedGraphReferenceID] = localRelated.id
-                        continue
-                    }
-
-                    let relatedSourceRecipeId = relatedRecipe.relatedGraphReferenceID
-                    let existingRelatedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
-                        originalRecipeIds: [relatedSourceRecipeId]
-                    )
-                    if let existingRelatedCopy = existingRelatedCopies.first {
-                        relatedRecipeIdMapping[relatedSourceRecipeId] = existingRelatedCopy.id
-                        continue
-                    }
-
-                    let canonicalRelatedIDsForCopy = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: relatedRecipe)
-                    let relatedImageSourceRecipeID = relatedRecipe.sourceAssetReferenceID
-                    let copiedRelated = relatedRecipe.withOwner(
-                        userId,
-                        originalCreatorId: relatedRecipe.ownerId,
-                        originalCreatorName: nil,
-                        visibility: .publicRecipe,
-                        relatedRecipeIds: canonicalRelatedIDsForCopy
-                    ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
-                    try await dependencies.recipeRepository.create(copiedRelated)
-                    relatedRecipeIdMapping[relatedSourceRecipeId] = copiedRelated.id
-
-                    if relatedRecipe.cloudImageRecordName != nil || relatedImageSourceRecipeID != relatedRecipe.id {
-                        do {
-                            if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                                recipeId: relatedImageSourceRecipeID,
-                                fromPublic: true
-                            ), let image = UIImage(data: imageData) {
-                                let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRelated.id)
-                                let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                                let updatedRelated = copiedRelated
-                                    .withImageState(
-                                        imageURL: imageURL,
-                                        cloudImageRecordName: nil,
-                                        imageModifiedAt: nil
-                                    )
-                                try await dependencies.recipeRepository.update(
-                                    updatedRelated,
-                                    shouldUpdateTimestamp: false
-                                )
-                                AppLogger.general.info("✅ Downloaded image for related recipe: \(relatedRecipe.title)")
-                            }
-                        } catch {
-                            AppLogger.general.warning("Failed to download image for related recipe: \(error.localizedDescription)")
-                        }
-                    }
-                }
-
-                AppLogger.general.info("✅ Saved \(relatedRecipesToSave.count) related recipes")
-            }
-
-            let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id)
-
-            var copiedRecipe: Recipe
-            if let existingPreview = existingRecipe, existingPreview.isPreview {
-                AppLogger.general.info("🔄 Converting preview to owned recipe: \(recipe.title)")
-
-                try await dependencies.recipeRepository.delete(id: existingPreview.id)
-
-                let originalCloudImageRecordName = existingPreview.cloudImageRecordName
-                let originalRecipeId = existingPreview.originalRecipeId ?? existingPreview.id
-
-                let remappedRelatedIds = canonicalRelatedRecipeIDs.map { originalId in
-                    relatedRecipeIdMapping[originalId] ?? originalId
-                }
-
-                copiedRecipe = Recipe(
-                    id: UUID(),
-                    title: existingPreview.title,
-                    ingredients: existingPreview.ingredients,
-                    steps: existingPreview.steps,
-                    yields: existingPreview.yields,
-                    totalMinutes: existingPreview.totalMinutes,
-                    tags: existingPreview.tags,
-                    nutrition: existingPreview.nutrition,
-                    sourceURL: existingPreview.sourceURL,
-                    sourceTitle: existingPreview.sourceTitle,
-                    notes: existingPreview.notes,
-                    imageURL: nil,
-                    isFavorite: false,
-                    visibility: .publicRecipe,
-                    ownerId: userId,
-                    cloudRecordName: nil,
-                    cloudImageRecordName: nil,
-                    imageModifiedAt: nil,
-                    createdAt: Date(),
-                    updatedAt: Date(),
-                    originalRecipeId: originalRecipeId,
-                    originalCreatorId: existingPreview.originalCreatorId ?? existingPreview.ownerId,
-                    originalCreatorName: existingPreview.originalCreatorName ?? recipeOwner?.displayName,
-                    savedAt: Date(),
-                    sourceRecipeUpdatedAt: existingPreview.sourceRecipeUpdatedAt ?? existingPreview.updatedAt,
-                    followsSourceUpdates: true,
-                    relatedRecipeIds: remappedRelatedIds,
-                    isPreview: false
-                )
-
-                try await dependencies.recipeRepository.create(copiedRecipe)
-
-                if originalCloudImageRecordName != nil || originalRecipeId != existingPreview.id {
-                    do {
-                        if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                            recipeId: originalRecipeId,
-                            fromPublic: true
-                        ), let image = UIImage(data: imageData) {
-                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-
-                            let updatedRecipe = copiedRecipe
-                                .withImageState(
-                                    imageURL: imageURL,
-                                    cloudImageRecordName: nil,
-                                    imageModifiedAt: nil
-                                )
-                            try await dependencies.recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false)
-
-                            AppLogger.general.info("✅ Downloaded and saved image for copied recipe")
-                            copiedRecipe = updatedRecipe
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to download image for copied recipe: \(error.localizedDescription)")
-                    }
-                }
-
-                AppLogger.general.info("✅ Converted preview to owned recipe: \(recipe.title)")
-            } else {
-                var tempCopiedRecipe = recipe.withOwner(
-                    userId,
-                    originalCreatorId: recipe.ownerId,
-                    originalCreatorName: recipeOwner?.displayName,
-                    visibility: .publicRecipe,
-                    relatedRecipeIds: canonicalRelatedRecipeIDs
-                ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
-
-                if !relatedRecipeIdMapping.isEmpty {
-                    let remappedRelatedIds = tempCopiedRecipe.relatedRecipeIds.map { originalId in
-                        relatedRecipeIdMapping[originalId] ?? originalId
-                    }
-                    tempCopiedRecipe = Recipe(
-                        id: tempCopiedRecipe.id,
-                        title: tempCopiedRecipe.title,
-                        ingredients: tempCopiedRecipe.ingredients,
-                        steps: tempCopiedRecipe.steps,
-                        yields: tempCopiedRecipe.yields,
-                        totalMinutes: tempCopiedRecipe.totalMinutes,
-                        tags: tempCopiedRecipe.tags,
-                        nutrition: tempCopiedRecipe.nutrition,
-                        sourceURL: tempCopiedRecipe.sourceURL,
-                        sourceTitle: tempCopiedRecipe.sourceTitle,
-                        notes: tempCopiedRecipe.notes,
-                        imageURL: tempCopiedRecipe.imageURL,
-                        isFavorite: tempCopiedRecipe.isFavorite,
-                        visibility: tempCopiedRecipe.visibility,
-                        ownerId: tempCopiedRecipe.ownerId,
-                        cloudRecordName: tempCopiedRecipe.cloudRecordName,
-                        cloudImageRecordName: tempCopiedRecipe.cloudImageRecordName,
-                        imageModifiedAt: tempCopiedRecipe.imageModifiedAt,
-                        createdAt: tempCopiedRecipe.createdAt,
-                        updatedAt: tempCopiedRecipe.updatedAt,
-                        originalRecipeId: tempCopiedRecipe.originalRecipeId,
-                        originalCreatorId: tempCopiedRecipe.originalCreatorId,
-                        originalCreatorName: tempCopiedRecipe.originalCreatorName,
-                        savedAt: tempCopiedRecipe.savedAt,
-                        sourceRecipeUpdatedAt: tempCopiedRecipe.sourceRecipeUpdatedAt,
-                        followsSourceUpdates: tempCopiedRecipe.followsSourceUpdates,
-                        relatedRecipeIds: remappedRelatedIds,
-                        isPreview: tempCopiedRecipe.isPreview
-                    )
-                }
-                copiedRecipe = tempCopiedRecipe
-
-                try await dependencies.recipeRepository.create(copiedRecipe)
-                AppLogger.general.info("✅ Saved recipe to library: \(recipe.title)")
-
-                if copiedRecipe.imageURL == nil {
-                    do {
-                        if let imageData = try await dependencies.recipeCloudService.downloadImageAsset(
-                            recipeId: sourceImageRecipeID,
-                            fromPublic: true
-                        ), let image = UIImage(data: imageData) {
-                            let filename = try await dependencies.imageManager.saveImage(image, recipeId: copiedRecipe.id)
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                            let updatedRecipe = copiedRecipe
-                                .withImageState(
-                                    imageURL: imageURL,
-                                    cloudImageRecordName: nil,
-                                    imageModifiedAt: nil
-                                )
-                            try await dependencies.recipeRepository.update(
-                                updatedRecipe,
-                                shouldUpdateTimestamp: false
-                            )
-                            AppLogger.general.info("✅ Downloaded and saved recipe image: \(filename)")
-                            copiedRecipe = updatedRecipe
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to download recipe image: \(error.localizedDescription)")
-                    }
-                }
-            }
-
-            NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
 
             withAnimation {
-                recipe = copiedRecipe
-                currentVisibility = copiedRecipe.visibility
-                localIsFavorite = copiedRecipe.isFavorite
+                recipe = result.recipe
+                currentVisibility = result.recipe.visibility
+                localIsFavorite = result.recipe.isFavorite
                 hasOwnedCopy = true
-                showSaveSuccessToast = true
+                showSaveSuccessToast = !result.reusedExistingCopy
+                imageRefreshID = UUID()
             }
 
             relatedRecipesToSave = []

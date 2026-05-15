@@ -203,7 +203,11 @@ final class FriendsTabViewModel {
     func copyToPersonalCollection(_ sharedRecipe: SharedRecipe) async {
         guard let dependencies = dependencies else { return }
         do {
-            let copiedRecipe = try await dependencies.sharingService.copySharedRecipeToPersonal(sharedRecipe)
+            let copiedRecipe = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+                sharedRecipe.recipe,
+                originalCreatorId: sharedRecipe.sharedBy.id,
+                originalCreatorName: sharedRecipe.sharedBy.displayName
+            ).recipe
             AppLogger.general.info("Copied shared recipe to personal collection: \(copiedRecipe.title)")
             // Toast notification is shown in RecipeDetailView
         } catch {

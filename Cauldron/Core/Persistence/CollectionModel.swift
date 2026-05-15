@@ -36,6 +36,14 @@ final class CollectionModel {
     // CloudKit sync
     var cloudRecordName: String?
 
+    // Copy-on-write source tracking
+    var originalCollectionId: UUID?
+    var originalCollectionOwnerId: UUID?
+    var originalCollectionName: String?
+    var savedAt: Date?
+    var sourceCollectionUpdatedAt: Date?
+    var followsSourceUpdates: Bool = false
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -51,6 +59,12 @@ final class CollectionModel {
         coverImageModifiedAt: Date? = nil,
         visibility: String = "private",
         cloudRecordName: String? = nil,
+        originalCollectionId: UUID? = nil,
+        originalCollectionOwnerId: UUID? = nil,
+        originalCollectionName: String? = nil,
+        savedAt: Date? = nil,
+        sourceCollectionUpdatedAt: Date? = nil,
+        followsSourceUpdates: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -68,6 +82,12 @@ final class CollectionModel {
         self.coverImageModifiedAt = coverImageModifiedAt
         self.visibility = visibility
         self.cloudRecordName = cloudRecordName
+        self.originalCollectionId = originalCollectionId
+        self.originalCollectionOwnerId = originalCollectionOwnerId
+        self.originalCollectionName = originalCollectionName
+        self.savedAt = savedAt
+        self.sourceCollectionUpdatedAt = sourceCollectionUpdatedAt
+        self.followsSourceUpdates = followsSourceUpdates
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -92,6 +112,12 @@ final class CollectionModel {
             coverImageModifiedAt: collection.coverImageModifiedAt,
             visibility: collection.visibility.rawValue,
             cloudRecordName: collection.cloudRecordName,
+            originalCollectionId: collection.originalCollectionId,
+            originalCollectionOwnerId: collection.originalCollectionOwnerId,
+            originalCollectionName: collection.originalCollectionName,
+            savedAt: collection.savedAt,
+            sourceCollectionUpdatedAt: collection.sourceCollectionUpdatedAt,
+            followsSourceUpdates: collection.followsSourceUpdates,
             createdAt: collection.createdAt,
             updatedAt: collection.updatedAt
         )
@@ -117,6 +143,12 @@ final class CollectionModel {
             cloudCoverImageRecordName: cloudCoverImageRecordName,
             coverImageModifiedAt: coverImageModifiedAt,
             cloudRecordName: cloudRecordName,
+            originalCollectionId: originalCollectionId,
+            originalCollectionOwnerId: originalCollectionOwnerId,
+            originalCollectionName: originalCollectionName,
+            savedAt: savedAt,
+            sourceCollectionUpdatedAt: sourceCollectionUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
             createdAt: createdAt,
             updatedAt: updatedAt
         )

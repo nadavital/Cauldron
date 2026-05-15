@@ -22,10 +22,12 @@ final class CollectionRepositoryTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        CurrentUserSession.shared.signOut()
 
         // Create in-memory model container for testing
         modelContainer = try TestModelContainer.create(with: [
-            CollectionModel.self
+            CollectionModel.self,
+            CollectionMembershipModel.self
         ])
 
         // Create CloudKit services (will use real services)
@@ -46,12 +48,24 @@ final class CollectionRepositoryTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        CurrentUserSession.shared.signOut()
         repository = nil
         cloudKitCore = nil
         collectionCloudService = nil
         modelContainer = nil
         testUserId = nil
         try await super.tearDown()
+    }
+
+    private func setCurrentUser(id: UUID) {
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: id,
+                username: "test-\(id.uuidString.prefix(6))",
+                displayName: "Test User",
+                createdAt: Date()
+            )
+        )
     }
 
     // MARK: - Create Tests
@@ -253,6 +267,25 @@ final class CollectionRepositoryTests: XCTestCase {
         }
     }
 
+    func testUpdate_NonOwnedCollection_ThrowsNotAuthorized() async throws {
+        // Given
+        let ownerId = UUID()
+        let otherUserId = UUID()
+        let collection = Collection.new(name: "Shared Collection", userId: ownerId)
+        try await repository.create(collection)
+        setCurrentUser(id: otherUserId)
+
+        // When/Then
+        do {
+            try await repository.update(collection.updated(name: "Should Not Save"))
+            XCTFail("Expected notAuthorized error")
+        } catch CollectionRepositoryError.notAuthorized {
+            // Expected error
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     // MARK: - Add/Remove Recipe Tests
 
     func testAddRecipe_AddsRecipeToCollection() async throws {
@@ -308,6 +341,25 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertTrue(updated?.recipeIds.contains(recipeId3) ?? false)
     }
 
+    func testAddRecipe_ToNonOwnedCollection_ThrowsNotAuthorized() async throws {
+        // Given
+        let ownerId = UUID()
+        let otherUserId = UUID()
+        let collection = Collection.new(name: "Shared Collection", userId: ownerId)
+        try await repository.create(collection)
+        setCurrentUser(id: otherUserId)
+
+        // When/Then
+        do {
+            try await repository.addRecipe(UUID(), to: collection.id)
+            XCTFail("Expected notAuthorized error")
+        } catch CollectionRepositoryError.notAuthorized {
+            // Expected error
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testRemoveRecipe_RemovesRecipeFromCollection() async throws {
         // Given
         let recipeId1 = UUID()
@@ -327,6 +379,67 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(updated?.recipeCount, 1)
         XCTAssertFalse(updated?.recipeIds.contains(recipeId1) ?? true)
         XCTAssertTrue(updated?.recipeIds.contains(recipeId2) ?? false)
+    }
+
+    func testFetch_UsesMembershipRemovalOverStaleLegacyRecipeIdsBlob() async throws {
+        // Given
+        let recipeId1 = UUID()
+        let recipeId2 = UUID()
+        let collection = Collection(
+            name: "Test Collection",
+            userId: testUserId,
+            recipeIds: [recipeId1, recipeId2]
+        )
+        try await repository.create(collection)
+
+        // When
+        try await repository.removeRecipe(recipeId2, from: collection.id)
+
+        // Simulate an older synced collection record still carrying the removed recipe
+        // in its legacy recipeIds blob.
+        let context = ModelContext(modelContainer)
+        let collectionId = collection.id
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { $0.id == collectionId }
+        )
+        let model = try XCTUnwrap(context.fetch(descriptor).first)
+        model.recipeIdsBlob = try JSONEncoder().encode([recipeId1, recipeId2])
+        try context.save()
+
+        // Then
+        let fetched = try await repository.fetch(id: collection.id)
+        XCTAssertEqual(fetched?.recipeIds, [recipeId1])
+    }
+
+    func testRemoveRecipe_DiffsAgainstMembershipOverlayWhenLegacyRecipeIdsBlobIsStale() async throws {
+        // Given
+        let recipeId1 = UUID()
+        let recipeId2 = UUID()
+        let collection = Collection(
+            name: "Test Collection",
+            userId: testUserId,
+            recipeIds: [recipeId1]
+        )
+        try await repository.create(collection)
+        try await repository.addRecipe(recipeId2, to: collection.id)
+
+        // Simulate a stale local/cloud collection model that predates the add.
+        let context = ModelContext(modelContainer)
+        let collectionId = collection.id
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { $0.id == collectionId }
+        )
+        let model = try XCTUnwrap(context.fetch(descriptor).first)
+        model.recipeIdsBlob = try JSONEncoder().encode([recipeId1])
+        try context.save()
+
+        // When
+        try await repository.removeRecipe(recipeId2, from: collection.id)
+
+        // Then
+        let fetched = try await repository.fetch(id: collection.id)
+        XCTAssertEqual(fetched?.recipeIds, [recipeId1])
+        XCTAssertFalse(fetched?.recipeIds.contains(recipeId2) ?? true)
     }
 
     func testRemoveRecipe_FromNonExistentCollection_ThrowsError() async throws {

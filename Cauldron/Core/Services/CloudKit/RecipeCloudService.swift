@@ -16,6 +16,33 @@ struct PublicRecipeSearchMetadataBackfillSummary: Sendable, Equatable {
     let failed: Int
 }
 
+struct DeletedRecipeTombstone: Sendable, Equatable {
+    nonisolated static let currentSchemaVersion = 1
+
+    let recipeId: UUID
+    let ownerId: UUID
+    let deletedAt: Date
+    let cloudRecordName: String?
+    let sourceDeviceId: String?
+    let schemaVersion: Int
+
+    nonisolated init(
+        recipeId: UUID,
+        ownerId: UUID,
+        deletedAt: Date = Date(),
+        cloudRecordName: String? = nil,
+        sourceDeviceId: String? = nil,
+        schemaVersion: Int = Self.currentSchemaVersion
+    ) {
+        self.recipeId = recipeId
+        self.ownerId = ownerId
+        self.deletedAt = deletedAt
+        self.cloudRecordName = cloudRecordName
+        self.sourceDeviceId = sourceDeviceId
+        self.schemaVersion = schemaVersion
+    }
+}
+
 /// CloudKit service for recipe-related operations.
 ///
 /// Handles:
@@ -26,6 +53,7 @@ struct PublicRecipeSearchMetadataBackfillSummary: Sendable, Equatable {
 actor RecipeCloudService {
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeCloudService")
+    private let maxDurableRecordSaveAttempts = 3
 
     init(core: CloudKitCore) {
         self.core = core
@@ -33,6 +61,10 @@ actor RecipeCloudService {
 
     nonisolated static func privateRecipeRecordID(recordName: String, zoneID: CKRecordZone.ID) -> CKRecord.ID {
         CKRecord.ID(recordName: recordName, zoneID: zoneID)
+    }
+
+    nonisolated static func deletedRecipeRecordID(recipeId: UUID, zoneID: CKRecordZone.ID) -> CKRecord.ID {
+        CKRecord.ID(recordName: "deletedRecipe_\(recipeId.uuidString)", zoneID: zoneID)
     }
 
     // MARK: - Account Status (delegated to core)
@@ -84,15 +116,26 @@ actor RecipeCloudService {
         let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
 
         let db = try await core.getPrivateDatabase()
-        let results = try await db.records(matching: query)
-
         var recipes: [Recipe] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let recipe = try? recipeFromRecord(record) {
-                recipes.append(recipe)
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
             }
-        }
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let recipe = try? recipeFromRecord(record) {
+                    recipes.append(recipe)
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
 
         return recipes
     }
@@ -113,19 +156,29 @@ actor RecipeCloudService {
         do {
             let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
             let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
+            var cursor: CKQueryOperation.Cursor?
 
-            let results = try await db.records(matching: query, inZoneWith: zoneID)
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, inZoneWith: zoneID, resultsLimit: 500)
+                }
 
-            for (_, result) in results.matchResults {
-                if let record = try? result.get() {
-                    do {
-                        let recipe = try recipeFromRecord(record)
-                        allRecipes.append(recipe)
-                    } catch {
-                        logger.error("Failed to decode recipe from record: \(error.localizedDescription)")
+                for (_, result) in results.matchResults {
+                    if let record = try? result.get() {
+                        do {
+                            let recipe = try recipeFromRecord(record)
+                            allRecipes.append(recipe)
+                        } catch {
+                            logger.error("Failed to decode recipe from record: \(error.localizedDescription)")
+                        }
                     }
                 }
-            }
+
+                cursor = results.queryCursor
+            } while cursor != nil
         } catch let error as CKError {
             logger.error("❌ Failed to fetch recipes from CloudKit: \(error.localizedDescription)")
             throw error
@@ -154,6 +207,86 @@ actor RecipeCloudService {
                 return
             }
             throw error
+        }
+    }
+
+    func saveDeletedRecipeTombstone(_ tombstone: DeletedRecipeTombstone) async throws {
+        let zoneID = try await core.getCustomZoneID()
+        let db = try await core.getPrivateDatabase()
+        let recordID = Self.deletedRecipeRecordID(recipeId: tombstone.recipeId, zoneID: zoneID)
+        var record = try await fetchOrCreateRecord(
+            in: db,
+            recordID: recordID,
+            recordType: CloudKitCore.RecordType.deletedRecipe
+        )
+        var tombstoneToSave = tombstone
+
+        for attempt in 1...maxDurableRecordSaveAttempts {
+            populateDeletedRecipeRecord(record, from: tombstoneToSave)
+            do {
+                _ = try await db.save(record)
+                logger.info("Saved deleted recipe tombstone: \(tombstone.recipeId)")
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                guard let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord else {
+                    throw error
+                }
+
+                logger.warning("DeletedRecipe save conflict for \(tombstone.recipeId), retrying \(attempt)/\(self.maxDurableRecordSaveAttempts)")
+                let serverTombstone = try? deletedRecipeTombstone(from: serverRecord)
+                record = serverRecord
+                tombstoneToSave = DeletedRecipeTombstone(
+                    recipeId: tombstone.recipeId,
+                    ownerId: tombstone.ownerId,
+                    deletedAt: max(tombstone.deletedAt, serverTombstone?.deletedAt ?? tombstone.deletedAt),
+                    cloudRecordName: tombstone.cloudRecordName ?? serverTombstone?.cloudRecordName,
+                    sourceDeviceId: tombstone.sourceDeviceId ?? serverTombstone?.sourceDeviceId,
+                    schemaVersion: max(tombstone.schemaVersion, serverTombstone?.schemaVersion ?? tombstone.schemaVersion)
+                )
+            } catch {
+                throw error
+            }
+        }
+
+        throw CloudKitError.syncConflict
+    }
+
+    func fetchDeletedRecipeTombstones(ownerId: UUID) async throws -> [DeletedRecipeTombstone] {
+        let accountStatus = await core.checkAccountStatus()
+        guard accountStatus.isAvailable else {
+            logger.error("CloudKit account not available: \(accountStatus)")
+            throw CloudKitError.accountNotAvailable(accountStatus)
+        }
+
+        let zoneID = try await core.getCustomZoneID()
+        let db = try await core.getPrivateDatabase()
+        let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.deletedRecipe, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "deletedAt", ascending: false)]
+
+        do {
+            var tombstones: [DeletedRecipeTombstone] = []
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, inZoneWith: zoneID, resultsLimit: 500)
+                }
+
+                tombstones += results.matchResults.compactMap { _, result in
+                    guard let record = try? result.get() else { return nil }
+                    return try? deletedRecipeTombstone(from: record)
+                }
+                cursor = results.queryCursor
+            } while cursor != nil
+
+            return tombstones
+        } catch let error as CKError where error.code == .unknownItem {
+            logger.info("DeletedRecipe record type not available yet - treating as no remote tombstones")
+            return []
         }
     }
 
@@ -1183,6 +1316,34 @@ actor RecipeCloudService {
         record["isPreview"] = recipe.isPreview as CKRecordValue
     }
 
+    func populateDeletedRecipeRecord(_ record: CKRecord, from tombstone: DeletedRecipeTombstone) {
+        record["recipeId"] = tombstone.recipeId.uuidString as CKRecordValue
+        record["ownerId"] = tombstone.ownerId.uuidString as CKRecordValue
+        record["deletedAt"] = tombstone.deletedAt as CKRecordValue
+        record["cloudRecordName"] = tombstone.cloudRecordName as CKRecordValue?
+        record["sourceDeviceId"] = tombstone.sourceDeviceId as CKRecordValue?
+        record["schemaVersion"] = tombstone.schemaVersion as NSNumber
+    }
+
+    func deletedRecipeTombstone(from record: CKRecord) throws -> DeletedRecipeTombstone {
+        guard let recipeIdString = record["recipeId"] as? String,
+              let recipeId = UUID(uuidString: recipeIdString),
+              let ownerIdString = record["ownerId"] as? String,
+              let ownerId = UUID(uuidString: ownerIdString),
+              let deletedAt = record["deletedAt"] as? Date else {
+            throw CloudKitError.invalidRecord
+        }
+
+        return DeletedRecipeTombstone(
+            recipeId: recipeId,
+            ownerId: ownerId,
+            deletedAt: deletedAt,
+            cloudRecordName: record["cloudRecordName"] as? String,
+            sourceDeviceId: record["sourceDeviceId"] as? String,
+            schemaVersion: Self.intValue(for: record["schemaVersion"]) ?? DeletedRecipeTombstone.currentSchemaVersion
+        )
+    }
+
     @discardableResult
     nonisolated func updateSearchMetadataFields(on record: CKRecord) -> Bool {
         let title = record["title"] as? String ?? ""
@@ -1446,5 +1607,17 @@ actor RecipeCloudService {
         }
 
         return false
+    }
+
+    private nonisolated static func intValue(for value: CKRecordValue?) -> Int? {
+        if let intValue = value as? Int {
+            return intValue
+        }
+
+        if let numberValue = value as? NSNumber {
+            return numberValue.intValue
+        }
+
+        return nil
     }
 }

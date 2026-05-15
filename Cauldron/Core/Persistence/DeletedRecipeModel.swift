@@ -18,10 +18,12 @@ final class DeletedRecipeModel {
     var recipeId: UUID?
     var deletedAt: Date?
     var cloudRecordName: String?
+    var sourceDeviceId: String?
 
-    init(recipeId: UUID, deletedAt: Date, cloudRecordName: String?) {
+    init(recipeId: UUID, deletedAt: Date, cloudRecordName: String?, sourceDeviceId: String? = nil) {
         self.recipeId = recipeId
         self.deletedAt = deletedAt
         self.cloudRecordName = cloudRecordName
+        self.sourceDeviceId = sourceDeviceId
     }
 }
