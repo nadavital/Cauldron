@@ -40,12 +40,15 @@ Guidance for coding agents working in this repository.
 - Social sharing is a core workflow:
   - Invite links/referrals, friend connections, and profile/friends UX should remain reliable and low-friction.
   - Saving someone else's recipe should preserve attribution while creating a synced, profile-visible user-owned copy that follows source updates until the saver edits it.
+  - Saving someone else's collection should create a user-owned copy, save visible recipes through `RecipeSaveService`, persist membership through `CollectionRepository`, and preserve source metadata to prevent duplicate saved collections.
   - CloudKit + Firebase share-link behavior must remain compatible with associated domains and app routing.
 - Large-screen experience is intentional:
   - iPad layouts are first-class, not stretched iPhone views.
   - Mac app behavior is intentionally supported via Mac Catalyst target configuration.
 - Offline-first sync reliability matters:
   - Operation queue + CloudKit sync paths should not be bypassed without a clear migration plan.
+  - Deleted recipes are represented by durable private CloudKit `DeletedRecipe` tombstones; deletion wins over stale active recipe records.
+  - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
 - Update-surface behavior matters:
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.
 

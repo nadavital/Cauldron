@@ -154,7 +154,14 @@ struct AddToCollectionSheet: View {
         defer { isLoading = false }
 
         do {
+            guard let currentUserId = CurrentUserSession.shared.userId else {
+                collections = []
+                selectedCollectionIds.removeAll()
+                return
+            }
+
             collections = try await dependencies.collectionRepository.fetchAll()
+                .filter { $0.userId == currentUserId }
 
             // Pre-select collections that already contain this recipe
             selectedCollectionIds.removeAll()
@@ -173,6 +180,8 @@ struct AddToCollectionSheet: View {
     }
 
     private func toggleCollection(_ collection: Collection) {
+        guard collection.userId == CurrentUserSession.shared.userId else { return }
+
         if selectedCollectionIds.contains(collection.id) {
             selectedCollectionIds.remove(collection.id)
         } else {
@@ -183,6 +192,10 @@ struct AddToCollectionSheet: View {
     private func saveSelections() async {
         do {
             for collection in collections {
+                guard collection.userId == CurrentUserSession.shared.userId else {
+                    continue
+                }
+
                 let shouldBeInCollection = selectedCollectionIds.contains(collection.id)
                 let isCurrentlyInCollection = collection.contains(recipeId: recipe.id)
 

@@ -90,15 +90,26 @@ actor CollectionCloudService {
         let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
 
-        let results = try await db.records(matching: query)
-
         var collections: [Collection] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let collection = try? collectionFromRecord(record) {
-                collections.append(collection)
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: 500)
             }
-        }
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get(),
+                   let collection = try? collectionFromRecord(record) {
+                    collections.append(collection)
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
 
         logger.info("✅ Fetched \(collections.count) collections")
         return collections
@@ -187,8 +198,89 @@ actor CollectionCloudService {
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
-        try await db.deleteRecord(withID: recordID)
-        logger.info("✅ Deleted collection")
+        do {
+            try await db.deleteRecord(withID: recordID)
+            logger.info("✅ Deleted collection")
+        } catch let error as CKError where error.code == .unknownItem {
+            logger.info("Collection not found in CloudKit (already deleted): \(collectionId)")
+        }
+    }
+
+    // MARK: - Collection Membership
+
+    nonisolated static func membershipRecordID(collectionId: UUID, recipeId: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: "membership_\(collectionId.uuidString)_\(recipeId.uuidString)")
+    }
+
+    func saveMembershipEdge(_ edge: CollectionMembershipEdge) async throws {
+        let db = try await core.getPublicDatabase()
+        let recordID = Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+        var record = try await fetchOrCreateMembershipRecord(recordID: recordID, in: db)
+
+        for attempt in 1...maxSaveAttempts {
+            populateMembershipRecord(record, from: edge)
+            do {
+                _ = try await db.save(record)
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                guard let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord else {
+                    throw error
+                }
+
+                if let serverEdge = try? membershipEdge(from: serverRecord),
+                   serverEdge.updatedAt > edge.updatedAt {
+                    return
+                }
+
+                logger.warning("CollectionMembership save conflict for \(edge.collectionId), retrying \(attempt)/\(self.maxSaveAttempts)")
+                record = serverRecord
+            } catch {
+                throw error
+            }
+        }
+
+        throw CloudKitError.syncConflict
+    }
+
+    func saveMembershipEdges(_ edges: [CollectionMembershipEdge]) async throws {
+        for edge in edges {
+            try await saveMembershipEdge(edge)
+        }
+    }
+
+    func fetchMembershipEdges(forUserId userId: UUID) async throws -> [CollectionMembershipEdge] {
+        let db = try await core.getPublicDatabase()
+        let predicate = NSPredicate(format: "ownerId == %@", userId.uuidString)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.collectionMembership, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+        do {
+            var edges: [CollectionMembershipEdge] = []
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, resultsLimit: 500)
+                }
+
+                edges += results.matchResults.compactMap { _, result in
+                    guard let record = try? result.get() else { return nil }
+                    return try? membershipEdge(from: record)
+                }
+                cursor = results.queryCursor
+            } while cursor != nil
+
+            return edges
+        } catch let error as CKError {
+            if error.code == .unknownItem || error.errorCode == 11 {
+                logger.info("CollectionMembership record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
     }
 
     // MARK: - Cover Image
@@ -312,7 +404,7 @@ actor CollectionCloudService {
         return serverRecord
     }
 
-    private func populateCollectionRecord(
+    func populateCollectionRecord(
         _ record: CKRecord,
         from collection: Collection,
         clearingMissingOptionalFields: Bool = true
@@ -325,6 +417,12 @@ actor CollectionCloudService {
         record["createdAt"] = collection.createdAt as CKRecordValue
         record["updatedAt"] = collection.updatedAt as CKRecordValue
         record["coverImageType"] = collection.coverImageType.rawValue as CKRecordValue
+        record["originalCollectionId"] = collection.originalCollectionId?.uuidString as CKRecordValue?
+        record["originalCollectionOwnerId"] = collection.originalCollectionOwnerId?.uuidString as CKRecordValue?
+        record["originalCollectionName"] = collection.originalCollectionName as CKRecordValue?
+        record["savedAt"] = collection.savedAt as CKRecordValue?
+        record["sourceCollectionUpdatedAt"] = collection.sourceCollectionUpdatedAt as CKRecordValue?
+        record["followsSourceUpdates"] = (collection.followsSourceUpdates ? 1 : 0) as CKRecordValue
 
         // Optional fields.
         // On first save attempt, clear missing local fields so explicit user clears persist.
@@ -391,6 +489,9 @@ actor CollectionCloudService {
         let color = record["color"] as? String
         let coverImageTypeString = record["coverImageType"] as? String
         let coverImageType = coverImageTypeString.flatMap { CoverImageType(rawValue: $0) } ?? .recipeGrid
+        let originalCollectionId = (record["originalCollectionId"] as? String).flatMap(UUID.init(uuidString:))
+        let originalCollectionOwnerId = (record["originalCollectionOwnerId"] as? String).flatMap(UUID.init(uuidString:))
+        let followsSourceUpdates = Self.boolValue(for: record["followsSourceUpdates"])
 
         return Collection(
             id: collectionId,
@@ -404,8 +505,72 @@ actor CollectionCloudService {
             color: color,
             coverImageType: coverImageType,
             cloudRecordName: record.recordID.recordName,
+            originalCollectionId: originalCollectionId,
+            originalCollectionOwnerId: originalCollectionOwnerId,
+            originalCollectionName: record["originalCollectionName"] as? String,
+            savedAt: record["savedAt"] as? Date,
+            sourceCollectionUpdatedAt: record["sourceCollectionUpdatedAt"] as? Date,
+            followsSourceUpdates: followsSourceUpdates,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
+    }
+
+    private func fetchOrCreateMembershipRecord(recordID: CKRecord.ID, in db: CKDatabase) async throws -> CKRecord {
+        do {
+            return try await db.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return CKRecord(recordType: CloudKitCore.RecordType.collectionMembership, recordID: recordID)
+        }
+    }
+
+    func populateMembershipRecord(_ record: CKRecord, from edge: CollectionMembershipEdge) {
+        record["collectionId"] = edge.collectionId.uuidString as CKRecordValue
+        record["recipeId"] = edge.recipeId.uuidString as CKRecordValue
+        record["ownerId"] = edge.ownerId.uuidString as CKRecordValue
+        record["status"] = edge.status.rawValue as CKRecordValue
+        record["updatedAt"] = edge.updatedAt as CKRecordValue
+        record["sortOrder"] = edge.sortOrder as NSNumber
+        record["sourceDeviceId"] = edge.sourceDeviceId as CKRecordValue?
+        record["schemaVersion"] = edge.schemaVersion as NSNumber
+    }
+
+    func membershipEdge(from record: CKRecord) throws -> CollectionMembershipEdge {
+        guard let collectionIdString = record["collectionId"] as? String,
+              let collectionId = UUID(uuidString: collectionIdString),
+              let recipeIdString = record["recipeId"] as? String,
+              let recipeId = UUID(uuidString: recipeIdString),
+              let ownerIdString = record["ownerId"] as? String,
+              let ownerId = UUID(uuidString: ownerIdString),
+              let statusString = record["status"] as? String,
+              let status = CollectionMembershipStatus(rawValue: statusString),
+              let updatedAt = record["updatedAt"] as? Date else {
+            throw CloudKitError.invalidRecord
+        }
+
+        let sortOrder = (record["sortOrder"] as? NSNumber)?.intValue ?? 0
+        let schemaVersion = (record["schemaVersion"] as? NSNumber)?.intValue ?? CollectionMembershipEdge.currentSchemaVersion
+        return CollectionMembershipEdge(
+            collectionId: collectionId,
+            recipeId: recipeId,
+            ownerId: ownerId,
+            status: status,
+            updatedAt: updatedAt,
+            sortOrder: sortOrder,
+            sourceDeviceId: record["sourceDeviceId"] as? String,
+            schemaVersion: schemaVersion
+        )
+    }
+
+    private nonisolated static func boolValue(for value: CKRecordValue?) -> Bool {
+        if let bool = value as? Bool {
+            return bool
+        }
+
+        if let number = value as? NSNumber {
+            return number.boolValue
+        }
+
+        return false
     }
 }

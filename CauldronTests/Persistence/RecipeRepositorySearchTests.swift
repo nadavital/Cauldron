@@ -237,6 +237,58 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(Set(remainingRecipes.map(\.id)), Set([sourceId, externalCopy.id]))
     }
 
+    func testRemoveDuplicateRecipesMergesIntoCanonicalNonPreviewRecipe() async throws {
+        let recipeId = UUID()
+        let ownerId = UUID()
+        let previewDuplicate = makeRecipe(
+            id: recipeId,
+            title: "Preview Shell",
+            ownerId: ownerId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: true
+        )
+        let ownedCanonical = Recipe(
+            id: recipeId,
+            title: "Owned Recipe",
+            ingredients: [
+                Ingredient(name: "Flour", quantity: Quantity(value: 2, unit: .cup))
+            ],
+            steps: [
+                CookStep(index: 0, text: "Mix.", timers: [])
+            ],
+            imageURL: URL(string: "file:///tmp/recipe.jpg"),
+            isFavorite: true,
+            visibility: .publicRecipe,
+            ownerId: ownerId,
+            cloudRecordName: "private-record",
+            cloudImageRecordName: "image-record",
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        let context = ModelContext(modelContainer)
+        context.insert(try RecipeModel.from(previewDuplicate))
+        context.insert(try RecipeModel.from(ownedCanonical))
+        try context.save()
+
+        let removedCount = try await repository.removeDuplicateRecipes()
+        let remaining = try await repository.fetchAll()
+
+        XCTAssertEqual(removedCount, 1)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.id, recipeId)
+        XCTAssertEqual(remaining.first?.title, "Owned Recipe")
+        XCTAssertEqual(remaining.first?.ownerId, ownerId)
+        XCTAssertEqual(remaining.first?.cloudRecordName, "private-record")
+        XCTAssertEqual(remaining.first?.cloudImageRecordName, "image-record")
+        XCTAssertEqual(remaining.first?.imageURL?.lastPathComponent, "recipe.jpg")
+        XCTAssertTrue(remaining.first?.imageURL?.path.contains("/RecipeImages/") ?? false)
+        XCTAssertEqual(remaining.first?.visibility, .publicRecipe)
+        XCTAssertTrue(remaining.first?.isFavorite ?? false)
+        XCTAssertFalse(remaining.first?.isPreview ?? true)
+    }
+
     private func makeRecipe(
         title: String,
         tags: [Tag],

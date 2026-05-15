@@ -31,6 +31,7 @@ actor RecipeSyncService {
     private let recipeCloudService: RecipeCloudService
     private let recipeRepository: RecipeRepository
     private let deletedRecipeRepository: DeletedRecipeRepository
+    private let collectionRepository: CollectionRepository?
     private let imageManager: RecipeImageManager
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeSyncService")
 
@@ -47,12 +48,14 @@ actor RecipeSyncService {
         recipeCloudService: RecipeCloudService,
         recipeRepository: RecipeRepository,
         deletedRecipeRepository: DeletedRecipeRepository,
+        collectionRepository: CollectionRepository? = nil,
         imageManager: RecipeImageManager
     ) {
         self.cloudKitCore = cloudKitCore
         self.recipeCloudService = recipeCloudService
         self.recipeRepository = recipeRepository
         self.deletedRecipeRepository = deletedRecipeRepository
+        self.collectionRepository = collectionRepository
         self.imageManager = imageManager
 
         // Load last sync date
@@ -124,24 +127,49 @@ actor RecipeSyncService {
         // Fetch recipes from CloudKit
         let cloudRecipes = try await recipeCloudService.syncUserRecipes(ownerId: userId)
 
+        // Fetch durable remote deletion facts before merging active recipe records.
+        let remoteDeletedRecipes = try await recipeCloudService.fetchDeletedRecipeTombstones(ownerId: userId)
+        for tombstone in remoteDeletedRecipes {
+            try await deletedRecipeRepository.markAsDeleted(
+                recipeId: tombstone.recipeId,
+                cloudRecordName: tombstone.cloudRecordName,
+                deletedAt: tombstone.deletedAt
+            )
+        }
+        let deletedRecipeIds = Set(try await deletedRecipeRepository.fetchAllDeletedRecipeIds())
+
         // Fetch local recipes
         let localRecipes = try await recipeRepository.fetchAll()
 
         // Merge strategies
-        try await mergeRecipes(cloudRecipes: cloudRecipes, localRecipes: localRecipes, userId: userId)
+        try await mergeRecipes(
+            cloudRecipes: cloudRecipes,
+            localRecipes: localRecipes,
+            userId: userId,
+            deletedRecipeIds: deletedRecipeIds
+        )
 
         // Refresh saved recipes that still follow their source of truth.
         try await syncFollowedRecipesFromSources(for: userId)
+
+        if let collectionRepository {
+            try await collectionRepository.syncFromCloudKit(userId: userId)
+            try await collectionRepository.removeRecipesFromAllCollections(deletedRecipeIds)
+        }
 
         // Update last sync date
         lastSyncDate = Date()
         UserDefaults.standard.set(lastSyncDate, forKey: lastSyncKey)
 
-        // Clean up orphaned public recipes (exist in public DB but not locally)
-        await cleanupOrphanedPublicRecipes(userId: userId, localRecipeIds: Set(localRecipes.map { $0.id }))
+        // Clean up orphaned public recipes using post-merge local state. Using
+        // the pre-merge snapshot can delete public records for recipes that were
+        // just restored from private CloudKit during this sync.
+        let reconciledLocalRecipes = try await recipeRepository.fetchAll()
+        await cleanupOrphanedPublicRecipes(userId: userId, localRecipeIds: Set(reconciledLocalRecipes.map { $0.id }))
 
-        // Clean up old tombstones (older than 30 days)
-        try await deletedRecipeRepository.cleanupOldTombstones()
+        // Do not aggressively clean local tombstones here. Remote deleted-recipe
+        // records are now the durable source of truth, and local cleanup must be
+        // server-aware to avoid resurrection after app upgrades or reinstalls.
 
         // Sync completed successfully (don't log routine operations)
     }
@@ -206,7 +234,12 @@ actor RecipeSyncService {
 
     // MARK: - Merge Logic
 
-    private func mergeRecipes(cloudRecipes: [Recipe], localRecipes: [Recipe], userId: UUID) async throws {
+    private func mergeRecipes(
+        cloudRecipes: [Recipe],
+        localRecipes: [Recipe],
+        userId: UUID,
+        deletedRecipeIds: Set<UUID>
+    ) async throws {
         // Starting recipe merge process
 
         // Create dictionaries for faster lookup
@@ -232,8 +265,17 @@ actor RecipeSyncService {
         // Process cloud recipes
         for cloudRecipe in cloudRecipes {
             // Check if this recipe was intentionally deleted locally
-            let wasDeleted = try await deletedRecipeRepository.isDeleted(recipeId: cloudRecipe.id)
+            let wasDeleted = deletedRecipeIds.contains(cloudRecipe.id)
             if wasDeleted {
+                let tombstone = DeletedRecipeTombstone(
+                    recipeId: cloudRecipe.id,
+                    ownerId: userId,
+                    cloudRecordName: cloudRecipe.cloudRecordName,
+                    sourceDeviceId: SyncDeviceIdentifier.current()
+                )
+                try? await recipeCloudService.saveDeletedRecipeTombstone(tombstone)
+                try? await recipeCloudService.deleteRecipe(cloudRecipe)
+                try? await recipeCloudService.deletePublicRecipe(recipeId: cloudRecipe.id)
                 deletedLocally += 1
                 skipped += 1
                 continue
@@ -373,9 +415,17 @@ actor RecipeSyncService {
             }
         }
 
+        for localRecipe in localRecipes where deletedRecipeIds.contains(localRecipe.id) {
+            try await recipeRepository.removeLocalRecipeAfterRemoteDeletion(id: localRecipe.id)
+        }
+
         // Process local-only recipes (push ALL to cloud regardless of visibility)
         for localRecipe in localRecipes {
-            if cloudRecipesByID[localRecipe.id] == nil {
+            if deletedRecipeIds.contains(localRecipe.id) {
+                continue
+            }
+
+            if !cloudRecipesByID.keys.contains(localRecipe.id) {
                 // Recipe exists locally but not in cloud
                 if let ownerId = localRecipe.ownerId, ownerId == userId {
                     // Push ALL recipes to cloud (visibility controls social sharing, not cloud backup)

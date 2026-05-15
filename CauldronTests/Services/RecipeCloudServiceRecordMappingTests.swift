@@ -21,6 +21,47 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertEqual(recordID.zoneID.ownerName, CKCurrentUserDefaultName)
     }
 
+    func testDeletedRecipeRecordIDUsesDistinctCustomZoneRecordName() {
+        let recipeId = UUID()
+        let zoneID = CKRecordZone.ID(zoneName: "CauldronCustomZone", ownerName: CKCurrentUserDefaultName)
+        let recordID = RecipeCloudService.deletedRecipeRecordID(recipeId: recipeId, zoneID: zoneID)
+
+        XCTAssertEqual(recordID.recordName, "deletedRecipe_\(recipeId.uuidString)")
+        XCTAssertNotEqual(recordID.recordName, recipeId.uuidString)
+        XCTAssertEqual(recordID.zoneID.zoneName, "CauldronCustomZone")
+        XCTAssertEqual(recordID.zoneID.ownerName, CKCurrentUserDefaultName)
+    }
+
+    func testPopulateAndDecodeDeletedRecipeTombstone() async throws {
+        let service = RecipeCloudService(core: CloudKitCore())
+        let recipeId = UUID()
+        let ownerId = UUID()
+        let deletedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let tombstone = DeletedRecipeTombstone(
+            recipeId: recipeId,
+            ownerId: ownerId,
+            deletedAt: deletedAt,
+            cloudRecordName: "private-record",
+            sourceDeviceId: "device-a",
+            schemaVersion: 7
+        )
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.deletedRecipe,
+            recordID: CKRecord.ID(recordName: "deletedRecipe_\(recipeId.uuidString)")
+        )
+
+        await service.populateDeletedRecipeRecord(record, from: tombstone)
+        let decoded = try await service.deletedRecipeTombstone(from: record)
+
+        XCTAssertEqual(decoded, tombstone)
+        XCTAssertEqual(record["recipeId"] as? String, recipeId.uuidString)
+        XCTAssertEqual(record["ownerId"] as? String, ownerId.uuidString)
+        XCTAssertEqual(record["deletedAt"] as? Date, deletedAt)
+        XCTAssertEqual(record["cloudRecordName"] as? String, "private-record")
+        XCTAssertEqual(record["sourceDeviceId"] as? String, "device-a")
+        XCTAssertEqual((record["schemaVersion"] as? NSNumber)?.intValue, 7)
+    }
+
     func testPopulateAndDecodeRecipeRecordPreservesSourceLineageAndPreviewState() async throws {
         let service = RecipeCloudService(core: CloudKitCore())
         let ownerId = UUID()

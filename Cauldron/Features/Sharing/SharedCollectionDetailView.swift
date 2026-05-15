@@ -19,6 +19,8 @@ struct SharedCollectionDetailView: View {
     @State private var hiddenRecipeCount = 0
     @State private var isFriendWithOwner = false
     @State private var collectionOwner: User?
+    @State private var isSavingCollection = false
+    @State private var savedCollection: Collection?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
@@ -40,6 +42,14 @@ struct SharedCollectionDetailView: View {
         RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
             storedRecipeLayoutMode = mode.rawValue
         }
+    }
+
+    private var isOwnedByCurrentUser: Bool {
+        collection.userId == CurrentUserSession.shared.userId
+    }
+
+    private var canSaveCollection: Bool {
+        CurrentUserSession.shared.userId != nil && !isOwnedByCurrentUser
     }
 
     var body: some View {
@@ -93,6 +103,7 @@ struct SharedCollectionDetailView: View {
             await loadCollectionOwner()
             await checkFriendshipStatus()
             await loadRecipes()
+            await loadExistingSavedCollection()
         }
     }
 
@@ -150,13 +161,44 @@ struct SharedCollectionDetailView: View {
                     .cornerRadius(12)
             }
 
-            // Shared collection info banner
-            HStack {
+            HStack(spacing: 12) {
                 Image(systemName: "person.2.fill")
                     .foregroundColor(.cauldronOrange)
-                Text("This is a shared collection. Save it to access it from your Collections tab.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isOwnedByCurrentUser ? "This is your collection." : "This is a shared collection.")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+
+                    Text(saveCollectionStatusText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if canSaveCollection {
+                    Button {
+                        Task {
+                            await saveCollectionToLibrary()
+                        }
+                    } label: {
+                        if isSavingCollection {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label(
+                                savedCollection == nil ? "Save" : "Saved",
+                                systemImage: savedCollection == nil ? "square.and.arrow.down" : "checkmark.circle.fill"
+                            )
+                            .labelStyle(.titleAndIcon)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cauldronOrange)
+                    .disabled(isLoading || isSavingCollection || savedCollection != nil)
+                }
             }
             .padding()
             .background(Color.cauldronOrange.opacity(0.1))
@@ -311,6 +353,19 @@ struct SharedCollectionDetailView: View {
         AppLogger.general.info("✅ Loaded \(recipes.count) visible recipes, \(hiddenRecipeCount) hidden")
     }
 
+    private func loadExistingSavedCollection() async {
+        guard canSaveCollection else {
+            savedCollection = nil
+            return
+        }
+
+        do {
+            savedCollection = try await dependencies.collectionSaveService.existingSavedCollection(for: collection)
+        } catch {
+            AppLogger.general.warning("Failed to check saved collection state: \(error.localizedDescription)")
+        }
+    }
+
     private func loadCollectionOwner() async {
         do {
             collectionOwner = try await dependencies.userCloudService.fetchUser(byUserId: collection.userId)
@@ -319,24 +374,23 @@ struct SharedCollectionDetailView: View {
         }
     }
 
-    private func copyRecipe(_ recipe: Recipe) async {
-        guard let userId = CurrentUserSession.shared.userId else { return }
+    private func saveCollectionToLibrary() async {
+        guard !isSavingCollection else { return }
+
+        isSavingCollection = true
+        defer { isSavingCollection = false }
 
         do {
-            // Create a copy of the recipe owned by the current user using withOwner()
-            let canonicalRelatedRecipeIDs = try await dependencies.recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
-            let copiedRecipe = recipe.withOwner(
-                userId,
-                originalCreatorId: recipe.ownerId,
-                originalCreatorName: collectionOwner?.displayName,
-                visibility: .publicRecipe,
-                relatedRecipeIds: canonicalRelatedRecipeIDs
+            let result = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+                collection,
+                visibleRecipes: recipes,
+                sourceOwnerName: collectionOwner?.displayName
             )
-            try await dependencies.recipeRepository.create(copiedRecipe)
-
-            AppLogger.general.info("✅ Copied recipe: \(recipe.title)")
+            savedCollection = result.collection
         } catch {
-            AppLogger.general.error("❌ Failed to copy recipe: \(error.localizedDescription)")
+            AppLogger.general.error("❌ Failed to save collection: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            showError = true
         }
     }
 
@@ -366,6 +420,30 @@ struct SharedCollectionDetailView: View {
             return Color(hex: colorHex) ?? .cauldronOrange
         }
         return .cauldronOrange
+    }
+
+    private var saveCollectionStatusText: String {
+        if isOwnedByCurrentUser {
+            return "You can edit recipes and details from your collection tools."
+        }
+
+        if savedCollection != nil {
+            if collection.recipeIds.isEmpty {
+                return "Saved to your collections. Recipes added later stay on the original until you save them."
+            }
+
+            return "Saved to your collections with your own recipe copies."
+        }
+
+        if collection.recipeIds.isEmpty {
+            return "Save this empty collection to create your own editable copy."
+        }
+
+        if hiddenRecipeCount > 0 {
+            return "Save visible recipes to your own editable copy. Private recipes stay hidden."
+        }
+
+        return "Save this collection to create your own editable copy."
     }
 
     private var recipeGridColumns: [GridItem] {

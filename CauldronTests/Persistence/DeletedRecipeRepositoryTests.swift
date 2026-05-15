@@ -75,6 +75,34 @@ final class DeletedRecipeRepositoryTests: XCTestCase {
         XCTAssertEqual(count, 1, "Should only have one tombstone for the recipe")
     }
 
+    func testMarkAsDeleted_ExistingTombstonePreservesNewestDeletedAtAndCloudRecordName() async throws {
+        // Given
+        let recipeId = UUID()
+        let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let newerDate = Date(timeIntervalSince1970: 1_700_000_500)
+
+        // When
+        try await repository.markAsDeleted(
+            recipeId: recipeId,
+            cloudRecordName: "private-record",
+            deletedAt: olderDate
+        )
+        try await repository.markAsDeleted(
+            recipeId: recipeId,
+            cloudRecordName: nil,
+            deletedAt: newerDate
+        )
+
+        // Then
+        let context = ModelContext(modelContainer)
+        let tombstones = try context.fetch(FetchDescriptor<DeletedRecipeModel>())
+
+        XCTAssertEqual(tombstones.count, 1)
+        XCTAssertEqual(tombstones.first?.recipeId, recipeId)
+        XCTAssertEqual(tombstones.first?.deletedAt, newerDate)
+        XCTAssertEqual(tombstones.first?.cloudRecordName, "private-record")
+    }
+
     func testMarkAsDeleted_MultipleRecipes() async throws {
         // Given
         let recipeId1 = UUID()
