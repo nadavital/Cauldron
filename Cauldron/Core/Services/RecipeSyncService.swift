@@ -32,6 +32,7 @@ actor RecipeSyncService {
     private let recipeRepository: RecipeRepository
     private let deletedRecipeRepository: DeletedRecipeRepository
     private let collectionRepository: CollectionRepository?
+    private let savedReferenceRepository: SavedReferenceRepository?
     private let imageManager: RecipeImageManager
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeSyncService")
 
@@ -49,6 +50,7 @@ actor RecipeSyncService {
         recipeRepository: RecipeRepository,
         deletedRecipeRepository: DeletedRecipeRepository,
         collectionRepository: CollectionRepository? = nil,
+        savedReferenceRepository: SavedReferenceRepository? = nil,
         imageManager: RecipeImageManager
     ) {
         self.cloudKitCore = cloudKitCore
@@ -56,6 +58,7 @@ actor RecipeSyncService {
         self.recipeRepository = recipeRepository
         self.deletedRecipeRepository = deletedRecipeRepository
         self.collectionRepository = collectionRepository
+        self.savedReferenceRepository = savedReferenceRepository
         self.imageManager = imageManager
 
         // Load last sync date
@@ -155,7 +158,13 @@ actor RecipeSyncService {
         if let collectionRepository {
             try await collectionRepository.syncFromCloudKit(userId: userId)
             try await collectionRepository.removeRecipesFromAllCollections(deletedRecipeIds)
+            try await collectionRepository.repairInvalidPublicCollectionMemberships(
+                recipeRepository: recipeRepository,
+                ownerId: userId
+            )
         }
+
+        try await savedReferenceRepository?.syncFromCloudKit(userId: userId)
 
         // Update last sync date
         lastSyncDate = Date()
@@ -222,6 +231,8 @@ actor RecipeSyncService {
                 logger.error("Failed to sync recipe '\(recipe.title)': \(error.localizedDescription)")
             }
         }
+
+        try await savedReferenceRepository?.forceSyncAllReferencesToCloud(userId: userId)
 
         logger.info("✅ Force sync complete - Synced: \(syncedCount), Failed: \(failedCount)")
     }

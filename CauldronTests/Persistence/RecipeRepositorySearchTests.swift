@@ -11,19 +11,32 @@ import XCTest
 final class RecipeRepositorySearchTests: XCTestCase {
     private var modelContainer: ModelContainer!
     private var repository: RecipeRepository!
+    private var currentUserId: UUID!
 
     override func setUp() async throws {
         try await super.setUp()
 
         UserDefaults.standard.removeObject(forKey: "hasFixedCorruptedImageFilenames_v2")
+        CurrentUserSession.shared.signOut()
+        currentUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "tester",
+                displayName: "Tester",
+                createdAt: Date()
+            )
+        )
         modelContainer = try TestModelContainer.create()
         repository = makeRepository(modelContainer: modelContainer)
     }
 
     override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: "hasFixedCorruptedImageFilenames_v2")
+        CurrentUserSession.shared.signOut()
         repository = nil
         modelContainer = nil
+        currentUserId = nil
         try await super.tearDown()
     }
 
@@ -109,19 +122,19 @@ final class RecipeRepositorySearchTests: XCTestCase {
         let otherSourceId = UUID()
         let matchingCopy = makeRecipe(
             title: "Saved Soup",
-            ownerId: UUID(),
+            ownerId: currentUserId,
             originalRecipeId: sourceId,
             isPreview: false
         )
         let previewCopy = makeRecipe(
             title: "Preview Soup",
-            ownerId: UUID(),
+            ownerId: currentUserId,
             originalRecipeId: sourceId,
             isPreview: true
         )
         let unrelatedCopy = makeRecipe(
             title: "Saved Salad",
-            ownerId: UUID(),
+            ownerId: currentUserId,
             originalRecipeId: otherSourceId,
             isPreview: false
         )
@@ -133,6 +146,29 @@ final class RecipeRepositorySearchTests: XCTestCase {
         let results = try await repository.fetchOwnedCopies(originalRecipeIds: [sourceId])
 
         XCTAssertEqual(results.map(\.id), [matchingCopy.id])
+    }
+
+    func testFetchOwnedCopiesExcludesCopiesOwnedByOtherUsers() async throws {
+        let sourceId = UUID()
+        let otherUserCopy = makeRecipe(
+            title: "Other User Soup",
+            ownerId: UUID(),
+            originalRecipeId: sourceId,
+            isPreview: false
+        )
+        let currentUserCopy = makeRecipe(
+            title: "My Soup",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            isPreview: false
+        )
+
+        try await repository.create(otherUserCopy, skipCloudSync: true)
+        try await repository.create(currentUserCopy, skipCloudSync: true)
+
+        let results = try await repository.fetchOwnedCopies(originalRecipeIds: [sourceId])
+
+        XCTAssertEqual(results.map(\.id), [currentUserCopy.id])
     }
 
     func testFetchOwnedCopiesDoesNotTreatSameTitleAndIngredientCountAsSavedCopy() async throws {
@@ -162,7 +198,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
         )
         let ownedCopy = makeRecipe(
             title: "Saved Sauce",
-            ownerId: UUID(),
+            ownerId: currentUserId,
             originalRecipeId: sourceId,
             isPreview: false
         )
@@ -201,7 +237,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
     }
 
     func testRemoveSelfSavedRecipeCopiesDeletesFollowingCopyOfOwnedOriginal() async throws {
-        let currentUserId = UUID()
+        let currentUserId = try XCTUnwrap(self.currentUserId)
         let sourceId = UUID()
         let original = makeRecipe(
             id: sourceId,

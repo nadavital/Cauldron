@@ -13,7 +13,7 @@ struct RecipeDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var recipe: Recipe
-    @State private var showingEditSheet = false
+    @State var showingEditSheet = false
     @State var showSessionConflictAlert = false
     @State var scaleFactor: Double = 1.0
     @State var localIsFavorite: Bool
@@ -26,6 +26,9 @@ struct RecipeDetailView: View {
     @State private var showReferenceRemovedToast = false
     @State var currentVisibility: RecipeVisibility
     @State var isChangingVisibility = false
+    @State var pendingVisibilityChange: RecipeVisibility?
+    @State var pendingVisibilityImpact: RecipeVisibilityChangeImpact?
+    @State var showVisibilityImpactAlert = false
     @State private var showingCollectionPicker = false
     @State var isSavingRecipe = false
     @State var showSaveSuccessToast = false
@@ -282,6 +285,24 @@ struct RecipeDetailView: View {
                 Text("End '\(currentRecipe.title)' to start cooking '\(recipe.title)'?")
             }
         }
+        .alert("Remove from Public Collections?", isPresented: $showVisibilityImpactAlert) {
+            Button("Cancel", role: .cancel) {
+                pendingVisibilityChange = nil
+                pendingVisibilityImpact = nil
+            }
+            Button("Make Private", role: .destructive) {
+                let targetVisibility = pendingVisibilityChange ?? .privateRecipe
+                pendingVisibilityChange = nil
+                pendingVisibilityImpact = nil
+                Task {
+                    await changeVisibility(to: targetVisibility)
+                }
+            }
+        } message: {
+            if let impact = pendingVisibilityImpact {
+                Text("This recipe is in \(impact.publicCollectionCount) public collection\(impact.publicCollectionCount == 1 ? "" : "s"). Making it private will remove it from those collections.")
+            }
+        }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -453,7 +474,9 @@ struct RecipeDetailView: View {
                     Divider()
 
                     Button {
-                        showingEditSheet = true
+                        Task {
+                            await prepareRecipeForEditing()
+                        }
                     } label: {
                         Label("Edit Recipe", systemImage: "pencil")
                     }
@@ -471,6 +494,16 @@ struct RecipeDetailView: View {
                     } label: {
                         Label("Delete Recipe", systemImage: "trash")
                     }
+                } else if hasOwnedCopy {
+                    Divider()
+
+                    Button {
+                        Task {
+                            await prepareRecipeForEditing()
+                        }
+                    } label: {
+                        Label("Edit Recipe", systemImage: "pencil")
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -487,7 +520,7 @@ struct RecipeDetailView: View {
                 }
 
                 Task {
-                    await changeVisibility(to: newVisibility)
+                    await requestVisibilityChange(to: newVisibility)
                 }
             }
         )

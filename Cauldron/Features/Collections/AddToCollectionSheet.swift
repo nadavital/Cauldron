@@ -17,8 +17,14 @@ struct AddToCollectionSheet: View {
     @State private var isLoading = false
     @State private var showingCreateSheet = false
     @State private var selectedCollectionIds = Set<UUID>()
+    @State private var collectionMembershipRecipeIdsByCollectionId: [UUID: UUID] = [:]
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var showingPublicMembershipRepairConfirmation = false
+    @State private var pendingPublicMembershipRepairPlan = PublicCollectionMembershipRepairPlan(
+        privateOwnedRecipeCount: 0,
+        referencedRecipeCount: 0
+    )
 
     var body: some View {
         NavigationStack {
@@ -111,6 +117,19 @@ struct AddToCollectionSheet: View {
                     Text(errorMessage)
                 }
             }
+            .alert(
+                "Make Recipes Public?",
+                isPresented: $showingPublicMembershipRepairConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Continue") {
+                    Task {
+                        await saveSelections(confirmingPublicMembershipRepair: true)
+                    }
+                }
+            } message: {
+                Text(pendingPublicMembershipRepairPlan.confirmationMessage)
+            }
             .task {
                 await loadCollections()
             }
@@ -165,9 +184,12 @@ struct AddToCollectionSheet: View {
 
             // Pre-select collections that already contain this recipe
             selectedCollectionIds.removeAll()
+            collectionMembershipRecipeIdsByCollectionId.removeAll()
+            let membershipCandidateIds = try await membershipCandidateRecipeIds()
             for collection in collections {
-                if collection.contains(recipeId: recipe.id) {
+                if let membershipRecipeId = collection.recipeIds.first(where: { membershipCandidateIds.contains($0) }) {
                     selectedCollectionIds.insert(collection.id)
+                    collectionMembershipRecipeIdsByCollectionId[collection.id] = membershipRecipeId
                 }
             }
 
@@ -189,23 +211,39 @@ struct AddToCollectionSheet: View {
         }
     }
 
-    private func saveSelections() async {
+    private func saveSelections(confirmingPublicMembershipRepair: Bool = false) async {
         do {
+            if !confirmingPublicMembershipRepair {
+                let repairPlan = try await publicMembershipRepairPlanForPendingAdds()
+                if repairPlan.requiresRepair {
+                    pendingPublicMembershipRepairPlan = repairPlan
+                    showingPublicMembershipRepairConfirmation = true
+                    return
+                }
+            }
+
             for collection in collections {
                 guard collection.userId == CurrentUserSession.shared.userId else {
                     continue
                 }
 
                 let shouldBeInCollection = selectedCollectionIds.contains(collection.id)
-                let isCurrentlyInCollection = collection.contains(recipeId: recipe.id)
+                let currentMembershipRecipeId = collectionMembershipRecipeIdsByCollectionId[collection.id]
+                let isCurrentlyInCollection = currentMembershipRecipeId != nil
 
                 if shouldBeInCollection && !isCurrentlyInCollection {
-                    // Add recipe to collection
-                    try await dependencies.collectionRepository.addRecipe(recipe.id, to: collection.id)
+                    let recipeToAdd = try await recipeForCollectionMembership(collection)
+                    let desiredRecipeIds = collection.recipeIds + [recipeToAdd.id]
+                    let resolution = try await dependencies.publicCollectionMembershipResolver.resolveRecipeIdsForOwnedPublicCollection(
+                        recipeIds: desiredRecipeIds,
+                        ownerId: collection.userId,
+                        visibility: collection.visibility
+                    )
+                    try await dependencies.collectionRepository.update(collection.updated(recipeIds: resolution.recipeIds))
                     AppLogger.general.info("✅ Added recipe to collection: \(collection.name)")
                 } else if !shouldBeInCollection && isCurrentlyInCollection {
                     // Remove recipe from collection
-                    try await dependencies.collectionRepository.removeRecipe(recipe.id, from: collection.id)
+                    try await dependencies.collectionRepository.removeRecipe(currentMembershipRecipeId ?? recipe.id, from: collection.id)
                     AppLogger.general.info("✅ Removed recipe from collection: \(collection.name)")
                 }
             }
@@ -216,6 +254,63 @@ struct AddToCollectionSheet: View {
             errorMessage = "Failed to save changes: \(error.localizedDescription)"
             showError = true
         }
+    }
+
+    private func publicMembershipRepairPlanForPendingAdds() async throws -> PublicCollectionMembershipRepairPlan {
+        var privateOwnedRecipeCount = 0
+        var referencedRecipeCount = 0
+
+        for collection in collections {
+            guard collection.userId == CurrentUserSession.shared.userId,
+                  collection.visibility == .publicRecipe,
+                  selectedCollectionIds.contains(collection.id),
+                  collectionMembershipRecipeIdsByCollectionId[collection.id] == nil else {
+                continue
+            }
+
+            let recipeIsOwnedByCollectionOwner = recipe.ownerId == collection.userId && !recipe.isPreview
+            let desiredRecipeIds = recipeIsOwnedByCollectionOwner
+                ? collection.recipeIds + [recipe.id]
+                : collection.recipeIds
+            let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
+                recipeIds: desiredRecipeIds,
+                ownerId: collection.userId,
+                visibility: collection.visibility
+            )
+            privateOwnedRecipeCount += repairPlan.privateOwnedRecipeCount
+            referencedRecipeCount += repairPlan.referencedRecipeCount
+
+            if !recipeIsOwnedByCollectionOwner {
+                referencedRecipeCount += 1
+            }
+        }
+
+        return PublicCollectionMembershipRepairPlan(
+            privateOwnedRecipeCount: privateOwnedRecipeCount,
+            referencedRecipeCount: referencedRecipeCount
+        )
+    }
+
+    private func recipeForCollectionMembership(_ collection: Collection) async throws -> Recipe {
+        guard recipe.ownerId != collection.userId || recipe.isPreview else {
+            return recipe
+        }
+
+        return try await dependencies.recipeSaveService.materializeRecipeForOwnedCollectionMembership(
+            recipe,
+            minimumVisibility: collection.visibility,
+            originalCreatorId: recipe.originalCreatorId ?? recipe.ownerId,
+            originalCreatorName: recipe.originalCreatorName
+        )
+    }
+
+    private func membershipCandidateRecipeIds() async throws -> Set<UUID> {
+        let sourceRecipeId = recipe.relatedGraphReferenceID
+        let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [sourceRecipeId]
+        )
+
+        return Set([recipe.id, sourceRecipeId] + ownedCopies.map(\.id))
     }
 
     // MARK: - Helpers

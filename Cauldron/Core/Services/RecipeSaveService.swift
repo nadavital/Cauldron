@@ -9,12 +9,14 @@ import os
 
 struct RecipeSaveResult: Sendable, Equatable {
     let recipe: Recipe
+    let savedReference: SavedRecipeReference?
     let savedRelatedRecipeCount: Int
     let reusedExistingCopy: Bool
 }
 
 actor RecipeSaveService {
     private let recipeRepository: RecipeRepository
+    private let savedReferenceRepository: SavedReferenceRepository
     private let recipeCloudService: RecipeCloudService
     private let recipeDiscoveryCache: RecipeDiscoveryCache
     private let imageManager: RecipeImageManager
@@ -22,11 +24,13 @@ actor RecipeSaveService {
 
     init(
         recipeRepository: RecipeRepository,
+        savedReferenceRepository: SavedReferenceRepository,
         recipeCloudService: RecipeCloudService,
         recipeDiscoveryCache: RecipeDiscoveryCache,
         imageManager: RecipeImageManager
     ) {
         self.recipeRepository = recipeRepository
+        self.savedReferenceRepository = savedReferenceRepository
         self.recipeCloudService = recipeCloudService
         self.recipeDiscoveryCache = recipeDiscoveryCache
         self.imageManager = imageManager
@@ -55,116 +59,225 @@ actor RecipeSaveService {
         _ recipe: Recipe,
         originalCreatorId: UUID? = nil,
         originalCreatorName: String? = nil,
-        relatedRecipesToSave: [Recipe] = []
+        relatedRecipesToSave: [Recipe] = [],
+        minimumVisibility: RecipeVisibility? = nil
     ) async throws -> RecipeSaveResult {
         guard let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
             throw RecipeSaveServiceError.notAuthenticated
         }
 
-        if recipe.ownerId == userId {
-            return RecipeSaveResult(recipe: recipe, savedRelatedRecipeCount: 0, reusedExistingCopy: true)
+        if recipe.ownerId == userId, !recipe.isPreview {
+            let resolvedRecipe = try await recipeWithMinimumVisibility(
+                recipe,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+            return RecipeSaveResult(
+                recipe: resolvedRecipe,
+                savedReference: nil,
+                savedRelatedRecipeCount: 0,
+                reusedExistingCopy: true
+            )
         }
 
         let sourceRecipeID = recipe.relatedGraphReferenceID
-        let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+
+        if let existingReference = try await savedReferenceRepository.recipeReference(
+            userId: userId,
+            sourceRecipeId: sourceRecipeID
+        ) {
+            if let materializedRecipeId = existingReference.materializedRecipeId,
+               let materializedRecipe = try await recipeRepository.fetch(id: materializedRecipeId) {
+                return RecipeSaveResult(
+                    recipe: materializedRecipe,
+                    savedReference: existingReference,
+                    savedRelatedRecipeCount: 0,
+                    reusedExistingCopy: true
+                )
+            }
+
+            return RecipeSaveResult(
+                recipe: recipe,
+                savedReference: existingReference,
+                savedRelatedRecipeCount: 0,
+                reusedExistingCopy: true
+            )
+        }
 
         if let existingLocalRecipe = try await recipeRepository.fetch(id: recipe.id),
+           existingLocalRecipe.ownerId == userId,
            !existingLocalRecipe.isPreview {
-            return RecipeSaveResult(recipe: existingLocalRecipe, savedRelatedRecipeCount: 0, reusedExistingCopy: true)
+            let resolvedRecipe = try await recipeWithMinimumVisibility(
+                existingLocalRecipe,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+            return RecipeSaveResult(
+                recipe: resolvedRecipe,
+                savedReference: nil,
+                savedRelatedRecipeCount: 0,
+                reusedExistingCopy: true
+            )
         }
 
         let existingOwnedCopies = try await recipeRepository.fetchOwnedCopies(originalRecipeIds: [sourceRecipeID])
         if let existingOwnedCopy = existingOwnedCopies.first {
-            return RecipeSaveResult(recipe: existingOwnedCopy, savedRelatedRecipeCount: 0, reusedExistingCopy: true)
+            let referenceResult = try await savedReferenceRepository.saveRecipeReference(
+                sourceRecipe: recipe,
+                userId: userId,
+                originalCreatorName: originalCreatorName,
+                materializedRecipeId: existingOwnedCopy.id
+            )
+            let resolvedRecipe = try await recipeWithMinimumVisibility(
+                existingOwnedCopy,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+            return RecipeSaveResult(
+                recipe: resolvedRecipe,
+                savedReference: referenceResult.reference,
+                savedRelatedRecipeCount: 0,
+                reusedExistingCopy: true
+            )
         }
 
-        let relatedSaveResult = try await saveRelatedRecipes(
+        let savedRelatedRecipeCount = try await saveRelatedRecipeReferences(
             relatedRecipesToSave,
             userId: userId
         )
-        let relatedRecipeIdMapping = relatedSaveResult.recipeIdMapping
-        let savedRecipe: Recipe
-
-        if let existingPreview = try await recipeRepository.fetch(id: recipe.id), existingPreview.isPreview {
-            savedRecipe = try await convertPreviewToOwnedRecipe(
-                existingPreview,
-                sourceRecipe: recipe,
-                userId: userId,
-                originalCreatorId: originalCreatorId ?? recipe.ownerId,
-                originalCreatorName: originalCreatorName,
-                canonicalRelatedRecipeIDs: canonicalRelatedRecipeIDs,
-                relatedRecipeIdMapping: relatedRecipeIdMapping
-            )
-        } else {
-            savedRecipe = try await copyRecipeToOwner(
-                recipe,
-                userId: userId,
-                originalCreatorId: originalCreatorId ?? recipe.ownerId,
-                originalCreatorName: originalCreatorName,
-                canonicalRelatedRecipeIDs: canonicalRelatedRecipeIDs,
-                relatedRecipeIdMapping: relatedRecipeIdMapping
-            )
-        }
+        let referenceResult = try await savedReferenceRepository.saveRecipeReference(
+            sourceRecipe: recipe,
+            userId: userId,
+            originalCreatorName: originalCreatorName
+        )
 
         NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)
         return RecipeSaveResult(
-            recipe: savedRecipe,
-            savedRelatedRecipeCount: relatedSaveResult.savedCount,
-            reusedExistingCopy: false
+            recipe: recipe,
+            savedReference: referenceResult.reference,
+            savedRelatedRecipeCount: savedRelatedRecipeCount,
+            reusedExistingCopy: referenceResult.reusedExistingReference
         )
     }
 
-    private func saveRelatedRecipes(
+    func materializeSavedRecipeForEditing(
+        _ recipe: Recipe,
+        originalCreatorId: UUID? = nil,
+        originalCreatorName: String? = nil,
+        minimumVisibility: RecipeVisibility? = nil
+    ) async throws -> Recipe {
+        guard let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            throw RecipeSaveServiceError.notAuthenticated
+        }
+
+        if recipe.ownerId == userId, !recipe.isPreview {
+            return try await recipeWithMinimumVisibility(
+                recipe,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+        }
+
+        let sourceRecipeID = recipe.relatedGraphReferenceID
+        if let existingReference = try await savedReferenceRepository.recipeReference(
+            userId: userId,
+            sourceRecipeId: sourceRecipeID
+        ), let materializedRecipeId = existingReference.materializedRecipeId,
+           let materializedRecipe = try await recipeRepository.fetch(id: materializedRecipeId) {
+            return try await recipeWithMinimumVisibility(
+                materializedRecipe,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+        }
+
+        let existingOwnedCopies = try await recipeRepository.fetchOwnedCopies(originalRecipeIds: [sourceRecipeID])
+        if let existingOwnedCopy = existingOwnedCopies.first {
+            _ = try await savedReferenceRepository.saveRecipeReference(
+                sourceRecipe: recipe,
+                userId: userId,
+                originalCreatorName: originalCreatorName,
+                materializedRecipeId: existingOwnedCopy.id
+            )
+            return try await recipeWithMinimumVisibility(
+                existingOwnedCopy,
+                userId: userId,
+                minimumVisibility: minimumVisibility
+            )
+        }
+
+        let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
+        let copiedRecipe = try await copyRecipeToOwner(
+            recipe,
+            userId: userId,
+            originalCreatorId: originalCreatorId ?? recipe.ownerId,
+            originalCreatorName: originalCreatorName,
+            canonicalRelatedRecipeIDs: canonicalRelatedRecipeIDs,
+            relatedRecipeIdMapping: [:]
+        )
+
+        _ = try await savedReferenceRepository.saveRecipeReference(
+            sourceRecipe: recipe,
+            userId: userId,
+            originalCreatorName: originalCreatorName,
+            materializedRecipeId: copiedRecipe.id
+        )
+        return try await recipeWithMinimumVisibility(
+            copiedRecipe,
+            userId: userId,
+            minimumVisibility: minimumVisibility
+        )
+    }
+
+    func materializeRecipeForOwnedCollectionMembership(
+        _ recipe: Recipe,
+        minimumVisibility: RecipeVisibility,
+        originalCreatorId: UUID? = nil,
+        originalCreatorName: String? = nil
+    ) async throws -> Recipe {
+        try await materializeSavedRecipeForEditing(
+            recipe,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            minimumVisibility: minimumVisibility
+        )
+    }
+
+    private func saveRelatedRecipeReferences(
         _ relatedRecipes: [Recipe],
         userId: UUID
-    ) async throws -> (recipeIdMapping: [UUID: UUID], savedCount: Int) {
-        var relatedRecipeIdMapping: [UUID: UUID] = [:]
+    ) async throws -> Int {
         var savedCount = 0
 
         for relatedRecipe in relatedRecipes {
-            let relatedSourceRecipeId = relatedRecipe.relatedGraphReferenceID
-
-            if relatedRecipe.ownerId == userId {
-                relatedRecipeIdMapping[relatedSourceRecipeId] = relatedRecipe.id
+            if relatedRecipe.ownerId == userId && !relatedRecipe.isPreview {
                 continue
             }
 
-            if let localRelated = try await recipeRepository.fetch(id: relatedRecipe.id),
-               !localRelated.isPreview {
-                relatedRecipeIdMapping[relatedSourceRecipeId] = localRelated.id
-                continue
-            }
-
-            let existingRelatedCopies = try await recipeRepository.fetchOwnedCopies(
-                originalRecipeIds: [relatedSourceRecipeId]
+            let result = try await savedReferenceRepository.saveRecipeReference(
+                sourceRecipe: relatedRecipe,
+                userId: userId,
+                originalCreatorName: relatedRecipe.originalCreatorName
             )
-            if let existingRelatedCopy = existingRelatedCopies.first {
-                relatedRecipeIdMapping[relatedSourceRecipeId] = existingRelatedCopy.id
-                continue
-            }
-
-            let canonicalRelatedIDsForCopy = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: relatedRecipe)
-            let relatedImageSourceRecipeID = relatedRecipe.sourceAssetReferenceID
-            var copiedRelated = relatedRecipe.withOwner(
-                userId,
-                originalCreatorId: relatedRecipe.ownerId,
-                originalCreatorName: relatedRecipe.originalCreatorName,
-                visibility: .publicRecipe,
-                relatedRecipeIds: canonicalRelatedIDsForCopy
-            ).withCloudImageMetadata(recordName: nil, modifiedAt: nil)
-
-            try await recipeRepository.create(copiedRelated)
-            copiedRelated = try await localizePublicImageIfNeeded(
-                from: relatedRecipe,
-                sourceImageRecipeID: relatedImageSourceRecipeID,
-                into: copiedRelated
-            )
-
-            relatedRecipeIdMapping[relatedSourceRecipeId] = copiedRelated.id
-            savedCount += 1
+            if !result.reusedExistingReference { savedCount += 1 }
         }
 
-        return (relatedRecipeIdMapping, savedCount)
+        return savedCount
+    }
+
+    private func recipeWithMinimumVisibility(
+        _ recipe: Recipe,
+        userId: UUID,
+        minimumVisibility: RecipeVisibility?
+    ) async throws -> Recipe {
+        guard let minimumVisibility,
+              !recipe.meetsMinimumVisibility(for: minimumVisibility),
+              recipe.ownerId == userId else {
+            return recipe
+        }
+
+        try await recipeRepository.updateVisibility(id: recipe.id, visibility: minimumVisibility)
+        return try await recipeRepository.fetch(id: recipe.id) ?? recipe
     }
 
     private func convertPreviewToOwnedRecipe(

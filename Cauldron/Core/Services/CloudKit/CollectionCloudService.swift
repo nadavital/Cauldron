@@ -111,8 +111,9 @@ actor CollectionCloudService {
             cursor = results.queryCursor
         } while cursor != nil
 
-        logger.info("✅ Fetched \(collections.count) collections")
-        return collections
+        let collectionsWithMemberships = await applyMembershipOverlay(to: collections)
+        logger.info("✅ Fetched \(collectionsWithMemberships.count) collections")
+        return collectionsWithMemberships
     }
 
     /// Fetch shared collections from friends
@@ -121,27 +122,25 @@ actor CollectionCloudService {
 
         let db = try await core.getPublicDatabase()
 
-        let friendIdStrings = friendIds.map { $0.uuidString }
-        let predicate = NSPredicate(
-            format: "userId IN %@ AND visibility != %@",
-            friendIdStrings,
-            RecipeVisibility.privateRecipe.rawValue
-        )
-        let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
-
         do {
-            let results = try await db.records(matching: query)
-
             var collections: [Collection] = []
-            for (_, result) in results.matchResults {
-                if let record = try? result.get(),
-                   let collection = try? collectionFromRecord(record) {
+            for friendIdChunk in Self.chunkedStrings(friendIds.map(\.uuidString)) {
+                let predicate = NSPredicate(
+                    format: "userId IN %@ AND visibility != %@",
+                    friendIdChunk,
+                    RecipeVisibility.privateRecipe.rawValue
+                )
+                let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
+                query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+                let records = try await fetchAllRecords(matching: query, in: db)
+                for record in records {
+                    guard let collection = try? collectionFromRecord(record) else { continue }
                     collections.append(collection)
                 }
             }
 
-            return collections
+            return await applyMembershipOverlay(to: deduplicatedAndSortedCollections(collections))
         } catch let error as CKError {
             if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("Collection record type not yet in CloudKit schema - returning empty list")
@@ -159,29 +158,28 @@ actor CollectionCloudService {
 
         let db = try await core.getPublicDatabase()
 
-        let ownerIdStrings = ownerIds.map { $0.uuidString }
-        let predicate = NSPredicate(
-            format: "userId IN %@ AND visibility == %@",
-            ownerIdStrings,
-            visibility.rawValue
-        )
-
-        let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
-
         do {
-            let results = try await db.records(matching: query, resultsLimit: 100)
-
             var collections: [Collection] = []
-            for (_, result) in results.matchResults {
-                if let record = try? result.get(),
-                   let collection = try? collectionFromRecord(record) {
+            for ownerIdChunk in Self.chunkedStrings(ownerIds.map(\.uuidString)) {
+                let predicate = NSPredicate(
+                    format: "userId IN %@ AND visibility == %@",
+                    ownerIdChunk,
+                    visibility.rawValue
+                )
+
+                let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
+                query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+
+                let records = try await fetchAllRecords(matching: query, in: db)
+                for record in records {
+                    guard let collection = try? collectionFromRecord(record) else { continue }
                     collections.append(collection)
                 }
             }
 
-            logger.info("✅ Found \(collections.count) collections")
-            return collections
+            let collectionsWithMemberships = await applyMembershipOverlay(to: deduplicatedAndSortedCollections(collections))
+            logger.info("✅ Found \(collectionsWithMemberships.count) collections")
+            return collectionsWithMemberships
         } catch let error as CKError {
             if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("Collection record type not yet in CloudKit schema - returning empty list")
@@ -191,9 +189,38 @@ actor CollectionCloudService {
         }
     }
 
+    func fetchPublicCollections(ids: [UUID]) async throws -> [UUID: Collection] {
+        let uniqueIds = Array(Set(ids))
+        guard !uniqueIds.isEmpty else { return [:] }
+
+        let db = try await core.getPublicDatabase()
+        var collections: [Collection] = []
+
+        for id in uniqueIds {
+            let recordID = CKRecord.ID(recordName: id.uuidString)
+            do {
+                let record = try await db.record(for: recordID)
+                let collection = try collectionFromRecord(record)
+                guard collection.visibility != .privateRecipe else { continue }
+                collections.append(collection)
+            } catch let error as CKError where error.code == .unknownItem {
+                continue
+            } catch {
+                logger.warning("Failed to fetch saved source collection \(id.uuidString): \(error.localizedDescription)")
+            }
+        }
+
+        let overlaidCollections = await applyMembershipOverlay(to: collections)
+        return Dictionary(uniqueKeysWithValues: overlaidCollections.map { ($0.id, $0) })
+    }
+
     /// Delete collection from PUBLIC database
-    func deleteCollection(_ collectionId: UUID) async throws {
+    func deleteCollection(_ collectionId: UUID, ownerId: UUID? = nil) async throws {
         logger.info("🗑️ Deleting collection: \(collectionId)")
+
+        if let ownerId {
+            try await deleteMembershipEdges(forCollectionId: collectionId, ownerId: ownerId)
+        }
 
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collectionId.uuidString)
@@ -281,6 +308,27 @@ actor CollectionCloudService {
             }
             throw error
         }
+    }
+
+    func deleteMembershipEdges(forCollectionId collectionId: UUID, ownerId: UUID) async throws {
+        let edges = try await fetchMembershipEdges(forUserId: ownerId)
+            .filter { $0.collectionId == collectionId }
+
+        guard !edges.isEmpty else {
+            logger.info("No collection membership edges found to delete for collection: \(collectionId)")
+            return
+        }
+
+        let db = try await core.getPublicDatabase()
+        let recordIDs = edges.map {
+            Self.membershipRecordID(collectionId: $0.collectionId, recipeId: $0.recipeId)
+        }
+
+        for chunk in Self.chunked(recordIDs, size: 200) {
+            try await deleteRecordIDs(chunk, in: db)
+        }
+
+        logger.info("✅ Deleted \(edges.count) collection membership edges for collection: \(collectionId)")
     }
 
     // MARK: - Cover Image
@@ -395,6 +443,103 @@ actor CollectionCloudService {
         }
     }
 
+    private func fetchAllRecords(
+        matching query: CKQuery,
+        in db: CKDatabase,
+        resultsLimit: Int = 500
+    ) async throws -> [CKRecord] {
+        var records: [CKRecord] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: resultsLimit)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: resultsLimit)
+            }
+
+            records += results.matchResults.compactMap { _, result in
+                try? result.get()
+            }
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return records
+    }
+
+    private func deleteRecordIDs(_ recordIDs: [CKRecord.ID], in db: CKDatabase) async throws {
+        guard !recordIDs.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
+            operation.modifyRecordsResultBlock = { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            operation.database = db
+            operation.start()
+        }
+    }
+
+    private func deduplicatedAndSortedCollections(_ collections: [Collection]) -> [Collection] {
+        var byId: [UUID: Collection] = [:]
+        for collection in collections {
+            if let existing = byId[collection.id] {
+                if collection.updatedAt > existing.updatedAt {
+                    byId[collection.id] = collection
+                }
+            } else {
+                byId[collection.id] = collection
+            }
+        }
+
+        return byId.values.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private func applyMembershipOverlay(to collections: [Collection]) async -> [Collection] {
+        guard !collections.isEmpty else { return [] }
+
+        var edges: [CollectionMembershipEdge] = []
+        for ownerId in Set(collections.map(\.userId)) {
+            do {
+                edges += try await fetchMembershipEdges(forUserId: ownerId)
+            } catch {
+                logger.warning("Failed to fetch collection memberships for owner \(ownerId.uuidString): \(error.localizedDescription)")
+            }
+        }
+
+        guard !edges.isEmpty else { return collections }
+
+        let edgesByCollection = Dictionary(grouping: edges, by: \.collectionId)
+        return collections.map { collection in
+            guard let collectionEdges = edgesByCollection[collection.id], !collectionEdges.isEmpty else {
+                return collection
+            }
+            return CollectionMembershipProjection.collectionWithRecipeIds(
+                collection,
+                CollectionMembershipProjection.activeRecipeIds(from: collectionEdges)
+            )
+        }
+    }
+
+    private nonisolated static func chunkedStrings(_ values: [String], size: Int = 100) -> [[String]] {
+        chunked(values, size: size)
+    }
+
+    private nonisolated static func chunked<Value>(_ values: [Value], size: Int) -> [[Value]] {
+        guard size > 0, !values.isEmpty else { return [] }
+
+        return stride(from: 0, to: values.count, by: size).map { startIndex in
+            let endIndex = min(startIndex + size, values.count)
+            return Array(values[startIndex..<endIndex])
+        }
+    }
+
     private func makeConflictResolvedRecord(serverRecord: CKRecord, localCollection: Collection) -> CKRecord {
         populateCollectionRecord(
             serverRecord,
@@ -451,6 +596,11 @@ actor CollectionCloudService {
             record["color"] = nil
         }
 
+        if collection.coverImageType != .customImage, clearingMissingOptionalFields {
+            record["coverImageAsset"] = nil
+            record["coverImageModifiedAt"] = nil
+        }
+
         if let recipeIdsJSON = try? JSONEncoder().encode(collection.recipeIds),
            let recipeIdsString = String(data: recipeIdsJSON, encoding: .utf8) {
             record["recipeIds"] = recipeIdsString as CKRecordValue
@@ -489,6 +639,8 @@ actor CollectionCloudService {
         let color = record["color"] as? String
         let coverImageTypeString = record["coverImageType"] as? String
         let coverImageType = coverImageTypeString.flatMap { CoverImageType(rawValue: $0) } ?? .recipeGrid
+        let hasCloudCoverImage = record["coverImageAsset"] as? CKAsset != nil
+        let coverImageModifiedAt = record["coverImageModifiedAt"] as? Date
         let originalCollectionId = (record["originalCollectionId"] as? String).flatMap(UUID.init(uuidString:))
         let originalCollectionOwnerId = (record["originalCollectionOwnerId"] as? String).flatMap(UUID.init(uuidString:))
         let followsSourceUpdates = Self.boolValue(for: record["followsSourceUpdates"])
@@ -504,6 +656,8 @@ actor CollectionCloudService {
             symbolName: symbolName,
             color: color,
             coverImageType: coverImageType,
+            cloudCoverImageRecordName: hasCloudCoverImage ? record.recordID.recordName : nil,
+            coverImageModifiedAt: coverImageModifiedAt,
             cloudRecordName: record.recordID.recordName,
             originalCollectionId: originalCollectionId,
             originalCollectionOwnerId: originalCollectionOwnerId,

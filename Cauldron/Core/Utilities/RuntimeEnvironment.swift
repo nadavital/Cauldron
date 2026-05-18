@@ -37,6 +37,14 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    nonisolated static var shouldForceWhatsNew: Bool {
+        #if DEBUG
+        arguments.contains("--cauldron-show-whats-new")
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var canUseCloudKit: Bool {
         !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }

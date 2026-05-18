@@ -84,6 +84,12 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(fetched?.userId, testUserId)
     }
 
+    func testNewCollectionDefaultsPublic() {
+        let collection = Collection.new(name: "Test Collection", userId: testUserId)
+
+        XCTAssertEqual(collection.visibility, .publicRecipe)
+    }
+
     func testCreate_MultipleCollections() async throws {
         // Given
         let collection1 = Collection.new(name: "Collection 1", userId: testUserId)
@@ -200,6 +206,24 @@ final class CollectionRepositoryTests: XCTestCase {
         let fetched = try await repository.fetch(id: collection.id)
         XCTAssertEqual(fetched?.name, "Updated Name")
         XCTAssertEqual(fetched?.description, "New description")
+    }
+
+    func testUpdate_ClearsDescription() async throws {
+        // Given
+        let collection = Collection(
+            name: "Original Name",
+            description: "Old description",
+            userId: testUserId
+        )
+        try await repository.create(collection)
+
+        // When
+        let updated = collection.updated(clearDescription: true)
+        try await repository.update(updated)
+
+        // Then
+        let fetched = try await repository.fetch(id: collection.id)
+        XCTAssertNil(fetched?.description)
     }
 
     func testUpdate_UpdatesTimestamp_WhenShouldUpdateTimestampIsTrue() async throws {
@@ -509,6 +533,48 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertNil(fetched)
     }
 
+    func testDelete_RemovesLocalMembershipEdges() async throws {
+        // Given
+        let recipeId1 = UUID()
+        let recipeId2 = UUID()
+        let collection = Collection(
+            name: "Test Collection",
+            userId: testUserId,
+            recipeIds: [recipeId1, recipeId2]
+        )
+        try await repository.create(collection)
+
+        // When
+        try await repository.delete(id: collection.id)
+
+        // Then
+        let context = ModelContext(modelContainer)
+        let collectionId = collection.id
+        let descriptor = FetchDescriptor<CollectionMembershipModel>(
+            predicate: #Predicate { $0.collectionId == collectionId }
+        )
+        XCTAssertTrue(try context.fetch(descriptor).isEmpty)
+    }
+
+    func testDelete_NonOwnedCollection_ThrowsNotAuthorized() async throws {
+        // Given
+        let ownerId = UUID()
+        let otherUserId = UUID()
+        let collection = Collection.new(name: "Shared Collection", userId: ownerId)
+        try await repository.create(collection)
+        setCurrentUser(id: otherUserId)
+
+        // When/Then
+        do {
+            try await repository.delete(id: collection.id)
+            XCTFail("Expected notAuthorized error")
+        } catch CollectionRepositoryError.notAuthorized {
+            // Expected error
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testDelete_NonExistentCollection_ThrowsError() async throws {
         // When/Then
         do {
@@ -576,5 +642,51 @@ final class CollectionRepositoryTests: XCTestCase {
 
         // Then
         XCTAssertEqual(results.count, 0)
+    }
+
+    func testLegacyStoreFixtureOpensWithCurrentLocalSchema() throws {
+        let fixturePath = ProcessInfo.processInfo.environment["CAULDRON_LEGACY_STORE_FIXTURE"]
+            ?? "/private/tmp/cauldron-default.store"
+        let sourceURL = URL(fileURLWithPath: fixturePath)
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: sourceURL.path), "Legacy store fixture unavailable")
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CauldronStoreOpen-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let storeURL = tempDir.appendingPathComponent("default.store")
+        try FileManager.default.copyItem(at: sourceURL, to: storeURL)
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: sourceURL.path + suffix)
+            if FileManager.default.fileExists(atPath: sidecar.path) {
+                try FileManager.default.copyItem(
+                    at: sidecar,
+                    to: URL(fileURLWithPath: storeURL.path + suffix)
+                )
+            }
+        }
+
+        let schema = Schema([
+            RecipeModel.self,
+            DeletedRecipeModel.self,
+            GroceryListModel.self,
+            GroceryItemModel.self,
+            CookingHistoryModel.self,
+            UserModel.self,
+            SharedRecipeModel.self,
+            ConnectionModel.self,
+            CollectionModel.self,
+            CollectionMembershipModel.self,
+            SavedRecipeReferenceModel.self,
+            SavedCollectionReferenceModel.self
+        ])
+        let config = ModelConfiguration(
+            schema: schema,
+            url: storeURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
+        _ = try ModelContainer(for: schema, configurations: [config])
     }
 }

@@ -69,6 +69,9 @@ class DependencyContainer: ObservableObject {
     /// Collection cloud operations
     let collectionCloudService: CollectionCloudService
 
+    /// Saved recipe/collection reference cloud operations
+    let savedReferenceCloudService: SavedReferenceCloudService
+
     /// Friend connection cloud operations
     let connectionCloudService: ConnectionCloudService
 
@@ -84,6 +87,7 @@ class DependencyContainer: ObservableObject {
     let sharingRepository: SharingRepository
     let connectionRepository: ConnectionRepository
     let collectionRepository: CollectionRepository
+    let savedReferenceRepository: SavedReferenceRepository
 
     // MARK: - Layer 4: Domain Services
 
@@ -96,6 +100,7 @@ class DependencyContainer: ObservableObject {
     let recipeLineClassificationService: RecipeLineClassificationService
     let sharingService: SharingService
     let recipeSaveService: RecipeSaveService
+    let publicCollectionMembershipResolver: PublicCollectionMembershipResolver
     let collectionSaveService: CollectionSaveService
     let externalShareService: ExternalShareService
     let recipeSyncService: RecipeSyncService
@@ -150,6 +155,7 @@ class DependencyContainer: ObservableObject {
         self.recipeCloudService = RecipeCloudService(core: cloudKitCore)
         self.userCloudService = UserCloudService(core: cloudKitCore)
         self.collectionCloudService = CollectionCloudService(core: cloudKitCore)
+        self.savedReferenceCloudService = SavedReferenceCloudService(core: cloudKitCore)
         self.connectionCloudService = ConnectionCloudService(core: cloudKitCore)
         self.recipeDiscoveryCache = RecipeDiscoveryCache(
             recipeCloudService: recipeCloudService,
@@ -178,6 +184,11 @@ class DependencyContainer: ObservableObject {
             modelContainer: modelContainer,
             cloudKitCore: cloudKitCore,
             collectionCloudService: collectionCloudService,
+            operationQueueService: operationQueueService
+        )
+        self.savedReferenceRepository = SavedReferenceRepository(
+            modelContainer: modelContainer,
+            savedReferenceCloudService: savedReferenceCloudService,
             operationQueueService: operationQueueService
         )
         self.recipeRepository = RecipeRepository(
@@ -214,12 +225,18 @@ class DependencyContainer: ObservableObject {
 
         self.recipeSaveService = RecipeSaveService(
             recipeRepository: recipeRepository,
+            savedReferenceRepository: savedReferenceRepository,
             recipeCloudService: recipeCloudService,
             recipeDiscoveryCache: recipeDiscoveryCache,
             imageManager: imageManager
         )
+        self.publicCollectionMembershipResolver = PublicCollectionMembershipResolver(
+            recipeRepository: recipeRepository,
+            recipeSaveService: recipeSaveService
+        )
         self.collectionSaveService = CollectionSaveService(
             collectionRepository: collectionRepository,
+            savedReferenceRepository: savedReferenceRepository,
             recipeSaveService: recipeSaveService
         )
 
@@ -238,6 +255,7 @@ class DependencyContainer: ObservableObject {
             recipeRepository: recipeRepository,
             deletedRecipeRepository: deletedRecipeRepository,
             collectionRepository: collectionRepository,
+            savedReferenceRepository: savedReferenceRepository,
             imageManager: imageManager
         )
 
@@ -304,7 +322,9 @@ class DependencyContainer: ObservableObject {
             SharedRecipeModel.self,
             ConnectionModel.self,
             CollectionModel.self,
-            CollectionMembershipModel.self
+            CollectionMembershipModel.self,
+            SavedRecipeReferenceModel.self,
+            SavedCollectionReferenceModel.self
         ])
 
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -327,7 +347,9 @@ class DependencyContainer: ObservableObject {
             SharedRecipeModel.self,
             ConnectionModel.self,
             CollectionModel.self,
-            CollectionMembershipModel.self
+            CollectionMembershipModel.self,
+            SavedRecipeReferenceModel.self,
+            SavedCollectionReferenceModel.self
         ])
 
         // Ensure Application Support directory exists
@@ -337,10 +359,16 @@ class DependencyContainer: ObservableObject {
             try fileManager.createDirectory(at: appSupportURL, withIntermediateDirectories: true, attributes: nil)
         }
 
-        // SwiftData will handle automatic lightweight migrations for compatible schema changes
-        // New optional fields (cloudImageRecordName, imageModifiedAt) will be automatically
-        // migrated with nil values for existing records
-        let config = ModelConfiguration(schema: schema, allowsSave: true)
+        // Keep SwiftData local-only. Cauldron owns CloudKit sync through the
+        // CloudKit service layer; allowing SwiftData to auto-enable CloudKit
+        // because of entitlements makes local store migrations depend on
+        // CloudKit mirroring metadata and schema state.
+        let config = ModelConfiguration(
+            schema: schema,
+            allowsSave: true,
+            groupContainer: .identifier("group.Nadav.Cauldron"),
+            cloudKitDatabase: .none
+        )
         let container = try ModelContainer(for: schema, configurations: [config])
 
         return DependencyContainer(modelContainer: container)

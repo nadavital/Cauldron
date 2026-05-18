@@ -25,6 +25,105 @@ struct CollectionRecipeImageSource: Hashable {
     }
 }
 
+struct CollectionCoverArtwork: View {
+    let imageSources: [CollectionRecipeImageSource]
+    let additionalRecipeCount: Int
+    let collectionColor: Color
+    let collectionSymbolName: String
+    let dependencies: DependencyContainer?
+    let iconScale: CGFloat
+
+    private var visibleImageSources: [CollectionRecipeImageSource] {
+        Array(imageSources.filter { $0.canLoadImage }.prefix(4))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            if visibleImageSources.isEmpty {
+                defaultGradientCover
+            } else {
+                collageView(width: proxy.size.width, height: proxy.size.height)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func collageView(width: CGFloat, height: CGFloat) -> some View {
+        switch visibleImageSources.count {
+        case 1:
+            recipeImageTile(0, width: width, height: height)
+        case 2:
+            HStack(spacing: 0) {
+                recipeImageTile(0, width: width / 2, height: height)
+                recipeImageTile(1, width: width / 2, height: height)
+            }
+        case 3:
+            HStack(spacing: 0) {
+                recipeImageTile(0, width: width * 0.58, height: height)
+                VStack(spacing: 0) {
+                    recipeImageTile(1, width: width * 0.42, height: height / 2)
+                    recipeImageTile(2, width: width * 0.42, height: height / 2)
+                }
+            }
+        default:
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    recipeImageTile(0, width: width / 2, height: height / 2)
+                    recipeImageTile(1, width: width / 2, height: height / 2)
+                }
+                HStack(spacing: 0) {
+                    recipeImageTile(2, width: width / 2, height: height / 2)
+                    recipeImageTile(3, width: width / 2, height: height / 2)
+                }
+            }
+        }
+    }
+
+    private func recipeImageTile(_ index: Int, width: CGFloat, height: CGFloat) -> some View {
+        let imageSource = visibleImageSources[index]
+
+        return RecipeImageView(
+            imageURL: imageSource.imageURL,
+            size: .collectionTile,
+            showPlaceholderText: false,
+            recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService,
+            recipeId: imageSource.recipeId,
+            ownerId: imageSource.ownerId
+        )
+        .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
+        .frame(width: width, height: height)
+        .clipped()
+        .overlay {
+            if index == min(visibleImageSources.count, 4) - 1, additionalRecipeCount > 0 {
+                ZStack {
+                    Rectangle()
+                        .fill(.black.opacity(0.42))
+                    Text("+\(additionalRecipeCount)")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+    }
+
+    private var defaultGradientCover: some View {
+        LinearGradient(
+            stops: [
+                .init(color: collectionColor, location: 0),
+                .init(color: Color.cauldronOrange, location: 0.52),
+                .init(color: Color(red: 0.98, green: 0.76, blue: 0.22), location: 1)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .overlay {
+            Image(systemName: collectionSymbolName)
+                .font(.system(size: iconScale, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.88))
+        }
+    }
+}
+
 struct CollectionCardView: View {
     let collection: Collection
     let recipeImages: [URL?]  // Up to 4 recipe image URLs for the grid
@@ -103,99 +202,19 @@ struct CollectionCardView: View {
         if collection.coverImageType == .customImage {
             customImageView
         } else {
-            recipeGridView
+            collectionCoverArtwork
         }
     }
 
-    private var recipeGridView: some View {
-        GeometryReader { proxy in
-            let tileSize = proxy.size.width / 2
-
-            if collection.recipeCount == 0 {
-                collectionColor
-                    .overlay(
-                        VStack(spacing: 6) {
-                            Image(systemName: collectionSymbolName)
-                                .font(.system(size: 28))
-                                .foregroundStyle(.white.opacity(0.7))
-                            Text("No recipes")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.85))
-                        }
-                    )
-            } else if coverImageSources.isEmpty || coverImageSources.allSatisfy({ !$0.canLoadImage }) {
-                placeholderGridView(tileSize: tileSize)
-            } else {
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        recipeImageTile(at: 0, size: tileSize)
-                        recipeImageTile(at: 1, size: tileSize)
-                    }
-                    HStack(spacing: 0) {
-                        recipeImageTile(at: 2, size: tileSize)
-                        recipeImageTile(at: 3, size: tileSize)
-                    }
-                }
-            }
-        }
-    }
-
-    private func placeholderGridView(tileSize: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                placeholderTile(at: 0, size: tileSize)
-                placeholderTile(at: 1, size: tileSize)
-            }
-            HStack(spacing: 0) {
-                placeholderTile(at: 2, size: tileSize)
-                placeholderTile(at: 3, size: tileSize)
-            }
-        }
-    }
-
-    private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
-        Group {
-            if index < coverImageSources.count, coverImageSources[index].canLoadImage {
-                let imageSource = coverImageSources[index]
-                RecipeImageView(
-                    previewImageURL: imageSource.imageURL,
-                    showPlaceholderText: false,
-                    recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService,
-                    recipeId: imageSource.recipeId,
-                    ownerId: imageSource.ownerId
-                )
-                .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
-                .frame(width: size, height: size)
-                .clipped()
-            } else {
-                placeholderTile(at: index, size: size)
-            }
-        }
-        .overlay {
-            if index == 3, additionalRecipeCount > 0 {
-                ZStack {
-                    Rectangle()
-                        .fill(.black.opacity(0.45))
-                    Text("+\(additionalRecipeCount)")
-                        .font(.system(size: size * 0.22, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-        }
-    }
-
-    private func placeholderTile(at index: Int, size: CGFloat) -> some View {
-        let symbols = [collectionSymbolName, "fork.knife", "book.closed.fill", "sparkles"]
-        let opacity = [0.28, 0.22, 0.18, 0.24][min(index, 3)]
-
-        return Rectangle()
-            .fill(collectionColor.opacity(opacity))
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: symbols[min(index, symbols.count - 1)])
-                    .font(.system(size: size * 0.28, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
-            )
+    private var collectionCoverArtwork: some View {
+        CollectionCoverArtwork(
+            imageSources: coverImageSources,
+            additionalRecipeCount: additionalRecipeCount,
+            collectionColor: collectionColor,
+            collectionSymbolName: collectionSymbolName,
+            dependencies: dependencies,
+            iconScale: 46
+        )
     }
 
     private var customImageView: some View {
@@ -205,14 +224,13 @@ struct CollectionCardView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else if isLoadingImage {
-                collectionColor
+                collectionCoverArtwork
                     .overlay(
                         ProgressView()
                             .tint(.white)
                     )
             } else {
-                // Fallback to recipe grid if custom image fails to load
-                recipeGridView
+                collectionCoverArtwork
             }
         }
     }

@@ -36,7 +36,7 @@ final class RecipeSaveServiceTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testSaveRecipeToLibrary_createsOwnedCopyWithAttributionAndReusesOnRepeatSave() async throws {
+    func testSaveRecipeToLibraryCreatesReferenceWithoutOwnedCopyAndReusesOnRepeatSave() async throws {
         let sourceRecipeId = UUID()
         let sourceRecipe = makeRecipe(
             id: sourceRecipeId,
@@ -52,13 +52,16 @@ final class RecipeSaveServiceTests: XCTestCase {
 
         XCTAssertFalse(firstSave.reusedExistingCopy)
         XCTAssertEqual(firstSave.savedRelatedRecipeCount, 0)
-        XCTAssertNotEqual(firstSave.recipe.id, sourceRecipeId)
-        XCTAssertEqual(firstSave.recipe.ownerId, currentUserId)
-        XCTAssertEqual(firstSave.recipe.originalRecipeId, sourceRecipeId)
-        XCTAssertEqual(firstSave.recipe.originalCreatorId, sourceOwnerId)
-        XCTAssertEqual(firstSave.recipe.originalCreatorName, "Source Chef")
-        XCTAssertTrue(firstSave.recipe.followsSourceUpdates)
-        XCTAssertFalse(firstSave.recipe.isPreview)
+        XCTAssertEqual(firstSave.recipe.id, sourceRecipeId)
+        XCTAssertEqual(firstSave.recipe.ownerId, sourceOwnerId)
+        XCTAssertEqual(firstSave.savedReference?.sourceRecipeId, sourceRecipeId)
+        XCTAssertEqual(firstSave.savedReference?.userId, currentUserId)
+        XCTAssertNil(firstSave.savedReference?.materializedRecipeId)
+
+        let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [sourceRecipeId]
+        )
+        XCTAssertEqual(ownedCopies.count, 0)
 
         let secondSave = try await dependencies.recipeSaveService.saveRecipeToLibrary(
             sourceRecipe,
@@ -67,7 +70,73 @@ final class RecipeSaveServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(secondSave.reusedExistingCopy)
-        XCTAssertEqual(secondSave.recipe.id, firstSave.recipe.id)
+        XCTAssertEqual(secondSave.recipe.id, sourceRecipeId)
+        XCTAssertEqual(secondSave.savedReference?.id, firstSave.savedReference?.id)
+
+        let references = try await dependencies.savedReferenceRepository.recipeReferences(for: currentUserId)
+        XCTAssertEqual(references.count, 1)
+        XCTAssertEqual(references.first?.sourceRecipeId, sourceRecipeId)
+    }
+
+    func testDeleteRecipeReferenceRemovesSavedReferenceWithoutDeletingSource() async throws {
+        let sourceRecipeId = UUID()
+        let sourceRecipe = makeRecipe(
+            id: sourceRecipeId,
+            title: "Shared Salad",
+            ownerId: sourceOwnerId
+        )
+
+        _ = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        let deleted = try await dependencies.savedReferenceRepository.deleteRecipeReference(
+            userId: currentUserId,
+            sourceRecipeId: sourceRecipeId
+        )
+
+        XCTAssertTrue(deleted)
+        let references = try await dependencies.savedReferenceRepository.recipeReferences(for: currentUserId)
+        XCTAssertTrue(references.isEmpty)
+    }
+
+    func testSaveRecipeToLibraryReusesLegacyOwnedCopyAndLinksSavedReference() async throws {
+        let sourceRecipeId = UUID()
+        let legacyCopy = Recipe(
+            title: "My Pasta",
+            ingredients: [],
+            steps: [],
+            yields: "4 servings",
+            tags: [],
+            visibility: .privateRecipe,
+            ownerId: currentUserId,
+            originalRecipeId: sourceRecipeId,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef",
+            savedAt: Date(),
+            sourceRecipeUpdatedAt: Date(),
+            followsSourceUpdates: true
+        )
+        try await dependencies.recipeRepository.create(legacyCopy, skipCloudSync: true)
+
+        let sourceRecipe = makeRecipe(
+            id: sourceRecipeId,
+            title: "Shared Pasta",
+            ownerId: sourceOwnerId
+        )
+
+        let result = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        XCTAssertTrue(result.reusedExistingCopy)
+        XCTAssertEqual(result.recipe.id, legacyCopy.id)
+        XCTAssertEqual(result.savedReference?.sourceRecipeId, sourceRecipeId)
+        XCTAssertEqual(result.savedReference?.materializedRecipeId, legacyCopy.id)
 
         let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
             originalRecipeIds: [sourceRecipeId]
@@ -75,38 +144,88 @@ final class RecipeSaveServiceTests: XCTestCase {
         XCTAssertEqual(ownedCopies.count, 1)
     }
 
-    func testSaveRecipeToLibrary_convertsExistingPreviewToOwnedCopy() async throws {
+    func testMaterializeSavedRecipeForEditingCreatesOneOwnedCopyAndReusesIt() async throws {
         let sourceRecipeId = UUID()
-        let preview = makeRecipe(
+        let sourceRecipe = makeRecipe(
             id: sourceRecipeId,
-            title: "Preview Curry",
-            ownerId: sourceOwnerId,
-            isPreview: true
+            title: "Shared Curry",
+            ownerId: sourceOwnerId
         )
-        try await dependencies.recipeRepository.create(preview, skipCloudSync: true)
 
-        let result = try await dependencies.recipeSaveService.saveRecipeToLibrary(
-            preview,
+        _ = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
             originalCreatorId: sourceOwnerId,
             originalCreatorName: "Source Chef"
         )
 
-        XCTAssertFalse(result.reusedExistingCopy)
-        XCTAssertNotEqual(result.recipe.id, sourceRecipeId)
-        XCTAssertEqual(result.recipe.ownerId, currentUserId)
-        XCTAssertEqual(result.recipe.originalRecipeId, sourceRecipeId)
-        XCTAssertEqual(result.recipe.originalCreatorId, sourceOwnerId)
-        XCTAssertEqual(result.recipe.originalCreatorName, "Source Chef")
-        XCTAssertTrue(result.recipe.followsSourceUpdates)
-        XCTAssertFalse(result.recipe.isPreview)
+        let firstEditable = try await dependencies.recipeSaveService.materializeSavedRecipeForEditing(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
 
-        let oldPreview = try await dependencies.recipeRepository.fetch(id: sourceRecipeId)
-        XCTAssertNil(oldPreview)
-        let previewWasTombstoned = try await dependencies.deletedRecipeRepository.isDeleted(recipeId: sourceRecipeId)
-        XCTAssertFalse(previewWasTombstoned)
+        XCTAssertNotEqual(firstEditable.id, sourceRecipeId)
+        XCTAssertEqual(firstEditable.ownerId, currentUserId)
+        XCTAssertEqual(firstEditable.originalRecipeId, sourceRecipeId)
+        XCTAssertEqual(firstEditable.originalCreatorId, sourceOwnerId)
+        XCTAssertEqual(firstEditable.originalCreatorName, "Source Chef")
+        XCTAssertTrue(firstEditable.followsSourceUpdates)
+
+        let secondEditable = try await dependencies.recipeSaveService.materializeSavedRecipeForEditing(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+        XCTAssertEqual(secondEditable.id, firstEditable.id)
+
+        let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [sourceRecipeId]
+        )
+        XCTAssertEqual(ownedCopies.count, 1)
+
+        let fetchedReference = try await dependencies.savedReferenceRepository.recipeReference(
+            userId: currentUserId,
+            sourceRecipeId: sourceRecipeId
+        )
+        let reference = try XCTUnwrap(fetchedReference)
+        XCTAssertEqual(reference.materializedRecipeId, firstEditable.id)
     }
 
-    func testSaveRecipeToLibrary_savesAndRemapsRequestedRelatedRecipes() async throws {
+    func testMaterializeRecipeForOwnedCollectionMembershipLinksReferenceAndReturnsOwnedRecipe() async throws {
+        let sourceRecipeId = UUID()
+        let sourceRecipe = makeRecipe(
+            id: sourceRecipeId,
+            title: "Shared Soup",
+            ownerId: sourceOwnerId
+        )
+
+        _ = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        let materializedRecipe = try await dependencies.recipeSaveService.materializeRecipeForOwnedCollectionMembership(
+            sourceRecipe,
+            minimumVisibility: .publicRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        XCTAssertNotEqual(materializedRecipe.id, sourceRecipeId)
+        XCTAssertEqual(materializedRecipe.ownerId, currentUserId)
+        XCTAssertEqual(materializedRecipe.originalRecipeId, sourceRecipeId)
+        XCTAssertEqual(materializedRecipe.visibility, .publicRecipe)
+
+        let fetchedReference = try await dependencies.savedReferenceRepository.recipeReference(
+            userId: currentUserId,
+            sourceRecipeId: sourceRecipeId
+        )
+        let reference = try XCTUnwrap(fetchedReference)
+        XCTAssertEqual(reference.materializedRecipeId, materializedRecipe.id)
+    }
+
+    func testSaveRecipeToLibraryCreatesReferencesForRequestedRelatedRecipesWithoutCopyingThem() async throws {
         let relatedSourceId = UUID()
         let relatedRecipe = makeRecipe(
             id: relatedSourceId,
@@ -128,14 +247,14 @@ final class RecipeSaveServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(result.savedRelatedRecipeCount, 1)
-        XCTAssertEqual(result.recipe.relatedRecipeIds.count, 1)
-        XCTAssertNotEqual(result.recipe.relatedRecipeIds.first, relatedSourceId)
+
+        let references = try await dependencies.savedReferenceRepository.recipeReferences(for: currentUserId)
+        XCTAssertEqual(Set(references.map(\.sourceRecipeId)), Set([sourceRecipe.id, relatedSourceId]))
 
         let relatedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
             originalRecipeIds: [relatedSourceId]
         )
-        XCTAssertEqual(relatedCopies.count, 1)
-        XCTAssertEqual(result.recipe.relatedRecipeIds.first, relatedCopies.first?.id)
+        XCTAssertEqual(relatedCopies.count, 0)
     }
 
     private func makeRecipe(

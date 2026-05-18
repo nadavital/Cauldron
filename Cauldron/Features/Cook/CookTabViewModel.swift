@@ -144,6 +144,7 @@ private struct CookTabDerivedSections {
     var forgottenFavorites: [Recipe] = []
     var tagRows: [(tag: String, recipes: [Recipe])] = []
     var collections: [Collection] = []
+    var savedCollections: [Collection] = []
     var friendsRecipes: [SharedRecipe] = []
     var popularRecipes: [Recipe] = []
     var popularRecipeTiers: [UUID: UserTier] = [:]  // Cached owner tiers for sorting
@@ -175,7 +176,14 @@ private struct CookTabDerivedSections {
             // for the first time, allRecipes and collections are already populated and won't show empty state
             self.allRecipes = preloadedRecipes
             self.recentlyAddedRecipes = preloadedRecipes.sorted { $0.createdAt > $1.createdAt }
-            self.collections = preloadedData.collections.sorted { $0.updatedAt > $1.updatedAt }
+            let preloadedCollectionSections = CollectionsListViewModel.splitCollectionsForDisplay(
+                localCollections: preloadedData.collections,
+                savedReferences: [],
+                fetchedSourceCollections: [:],
+                currentUserId: CurrentUserSession.shared.userId
+            )
+            self.collections = preloadedCollectionSections.owned
+            self.savedCollections = preloadedCollectionSections.saved
             self.recipeImageURLsById = preloadedLibraryRecipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
@@ -196,6 +204,9 @@ private struct CookTabDerivedSections {
 
                 // Load smart recommendations
                 self.updateSmartRecommendations()
+
+                // Refresh collection references so saved collections appear in their own Cook row
+                await self.refreshCollections()
 
                 // Load friends' recipes and popular recipes in background
                 await self.loadSocialRecipes()
@@ -247,17 +258,39 @@ private struct CookTabDerivedSections {
                     // Re-sort by updatedAt
                     self.collections.sort { $0.updatedAt > $1.updatedAt }
                 }
+                if let index = self.savedCollections.firstIndex(where: { $0.id == collectionId }) {
+                    self.savedCollections[index] = updatedCollection
+                }
             }
         }
     }
 
-    /// Fetch all recipes (owned recipes only - references have been deprecated)
+    /// Fetch owned recipes plus saved source references that are not materialized locally.
     private func fetchAllRecipesIncludingReferences() async throws -> [Recipe] {
-        // Load owned recipes from local storage
-        let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+        var recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
             try await dependencies.recipeRepository.fetchAll(),
             currentUserId: CurrentUserSession.shared.userId
         )
+
+        if let currentUserId = CurrentUserSession.shared.userId {
+            let references = try await dependencies.savedReferenceRepository.recipeReferences(for: currentUserId)
+            let representedSourceIds = Set(recipes.map(\.relatedGraphReferenceID))
+            let missingSourceIds = references.compactMap { reference -> UUID? in
+                guard reference.materializedRecipeId == nil,
+                      !representedSourceIds.contains(reference.sourceRecipeId) else {
+                    return nil
+                }
+                return reference.sourceRecipeId
+            }
+
+            if !missingSourceIds.isEmpty {
+                let fetchedRecipes = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: missingSourceIds)
+                recipes += references.compactMap { reference in
+                    guard reference.materializedRecipeId == nil else { return nil }
+                    return fetchedRecipes[reference.sourceRecipeId]
+                }
+            }
+        }
 
         AppLogger.general.info("Total recipes: \(recipes.count)")
 
@@ -299,11 +332,47 @@ private struct CookTabDerivedSections {
 
     func refreshCollections() async {
         do {
-            collections = try await dependencies.collectionRepository.fetchAll()
-            collections.sort { $0.updatedAt > $1.updatedAt }
+            let collectionSections = try await loadCollectionSections()
+            collections = collectionSections.owned
+            savedCollections = collectionSections.saved
         } catch {
             AppLogger.general.error("Failed to refresh collections: \(error.localizedDescription)")
         }
+    }
+
+    private func loadCollectionSections() async throws -> (owned: [Collection], saved: [Collection]) {
+        let localCollections = try await dependencies.collectionRepository.fetchAll()
+
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return CollectionsListViewModel.splitCollectionsForDisplay(
+                localCollections: localCollections,
+                savedReferences: [],
+                fetchedSourceCollections: [:],
+                currentUserId: nil
+            )
+        }
+
+        let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
+        let savedSourceIds = Set(references.map(\.sourceCollectionId))
+        let representedSourceIds = Set(localCollections.compactMap { collection -> UUID? in
+            let sourceId = collection.sourceCollectionReferenceId
+            return collection.userId != currentUserId && savedSourceIds.contains(sourceId) ? sourceId : nil
+        })
+        let missingSourceIds = references
+            .map(\.sourceCollectionId)
+            .filter { !representedSourceIds.contains($0) }
+
+        var fetchedSources: [UUID: Collection] = [:]
+        if !missingSourceIds.isEmpty {
+            fetchedSources = try await dependencies.collectionCloudService.fetchPublicCollections(ids: missingSourceIds)
+        }
+
+        return CollectionsListViewModel.splitCollectionsForDisplay(
+            localCollections: localCollections,
+            savedReferences: references,
+            fetchedSourceCollections: fetchedSources,
+            currentUserId: currentUserId
+        )
     }
 
     /// Load friends' recipes and popular recipes for the social sections
@@ -466,8 +535,9 @@ private struct CookTabDerivedSections {
         updateSmartRecommendations()
 
         if loadCollections {
-            collections = try await dependencies.collectionRepository.fetchAll()
-            collections.sort { $0.updatedAt > $1.updatedAt }
+            let collectionSections = try await loadCollectionSections()
+            collections = collectionSections.owned
+            savedCollections = collectionSections.saved
         }
     }
     

@@ -36,7 +36,7 @@ final class CollectionSaveServiceTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testSaveCollectionToLibraryCreatesOwnedCopyWithSavedRecipeMembership() async throws {
+    func testSaveCollectionToLibraryCreatesReferenceWithoutCopyingCollectionOrRecipes() async throws {
         let firstSourceRecipe = makeRecipe(title: "Pancakes")
         let secondSourceRecipe = makeRecipe(title: "Coffee Cake")
         let sourceUpdatedAt = Date(timeIntervalSince1970: 1_800_000_000)
@@ -59,22 +59,19 @@ final class CollectionSaveServiceTests: XCTestCase {
         )
 
         XCTAssertFalse(result.reusedExistingCopy)
-        XCTAssertEqual(result.savedRecipeCount, 2)
-        XCTAssertNotEqual(result.collection.id, sourceCollection.id)
-        XCTAssertEqual(result.collection.userId, currentUserId)
-        XCTAssertEqual(result.collection.name, sourceCollection.name)
-        XCTAssertEqual(result.collection.description, sourceCollection.description)
-        XCTAssertEqual(result.collection.originalCollectionId, sourceCollection.id)
-        XCTAssertEqual(result.collection.originalCollectionOwnerId, sourceOwnerId)
-        XCTAssertEqual(result.collection.originalCollectionName, sourceCollection.name)
-        XCTAssertEqual(result.collection.sourceCollectionUpdatedAt, sourceUpdatedAt)
-        XCTAssertTrue(result.collection.followsSourceUpdates)
-        XCTAssertNotNil(result.collection.savedAt)
+        XCTAssertEqual(result.savedRecipeCount, 0)
+        XCTAssertEqual(result.collection.id, sourceCollection.id)
+        XCTAssertEqual(result.collection.userId, sourceOwnerId)
+        XCTAssertEqual(result.collection.recipeIds, sourceCollection.recipeIds)
+        XCTAssertEqual(result.savedReference?.sourceCollectionId, sourceCollection.id)
+        XCTAssertEqual(result.savedReference?.sourceOwnerId, sourceOwnerId)
+        XCTAssertEqual(result.savedReference?.sourceCollectionUpdatedAt, sourceUpdatedAt)
 
-        let fetchedCollection = try await dependencies.collectionRepository.fetch(id: result.collection.id)
-        let savedCollection = try XCTUnwrap(fetchedCollection)
-        XCTAssertEqual(savedCollection.recipeIds.count, 2)
-        XCTAssertNotEqual(savedCollection.recipeIds, sourceCollection.recipeIds)
+        let allCollections = try await dependencies.collectionRepository.fetchAll()
+        XCTAssertFalse(allCollections.contains { collection in
+            collection.userId == currentUserId &&
+            collection.originalCollectionId == sourceCollection.id
+        })
 
         let firstCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
             originalRecipeIds: [firstSourceRecipe.id]
@@ -82,12 +79,11 @@ final class CollectionSaveServiceTests: XCTestCase {
         let secondCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
             originalRecipeIds: [secondSourceRecipe.id]
         )
-        XCTAssertEqual(firstCopies.count, 1)
-        XCTAssertEqual(secondCopies.count, 1)
-        XCTAssertEqual(savedCollection.recipeIds, [secondCopies[0].id, firstCopies[0].id])
+        XCTAssertEqual(firstCopies.count, 0)
+        XCTAssertEqual(secondCopies.count, 0)
     }
 
-    func testSaveCollectionToLibraryReusesExistingCopyOnRepeatSave() async throws {
+    func testSaveCollectionToLibraryReusesExistingReferenceOnRepeatSave() async throws {
         let sourceRecipe = makeRecipe(title: "Soup")
         let sourceCollection = Collection(
             id: UUID(),
@@ -110,23 +106,81 @@ final class CollectionSaveServiceTests: XCTestCase {
 
         XCTAssertFalse(firstSave.reusedExistingCopy)
         XCTAssertTrue(secondSave.reusedExistingCopy)
-        XCTAssertEqual(secondSave.collection.id, firstSave.collection.id)
-        XCTAssertEqual(secondSave.savedRecipeCount, 0)
+        XCTAssertEqual(secondSave.collection.id, sourceCollection.id)
+        XCTAssertEqual(secondSave.savedReference?.id, firstSave.savedReference?.id)
 
-        let allCollections = try await dependencies.collectionRepository.fetchAll()
-        let savedCollections = allCollections.filter {
-            $0.userId == currentUserId &&
-            $0.originalCollectionId == sourceCollection.id
-        }
-        XCTAssertEqual(savedCollections.count, 1)
+        let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
+        XCTAssertEqual(references.count, 1)
+        XCTAssertEqual(references.first?.sourceCollectionId, sourceCollection.id)
 
         let ownedRecipeCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
             originalRecipeIds: [sourceRecipe.id]
         )
-        XCTAssertEqual(ownedRecipeCopies.count, 1)
+        XCTAssertEqual(ownedRecipeCopies.count, 0)
     }
 
-    func testSaveCollectionToLibraryCreatesOwnedCopyForEmptyCollection() async throws {
+    func testDeleteCollectionReferenceRemovesSavedReferenceWithoutDeletingSource() async throws {
+        let recipeId = UUID()
+        let sourceCollection = Collection(
+            id: UUID(),
+            name: "Shared Dinner",
+            userId: sourceOwnerId,
+            recipeIds: [recipeId],
+            visibility: .publicRecipe
+        )
+
+        _ = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+            sourceCollection,
+            visibleRecipes: []
+        )
+
+        let deleted = try await dependencies.savedReferenceRepository.deleteCollectionReference(
+            userId: currentUserId,
+            sourceCollectionId: sourceCollection.id
+        )
+
+        XCTAssertTrue(deleted)
+        let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
+        XCTAssertTrue(references.isEmpty)
+    }
+
+    func testExistingSavedCollectionTreatsLegacyOwnedCopyAsSavedAndCreatesReference() async throws {
+        let sourceCollection = Collection(
+            id: UUID(),
+            name: "Shared Brunch",
+            userId: sourceOwnerId,
+            recipeIds: [],
+            visibility: .publicRecipe
+        )
+        let legacyCopy = Collection(
+            name: sourceCollection.name,
+            userId: currentUserId,
+            recipeIds: [],
+            visibility: .publicRecipe,
+            originalCollectionId: sourceCollection.id,
+            originalCollectionOwnerId: sourceOwnerId,
+            originalCollectionName: sourceCollection.name,
+            savedAt: Date(),
+            sourceCollectionUpdatedAt: sourceCollection.updatedAt,
+            followsSourceUpdates: true
+        )
+        try await dependencies.collectionRepository.create(legacyCopy)
+
+        let result = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+            sourceCollection,
+            visibleRecipes: [],
+            sourceOwnerName: "Source Chef"
+        )
+
+        XCTAssertTrue(result.reusedExistingCopy)
+        XCTAssertEqual(result.collection.id, sourceCollection.id)
+        XCTAssertEqual(result.savedReference?.sourceCollectionId, sourceCollection.id)
+
+        let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
+        XCTAssertEqual(references.count, 1)
+    }
+
+    func testSaveCollectionToLibraryCreatesReferenceForEmptyCollection() async throws {
         let sourceCollection = Collection(
             id: UUID(),
             name: "Empty Ideas",
@@ -146,19 +200,13 @@ final class CollectionSaveServiceTests: XCTestCase {
 
         XCTAssertFalse(result.reusedExistingCopy)
         XCTAssertEqual(result.savedRecipeCount, 0)
-        XCTAssertNotEqual(result.collection.id, sourceCollection.id)
-        XCTAssertEqual(result.collection.userId, currentUserId)
+        XCTAssertEqual(result.collection.id, sourceCollection.id)
         XCTAssertEqual(result.collection.recipeIds, [])
-        XCTAssertEqual(result.collection.originalCollectionId, sourceCollection.id)
-        XCTAssertEqual(result.collection.originalCollectionOwnerId, sourceOwnerId)
-        XCTAssertEqual(result.collection.originalCollectionName, sourceCollection.name)
-        XCTAssertTrue(result.collection.followsSourceUpdates)
-        XCTAssertNotNil(result.collection.savedAt)
+        XCTAssertEqual(result.savedReference?.sourceCollectionId, sourceCollection.id)
+        XCTAssertEqual(result.savedReference?.sourceOwnerId, sourceOwnerId)
 
-        let fetchedCollection = try await dependencies.collectionRepository.fetch(id: result.collection.id)
-        let savedCollection = try XCTUnwrap(fetchedCollection)
-        XCTAssertEqual(savedCollection.recipeIds, [])
-        XCTAssertEqual(savedCollection.originalCollectionId, sourceCollection.id)
+        let allCollections = try await dependencies.collectionRepository.fetchAll()
+        XCTAssertFalse(allCollections.contains { $0.originalCollectionId == sourceCollection.id })
     }
 
     private func makeRecipe(title: String) -> Recipe {

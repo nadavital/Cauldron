@@ -20,38 +20,20 @@ struct CollectionsListView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // My Collections Section
-                if !viewModel.filteredOwnedCollections.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
-                            ForEach(viewModel.filteredOwnedCollections) { collection in
-                                NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
-                                    CollectionCardView(
-                                        collection: collection,
-                                        recipeImages: viewModel.recipeImages(for: collection),
-                                        recipeImageSources: viewModel.recipeImageSources(for: collection),
-                                        preferredWidth: nil,
-                                        dependencies: dependencies
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        Task {
-                                            await viewModel.deleteCollection(collection)
-                                        }
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
+                collectionSection(
+                    title: "My Collections",
+                    collections: viewModel.filteredOwnedCollections,
+                    isSavedSection: false
+                )
+
+                collectionSection(
+                    title: "Saved Collections",
+                    collections: viewModel.filteredSavedCollections,
+                    isSavedSection: true
+                )
 
                 // Empty State
-                if viewModel.filteredOwnedCollections.isEmpty {
+                if !viewModel.hasVisibleCollections {
                     VStack(spacing: 16) {
                         Spacer()
                             .frame(height: 60)
@@ -128,6 +110,61 @@ struct CollectionsListView: View {
             GridItem(.flexible(minimum: 150), spacing: 12),
             GridItem(.flexible(minimum: 150), spacing: 12)
         ]
+    }
+
+    @ViewBuilder
+    private func collectionSection(
+        title: String,
+        collections: [Collection],
+        isSavedSection: Bool
+    ) -> some View {
+        if !collections.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text(title)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+
+                    Spacer()
+
+                    Text("\(collections.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+                }
+                .padding(.horizontal)
+
+                LazyVGrid(columns: gridColumns, spacing: 12) {
+                    ForEach(collections) { collection in
+                        NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
+                            CollectionCardView(
+                                collection: collection,
+                                recipeImages: viewModel.recipeImages(for: collection),
+                                recipeImageSources: viewModel.recipeImageSources(for: collection),
+                                preferredWidth: nil,
+                                dependencies: dependencies
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.deleteCollection(collection)
+                                }
+                            } label: {
+                                Label(
+                                    isSavedSection ? "Remove Saved Collection" : "Delete",
+                                    systemImage: isSavedSection ? "bookmark.slash" : "trash"
+                                )
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
     }
 }
 

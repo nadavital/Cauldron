@@ -25,7 +25,9 @@ struct TestModelContainer {
             SharedRecipeModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
-            CookingHistoryModel.self
+            CookingHistoryModel.self,
+            SavedRecipeReferenceModel.self,
+            SavedCollectionReferenceModel.self
         ])
 
         let configuration = ModelConfiguration(

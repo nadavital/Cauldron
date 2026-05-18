@@ -178,7 +178,6 @@ actor UserCloudService {
     /// Save user to CloudKit
     func saveUser(_ user: User) async throws {
         let normalizedUsername = user.username.trimmingCharacters(in: .whitespaces).lowercased()
-        let normalizedDisplayName = user.displayName.trimmingCharacters(in: .whitespaces)
 
         let recordName: String
         if let cloudRecordName = user.cloudRecordName {
@@ -197,28 +196,7 @@ actor UserCloudService {
             recordType: CloudKitCore.RecordType.user
         )
 
-        record["userId"] = user.id.uuidString as CKRecordValue
-        record["username"] = normalizedUsername as CKRecordValue
-        record["displayName"] = normalizedDisplayName as CKRecordValue
-        if let referralCode = user.referralCode, !referralCode.isEmpty {
-            record["referralCode"] = normalizeReferralCode(referralCode) as CKRecordValue
-        }
-        if let email = user.email {
-            record["email"] = email as CKRecordValue
-        }
-        if let emoji = user.profileEmoji {
-            record["profileEmoji"] = emoji as CKRecordValue
-        }
-        if let color = user.profileColor {
-            record["profileColor"] = color as CKRecordValue
-        }
-        if let cloudImageRecordName = user.cloudProfileImageRecordName {
-            record["cloudProfileImageRecordName"] = cloudImageRecordName as CKRecordValue
-        }
-        if let imageModifiedAt = user.profileImageModifiedAt {
-            record["profileImageModifiedAt"] = imageModifiedAt as CKRecordValue
-        }
-        record["createdAt"] = user.createdAt as CKRecordValue
+        populateUserRecord(record, from: user)
 
         _ = try await db.save(record)
         logger.info("Saved user: \(normalizedUsername) to PUBLIC database")
@@ -341,20 +319,34 @@ actor UserCloudService {
     func fetchUsers(byUserIds userIds: [UUID]) async throws -> [User] {
         guard !userIds.isEmpty else { return [] }
 
-        let db = try await core.getPublicDatabase()
-        let userIdStrings = userIds.map { $0.uuidString }
-
-        let predicate = NSPredicate(format: "userId IN %@", userIdStrings)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: predicate)
-
-        let results = try await db.records(matching: query, resultsLimit: userIds.count)
-
         var users: [User] = []
-        for (_, result) in results.matchResults {
-            if let record = try? result.get(),
-               let user = try? userFromRecord(record) {
-                users.append(user)
-            }
+        var seenUserIds = Set<UUID>()
+        let db = try await core.getPublicDatabase()
+
+        for userIdChunk in Self.chunked(userIds.map(\.uuidString), size: 100) {
+            let predicate = NSPredicate(format: "userId IN %@", userIdChunk)
+            let query = CKQuery(recordType: CloudKitCore.RecordType.user, predicate: predicate)
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, resultsLimit: 500)
+                }
+
+                for (_, result) in results.matchResults {
+                    guard let record = try? result.get(),
+                          let user = try? userFromRecord(record),
+                          seenUserIds.insert(user.id).inserted else {
+                        continue
+                    }
+                    users.append(user)
+                }
+
+                cursor = results.queryCursor
+            } while cursor != nil
         }
 
         return users
@@ -842,6 +834,52 @@ actor UserCloudService {
         }
     }
 
+    func populateUserRecord(_ record: CKRecord, from user: User) {
+        let normalizedUsername = user.username.trimmingCharacters(in: .whitespaces).lowercased()
+        let normalizedDisplayName = user.displayName.trimmingCharacters(in: .whitespaces)
+
+        record["userId"] = user.id.uuidString as CKRecordValue
+        record["username"] = normalizedUsername as CKRecordValue
+        record["displayName"] = normalizedDisplayName as CKRecordValue
+        record["createdAt"] = user.createdAt as CKRecordValue
+
+        if let referralCode = user.referralCode, !referralCode.isEmpty {
+            record["referralCode"] = normalizeReferralCode(referralCode) as CKRecordValue
+        } else {
+            record["referralCode"] = nil
+        }
+
+        if let email = user.email {
+            record["email"] = email as CKRecordValue
+        } else {
+            record["email"] = nil
+        }
+
+        if let emoji = user.profileEmoji {
+            record["profileEmoji"] = emoji as CKRecordValue
+        } else {
+            record["profileEmoji"] = nil
+        }
+
+        if let color = user.profileColor {
+            record["profileColor"] = color as CKRecordValue
+        } else {
+            record["profileColor"] = nil
+        }
+
+        if let cloudImageRecordName = user.cloudProfileImageRecordName {
+            record["cloudProfileImageRecordName"] = cloudImageRecordName as CKRecordValue
+        } else {
+            record["cloudProfileImageRecordName"] = nil
+        }
+
+        if let imageModifiedAt = user.profileImageModifiedAt {
+            record["profileImageModifiedAt"] = imageModifiedAt as CKRecordValue
+        } else {
+            record["profileImageModifiedAt"] = nil
+        }
+    }
+
     func userFromRecord(_ record: CKRecord) throws -> User {
         guard let userIdString = record["userId"] as? String,
               let userId = UUID(uuidString: userIdString),
@@ -873,5 +911,14 @@ actor UserCloudService {
             cloudProfileImageRecordName: cloudProfileImageRecordName,
             profileImageModifiedAt: profileImageModifiedAt
         )
+    }
+
+    private nonisolated static func chunked<Value>(_ values: [Value], size: Int) -> [[Value]] {
+        guard size > 0, !values.isEmpty else { return [] }
+
+        return stride(from: 0, to: values.count, by: size).map { startIndex in
+            let endIndex = min(startIndex + size, values.count)
+            return Array(values[startIndex..<endIndex])
+        }
     }
 }

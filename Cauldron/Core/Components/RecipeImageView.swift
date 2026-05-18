@@ -186,6 +186,7 @@ extension RecipeImageView {
     enum ImageSize {
         case hero
         case card
+        case collectionTile
         case thumbnail
         case preview
 
@@ -193,6 +194,7 @@ extension RecipeImageView {
             switch self {
             case .hero: return nil // Full width
             case .card: return 240
+            case .collectionTile: return nil
             case .thumbnail: return 70
             case .preview: return nil // Dynamic
             }
@@ -202,6 +204,7 @@ extension RecipeImageView {
             switch self {
             case .hero: return nil // Dynamic based on aspect ratio
             case .card: return 160
+            case .collectionTile: return nil
             case .thumbnail: return 70
             case .preview: return nil // Dynamic
             }
@@ -210,6 +213,7 @@ extension RecipeImageView {
         var cornerRadius: CGFloat {
             switch self {
             case .hero: return 0 // Edge-to-edge, no corners
+            case .collectionTile: return 0
             case .card, .preview: return 16
             case .thumbnail: return 12
             }
@@ -218,6 +222,7 @@ extension RecipeImageView {
         var shadowOpacity: Double {
             switch self {
             case .hero: return 0 // No shadow for full-bleed
+            case .collectionTile: return 0
             case .card, .preview: return 0.1 // Medium shadow
             case .thumbnail: return 0.05 // Subtle shadow
             }
@@ -225,7 +230,7 @@ extension RecipeImageView {
 
         var shadowRadius: CGFloat {
             switch self {
-            case .hero: return 0
+            case .hero, .collectionTile: return 0
             case .card, .preview: return 8
             case .thumbnail: return 4
             }
@@ -233,7 +238,7 @@ extension RecipeImageView {
 
         var shadowY: CGFloat {
             switch self {
-            case .hero: return 0
+            case .hero, .collectionTile: return 0
             case .card, .preview: return 4
             case .thumbnail: return 2
             }
@@ -243,6 +248,7 @@ extension RecipeImageView {
             switch self {
             case .hero, .preview: return 48
             case .card: return 32
+            case .collectionTile: return 28
             case .thumbnail: return 20
             }
         }
@@ -251,6 +257,7 @@ extension RecipeImageView {
             switch self {
             case .hero: return "hero"
             case .card: return "card"
+            case .collectionTile: return "collectionTile"
             case .thumbnail: return "thumbnail"
             case .preview: return "preview"
             }
@@ -262,6 +269,8 @@ extension RecipeImageView {
                 return 900 * displayScale
             case .card:
                 return max(width ?? 0, height ?? 0) * displayScale
+            case .collectionTile:
+                return 500 * displayScale
             case .thumbnail:
                 return max(width ?? 0, height ?? 0) * displayScale
             case .preview:

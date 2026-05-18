@@ -488,6 +488,15 @@ extension RecipeDetailView {
             }
 
             let sourceRecipeID = recipe.relatedGraphReferenceID
+            if try await dependencies.savedReferenceRepository.recipeReference(
+                userId: userId,
+                sourceRecipeId: sourceRecipeID
+            ) != nil {
+                hasOwnedCopy = true
+                AppLogger.general.info("Saved reference check: true for recipe '\(recipe.title)'")
+                return
+            }
+
             let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
                 originalRecipeIds: [sourceRecipeID]
             )
@@ -496,6 +505,25 @@ extension RecipeDetailView {
         } catch {
             AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")
         }
+    }
+
+    func requestVisibilityChange(to newVisibility: RecipeVisibility) async {
+        do {
+            let impact = try await dependencies.recipeRepository.visibilityImpactForChangingRecipe(
+                id: recipe.id,
+                to: newVisibility
+            )
+            if impact.requiresConfirmation {
+                pendingVisibilityChange = newVisibility
+                pendingVisibilityImpact = impact
+                showVisibilityImpactAlert = true
+                return
+            }
+        } catch {
+            AppLogger.general.error("Failed to check visibility impact: \(error.localizedDescription)")
+        }
+
+        await changeVisibility(to: newVisibility)
     }
 
     func changeVisibility(to newVisibility: RecipeVisibility) async {
@@ -547,6 +575,29 @@ extension RecipeDetailView {
         } catch {
             AppLogger.general.error("Failed to change visibility: \(error.localizedDescription)")
             errorMessage = "Failed to change visibility: \(error.localizedDescription)"
+            showErrorAlert = true
+        }
+    }
+
+    func prepareRecipeForEditing() async {
+        do {
+            let editableRecipe = try await dependencies.recipeSaveService.materializeSavedRecipeForEditing(
+                recipe,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipeOwner?.displayName
+            )
+
+            withAnimation {
+                recipe = editableRecipe
+                currentVisibility = editableRecipe.visibility
+                localIsFavorite = editableRecipe.isFavorite
+                hasOwnedCopy = true
+                imageRefreshID = UUID()
+            }
+            showingEditSheet = true
+        } catch {
+            AppLogger.general.error("Failed to prepare recipe for editing: \(error.localizedDescription)")
+            errorMessage = "Failed to edit recipe: \(error.localizedDescription)"
             showErrorAlert = true
         }
     }

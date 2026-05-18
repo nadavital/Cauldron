@@ -30,7 +30,7 @@ struct WhatsNewView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
 
-                        Text("Reliability and sharing polish just landed.")
+                        Text("Collections, discovery, and recipe details feel cleaner.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,28 +38,28 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         FeatureRow(
-                            symbol: "person.3.fill",
-                            color: .green,
-                            title: "Safer Sharing and Profiles",
-                            detail: "Shared recipe and profile links now route more consistently, with better save detection and connection loading."
+                            symbol: "books.vertical.fill",
+                            color: .purple,
+                            title: "Richer Collections",
+                            detail: "Collections now feel more like cookbooks, with photo headers, custom covers, and clearer saved collection organization."
                         )
                         FeatureRow(
-                            symbol: "icloud.and.arrow.up.fill",
+                            symbol: "magnifyingglass",
                             color: .blue,
-                            title: "Stronger Offline Sync",
-                            detail: "Recipe changes and deletes are queued more durably so CloudKit interruptions can retry cleanly."
+                            title: "Better Recipe Discovery",
+                            detail: "Search, tags, and Explore results have been polished so the right recipes are easier to find."
                         )
                         FeatureRow(
-                            symbol: "ipad",
-                            color: .indigo,
-                            title: "Better iPad and Mac Layouts",
-                            detail: "Friends, collections, and recipe details are more comfortable on larger screens."
+                            symbol: "list.bullet.rectangle",
+                            color: .orange,
+                            title: "Cleaner Recipe Details",
+                            detail: "Related recipes, saved recipes, and preview recipes now behave more consistently across your library."
                         )
                         FeatureRow(
-                            symbol: "square.and.arrow.up.fill",
-                            color: .red,
-                            title: "More Reliable Imports",
-                            detail: "Share extension, text, and URL imports now follow a more consistent recipe handoff path."
+                            symbol: "checkmark.seal.fill",
+                            color: .green,
+                            title: "More Predictable Saving",
+                            detail: "Cauldron is better at recognizing recipes and collections you already saved, with fewer confusing duplicates."
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

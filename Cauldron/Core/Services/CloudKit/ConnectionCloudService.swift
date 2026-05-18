@@ -74,30 +74,12 @@ actor ConnectionCloudService {
         do {
             record = try await db.record(for: recordID)
             logger.info("Updating existing connection: \(connection.id)")
-        } catch {
+        } catch let error as CKError where error.code == .unknownItem {
             record = CKRecord(recordType: CloudKitCore.RecordType.connection, recordID: recordID)
             logger.info("Creating new connection: \(connection.id)")
         }
 
-        record["connectionId"] = connection.id.uuidString as CKRecordValue
-        record["fromUserId"] = connection.fromUserId.uuidString as CKRecordValue
-        record["toUserId"] = connection.toUserId.uuidString as CKRecordValue
-        record["status"] = connection.status.rawValue as CKRecordValue
-        record["createdAt"] = connection.createdAt as CKRecordValue
-        record["updatedAt"] = connection.updatedAt as CKRecordValue
-
-        if let fromUsername = connection.fromUsername {
-            record["fromUsername"] = fromUsername as CKRecordValue
-        }
-        if let fromDisplayName = connection.fromDisplayName {
-            record["fromDisplayName"] = fromDisplayName as CKRecordValue
-        }
-        if let toUsername = connection.toUsername {
-            record["toUsername"] = toUsername as CKRecordValue
-        }
-        if let toDisplayName = connection.toDisplayName {
-            record["toDisplayName"] = toDisplayName as CKRecordValue
-        }
+        populateConnectionRecord(record, from: connection)
 
         // Use modifyRecords with .changedKeys to allow any authenticated user to update
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -130,36 +112,20 @@ actor ConnectionCloudService {
         let toPredicate = NSPredicate(format: "toUserId == %@", userId.uuidString)
         let toQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: toPredicate)
 
-        async let fromResultsTask = db.records(matching: fromQuery)
-        async let toResultsTask = db.records(matching: toQuery)
+        async let fromRecordsTask = fetchAllRecords(matching: fromQuery, in: db)
+        async let toRecordsTask = fetchAllRecords(matching: toQuery, in: db)
 
-        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
+        let (fromRecords, toRecords) = try await (fromRecordsTask, toRecordsTask)
 
-        for (_, result) in fromResults.matchResults {
-            if let record = try? result.get() {
-                do {
-                    let connection = try connectionFromRecord(record)
-                    if !connectionIds.contains(connection.id) {
-                        connections.append(connection)
-                        connectionIds.insert(connection.id)
-                    }
-                } catch {
-                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
+        for record in fromRecords + toRecords {
+            do {
+                let connection = try connectionFromRecord(record)
+                if !connectionIds.contains(connection.id) {
+                    connections.append(connection)
+                    connectionIds.insert(connection.id)
                 }
-            }
-        }
-
-        for (_, result) in toResults.matchResults {
-            if let record = try? result.get() {
-                do {
-                    let connection = try connectionFromRecord(record)
-                    if !connectionIds.contains(connection.id) {
-                        connections.append(connection)
-                        connectionIds.insert(connection.id)
-                    }
-                } catch {
-                    logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
-                }
+            } catch {
+                logger.info("⏭️ Skipping legacy connection record (likely rejected/blocked): \(record.recordID.recordName)")
             }
         }
 
@@ -194,35 +160,18 @@ actor ConnectionCloudService {
         var connections: [Connection] = []
         var connectionIds = Set<UUID>()
 
-        let userIdStrings = userIds.map { $0.uuidString }
+        for userIdChunk in Self.chunked(userIds.map(\.uuidString), size: 100) {
+            let fromPredicate = NSPredicate(format: "fromUserId IN %@", userIdChunk)
+            let fromQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: fromPredicate)
 
-        let fromPredicate = NSPredicate(format: "fromUserId IN %@", userIdStrings)
-        let fromQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: fromPredicate)
+            let toPredicate = NSPredicate(format: "toUserId IN %@", userIdChunk)
+            let toQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: toPredicate)
 
-        let toPredicate = NSPredicate(format: "toUserId IN %@", userIdStrings)
-        let toQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: toPredicate)
+            async let fromRecordsTask = fetchAllRecords(matching: fromQuery, in: db)
+            async let toRecordsTask = fetchAllRecords(matching: toQuery, in: db)
 
-        async let fromResultsTask = db.records(matching: fromQuery, resultsLimit: 200)
-        async let toResultsTask = db.records(matching: toQuery, resultsLimit: 200)
-
-        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
-
-        for (_, result) in fromResults.matchResults {
-            if let record = try? result.get() {
-                do {
-                    let connection = try connectionFromRecord(record)
-                    if !connectionIds.contains(connection.id) {
-                        connections.append(connection)
-                        connectionIds.insert(connection.id)
-                    }
-                } catch {
-                    // Skip legacy/invalid
-                }
-            }
-        }
-
-        for (_, result) in toResults.matchResults {
-            if let record = try? result.get() {
+            let (fromRecords, toRecords) = try await (fromRecordsTask, toRecordsTask)
+            for record in fromRecords + toRecords {
                 do {
                     let connection = try connectionFromRecord(record)
                     if !connectionIds.contains(connection.id) {
@@ -299,24 +248,11 @@ actor ConnectionCloudService {
         let toPredicate = NSPredicate(format: "toUserId == %@", userId.uuidString)
         let toQuery = CKQuery(recordType: CloudKitCore.RecordType.connection, predicate: toPredicate)
 
-        async let fromResultsTask = db.records(matching: fromQuery)
-        async let toResultsTask = db.records(matching: toQuery)
+        async let fromRecordIDsTask = fetchAllRecordIDs(matching: fromQuery, in: db)
+        async let toRecordIDsTask = fetchAllRecordIDs(matching: toQuery, in: db)
 
-        let (fromResults, toResults) = try await (fromResultsTask, toResultsTask)
-
-        var recordIDs: [CKRecord.ID] = []
-
-        for (recordID, result) in fromResults.matchResults {
-            if (try? result.get()) != nil {
-                recordIDs.append(recordID)
-            }
-        }
-
-        for (recordID, result) in toResults.matchResults {
-            if (try? result.get()) != nil {
-                recordIDs.append(recordID)
-            }
-        }
+        let (fromRecordIDs, toRecordIDs) = try await (fromRecordIDsTask, toRecordIDsTask)
+        let recordIDs = deduplicatedRecordIDs(fromRecordIDs + toRecordIDs)
 
         guard !recordIDs.isEmpty else {
             logger.info("No connections found to delete for user: \(userId)")
@@ -325,21 +261,11 @@ actor ConnectionCloudService {
 
         logger.info("Found \(recordIDs.count) connections to delete for user: \(userId)")
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
-            operation.modifyRecordsResultBlock = { result in
-                switch result {
-                case .success:
-                    self.logger.info("✅ Successfully deleted \(recordIDs.count) connections for user: \(userId)")
-                    continuation.resume()
-                case .failure(let error):
-                    self.logger.error("❌ Failed to delete connections: \(error.localizedDescription)")
-                    continuation.resume(throwing: error)
-                }
-            }
-            operation.database = db
-            operation.start()
+        for chunk in Self.chunked(recordIDs, size: 200) {
+            try await deleteRecordIDs(chunk, in: db)
         }
+
+        logger.info("✅ Successfully deleted \(recordIDs.count) connections for user: \(userId)")
     }
 
     /// Create an auto-accepted friend connection between two users (from referral)
@@ -558,6 +484,122 @@ actor ConnectionCloudService {
     }
 
     // MARK: - Private Helpers
+
+    func populateConnectionRecord(_ record: CKRecord, from connection: Connection) {
+        record["connectionId"] = connection.id.uuidString as CKRecordValue
+        record["fromUserId"] = connection.fromUserId.uuidString as CKRecordValue
+        record["toUserId"] = connection.toUserId.uuidString as CKRecordValue
+        record["status"] = connection.status.rawValue as CKRecordValue
+        record["createdAt"] = connection.createdAt as CKRecordValue
+        record["updatedAt"] = connection.updatedAt as CKRecordValue
+
+        if let fromUsername = connection.fromUsername {
+            record["fromUsername"] = fromUsername as CKRecordValue
+        } else {
+            record["fromUsername"] = nil
+        }
+
+        if let fromDisplayName = connection.fromDisplayName {
+            record["fromDisplayName"] = fromDisplayName as CKRecordValue
+        } else {
+            record["fromDisplayName"] = nil
+        }
+
+        if let toUsername = connection.toUsername {
+            record["toUsername"] = toUsername as CKRecordValue
+        } else {
+            record["toUsername"] = nil
+        }
+
+        if let toDisplayName = connection.toDisplayName {
+            record["toDisplayName"] = toDisplayName as CKRecordValue
+        } else {
+            record["toDisplayName"] = nil
+        }
+    }
+
+    private func fetchAllRecords(
+        matching query: CKQuery,
+        in db: CKDatabase,
+        resultsLimit: Int = 500
+    ) async throws -> [CKRecord] {
+        var records: [CKRecord] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: resultsLimit)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: resultsLimit)
+            }
+
+            records += results.matchResults.compactMap { _, result in
+                try? result.get()
+            }
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return records
+    }
+
+    private func fetchAllRecordIDs(
+        matching query: CKQuery,
+        in db: CKDatabase,
+        resultsLimit: Int = 500
+    ) async throws -> [CKRecord.ID] {
+        var recordIDs: [CKRecord.ID] = []
+        var cursor: CKQueryOperation.Cursor?
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: resultsLimit)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: resultsLimit)
+            }
+
+            recordIDs += results.matchResults.compactMap { recordID, result in
+                (try? result.get()).map { _ in recordID }
+            }
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return recordIDs
+    }
+
+    private func deleteRecordIDs(_ recordIDs: [CKRecord.ID], in db: CKDatabase) async throws {
+        guard !recordIDs.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
+            operation.modifyRecordsResultBlock = { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    self.logger.error("❌ Failed to delete connections: \(error.localizedDescription)")
+                    continuation.resume(throwing: error)
+                }
+            }
+            operation.database = db
+            operation.start()
+        }
+    }
+
+    private nonisolated func deduplicatedRecordIDs(_ recordIDs: [CKRecord.ID]) -> [CKRecord.ID] {
+        var seenRecordNames = Set<String>()
+        return recordIDs.filter { seenRecordNames.insert($0.recordName).inserted }
+    }
+
+    private nonisolated static func chunked<Value>(_ values: [Value], size: Int) -> [[Value]] {
+        guard size > 0, !values.isEmpty else { return [] }
+
+        return stride(from: 0, to: values.count, by: size).map { startIndex in
+            let endIndex = min(startIndex + size, values.count)
+            return Array(values[startIndex..<endIndex])
+        }
+    }
 
     func connectionFromRecord(_ record: CKRecord) throws -> Connection {
         guard let connectionIdString = record["connectionId"] as? String,

@@ -376,13 +376,23 @@ actor RecipeCloudService {
 
             logger.warning("⚠️ No public recipe found with ID: \(id.uuidString)")
             return nil
+        } catch let error as CKError {
+            if error.code == .unknownItem ||
+                error.code == .invalidArguments ||
+                error.code == .serverRejectedRequest ||
+                error.errorCode == 11 {
+                logger.info("SharedRecipe recipeId query unavailable; treating missing public recipe as not found")
+                return nil
+            }
+            logger.error("❌ Query failed: \(error.localizedDescription)")
+            throw error
         } catch {
             logger.error("❌ Query failed: \(error.localizedDescription)")
             throw error
         }
     }
 
-    /// Fetch multiple public recipes by ID in a single CloudKit query.
+    /// Fetch multiple public recipes by stable public record ID.
     func fetchPublicRecipes(ids: [UUID]) async throws -> [UUID: Recipe] {
         let uniqueIds = Array(Set(ids))
         guard !uniqueIds.isEmpty else { return [:] }
@@ -395,40 +405,25 @@ actor RecipeCloudService {
         for startIndex in stride(from: 0, to: uniqueIds.count, by: Self.publicRecipeIdQueryChunkSize) {
             let endIndex = min(startIndex + Self.publicRecipeIdQueryChunkSize, uniqueIds.count)
             let idChunk = Array(uniqueIds[startIndex..<endIndex])
-            let recipeIdStrings = idChunk.map(\.uuidString)
-            let predicate = NSPredicate(format: "recipeId IN %@", recipeIdStrings)
-            let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
+            let recordIDs = idChunk.map { CKRecord.ID(recordName: $0.uuidString) }
+            let results = try await db.records(for: recordIDs)
 
-            var cursor: CKQueryOperation.Cursor?
-
-            repeat {
-                let results: (
-                    matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
-                    queryCursor: CKQueryOperation.Cursor?
-                )
-
-                if let cursor {
-                    results = try await db.records(
-                        continuingMatchFrom: cursor,
-                        resultsLimit: idChunk.count
-                    )
-                } else {
-                    results = try await db.records(
-                        matching: query,
-                        resultsLimit: idChunk.count
-                    )
-                }
-
-                for (_, result) in results.matchResults {
-                    guard let record = try? result.get(),
-                          let recipe = try? recipeFromRecord(record) else {
+            for (recordID, result) in results {
+                switch result {
+                case .success(let record):
+                    guard let recipe = try? recipeFromRecord(record) else {
+                        logger.warning("Failed to decode public recipe record: \(recordID.recordName)")
                         continue
                     }
                     recipesById[recipe.id] = recipe
+                case .failure(let error):
+                    if let ckError = error as? CKError, ckError.code == .unknownItem {
+                        logger.info("Public recipe record not found: \(recordID.recordName)")
+                    } else {
+                        logger.warning("Failed to fetch public recipe record \(recordID.recordName): \(error.localizedDescription)")
+                    }
                 }
-
-                cursor = results.queryCursor
-            } while cursor != nil
+            }
 
             if recipesById.count == uniqueIds.count {
                 break

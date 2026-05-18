@@ -45,6 +45,10 @@ struct CookTabView: View {
                     if viewModel.allRecipes.isEmpty {
                         newUserCTA
 
+                        if !viewModel.collections.isEmpty || !viewModel.savedCollections.isEmpty {
+                            collectionSections
+                        }
+
                         // From Friends (show early for new users)
                         if !viewModel.friendsRecipes.isEmpty {
                             friendsRecipesSection
@@ -82,8 +86,8 @@ struct CookTabView: View {
                             forgottenFavoritesSection
                         }
 
-                        // My Collections
-                        collectionsSection
+                        // Collections
+                        collectionSections
 
                         // Recently Cooked
                         if !viewModel.recentlyCookedRecipes.isEmpty {
@@ -377,12 +381,44 @@ struct CookTabView: View {
         }
     }
 
-    private var collectionsSection: some View {
+    private var collectionSections: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if viewModel.collections.isEmpty && viewModel.savedCollections.isEmpty {
+                collectionRowSection(
+                    title: "My Collections",
+                    systemImage: "folder.fill",
+                    collections: []
+                )
+            } else {
+                if !viewModel.collections.isEmpty {
+                    collectionRowSection(
+                        title: "My Collections",
+                        systemImage: "folder.fill",
+                        collections: viewModel.collections
+                    )
+                }
+
+                if !viewModel.savedCollections.isEmpty {
+                    collectionRowSection(
+                        title: "Saved Collections",
+                        systemImage: "bookmark.fill",
+                        collections: viewModel.savedCollections
+                    )
+                }
+            }
+        }
+    }
+
+    private func collectionRowSection(
+        title: String,
+        systemImage: String,
+        collections: [Collection]
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: "folder.fill")
+                Image(systemName: systemImage)
                     .foregroundColor(.cauldronOrange)
-                Text("Collections")
+                Text(title)
                     .font(.title2)
                     .fontWeight(.bold)
                 Spacer()
@@ -395,7 +431,7 @@ struct CookTabView: View {
             }
             .padding(.horizontal, 16)
 
-            if viewModel.collections.isEmpty {
+            if collections.isEmpty {
                 Text("Organize your recipes into collections")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -403,7 +439,7 @@ struct CookTabView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        ForEach(viewModel.collections.prefix(10)) { collection in
+                        ForEach(collections.prefix(10)) { collection in
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
                                     collection: collection,
@@ -873,6 +909,16 @@ struct CookTabView: View {
     private func deleteRecipe(_ recipe: Recipe) {
         Task {
             do {
+                if let currentUserId = CurrentUserSession.shared.userId,
+                   recipe.ownerId != currentUserId,
+                   try await viewModel.dependencies.savedReferenceRepository.deleteRecipeReference(
+                       userId: currentUserId,
+                       sourceRecipeId: recipe.relatedGraphReferenceID
+                   ) {
+                    await viewModel.loadData()
+                    return
+                }
+
                 try await viewModel.dependencies.recipeRepository.delete(id: recipe.id)
                 await viewModel.loadData()
             } catch {

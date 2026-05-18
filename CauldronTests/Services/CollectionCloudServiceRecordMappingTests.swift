@@ -57,6 +57,87 @@ final class CollectionCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertEqual((record["followsSourceUpdates"] as? NSNumber)?.intValue, 1)
     }
 
+    func testPopulateCollectionRecordClearsRemovedOptionalFields() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_800_000_200)
+        let assetURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("collection-cover-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        try Data([0x01, 0x02, 0x03]).write(to: assetURL)
+        defer { try? FileManager.default.removeItem(at: assetURL) }
+
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: collectionId.uuidString)
+        )
+        record["description"] = "Old description" as CKRecordValue
+        record["emoji"] = ":old:" as CKRecordValue
+        record["symbolName"] = "fork.knife" as CKRecordValue
+        record["color"] = "#000000" as CKRecordValue
+        record["coverImageAsset"] = CKAsset(fileURL: assetURL)
+        record["coverImageModifiedAt"] = createdAt as CKRecordValue
+
+        let collection = Collection(
+            id: collectionId,
+            name: "No Icon",
+            description: nil,
+            userId: ownerId,
+            recipeIds: [],
+            visibility: .privateRecipe,
+            emoji: nil,
+            symbolName: nil,
+            color: nil,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+
+        await service.populateCollectionRecord(record, from: collection)
+
+        XCTAssertNil(record["description"])
+        XCTAssertNil(record["emoji"])
+        XCTAssertNil(record["symbolName"])
+        XCTAssertNil(record["color"])
+        XCTAssertNil(record["coverImageAsset"])
+        XCTAssertNil(record["coverImageModifiedAt"])
+    }
+
+    func testDecodeCollectionMarksCloudCoverImageAssetAvailable() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_800_000_200)
+        let imageModifiedAt = Date(timeIntervalSince1970: 1_800_000_300)
+        let assetURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("collection-cover-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+        try Data([0x01, 0x02, 0x03]).write(to: assetURL)
+        defer { try? FileManager.default.removeItem(at: assetURL) }
+
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: collectionId.uuidString)
+        )
+        record["collectionId"] = collectionId.uuidString as CKRecordValue
+        record["name"] = "Cookbook"
+        record["userId"] = ownerId.uuidString as CKRecordValue
+        record["visibility"] = RecipeVisibility.publicRecipe.rawValue as CKRecordValue
+        record["createdAt"] = createdAt as CKRecordValue
+        record["updatedAt"] = createdAt as CKRecordValue
+        record["coverImageType"] = CoverImageType.customImage.rawValue as CKRecordValue
+        record["coverImageAsset"] = CKAsset(fileURL: assetURL)
+        record["coverImageModifiedAt"] = imageModifiedAt as CKRecordValue
+        record["recipeIds"] = "[]" as CKRecordValue
+
+        let decoded = try await service.collectionFromRecord(record)
+
+        XCTAssertEqual(decoded.coverImageType, .customImage)
+        XCTAssertNil(decoded.coverImageURL)
+        XCTAssertEqual(decoded.cloudCoverImageRecordName, collectionId.uuidString)
+        XCTAssertEqual(decoded.coverImageModifiedAt, imageModifiedAt)
+    }
+
     func testMembershipRecordIDUsesStableCollectionRecipePair() {
         let collectionId = UUID()
         let recipeId = UUID()

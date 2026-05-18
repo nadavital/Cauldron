@@ -8,20 +8,24 @@ import os
 
 struct CollectionSaveResult: Sendable, Equatable {
     let collection: Collection
+    let savedReference: SavedCollectionReference?
     let savedRecipeCount: Int
     let reusedExistingCopy: Bool
 }
 
 actor CollectionSaveService {
     private let collectionRepository: CollectionRepository
+    private let savedReferenceRepository: SavedReferenceRepository
     private let recipeSaveService: RecipeSaveService
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionSaveService")
 
     init(
         collectionRepository: CollectionRepository,
+        savedReferenceRepository: SavedReferenceRepository,
         recipeSaveService: RecipeSaveService
     ) {
         self.collectionRepository = collectionRepository
+        self.savedReferenceRepository = savedReferenceRepository
         self.recipeSaveService = recipeSaveService
     }
 
@@ -35,10 +39,18 @@ actor CollectionSaveService {
         }
 
         let sourceCollectionId = sourceCollection.sourceCollectionReferenceId
-        return try await collectionRepository.fetchAll().first { collection in
+        if try await savedReferenceRepository.collectionReference(
+            userId: userId,
+            sourceCollectionId: sourceCollectionId
+        ) != nil {
+            return sourceCollection
+        }
+
+        let legacySavedCopy = try await collectionRepository.fetchAll().first { collection in
             collection.userId == userId &&
             collection.originalCollectionId == sourceCollectionId
         }
+        return legacySavedCopy == nil ? nil : sourceCollection
     }
 
     func saveCollectionToLibrary(
@@ -53,65 +65,35 @@ actor CollectionSaveService {
         if sourceCollection.userId == userId {
             return CollectionSaveResult(
                 collection: sourceCollection,
+                savedReference: nil,
                 savedRecipeCount: 0,
                 reusedExistingCopy: true
             )
         }
 
         if let existing = try await existingSavedCollection(for: sourceCollection) {
+            let referenceResult = try await savedReferenceRepository.saveCollectionReference(
+                sourceCollection: sourceCollection,
+                userId: userId
+            )
             return CollectionSaveResult(
                 collection: existing,
+                savedReference: referenceResult.reference,
                 savedRecipeCount: 0,
                 reusedExistingCopy: true
             )
         }
 
-        let orderedVisibleRecipes = recipesInCollectionOrder(
+        let referenceResult = try await savedReferenceRepository.saveCollectionReference(
             sourceCollection: sourceCollection,
-            visibleRecipes: visibleRecipes
+            userId: userId
         )
-        var savedRecipeIds: [UUID] = []
-        var savedRecipeCount = 0
-
-        for recipe in orderedVisibleRecipes {
-            let result = try await recipeSaveService.saveRecipeToLibrary(
-                recipe,
-                originalCreatorId: recipe.originalCreatorId ?? recipe.ownerId,
-                originalCreatorName: recipe.originalCreatorName ?? sourceOwnerName
-            )
-            savedRecipeIds.append(result.recipe.id)
-            if !result.reusedExistingCopy {
-                savedRecipeCount += 1
-            }
-        }
-
-        let now = Date()
-        let savedCollection = Collection(
-            name: sourceCollection.name,
-            description: sourceCollection.description,
-            userId: userId,
-            recipeIds: savedRecipeIds,
-            visibility: sourceCollection.visibility,
-            emoji: sourceCollection.emoji,
-            symbolName: sourceCollection.symbolName,
-            color: sourceCollection.color,
-            coverImageType: sourceCollection.coverImageType == .customImage ? .recipeGrid : sourceCollection.coverImageType,
-            originalCollectionId: sourceCollection.sourceCollectionReferenceId,
-            originalCollectionOwnerId: sourceCollection.originalCollectionOwnerId ?? sourceCollection.userId,
-            originalCollectionName: sourceCollection.originalCollectionName ?? sourceCollection.name,
-            savedAt: now,
-            sourceCollectionUpdatedAt: sourceCollection.updatedAt,
-            followsSourceUpdates: true,
-            createdAt: now,
-            updatedAt: now
-        )
-
-        try await collectionRepository.create(savedCollection)
-        logger.info("Saved collection to library: \(savedCollection.name)")
+        logger.info("Saved collection reference to library: \(sourceCollection.name)")
         return CollectionSaveResult(
-            collection: savedCollection,
-            savedRecipeCount: savedRecipeCount,
-            reusedExistingCopy: false
+            collection: sourceCollection,
+            savedReference: referenceResult.reference,
+            savedRecipeCount: 0,
+            reusedExistingCopy: referenceResult.reusedExistingReference
         )
     }
 
@@ -119,7 +101,7 @@ actor CollectionSaveService {
         sourceCollection: Collection,
         visibleRecipes: [Recipe]
     ) -> [Recipe] {
-        let recipesById = Dictionary(uniqueKeysWithValues: visibleRecipes.map { ($0.id, $0) })
+        let recipesById = RecipeDeduplication.byIdPreferringBest(visibleRecipes)
         var seenRecipeIds = Set<UUID>()
         var orderedRecipes: [Recipe] = []
 

@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents a type of sync operation that can be performed on an entity
-enum SyncOperationType: String, Codable, Sendable {
+nonisolated enum SyncOperationType: String, Codable, Sendable {
     case create
     case update
     case delete
@@ -17,16 +17,18 @@ enum SyncOperationType: String, Codable, Sendable {
 }
 
 /// Represents the type of entity being operated on
-enum EntityType: String, Codable, Sendable {
+nonisolated enum EntityType: String, Codable, Sendable {
     case recipe
     case collection
+    case savedRecipeReference
+    case savedCollectionReference
     case groceryItem
     case userProfile
     case connection
 }
 
 /// Represents the status of a pending operation
-enum OperationStatus: String, Codable, Sendable {
+nonisolated enum OperationStatus: String, Codable, Sendable {
     case pending      // Waiting to be processed
     case inProgress   // Currently being synced
     case failed       // Last attempt failed, will retry
@@ -34,7 +36,7 @@ enum OperationStatus: String, Codable, Sendable {
 }
 
 /// A pending sync operation that needs to be synced to CloudKit
-struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
+nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let type: SyncOperationType
     let entityType: EntityType
@@ -176,6 +178,8 @@ extension EntityType {
         switch self {
         case .recipe: return "recipe"
         case .collection: return "collection"
+        case .savedRecipeReference: return "saved recipe"
+        case .savedCollectionReference: return "saved collection"
         case .groceryItem: return "grocery item"
         case .userProfile: return "profile"
         case .connection: return "connection"

@@ -552,7 +552,7 @@ struct FriendsTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(viewModel.sharedCollections.prefix(10), id: \.id) { collection in
-                        NavigationLink(destination: SharedCollectionDetailView(
+                        NavigationLink(destination: CollectionDetailView(
                             collection: collection,
                             dependencies: dependencies
                         )) {
@@ -867,7 +867,7 @@ struct AllFriendsCollectionsListView: View {
         ScrollView {
             LazyVGrid(columns: gridColumns, spacing: 12) {
                 ForEach(collections, id: \.id) { collection in
-                    NavigationLink(destination: SharedCollectionDetailView(
+                    NavigationLink(destination: CollectionDetailView(
                         collection: collection,
                         dependencies: dependencies
                     )) {

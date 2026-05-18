@@ -11,11 +11,16 @@ import os
 /// Result of loading recipes from a shared collection
 struct SharedCollectionLoadResult {
     let visibleRecipes: [Recipe]
-    let hiddenRecipeCount: Int
+    let inaccessibleRecipeCount: Int
+    let unavailableRecipeCount: Int
     let totalRecipeCount: Int
 
     var hasHiddenRecipes: Bool {
         hiddenRecipeCount > 0
+    }
+
+    var hiddenRecipeCount: Int {
+        inaccessibleRecipeCount + unavailableRecipeCount
     }
 }
 
@@ -45,23 +50,31 @@ class SharedCollectionLoader {
         guard !collection.recipeIds.isEmpty else {
             return SharedCollectionLoadResult(
                 visibleRecipes: [],
-                hiddenRecipeCount: 0,
+                inaccessibleRecipeCount: 0,
+                unavailableRecipeCount: 0,
                 totalRecipeCount: 0
             )
         }
 
         var visibleRecipes: [Recipe] = []
-        var skippedCount = 0
+        var inaccessibleCount = 0
+        var unavailableCount = 0
 
         do {
-            let recipesById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(
-                ids: collection.recipeIds,
-                forceRefresh: forceRefresh
-            )
+            let recipesById: [UUID: Recipe]
+            if RuntimeEnvironment.isSimulatorQAMode {
+                let localRecipes = try await dependencies.recipeRepository.fetch(ids: collection.recipeIds)
+                recipesById = RecipeDeduplication.byIdPreferringBest(localRecipes)
+            } else {
+                recipesById = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(
+                    ids: collection.recipeIds,
+                    forceRefresh: forceRefresh
+                )
+            }
 
             for recipeId in collection.recipeIds {
                 guard let recipe = recipesById[recipeId] else {
-                    skippedCount += 1
+                    unavailableCount += 1
                     logger.warning("Recipe not found in public database: \(recipeId)")
                     continue
                 }
@@ -69,20 +82,21 @@ class SharedCollectionLoader {
                 if recipe.isAccessible(to: viewerId, isFriend: isFriend) {
                     visibleRecipes.append(recipe)
                 } else {
-                    skippedCount += 1
+                    inaccessibleCount += 1
                     logger.info("Skipped inaccessible recipe: \(recipe.title)")
                 }
             }
         } catch {
-            skippedCount = collection.recipeIds.count
+            unavailableCount = collection.recipeIds.count
             logger.warning("Failed to batch fetch shared collection recipes: \(error.localizedDescription)")
         }
 
-        logger.info("✅ Loaded \(visibleRecipes.count) visible recipes, \(skippedCount) hidden/unavailable")
+        logger.info("✅ Loaded \(visibleRecipes.count) visible recipes, \(inaccessibleCount) inaccessible, \(unavailableCount) unavailable")
 
         return SharedCollectionLoadResult(
             visibleRecipes: visibleRecipes,
-            hiddenRecipeCount: skippedCount,
+            inaccessibleRecipeCount: inaccessibleCount,
+            unavailableRecipeCount: unavailableCount,
             totalRecipeCount: collection.recipeIds.count
         )
     }

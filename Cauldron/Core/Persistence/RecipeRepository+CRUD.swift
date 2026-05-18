@@ -577,6 +577,18 @@ extension RecipeRepository {
         // Update the recipe (this handles CloudKit sync)
         try await update(updatedRecipe)
 
+        if oldVisibility != visibility,
+           visibility == .privateRecipe,
+           let ownerId = recipe.ownerId {
+            let removedCollections = try await collectionRepository?.removeRecipeFromOwnedPublicCollections(
+                recipeId: id,
+                ownerId: ownerId
+            ) ?? []
+            if !removedCollections.isEmpty {
+                logger.info("Removed private recipe from \(removedCollections.count) public collections")
+            }
+        }
+
         logger.info("Updated recipe visibility: \(recipe.title) -> \(visibility.displayName)")
 
         // Post notification if visibility actually changed
@@ -591,6 +603,36 @@ extension RecipeRepository {
                 ]
             )
         }
+    }
+
+    func visibilityImpactForChangingRecipe(
+        id: UUID,
+        to visibility: RecipeVisibility
+    ) async throws -> RecipeVisibilityChangeImpact {
+        guard let recipe = try await fetch(id: id) else {
+            throw RepositoryError.notFound
+        }
+
+        guard visibility == .privateRecipe,
+              recipe.visibility != .privateRecipe,
+              let ownerId = recipe.ownerId else {
+            return RecipeVisibilityChangeImpact(
+                recipeId: id,
+                targetVisibility: visibility,
+                publicCollectionsAffected: []
+            )
+        }
+
+        let affectedCollections = try await collectionRepository?.publicCollectionsContainingRecipe(
+            recipeId: id,
+            ownerId: ownerId
+        ) ?? []
+
+        return RecipeVisibilityChangeImpact(
+            recipeId: id,
+            targetVisibility: visibility,
+            publicCollectionsAffected: affectedCollections
+        )
     }
     
     /// One-time migration: Update all recipes to set current user as owner
@@ -652,6 +694,16 @@ extension RecipeRepository {
 
         // Get the recipe before deletion for CloudKit sync and tombstone
         let recipe = try model.toDomain()
+
+        if !recipe.isPreview {
+            let currentUserId = await CurrentUserSession.shared.userId
+            if let currentUserId,
+               let ownerId = recipe.ownerId,
+               ownerId != currentUserId {
+                logger.warning("Blocked deletion of non-owned recipe: \(recipe.id)")
+                throw RepositoryError.notAuthorized
+            }
+        }
 
         // 1. Delete from local database (immediate)
         context.delete(model)

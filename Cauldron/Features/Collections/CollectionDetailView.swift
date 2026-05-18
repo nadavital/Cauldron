@@ -22,6 +22,16 @@ struct CollectionDetailView: View {
     @State private var recipeImages: [URL?] = []  // For recipe grid display
     @State private var recipeImageSources: [CollectionRecipeImageSource] = []
     @State private var visibleRecipes: [Recipe] = []
+    @State private var showingPublicMembershipRepairConfirmation = false
+    @State private var hasPromptedForPublicMembershipRepair = false
+    @State private var isFriendWithOwner = false
+    @State private var collectionOwner: User?
+    @State private var isSavingCollection = false
+    @State private var savedCollection: Collection?
+    @State private var customCoverImage: UIImage?
+    @State private var loadedCoverKey: String?
+    @State private var isLoadingCoverImage = false
+    @State private var selectedCoverPage = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
@@ -45,8 +55,41 @@ struct CollectionDetailView: View {
         }
     }
 
-    var nonConformingRecipes: [Recipe] {
+    private var nonConformingRecipes: [Recipe] {
         collection.nonConformingRecipes(from: recipes)
+    }
+
+    private var ownedPrivateRecipesNeedingPublicRepair: [Recipe] {
+        guard collection.visibility == .publicRecipe,
+              isOwned,
+              let currentUserId = CurrentUserSession.shared.userId else {
+            return []
+        }
+
+        return nonConformingRecipes.filter { $0.ownerId == currentUserId }
+    }
+
+    private var referencedRecipesNeedingPublicRepair: [Recipe] {
+        guard collection.visibility == .publicRecipe,
+              isOwned,
+              let currentUserId = CurrentUserSession.shared.userId else {
+            return []
+        }
+
+        return recipes.filter { recipe in
+            recipe.isPreview || recipe.ownerId != currentUserId
+        }
+    }
+
+    private var publicMembershipRepairPlan: PublicCollectionMembershipRepairPlan {
+        PublicCollectionMembershipRepairPlan(
+            privateOwnedRecipeCount: ownedPrivateRecipesNeedingPublicRepair.count,
+            referencedRecipeCount: referencedRecipesNeedingPublicRepair.count
+        )
+    }
+
+    private var publicMembershipRepairConfirmationMessage: String {
+        publicMembershipRepairPlan.confirmationMessage
     }
 
     /// Check if the current user owns this collection
@@ -56,6 +99,10 @@ struct CollectionDetailView: View {
             return false
         }
         return collection.userId == currentUserId
+    }
+
+    private var canSaveCollection: Bool {
+        CurrentUserSession.shared.userId != nil && !isOwned
     }
 
     init(collection: Collection, dependencies: DependencyContainer) {
@@ -73,6 +120,33 @@ struct CollectionDetailView: View {
         resolvedRecipeLayoutMode == .grid
     }
 
+    private var displayedRecipeCount: Int {
+        if isLoading || shouldShowUnavailableRecipesEmptyState {
+            return collection.recipeCount
+        }
+        return visibleRecipes.count
+    }
+
+    private var hasDescription: Bool {
+        guard let description = collection.description else {
+            return false
+        }
+        return !description.isEmpty
+    }
+
+    private var shouldShowUnavailableRecipesEmptyState: Bool {
+        !isLoading && collection.recipeCount > 0 && visibleRecipes.isEmpty
+    }
+
+    private var collectionSymbolName: String {
+        collection.symbolName ?? "folder.fill"
+    }
+
+    private var customCoverTaskID: String {
+        let remoteKey = collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName ?? "no-cover"
+        return "\(collection.id.uuidString)|\(collection.coverImageType.rawValue)|\(remoteKey)"
+    }
+
     private var recipeLayoutToolbarMenu: some View {
         RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
             storedRecipeLayoutMode = mode.rawValue
@@ -80,15 +154,32 @@ struct CollectionDetailView: View {
     }
 
     var body: some View {
-        List {
-            headerSection
-            recipesSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                collectionCover
+
+                VStack(alignment: .leading, spacing: 22) {
+                    headerSection
+
+                    if isOwned && collection.isShared && !nonConformingRecipes.isEmpty {
+                        nonConformingRecipesWarning
+                    }
+
+                    recipesSection
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 100)
+            }
         }
-        .navigationTitle(collection.name)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search recipes")
         .onChange(of: searchText) { _, _ in
             updateVisibleRecipes()
+        }
+        .onChange(of: collectionCoverPageCount) { _, pageCount in
+            selectedCoverPage = min(selectedCoverPage, max(0, pageCount - 1))
         }
         .sheet(item: $activeSheet) { sheet in
             sheetContent(for: sheet)
@@ -108,11 +199,31 @@ struct CollectionDetailView: View {
                 Text(errorMessage)
             }
         }
+        .alert(
+            "Repair Collection Sharing?",
+            isPresented: $showingPublicMembershipRepairConfirmation
+        ) {
+            Button("Not Now", role: .cancel) {}
+            Button("Repair") {
+                Task {
+                    await repairPublicCollectionMemberships()
+                }
+            }
+        } message: {
+            Text(publicMembershipRepairConfirmationMessage)
+        }
         .task {
+            await loadCollectionOwner()
             await loadRecipes()
+            await loadExistingSavedCollection()
+        }
+        .task(id: customCoverTaskID) {
+            await loadCustomCoverImage()
         }
         .refreshable {
+            await loadCollectionOwner(forceRefresh: true)
             await loadRecipes(forceRefresh: true)
+            await loadExistingSavedCollection()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             Task {
@@ -132,8 +243,7 @@ struct CollectionDetailView: View {
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                // Only allow sharing if collection is public
-                if collection.visibility == .publicRecipe {
+                if isOwned && collection.visibility == .publicRecipe {
                     Button {
                         Task {
                             await generateShareLink()
@@ -246,24 +356,29 @@ struct CollectionDetailView: View {
                 recipes = collection.recipeIds.compactMap { recipesById[$0] }
             } else {
                 AppLogger.general.info("📡 Loading recipes from CloudKit for non-owned collection: \(collection.name)")
-
-                let fetchedRecipes = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(
-                    ids: collection.recipeIds,
+                await refreshNonOwnedCollection(forceRefresh: forceRefresh)
+                await checkFriendshipStatus(forceRefresh: forceRefresh)
+                let result = await SharedCollectionLoader(dependencies: dependencies).loadRecipes(
+                    from: collection,
+                    viewerId: CurrentUserSession.shared.userId,
+                    isFriend: isFriendWithOwner,
                     forceRefresh: forceRefresh
                 )
-                recipes = collection.recipeIds.compactMap { fetchedRecipes[$0] }
-                AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes from CloudKit")
+                recipes = result.visibleRecipes
+                AppLogger.general.info("✅ Loaded \(recipes.count) of \(collection.recipeIds.count) recipes for non-owned collection")
             }
 
-            // Load up to 4 available recipe images for cover grid display.
+            // Load available recipe images for collection artwork and detail paging.
             let imagePairs: [(UUID, URL)] = recipes.compactMap { recipe in
                 guard let imageURL = recipe.imageURL else { return nil }
                 return (recipe.id, imageURL)
             }
-            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
+            let imageByRecipeId = imagePairs.reduce(into: [UUID: URL]()) { partialResult, pair in
+                partialResult[pair.0] = pair.1
+            }
             recipeImages = Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
-            let recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
-            recipeImageSources = collection.recipeIds.prefix(4).map { recipeId in
+            let recipesById = RecipeDeduplication.byIdPreferringBest(recipes)
+            recipeImageSources = collection.recipeIds.prefix(10).map { recipeId in
                 let recipe = recipesById[recipeId]
                 return CollectionRecipeImageSource(
                     recipeId: recipeId,
@@ -273,11 +388,75 @@ struct CollectionDetailView: View {
                 )
             }
             updateVisibleRecipes()
+            promptForPublicMembershipRepairIfNeeded()
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+
+    private func refreshNonOwnedCollection(forceRefresh: Bool = false) async {
+        if RuntimeEnvironment.isSimulatorQAMode {
+            do {
+                if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
+                    collection = updatedCollection
+                }
+            } catch {
+                AppLogger.general.warning("Failed to refresh simulator QA collection: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        guard CurrentUserSession.shared.isCloudSyncAvailable else {
+            return
+        }
+
+        do {
+            let ownerCollections = try await dependencies.collectionCloudService.fetchCollections(forUserId: collection.userId)
+            if let updatedCollection = ownerCollections.first(where: { $0.id == collection.id }) {
+                collection = updatedCollection
+            }
+        } catch {
+            AppLogger.general.warning("Failed to refresh shared collection metadata: \(error.localizedDescription)")
+        }
+    }
+
+    private func promptForPublicMembershipRepairIfNeeded() {
+        guard !hasPromptedForPublicMembershipRepair,
+              publicMembershipRepairPlan.requiresRepair else {
+            return
+        }
+
+        hasPromptedForPublicMembershipRepair = true
+        showingPublicMembershipRepairConfirmation = true
+    }
+
+    private func repairPublicCollectionMemberships() async {
+        guard let currentUserId = CurrentUserSession.shared.userId,
+              currentUserId == collection.userId,
+              publicMembershipRepairPlan.requiresRepair else {
+            return
+        }
+
+        do {
+            let resolution = try await dependencies.publicCollectionMembershipResolver.resolveRecipeIdsForOwnedPublicCollection(
+                recipeIds: collection.recipeIds,
+                ownerId: currentUserId,
+                visibility: collection.visibility
+            )
+
+            if resolution.changedRecipeIds {
+                let updatedCollection = collection.updated(recipeIds: resolution.recipeIds)
+                try await dependencies.collectionRepository.update(updatedCollection)
+            }
+
+            await loadRecipes(forceRefresh: true)
+        } catch {
+            AppLogger.general.error("❌ Failed to repair public collection memberships: \(error.localizedDescription)")
+            errorMessage = "Failed to repair collection sharing: \(error.localizedDescription)"
             showError = true
         }
     }
@@ -311,30 +490,456 @@ struct CollectionDetailView: View {
         }
     }
 
+    private func checkFriendshipStatus(forceRefresh: Bool = false) async {
+        guard !isOwned, let currentUserId = CurrentUserSession.shared.userId else {
+            isFriendWithOwner = false
+            return
+        }
+
+        await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
+        let connectionStatus = dependencies.connectionManager.connectionStatus(with: collection.userId)
+        isFriendWithOwner = connectionStatus?.isAccepted ?? false
+    }
+
+    private func loadExistingSavedCollection() async {
+        guard canSaveCollection else {
+            savedCollection = nil
+            return
+        }
+
+        do {
+            savedCollection = try await dependencies.collectionSaveService.existingSavedCollection(for: collection)
+        } catch {
+            AppLogger.general.warning("Failed to check saved collection state: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadCollectionOwner(forceRefresh: Bool = false) async {
+        guard !isOwned else {
+            collectionOwner = nil
+            return
+        }
+
+        do {
+            collectionOwner = try await dependencies.userCloudService.fetchUser(byUserId: collection.userId)
+        } catch {
+            AppLogger.general.warning("Failed to fetch collection owner: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveCollectionToLibrary() async {
+        guard !isSavingCollection else { return }
+
+        isSavingCollection = true
+        defer { isSavingCollection = false }
+
+        do {
+            let result = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+                collection,
+                visibleRecipes: visibleRecipes,
+                sourceOwnerName: collectionOwner?.displayName
+            )
+            savedCollection = result.collection
+        } catch {
+            AppLogger.general.error("❌ Failed to save collection: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+
+    @MainActor
+    private func loadCustomCoverImage() async {
+        guard collection.coverImageType == .customImage else {
+            customCoverImage = nil
+            loadedCoverKey = nil
+            isLoadingCoverImage = false
+            return
+        }
+
+        if loadedCoverKey != customCoverTaskID {
+            customCoverImage = nil
+        }
+        isLoadingCoverImage = true
+        defer { isLoadingCoverImage = false }
+
+        let image = await dependencies.entityImageLoader.loadCollectionCoverImage(
+            for: collection,
+            dependencies: dependencies
+        )
+
+        guard !Task.isCancelled else { return }
+
+        if let image {
+            if let currentImage = customCoverImage {
+                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
+                    customCoverImage = image
+                }
+            } else {
+                customCoverImage = image
+            }
+            loadedCoverKey = customCoverTaskID
+        } else {
+            customCoverImage = nil
+            loadedCoverKey = nil
+        }
+    }
+
     // MARK: - View Components
+
+    private var collectionCover: some View {
+        VStack(spacing: 10) {
+            TabView(selection: $selectedCoverPage) {
+                if showsCustomCollectionCoverPage {
+                    customCoverView
+                        .tag(0)
+                        .accessibilityLabel("\(collection.name) collection cover")
+                }
+
+                if collectionCoverRecipePages.isEmpty && !showsCustomCollectionCoverPage {
+                    fallbackCoverView
+                        .tag(0)
+                        .accessibilityLabel("\(collection.name) collection cover")
+                }
+
+                ForEach(Array(collectionCoverRecipePages.enumerated()), id: \.element.id) { index, recipe in
+                    collectionRecipeCoverPage(for: recipe)
+                        .tag(showsCustomCollectionCoverPage ? index + 1 : index)
+                    .accessibilityLabel(recipe.title)
+                }
+            }
+            .id(collectionCoverPagesID)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxWidth: .infinity)
+            .frame(height: horizontalSizeClass == .regular ? 360 : 260)
+            .clipShape(.rect(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.07), radius: 14, y: 6)
+            .background {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            }
+
+            if collectionCoverPageCount > 1 {
+                collectionCoverPageIndicator
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var showsCustomCollectionCoverPage: Bool {
+        collection.coverImageType == .customImage
+    }
+
+    private var collectionCoverPageCount: Int {
+        let customCoverCount = showsCustomCollectionCoverPage ? 1 : 0
+        return max(1, customCoverCount + collectionCoverRecipePages.count)
+    }
+
+    private var collectionCoverPagesID: String {
+        let recipePageKeys = collectionCoverRecipePages.map { recipe in
+            [
+                recipe.id.uuidString,
+                recipe.imageURL?.absoluteString ?? "no-url",
+                recipe.cloudImageRecordName ?? "no-cloud-image"
+            ].joined(separator: ":")
+        }
+        let customCoverKey = showsCustomCollectionCoverPage ? customCoverTaskID : "no-custom-cover"
+        return ([customCoverKey] + recipePageKeys).joined(separator: "|")
+    }
+
+    private var collectionCoverRecipePages: [Recipe] {
+        let recipesById = RecipeDeduplication.byIdPreferringBest(recipes)
+        let imageSourceByRecipeId = recipeImageSources.reduce(into: [UUID: CollectionRecipeImageSource]()) { result, source in
+            if let recipeId = source.recipeId, result[recipeId] == nil {
+                result[recipeId] = source
+            }
+        }
+        var seenRecipeIds = Set<UUID>()
+        let orderedRecipes = collection.recipeIds.compactMap { recipeId -> Recipe? in
+            guard seenRecipeIds.insert(recipeId).inserted else {
+                return nil
+            }
+            return recipesById[recipeId]
+        }
+
+        let imageCapableRecipes = orderedRecipes.filter { recipe in
+            let imageSource = imageSourceByRecipeId[recipe.id]
+            return recipe.imageURL != nil || recipe.cloudImageRecordName != nil || imageSource?.canLoadImage == true
+        }
+
+        return Array(imageCapableRecipes.prefix(10))
+    }
+
+    @ViewBuilder
+    private func collectionRecipeCoverPage(for recipe: Recipe) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            RecipeImageView(
+                imageURL: recipe.imageURL,
+                size: .collectionTile,
+                showPlaceholderText: false,
+                recipeImageService: dependencies.recipeImageService,
+                recipeId: recipe.id,
+                ownerId: recipe.ownerId
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.18), .black.opacity(0.72)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            recipeCoverTitle(recipe.title)
+        }
+    }
+
+    private func recipeCoverTitle(_ title: String) -> some View {
+        Text(title.recipeDetailLineBreakFriendly())
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.leading)
+            .lineLimit(3)
+            .minimumScaleFactor(0.88)
+            .allowsTightening(true)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 18)
+            .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+            .accessibilityHidden(true)
+    }
+
+    private var collectionCoverPageIndicator: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<collectionCoverPageCount, id: \.self) { index in
+                Capsule()
+                    .fill(index == selectedCoverPage ? collectionColor : Color.secondary.opacity(0.28))
+                    .frame(width: index == selectedCoverPage ? 18 : 6, height: 6)
+                    .animation(.snappy(duration: 0.2), value: selectedCoverPage)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Cover page \(selectedCoverPage + 1) of \(collectionCoverPageCount)")
+    }
+
+    @ViewBuilder
+    private var customCoverView: some View {
+        if let customCoverImage {
+            Image(uiImage: customCoverImage)
+                .resizable()
+                .scaledToFill()
+        } else if isLoadingCoverImage {
+            fallbackCoverView
+                .overlay {
+                    ProgressView()
+                        .tint(.white)
+                }
+        } else {
+            fallbackCoverView
+        }
+    }
+
+    @ViewBuilder
+    private var fallbackCoverView: some View {
+        CollectionCoverArtwork(
+            imageSources: [],
+            additionalRecipeCount: 0,
+            collectionColor: collectionColor,
+            collectionSymbolName: collectionSymbolName,
+            dependencies: dependencies,
+            iconScale: 82
+        )
+    }
+
+    private var collectionColor: Color {
+        Color(hex: collection.color ?? "#FF9933") ?? .cauldronOrange
+    }
+
+    private var emptyStateIconName: String {
+        if shouldShowUnavailableRecipesEmptyState {
+            return "exclamationmark.triangle"
+        }
+        return searchText.isEmpty ? "tray" : "magnifyingglass"
+    }
+
+    private var emptyStateTitle: String {
+        if shouldShowUnavailableRecipesEmptyState {
+            return "Recipes Unavailable"
+        }
+        return searchText.isEmpty ? "No recipes in this collection" : "No recipes found"
+    }
+
+    @ViewBuilder
+    private func recipeDestination(for recipe: Recipe) -> some View {
+        if !isOwned, let sharedRecipe = createSharedRecipe(from: recipe) {
+            RecipeDetailView(
+                recipe: recipe,
+                dependencies: dependencies,
+                sharedBy: sharedRecipe.sharedBy,
+                sharedAt: sharedRecipe.sharedAt
+            )
+        } else {
+            RecipeDetailView(recipe: recipe, dependencies: dependencies)
+        }
+    }
+
+    @ViewBuilder
+    private func recipeCard(for recipe: Recipe) -> some View {
+        if !isOwned, let owner = collectionOwner {
+            RecipeCardView(recipe: recipe, dependencies: dependencies, sharedBy: owner)
+        } else {
+            RecipeCardView(recipe: recipe, dependencies: dependencies)
+        }
+    }
+
+    private func createSharedRecipe(from recipe: Recipe) -> SharedRecipe? {
+        guard !isOwned else { return nil }
+
+        let owner = collectionOwner ?? User(
+            id: collection.userId,
+            username: "user",
+            displayName: "Unknown",
+            createdAt: Date(),
+            profileEmoji: nil,
+            profileColor: nil
+        )
+
+        return SharedRecipe(
+            recipe: recipe,
+            sharedBy: owner,
+            sharedAt: collection.updatedAt
+        )
+    }
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(collection.name.recipeDetailLineBreakFriendly())
+                    .font(.title.bold())
+                    .fontDesign(.serif)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                collectionPrimaryAction
+            }
+
+            if !isOwned {
+                ownerPill
+            }
+
+            if hasDescription, let description = collection.description {
+                Text(description)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isOwned {
+                HStack(spacing: 10) {
+                    editCollectionButton
+                    addRecipesButton
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder
+    private var collectionPrimaryAction: some View {
+        if canSaveCollection {
+            if savedCollection != nil {
+                Label("Saved", systemImage: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(.green)
+                    .background(Color.green.opacity(0.12), in: Capsule())
+                    .accessibilityLabel("Saved")
+            } else {
+                Button {
+                    Task {
+                        await saveCollectionToLibrary()
+                    }
+                } label: {
+                    if isSavingCollection {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(Color.cauldronOrange.opacity(0.12), in: Capsule())
+                    } else {
+                        Label("Save", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .foregroundStyle(Color.cauldronOrange)
+                            .background(Color.cauldronOrange.opacity(0.12), in: Capsule())
+                    }
+                }
+                .disabled(isLoading || isSavingCollection)
+                .accessibilityLabel("Save Collection")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var ownerPill: some View {
+        if let owner = collectionOwner {
+            NavigationLink {
+                UserProfileView(user: owner, dependencies: dependencies)
+            } label: {
+                HStack(spacing: 6) {
+                    ProfileAvatar(user: owner, size: 20, dependencies: dependencies)
+                    Text("By \(owner.displayName.recipeDetailLineBreakFriendly())")
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color(uiColor: .tertiaryLabel))
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
     @ViewBuilder
     private var recipesSection: some View {
-        if isLoading {
-            Section {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recipes")
+                .font(.title3)
+                .fontWeight(.bold)
+
+            if isLoading {
                 HStack {
                     Spacer()
-                    ProgressView()
+                    ProgressView("Loading recipes...")
                     Spacer()
                 }
-            }
-        } else if visibleRecipes.isEmpty {
-            Section {
+                .padding(.vertical, 40)
+            } else if visibleRecipes.isEmpty {
                 VStack(spacing: 12) {
-                    Image(systemName: searchText.isEmpty ? "tray" : "magnifyingglass")
+                    Image(systemName: emptyStateIconName)
                         .font(.system(size: 40))
                         .foregroundColor(.secondary)
 
-                    Text(searchText.isEmpty ? "No recipes in this collection" : "No recipes found")
+                    Text(emptyStateTitle)
                         .font(.subheadline)
+                        .fontWeight(.semibold)
                         .foregroundColor(.secondary)
 
-                    // Only show "add recipes" button for owner
                     if searchText.isEmpty && isOwned {
                         Button {
                             activeSheet = .addRecipes
@@ -354,11 +959,8 @@ struct CollectionDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            }
-            .listRowBackground(Color.clear)
-        } else {
-            Section {
+                .padding(.vertical, 40)
+            } else {
                 if usesGridRecipeLayout {
                     recipesGridContent
                 } else {
@@ -372,12 +974,12 @@ struct CollectionDetailView: View {
     private var recipesCompactContent: some View {
         ForEach(visibleRecipes) { recipe in
             NavigationLink {
-                RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                recipeDestination(for: recipe)
             } label: {
                 RecipeRowView(recipe: recipe, dependencies: dependencies)
             }
-            // Only allow removal for owner
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            .buttonStyle(.plain)
+            .contextMenu {
                 if isOwned {
                     Button(role: .destructive) {
                         Task {
@@ -386,19 +988,18 @@ struct CollectionDetailView: View {
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
-                    .tint(.red)
                 }
             }
         }
     }
 
     private var recipesGridContent: some View {
-        LazyVGrid(columns: recipeGridColumns, spacing: 12) {
+        LazyVGrid(columns: recipeGridColumns, spacing: 16) {
             ForEach(visibleRecipes) { recipe in
                 NavigationLink {
-                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                    recipeDestination(for: recipe)
                 } label: {
-                    RecipeCardView(recipe: recipe, dependencies: dependencies)
+                    recipeCard(for: recipe)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
@@ -415,63 +1016,10 @@ struct CollectionDetailView: View {
                 }
             }
         }
-        .padding(.vertical, 8)
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
     }
 
     private var recipeGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 12)]
-    }
-
-    private var headerSection: some View {
-        Section {
-            VStack(spacing: 16) {
-                // Cover Image
-                coverImageView
-                    .frame(width: 120, height: 120)
-                    .clipShape(.rect(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(collectionColor.opacity(0.2), lineWidth: 1)
-                    )
-
-                // Name and count
-                VStack(spacing: 4) {
-                    HStack(spacing: 8) {
-                        Image(systemName: collection.symbolName ?? "folder.fill")
-                            .foregroundStyle(collectionColor)
-                        Text(collection.name)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                // Action buttons (only for owner)
-                if isOwned {
-                    HStack(spacing: 12) {
-                        editCollectionButton
-                            .id("edit-button")
-                        addRecipesButton
-                            .id("add-button")
-                    }
-                    .padding(.horizontal, 16)
-                }
-
-                // Warning banner (only for owner who can fix it)
-                if isOwned && collection.isShared && !nonConformingRecipes.isEmpty {
-                    nonConformingRecipesWarning
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-        }
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets())
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
     }
 
     private var editCollectionButton: some View {
@@ -489,8 +1037,7 @@ struct CollectionDetailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Color.secondary.opacity(0.1))
-            .cornerRadius(10)
+            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -511,110 +1058,13 @@ struct CollectionDetailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Color.cauldronOrange.opacity(0.1))
-            .cornerRadius(10)
+            .background(Color.cauldronOrange.opacity(0.1), in: Capsule())
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
-
-    @ViewBuilder
-    private var coverImageView: some View {
-        recipeGridView
-    }
-
-    private var recipeGridView: some View {
-        Group {
-            let size: CGFloat = 60  // 120 / 2 for the 2x2 grid
-
-            if collection.recipeCount == 0 {
-                // Show placeholder
-                collectionColor
-                    .overlay(
-                        VStack(spacing: 4) {
-                            Image(systemName: "photo.stack")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.white.opacity(0.7))
-                            if collection.recipeCount > 0 {
-                                Text("\(collection.recipeCount)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
-                        }
-                    )
-            } else if recipeImageSources.isEmpty || recipeImageSources.allSatisfy({ !$0.canLoadImage }) {
-                placeholderGridView(tileSize: size)
-            } else {
-                // Show 2x2 grid of recipe images
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        recipeImageTile(at: 0, size: size)
-                        recipeImageTile(at: 1, size: size)
-                    }
-                    HStack(spacing: 0) {
-                        recipeImageTile(at: 2, size: size)
-                        recipeImageTile(at: 3, size: size)
-                    }
-                }
-            }
-        }
-    }
-
-    private func placeholderGridView(tileSize: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                placeholderTile(at: 0, size: tileSize)
-                placeholderTile(at: 1, size: tileSize)
-            }
-            HStack(spacing: 0) {
-                placeholderTile(at: 2, size: tileSize)
-                placeholderTile(at: 3, size: tileSize)
-            }
-        }
-    }
-
-    private func recipeImageTile(at index: Int, size: CGFloat) -> some View {
-        Group {
-            if index < recipeImageSources.count, recipeImageSources[index].canLoadImage {
-                let imageSource = recipeImageSources[index]
-                RecipeImageView(
-                    previewImageURL: imageSource.imageURL,
-                    showPlaceholderText: false,
-                    recipeImageService: dependencies.recipeImageService,
-                    recipeId: imageSource.recipeId,
-                    ownerId: imageSource.ownerId
-                )
-                .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
-                .frame(width: size, height: size)
-                .clipped()
-            } else {
-                placeholderTile(at: index, size: size)
-            }
-        }
-    }
-
-    private func placeholderTile(at index: Int, size: CGFloat) -> some View {
-        let symbols = [collection.symbolName ?? "folder.fill", "fork.knife", "book.closed.fill", "sparkles"]
-        let opacity = [0.28, 0.22, 0.18, 0.24][min(index, 3)]
-
-        return Rectangle()
-            .fill(collectionColor.opacity(opacity))
-            .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: symbols[min(index, symbols.count - 1)])
-                    .font(.system(size: size * 0.28, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.58))
-            )
-    }
-
-    private var collectionColor: Color {
-        if let colorHex = collection.color {
-            return Color(hex: colorHex) ?? .cauldronOrange
-        }
-        return .cauldronOrange
-    }
 
     private func updateVisibleRecipes() {
         let trimmedSearchText = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -626,24 +1076,6 @@ struct CollectionDetailView: View {
         visibleRecipes = recipes.filter { recipe in
             recipe.title.localizedCaseInsensitiveContains(trimmedSearchText) ||
             recipe.tags.contains(where: { $0.name.localizedCaseInsensitiveContains(trimmedSearchText) })
-        }
-    }
-
-    private var visibilityIcon: String {
-        switch collection.visibility {
-        case .privateRecipe:
-            return "lock.fill"
-        case .publicRecipe:
-            return "globe"
-        }
-    }
-
-    private var visibilityText: String {
-        switch collection.visibility {
-        case .privateRecipe:
-            return "Private"
-        case .publicRecipe:
-            return "Public"
         }
     }
 }
@@ -663,6 +1095,17 @@ struct CollectionRecipeSelectorSheet: View {
     @State private var showingCopyConfirmation: Recipe?
     @State private var isCopying = false
     @State private var recipeOwnerCache: [UUID: User] = [:]  // Cache recipe owners by userId
+    @State private var showingPublicMembershipRepairConfirmation = false
+    @State private var pendingPublicMembershipRepairPlan = PublicCollectionMembershipRepairPlan(
+        privateOwnedRecipeCount: 0,
+        referencedRecipeCount: 0
+    )
+    @State private var pendingPublicMembershipConfirmationAction: PublicMembershipConfirmationAction?
+
+    private enum PublicMembershipConfirmationAction {
+        case saveSelections
+        case copyRecipe(Recipe)
+    }
 
     init(collection: Collection, dependencies: DependencyContainer, onDismiss: @escaping () -> Void) {
         self.collection = collection
@@ -802,6 +1245,19 @@ struct CollectionRecipeSelectorSheet: View {
             } message: {
                 Text("This recipe is saved from another user. To add it to your collection, you need to save your own copy.")
             }
+            .alert(
+                "Make Recipes Public?",
+                isPresented: $showingPublicMembershipRepairConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Continue") {
+                    Task {
+                        await continueAfterPublicMembershipConfirmation()
+                    }
+                }
+            } message: {
+                Text(pendingPublicMembershipRepairPlan.confirmationMessage)
+            }
             .task {
                 await loadRecipes()
             }
@@ -875,29 +1331,66 @@ struct CollectionRecipeSelectorSheet: View {
         }
     }
 
-    private func saveChanges() async {
+    private func saveChanges(confirmingPublicMembershipRepair: Bool = false) async {
         do {
-            // Determine which recipes to add and which to remove
-            let currentRecipeIds = Set(collection.recipeIds)
-            let recipesToAdd = selectedRecipeIds.subtracting(currentRecipeIds)
-            let recipesToRemove = currentRecipeIds.subtracting(selectedRecipeIds)
-
-            // Add new recipes
-            for recipeId in recipesToAdd {
-                try await dependencies.collectionRepository.addRecipe(recipeId, to: collection.id)
-                AppLogger.general.info("✅ Added recipe to collection")
+            let recipeIds = orderedSelectedRecipeIds()
+            if !confirmingPublicMembershipRepair {
+                let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
+                    recipeIds: recipeIds,
+                    ownerId: collection.userId,
+                    visibility: collection.visibility
+                )
+                if repairPlan.requiresRepair {
+                    pendingPublicMembershipRepairPlan = repairPlan
+                    pendingPublicMembershipConfirmationAction = .saveSelections
+                    showingPublicMembershipRepairConfirmation = true
+                    return
+                }
             }
 
-            // Remove recipes
-            for recipeId in recipesToRemove {
-                try await dependencies.collectionRepository.removeRecipe(recipeId, from: collection.id)
-                AppLogger.general.info("✅ Removed recipe from collection")
-            }
+            let resolution = try await dependencies.publicCollectionMembershipResolver.resolveRecipeIdsForOwnedPublicCollection(
+                recipeIds: recipeIds,
+                ownerId: collection.userId,
+                visibility: collection.visibility
+            )
+            let updatedCollection = collection.updated(recipeIds: resolution.recipeIds)
+            try await dependencies.collectionRepository.update(updatedCollection)
 
             dismiss()
             onDismiss()
+            AppLogger.general.info("✅ Saved collection recipe membership")
         } catch {
             AppLogger.general.error("❌ Failed to save collection changes: \(error.localizedDescription)")
+        }
+    }
+
+    private func publicMembershipRepairPlanForCopyingReferencedRecipe() async throws -> PublicCollectionMembershipRepairPlan {
+        guard collection.visibility == .publicRecipe else {
+            return PublicCollectionMembershipRepairPlan(privateOwnedRecipeCount: 0, referencedRecipeCount: 0)
+        }
+
+        let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
+            recipeIds: collection.recipeIds,
+            ownerId: collection.userId,
+            visibility: collection.visibility
+        )
+        return PublicCollectionMembershipRepairPlan(
+            privateOwnedRecipeCount: repairPlan.privateOwnedRecipeCount,
+            referencedRecipeCount: repairPlan.referencedRecipeCount + 1
+        )
+    }
+
+    private func continueAfterPublicMembershipConfirmation() async {
+        let action = pendingPublicMembershipConfirmationAction
+        pendingPublicMembershipConfirmationAction = nil
+
+        switch action {
+        case .saveSelections:
+            await saveChanges(confirmingPublicMembershipRepair: true)
+        case .copyRecipe(let recipe):
+            await copyAndAddRecipe(recipe, confirmingPublicMembershipRepair: true)
+        case nil:
+            break
         }
     }
 
@@ -927,16 +1420,55 @@ struct CollectionRecipeSelectorSheet: View {
         }
     }
 
-    private func copyAndAddRecipe(_ recipe: Recipe) async {
+    private func orderedSelectedRecipeIds() -> [UUID] {
+        var orderedIds: [UUID] = []
+        var seenIds = Set<UUID>()
+
+        for recipeId in collection.recipeIds where selectedRecipeIds.contains(recipeId) {
+            if seenIds.insert(recipeId).inserted {
+                orderedIds.append(recipeId)
+            }
+        }
+
+        for recipeId in recipes.map(\.id) where selectedRecipeIds.contains(recipeId) {
+            if seenIds.insert(recipeId).inserted {
+                orderedIds.append(recipeId)
+            }
+        }
+
+        for recipeId in selectedRecipeIds.sorted(by: { $0.uuidString < $1.uuidString }) {
+            if seenIds.insert(recipeId).inserted {
+                orderedIds.append(recipeId)
+            }
+        }
+
+        return orderedIds
+    }
+
+    private func copyAndAddRecipe(
+        _ recipe: Recipe,
+        confirmingPublicMembershipRepair: Bool = false
+    ) async {
         guard CurrentUserSession.shared.userId != nil else {
             AppLogger.general.error("Cannot copy recipe - no current user")
             return
         }
 
-        isCopying = true
-        defer { isCopying = false }
-
         do {
+            if !confirmingPublicMembershipRepair {
+                let repairPlan = try await publicMembershipRepairPlanForCopyingReferencedRecipe()
+                if repairPlan.requiresRepair {
+                    pendingPublicMembershipRepairPlan = repairPlan
+                    pendingPublicMembershipConfirmationAction = .copyRecipe(recipe)
+                    showingCopyConfirmation = nil
+                    showingPublicMembershipRepairConfirmation = true
+                    return
+                }
+            }
+
+            isCopying = true
+            defer { isCopying = false }
+
             // Fetch the recipe owner if not already cached
             var recipeOwner: User?
             if let ownerId = recipe.ownerId {
@@ -955,16 +1487,17 @@ struct CollectionRecipeSelectorSheet: View {
                 }
             }
 
-            let saveResult = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            let materializedRecipe = try await dependencies.recipeSaveService.materializeRecipeForOwnedCollectionMembership(
                 recipe,
+                minimumVisibility: collection.visibility,
                 originalCreatorId: recipe.ownerId,
                 originalCreatorName: recipeOwner?.displayName
             )
 
-            try await dependencies.collectionRepository.addRecipe(saveResult.recipe.id, to: collection.id)
+            try await dependencies.collectionRepository.addRecipe(materializedRecipe.id, to: collection.id)
 
             // Update selected recipes to include the new copy
-            selectedRecipeIds.insert(saveResult.recipe.id)
+            selectedRecipeIds.insert(materializedRecipe.id)
 
             // Reload recipes to show the new copy
             await loadRecipes()

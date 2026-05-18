@@ -8,6 +8,9 @@
 #if DEBUG
 import Foundation
 import SwiftData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 enum SimulatorQASeed {
@@ -64,6 +67,7 @@ enum SimulatorQASeed {
         let context = ModelContext(dependencies.modelContainer)
 
         do {
+            try clearSeededState(in: context)
             try seedUsers(in: context)
             let recipes = try seedRecipes(in: context)
             try seedCollections(recipes: recipes, in: context)
@@ -75,6 +79,62 @@ enum SimulatorQASeed {
         }
     }
 
+    private static func clearSeededState(in context: ModelContext) throws {
+        let userIds = [currentUser.id, friendA.id, friendB.id]
+        let recipeIds = [
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6")!
+        ]
+        let collectionIds = [
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6")!,
+            UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7")!
+        ]
+        let connectionIds = [
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc1")!,
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")!
+        ]
+
+        for model in try context.fetch(FetchDescriptor<UserModel>())
+            where userIds.contains(model.id) {
+            context.delete(model)
+        }
+
+        for model in try context.fetch(FetchDescriptor<RecipeModel>())
+            where recipeIds.contains(model.id) || model.ownerId.map(userIds.contains) == true {
+            context.delete(model)
+        }
+
+        for model in try context.fetch(FetchDescriptor<CollectionModel>())
+            where collectionIds.contains(model.id) || userIds.contains(model.userId) {
+            context.delete(model)
+        }
+
+        for model in try context.fetch(FetchDescriptor<CollectionMembershipModel>())
+            where collectionIds.contains(model.collectionId) || userIds.contains(model.ownerId) {
+            context.delete(model)
+        }
+
+        for model in try context.fetch(FetchDescriptor<ConnectionModel>())
+            where connectionIds.contains(model.id) ||
+                userIds.contains(model.fromUserId) ||
+                userIds.contains(model.toUserId) {
+            context.delete(model)
+        }
+
+        for model in try context.fetch(FetchDescriptor<SharedRecipeModel>()) {
+            context.delete(model)
+        }
+    }
+
     private static func seedUsers(in context: ModelContext) throws {
         for user in [currentUser, friendA, friendB] {
             context.insert(UserModel.from(user))
@@ -83,6 +143,7 @@ enum SimulatorQASeed {
 
     private static func seedRecipes(in context: ModelContext) throws -> [Recipe] {
         let now = Date()
+        let imageURLs = try seedRecipeImages()
         let recipes = [
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
@@ -92,7 +153,8 @@ enum SimulatorQASeed {
                 tags: ["Dinner", "Weeknight", "Chicken"],
                 ownerId: currentUser.id,
                 visibility: .publicRecipe,
-                updatedAt: now
+                updatedAt: now,
+                imageURL: imageURLs.lemonChicken
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
@@ -102,7 +164,8 @@ enum SimulatorQASeed {
                 tags: ["Dinner", "Pasta", "Offline"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
-                updatedAt: now.addingTimeInterval(-3_600)
+                updatedAt: now.addingTimeInterval(-3_600),
+                imageURL: imageURLs.pantryPasta
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
@@ -113,6 +176,7 @@ enum SimulatorQASeed {
                 ownerId: friendA.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-7_200),
+                imageURL: imageURLs.cardamomBuns,
                 isPreview: true
             ),
             recipe(
@@ -124,6 +188,7 @@ enum SimulatorQASeed {
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-1_800),
+                imageURL: imageURLs.savedBuns,
                 originalRecipeId: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
                 originalCreatorId: friendA.id,
                 originalCreatorName: friendA.displayName,
@@ -138,7 +203,18 @@ enum SimulatorQASeed {
                 ownerId: friendB.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-5_400),
+                imageURL: imageURLs.ramen,
                 isPreview: true
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
+                title: "No-Image Picnic Notes",
+                ingredients: ["1 loaf bread", "Seasonal fruit", "Soft cheese", "Olives"],
+                steps: ["Pack everything cold.", "Slice bread at the table.", "Serve family style."],
+                tags: ["Snack", "Picnic", "No Image"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-9_000)
             )
         ]
 
@@ -150,20 +226,29 @@ enum SimulatorQASeed {
     }
 
     private static func seedCollections(recipes: [Recipe], in context: ModelContext) throws {
+        let recipeByTitle = recipes.reduce(into: [String: UUID]()) { result, recipe in
+            result[recipe.title] = recipe.id
+        }
         let ownRecipeIds = recipes
             .filter { $0.ownerId == currentUser.id && !$0.isPreview }
             .map(\.id)
         let sharedRecipeIds = recipes
             .filter { $0.ownerId != currentUser.id }
             .map(\.id)
+        let imageRecipeIds = [
+            recipeByTitle["Lemon Herb Chicken"],
+            recipeByTitle["Offline Pantry Pasta"],
+            recipeByTitle["Saved Cardamom Buns"],
+            recipeByTitle["Miso Mushroom Ramen"]
+        ].compactMap { $0 }
 
         let collections = [
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
                 name: "Weeknight Wins",
-                description: "Fast dinners used for simulator layout checks.",
+                description: "Three owned recipes for local collection checks.",
                 userId: currentUser.id,
-                recipeIds: ownRecipeIds,
+                recipeIds: Array(ownRecipeIds.prefix(3)),
                 visibility: .privateRecipe,
                 symbolName: "fork.knife",
                 color: "#FF9933"
@@ -171,12 +256,62 @@ enum SimulatorQASeed {
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")!,
                 name: "Friends' Favorites",
-                description: "Shared recipes for wide-screen collection cards.",
+                description: "Go-to dishes shared by friends.",
                 userId: friendA.id,
                 recipeIds: sharedRecipeIds,
                 visibility: .publicRecipe,
                 symbolName: "person.2.fill",
                 color: "#4ECDC4"
+            ),
+            Collection(
+                id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3")!,
+                name: "QA One Image",
+                description: "One recipe image for single-photo cover checks.",
+                userId: currentUser.id,
+                recipeIds: Array(imageRecipeIds.prefix(1)),
+                visibility: .privateRecipe,
+                symbolName: "photo",
+                color: "#F06449"
+            ),
+            Collection(
+                id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4")!,
+                name: "QA Two Images",
+                description: "Two recipe images for split cover checks.",
+                userId: currentUser.id,
+                recipeIds: Array(imageRecipeIds.prefix(2)),
+                visibility: .privateRecipe,
+                symbolName: "rectangle.split.2x1",
+                color: "#5B8DEF"
+            ),
+            Collection(
+                id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5")!,
+                name: "QA Three Images",
+                description: "Three recipe images for asymmetrical collage checks.",
+                userId: currentUser.id,
+                recipeIds: Array(imageRecipeIds.prefix(3)),
+                visibility: .privateRecipe,
+                symbolName: "rectangle.split.3x1",
+                color: "#7B61FF"
+            ),
+            Collection(
+                id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6")!,
+                name: "QA Four Images",
+                description: "Four recipe images for collage and swipe checks.",
+                userId: currentUser.id,
+                recipeIds: Array(imageRecipeIds.prefix(4)),
+                visibility: .privateRecipe,
+                symbolName: "square.grid.2x2",
+                color: "#7B61FF"
+            ),
+            Collection(
+                id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7")!,
+                name: "QA No Images",
+                description: "No recipe images so the fallback gradient stays testable.",
+                userId: currentUser.id,
+                recipeIds: [recipeByTitle["No-Image Picnic Notes"]].compactMap { $0 },
+                visibility: .privateRecipe,
+                symbolName: "sparkles",
+                color: "#2E8B57"
             )
         ]
 
@@ -245,6 +380,7 @@ enum SimulatorQASeed {
         ownerId: UUID,
         visibility: RecipeVisibility,
         updatedAt: Date,
+        imageURL: URL? = nil,
         isPreview: Bool = false,
         originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
@@ -259,9 +395,12 @@ enum SimulatorQASeed {
             yields: "4 servings",
             totalMinutes: 30,
             tags: tags.map { Tag(name: $0) },
+            imageURL: imageURL,
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: id,
+            cloudImageRecordName: imageURL == nil ? nil : id,
+            imageModifiedAt: imageURL == nil ? nil : updatedAt,
             createdAt: updatedAt.addingTimeInterval(-86_400 * 5),
             updatedAt: updatedAt,
             originalRecipeId: originalRecipeId,
@@ -272,6 +411,121 @@ enum SimulatorQASeed {
             followsSourceUpdates: followsSourceUpdates,
             isPreview: isPreview
         )
+    }
+
+    private struct SeededRecipeImageURLs {
+        let lemonChicken: URL
+        let pantryPasta: URL
+        let cardamomBuns: URL
+        let savedBuns: URL
+        let ramen: URL
+    }
+
+    private static func seedRecipeImages() throws -> SeededRecipeImageURLs {
+        SeededRecipeImageURLs(
+            lemonChicken: try writeRecipeImage(
+                filename: "qa-lemon-herb-chicken.png",
+                title: "Lemon Herb Chicken",
+                symbolName: "leaf.fill",
+                colors: [
+                    UIColor(red: 0.18, green: 0.52, blue: 0.34, alpha: 1),
+                    UIColor(red: 0.95, green: 0.78, blue: 0.28, alpha: 1)
+                ]
+            ),
+            pantryPasta: try writeRecipeImage(
+                filename: "qa-pantry-pasta.png",
+                title: "Pantry Pasta",
+                symbolName: "fork.knife",
+                colors: [
+                    UIColor(red: 0.73, green: 0.19, blue: 0.14, alpha: 1),
+                    UIColor(red: 0.96, green: 0.58, blue: 0.22, alpha: 1)
+                ]
+            ),
+            cardamomBuns: try writeRecipeImage(
+                filename: "qa-cardamom-buns.png",
+                title: "Cardamom Buns",
+                symbolName: "birthday.cake.fill",
+                colors: [
+                    UIColor(red: 0.75, green: 0.45, blue: 0.22, alpha: 1),
+                    UIColor(red: 0.98, green: 0.75, blue: 0.48, alpha: 1)
+                ]
+            ),
+            savedBuns: try writeRecipeImage(
+                filename: "qa-saved-cardamom-buns.png",
+                title: "Saved Buns",
+                symbolName: "heart.fill",
+                colors: [
+                    UIColor(red: 0.62, green: 0.31, blue: 0.72, alpha: 1),
+                    UIColor(red: 0.96, green: 0.68, blue: 0.78, alpha: 1)
+                ]
+            ),
+            ramen: try writeRecipeImage(
+                filename: "qa-miso-ramen.png",
+                title: "Miso Ramen",
+                symbolName: "takeoutbag.and.cup.and.straw.fill",
+                colors: [
+                    UIColor(red: 0.13, green: 0.32, blue: 0.64, alpha: 1),
+                    UIColor(red: 0.44, green: 0.78, blue: 0.84, alpha: 1)
+                ]
+            )
+        )
+    }
+
+    private static func writeRecipeImage(
+        filename: String,
+        title: String,
+        symbolName: String,
+        colors: [UIColor]
+    ) throws -> URL {
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("RecipeImages", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent(filename)
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900))
+        let image = renderer.image { context in
+            let rect = CGRect(x: 0, y: 0, width: 1200, height: 900)
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let cgColors = colors.map(\.cgColor) as CFArray
+            let locations: [CGFloat] = [0, 1]
+
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: cgColors, locations: locations) {
+                context.cgContext.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: rect.minX, y: rect.minY),
+                    end: CGPoint(x: rect.maxX, y: rect.maxY),
+                    options: []
+                )
+            }
+
+            UIColor.white.withAlphaComponent(0.16).setFill()
+            UIBezierPath(ovalIn: CGRect(x: 330, y: 190, width: 540, height: 540)).fill()
+
+            UIColor.white.withAlphaComponent(0.32).setStroke()
+            let platePath = UIBezierPath(ovalIn: CGRect(x: 300, y: 160, width: 600, height: 600))
+            platePath.lineWidth = 18
+            platePath.stroke()
+
+            if let symbol = UIImage(systemName: symbolName) {
+                let symbolRect = CGRect(x: 450, y: 280, width: 300, height: 300)
+                symbol.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: symbolRect)
+            }
+
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 54, weight: .semibold),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraphStyle
+            ]
+            title.draw(in: CGRect(x: 140, y: 720, width: 920, height: 80), withAttributes: attributes)
+        }
+
+        guard let data = image.pngData() else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try data.write(to: url, options: .atomic)
+        return url
     }
 }
 #endif

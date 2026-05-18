@@ -65,10 +65,11 @@ actor RecipeRepository {
     }
 }
 
-enum RepositoryError: Error, LocalizedError {
+enum RepositoryError: Error, LocalizedError, Equatable {
     case notFound
     case invalidData
     case saveFailed
+    case notAuthorized
     
     var errorDescription: String? {
         switch self {
@@ -78,6 +79,8 @@ enum RepositoryError: Error, LocalizedError {
             return "Invalid data format"
         case .saveFailed:
             return "Failed to save changes"
+        case .notAuthorized:
+            return "You can only delete recipes you own"
         }
     }
 }

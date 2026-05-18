@@ -151,6 +151,18 @@ struct RecentlyCookedListView: View {
 
     private func deleteRecipe(_ recipe: Recipe) async {
         do {
+            if let currentUserId = CurrentUserSession.shared.userId,
+               recipe.ownerId != currentUserId,
+               try await dependencies.savedReferenceRepository.deleteRecipeReference(
+                   userId: currentUserId,
+                   sourceRecipeId: recipe.relatedGraphReferenceID
+               ) {
+                localRecipes.removeAll {
+                    $0.id == recipe.id || $0.relatedGraphReferenceID == recipe.relatedGraphReferenceID
+                }
+                return
+            }
+
             try await dependencies.recipeRepository.delete(id: recipe.id)
             // UI update handled by RecipeDeleted notification listener
         } catch {

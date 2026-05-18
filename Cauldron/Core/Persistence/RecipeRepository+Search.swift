@@ -53,11 +53,16 @@ extension RecipeRepository {
     func fetchOwnedCopies(originalRecipeIds: [UUID]) async throws -> [Recipe] {
         let originalRecipeIdSet = Set(originalRecipeIds)
         guard !originalRecipeIdSet.isEmpty else { return [] }
+        guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            return []
+        }
 
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { model in
-                model.isPreview == false && model.originalRecipeId != nil
+                model.isPreview == false &&
+                model.ownerId == currentUserId &&
+                model.originalRecipeId != nil
             },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )

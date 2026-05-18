@@ -29,7 +29,7 @@ struct ContentView: View {
     // This is separate from the build number - the app can have multiple builds without triggering What's New.
     // When you ship a feature update, set this to match that version (e.g., "1.4.1").
     // When you ship a bug fix, leave this unchanged so no splash appears.
-    private static let whatsNewContentVersion = "1.4.1"
+    private static let whatsNewContentVersion = "1.5"
 
     @Environment(\.dependencies) private var dependencies
     @StateObject private var userSession = CurrentUserSession.shared
@@ -195,6 +195,15 @@ struct ContentView: View {
     }
 
     private func maybeShowSplashScreen() {
+        if RuntimeEnvironment.shouldForceWhatsNew,
+           userSession.isInitialized,
+           isDataReady,
+           !showWhatsNew,
+           !showWelcome {
+            showWhatsNew = true
+            return
+        }
+
         // Don't show any splash if not ready or already showing one
         guard userSession.isInitialized,
               isDataReady,
@@ -214,14 +223,15 @@ struct ContentView: View {
         }
 
         // Priority 1: Welcome screen for brand new users who haven't seen it yet
-        if !hasSeenWelcomeScreen {
+        if !RuntimeEnvironment.isSimulatorQAMode && !hasSeenWelcomeScreen {
             showWelcome = true
             return
         }
 
         // Priority 2: What's New for existing users when content version changes
         let forceShow = Bundle.main.object(forInfoDictionaryKey: "WhatsNewForceShow") as? Bool == true
-        if forceShow || whatsNewLastSeenContentVersion != Self.whatsNewContentVersion {
+        if !RuntimeEnvironment.isSimulatorQAMode &&
+            (forceShow || whatsNewLastSeenContentVersion != Self.whatsNewContentVersion) {
             showWhatsNew = true
         }
     }

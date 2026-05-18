@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 import os
 
 struct CollectionFormView: View {
@@ -17,6 +18,7 @@ struct CollectionFormView: View {
 
     // Form state
     @State private var name: String
+    @State private var description: String
     @State private var symbolName: String?
     @State private var color: String?
     @State private var visibility: RecipeVisibility
@@ -24,6 +26,17 @@ struct CollectionFormView: View {
     @State private var isSaving = false
     @State private var showingRecipeSelector = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingPublishRecipesConfirmation = false
+    @State private var showingImageSourceDialog = false
+    @State private var showingImagePicker = false
+    @State private var imagePickerSourceType: UIImagePickerController.SourceType = .photoLibrary
+    @State private var selectedCoverImage: UIImage?
+    @State private var existingCoverImage: UIImage?
+    @State private var shouldRemoveCustomCover = false
+    @State private var publicMembershipRepairPlan = PublicCollectionMembershipRepairPlan(
+        privateOwnedRecipeCount: 0,
+        referencedRecipeCount: 0
+    )
     @State private var allRecipes: [Recipe] = []
     @FocusState private var isNameFieldFocused: Bool
 
@@ -32,6 +45,7 @@ struct CollectionFormView: View {
 
         // Initialize state
         _name = State(initialValue: collectionToEdit?.name ?? "")
+        _description = State(initialValue: collectionToEdit?.description ?? "")
         _symbolName = State(initialValue: collectionToEdit?.symbolName)
         _color = State(initialValue: collectionToEdit?.color)
         _visibility = State(initialValue: collectionToEdit?.visibility ?? .publicRecipe)
@@ -46,38 +60,34 @@ struct CollectionFormView: View {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var publishRecipesConfirmationMessage: String {
+        var actions: [String] = []
+
+        if publicMembershipRepairPlan.privateOwnedRecipeCount > 0 {
+            let count = publicMembershipRepairPlan.privateOwnedRecipeCount
+            let recipeText = count == 1 ? "recipe" : "recipes"
+            actions.append("make \(count) private \(recipeText) public")
+        }
+
+        if publicMembershipRepairPlan.referencedRecipeCount > 0 {
+            let count = publicMembershipRepairPlan.referencedRecipeCount
+            let recipeText = count == 1 ? "referenced recipe" : "referenced recipes"
+            actions.append("save \(count) \(recipeText) as your own public copies")
+        }
+
+        guard !actions.isEmpty else {
+            return "Making this collection public will make its recipes available to people who can see the collection."
+        }
+
+        return "Making this collection public will \(actions.joined(separator: " and ")) so everyone sees the same recipes."
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(spacing: 18) {
-                        Menu {
-                            ForEach(Self.availableSymbolNames, id: \.self) { symbol in
-                                Button {
-                                    symbolName = symbol
-                                } label: {
-                                    Label(symbolDisplayName(for: symbol), systemImage: symbol)
-                                }
-                            }
-                        } label: {
-                            ZStack(alignment: .bottomTrailing) {
-                                Circle()
-                                    .fill(selectedColor.opacity(0.15))
-                                    .frame(width: 88, height: 88)
-
-                                Image(systemName: selectedSymbolName)
-                                    .font(.system(size: 42, weight: .semibold))
-                                    .foregroundColor(selectedColor)
-
-                                Image(systemName: "pencil.circle.fill")
-                                    .font(.title3)
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, selectedColor)
-                                    .background(Circle().fill(Color(.systemBackground)))
-                                    .offset(x: 2, y: 2)
-                            }
-                        }
-                        .buttonStyle(.plain)
+                    VStack(spacing: 14) {
+                        collectionImagePicker
 
                         TextField("Collection Name", text: $name)
                             .font(.title3.weight(.semibold))
@@ -92,45 +102,23 @@ struct CollectionFormView: View {
                                     .fill(Color(.secondarySystemGroupedBackground))
                             )
 
-                        Text("\(selectedRecipeIds.count) recipe\(selectedRecipeIds.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        HStack(spacing: 12) {
-                            ForEach(Self.availableColorHexes, id: \.self) { colorHex in
-                                Button {
-                                    color = colorHex
-                                } label: {
-                                    Circle()
-                                        .fill(Color(hex: colorHex) ?? .cauldronOrange)
-                                        .frame(width: 26, height: 26)
-                                        .overlay {
-                                            if resolvedColorHex == colorHex {
-                                                Image(systemName: "checkmark")
-                                                    .font(.caption.weight(.bold))
-                                                    .foregroundStyle(.white)
-                                            }
-                                        }
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            ColorPicker(
-                                "",
-                                selection: Binding(
-                                    get: { selectedColor },
-                                    set: { color = $0.toHex() }
-                                )
-                            )
-                            .labelsHidden()
-                            .frame(width: 30, height: 30)
-                        }
-                        .padding(.top, 2)
+                        symbolSelectionRow
+                        colorSelectionRow
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                 } header: {
                     Text("Collection")
+                }
+
+                Section {
+                    TextField("Description", text: $description, axis: .vertical)
+                        .lineLimit(3...6)
+                        .submitLabel(.return)
+                } header: {
+                    Text("Description")
+                } footer: {
+                    Text("Optional. Use this for what belongs in the collection, not as a recipe count.")
                 }
 
                 // Recipes Section
@@ -214,7 +202,7 @@ struct CollectionFormView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     case .publicRecipe:
-                        Text("Everyone can see this collection")
+                        Text("Everyone can see this collection. Included recipes will be public too.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -265,8 +253,49 @@ struct CollectionFormView: View {
                     dependencies: dependencies
                 )
             }
+            .fullScreenCover(isPresented: $showingImagePicker) {
+                ImagePicker(
+                    image: $selectedCoverImage,
+                    sourceType: imagePickerSourceType,
+                    allowsEditing: true
+                )
+                .ignoresSafeArea()
+            }
             .task {
                 await loadRecipes()
+                await loadExistingCoverImage()
+            }
+            .onChange(of: selectedCoverImage != nil) {
+                if selectedCoverImage != nil {
+                    shouldRemoveCustomCover = false
+                }
+            }
+            .confirmationDialog(
+                "Collection Image",
+                isPresented: $showingImageSourceDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Choose Photo", systemImage: "photo.on.rectangle") {
+                    imagePickerSourceType = .photoLibrary
+                    showingImagePicker = true
+                }
+
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button("Take Photo", systemImage: "camera") {
+                        imagePickerSourceType = .camera
+                        showingImagePicker = true
+                    }
+                }
+
+                if selectedCoverImage != nil || existingCoverImage != nil || collectionToEdit?.coverImageType == .customImage {
+                    Button("Remove Image", systemImage: "trash", role: .destructive) {
+                        selectedCoverImage = nil
+                        existingCoverImage = nil
+                        shouldRemoveCustomCover = true
+                    }
+                }
+
+                Button("Cancel", role: .cancel) {}
             }
             .confirmationDialog(
                 "Delete Collection?",
@@ -282,6 +311,127 @@ struct CollectionFormView: View {
             } message: {
                 Text("This will permanently delete \"\(collectionToEdit?.name ?? "this collection")\" and remove all recipes from it. The recipes themselves will not be deleted.")
             }
+            .alert(
+                "Make Collection Recipes Public?",
+                isPresented: $showingPublishRecipesConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Continue") {
+                    Task {
+                        await saveCollection(confirmingRecipePublish: true)
+                    }
+                }
+            } message: {
+                Text(publishRecipesConfirmationMessage)
+            }
+        }
+    }
+
+    private var collectionImagePicker: some View {
+        Button {
+            showingImageSourceDialog = true
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let coverImage = selectedCoverImage ?? existingCoverImage {
+                        Image(uiImage: coverImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [
+                                selectedColor.opacity(0.26),
+                                selectedColor.opacity(0.10),
+                                Color(.secondarySystemGroupedBackground)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .overlay {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.badge.plus")
+                                    .font(.system(size: 28, weight: .semibold))
+                                Text("Add Collection Image")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(selectedColor)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 148)
+                .clipShape(.rect(cornerRadius: 16))
+
+                Image(systemName: "pencil.circle.fill")
+                    .font(.title2)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, selectedColor)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .padding(10)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selectedCoverImage == nil && existingCoverImage == nil ? "Add collection image" : "Change collection image")
+    }
+
+    private var symbolSelectionRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Self.availableSymbolNames, id: \.self) { symbol in
+                    Button {
+                        symbolName = symbol
+                    } label: {
+                        Image(systemName: symbol)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(selectedSymbolName == symbol ? .white : selectedColor)
+                            .frame(width: 34, height: 34)
+                            .background(
+                                Circle()
+                                    .fill(selectedSymbolName == symbol ? selectedColor : selectedColor.opacity(0.12))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(symbolDisplayName(for: symbol))
+                    .accessibilityAddTraits(selectedSymbolName == symbol ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var colorSelectionRow: some View {
+        HStack(spacing: 12) {
+            ForEach(Self.availableColorHexes, id: \.self) { colorHex in
+                Button {
+                    color = colorHex
+                } label: {
+                    Circle()
+                        .fill(Color(hex: colorHex) ?? .cauldronOrange)
+                        .frame(width: 26, height: 26)
+                        .overlay {
+                            if resolvedColorHex == colorHex {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Collection color")
+                .accessibilityValue(colorHex)
+                .accessibilityAddTraits(resolvedColorHex == colorHex ? .isSelected : [])
+            }
+
+            ColorPicker(
+                "",
+                selection: Binding(
+                    get: { selectedColor },
+                    set: { color = $0.toHex() }
+                )
+            )
+            .labelsHidden()
+            .frame(width: 30, height: 30)
         }
     }
 
@@ -289,18 +439,29 @@ struct CollectionFormView: View {
 
     private func loadRecipes() async {
         do {
-            // Load owned recipes from local storage
-            allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
-            )
+            allRecipes = try await loadLibraryRecipesIncludingSavedReferences(dependencies: dependencies)
             AppLogger.general.info("✅ Loaded \(allRecipes.count) owned recipes")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes: \(error.localizedDescription)")
         }
     }
 
-    private func saveCollection() async {
+    @MainActor
+    private func loadExistingCoverImage() async {
+        guard let collectionToEdit,
+              collectionToEdit.coverImageType == .customImage,
+              !shouldRemoveCustomCover,
+              selectedCoverImage == nil else {
+            return
+        }
+
+        existingCoverImage = await dependencies.entityImageLoader.loadCollectionCoverImage(
+            for: collectionToEdit,
+            dependencies: dependencies
+        )
+    }
+
+    private func saveCollection(confirmingRecipePublish: Bool = false) async {
         isSaving = true
         defer { isSaving = false }
 
@@ -311,38 +472,100 @@ struct CollectionFormView: View {
 
         do {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let recipeIds = Array(selectedRecipeIds)
+            let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+            var recipeIds = orderedSelectedRecipeIds
             let resolvedSymbolName = symbolName ?? defaultSymbolName
             let resolvedColor = color ?? Color.cauldronOrange.toHex() ?? "#FF9933"
+            let collectionId = collectionToEdit?.id ?? UUID()
+            let cover = try await resolveCoverImageState(collectionId: collectionId)
+            let recipesById = RecipeDeduplication.byIdPreferringBest(allRecipes)
+
+            if !confirmingRecipePublish {
+                let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
+                    recipeIds: recipeIds,
+                    ownerId: userId,
+                    visibility: visibility
+                )
+                let referencedRecipeCount = visibility == .publicRecipe
+                    ? max(
+                        repairPlan.referencedRecipeCount,
+                        externalRecipeIdsNeedingMaterialization(
+                            recipeIds: recipeIds,
+                            recipesById: recipesById,
+                            currentUserId: userId
+                        ).count
+                    )
+                    : repairPlan.referencedRecipeCount
+                let combinedRepairPlan = PublicCollectionMembershipRepairPlan(
+                    privateOwnedRecipeCount: repairPlan.privateOwnedRecipeCount,
+                    referencedRecipeCount: referencedRecipeCount
+                )
+                if combinedRepairPlan.requiresRepair {
+                    publicMembershipRepairPlan = combinedRepairPlan
+                    showingPublishRecipesConfirmation = true
+                    return
+                }
+            }
+
+            recipeIds = try await materializeExternalRecipeIdsForOwnedCollection(
+                recipeIds,
+                recipesById: recipesById,
+                currentUserId: userId,
+                collectionVisibility: visibility,
+                dependencies: dependencies
+            )
+
+            let membershipResolution = try await dependencies.publicCollectionMembershipResolver.resolveRecipeIdsForOwnedPublicCollection(
+                recipeIds: recipeIds,
+                ownerId: userId,
+                visibility: visibility
+            )
+            recipeIds = membershipResolution.recipeIds
 
             if let existingCollection = collectionToEdit {
                 // Update existing collection
-                let updated = existingCollection.updated(
+                let updated = Collection(
+                    id: existingCollection.id,
                     name: trimmedName,
+                    description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                    userId: existingCollection.userId,
                     recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: nil,
                     symbolName: resolvedSymbolName,
                     color: resolvedColor,
-                    coverImageType: .recipeGrid,
-                    clearCoverImageMetadata: true
+                    coverImageType: cover.coverImageType,
+                    coverImageURL: cover.coverImageURL,
+                    cloudCoverImageRecordName: cover.cloudCoverImageRecordName,
+                    coverImageModifiedAt: cover.coverImageModifiedAt,
+                    cloudRecordName: existingCollection.cloudRecordName,
+                    originalCollectionId: existingCollection.originalCollectionId,
+                    originalCollectionOwnerId: existingCollection.originalCollectionOwnerId,
+                    originalCollectionName: existingCollection.originalCollectionName,
+                    savedAt: existingCollection.savedAt,
+                    sourceCollectionUpdatedAt: existingCollection.sourceCollectionUpdatedAt,
+                    followsSourceUpdates: existingCollection.followsSourceUpdates,
+                    createdAt: existingCollection.createdAt,
+                    updatedAt: Date()
                 )
                 try await dependencies.collectionRepository.update(updated)
                 AppLogger.general.info("✅ Updated collection: \(trimmedName)")
             } else {
                 // Create new collection
                 let newCollection = Collection(
+                    id: collectionId,
                     name: trimmedName,
+                    description: trimmedDescription.isEmpty ? nil : trimmedDescription,
                     userId: userId,
                     recipeIds: recipeIds,
                     visibility: visibility,
                     emoji: nil,
                     symbolName: resolvedSymbolName,
                     color: resolvedColor,
-                    coverImageType: .recipeGrid,
-                    coverImageURL: nil,
-                    cloudCoverImageRecordName: nil,
-                    coverImageModifiedAt: nil
+                    coverImageType: cover.coverImageType,
+                    coverImageURL: cover.coverImageURL,
+                    cloudCoverImageRecordName: cover.cloudCoverImageRecordName,
+                    coverImageModifiedAt: cover.coverImageModifiedAt
                 )
                 try await dependencies.collectionRepository.create(newCollection)
                 AppLogger.general.info("✅ Created collection: \(trimmedName)")
@@ -370,8 +593,82 @@ struct CollectionFormView: View {
 
     // MARK: - Helpers
 
+    private struct CoverImageState {
+        let coverImageType: CoverImageType
+        let coverImageURL: URL?
+        let cloudCoverImageRecordName: String?
+        let coverImageModifiedAt: Date?
+    }
+
+    private func resolveCoverImageState(collectionId: UUID) async throws -> CoverImageState {
+        if shouldRemoveCustomCover {
+            return CoverImageState(
+                coverImageType: .recipeGrid,
+                coverImageURL: nil,
+                cloudCoverImageRecordName: nil,
+                coverImageModifiedAt: nil
+            )
+        }
+
+        if let selectedCoverImage {
+            let imageURL = try await dependencies.collectionImageManager.saveImage(
+                selectedCoverImage,
+                collectionId: collectionId
+            )
+            return CoverImageState(
+                coverImageType: .customImage,
+                coverImageURL: imageURL,
+                cloudCoverImageRecordName: nil,
+                coverImageModifiedAt: Date()
+            )
+        }
+
+        if let collectionToEdit {
+            return CoverImageState(
+                coverImageType: collectionToEdit.coverImageType,
+                coverImageURL: collectionToEdit.coverImageURL,
+                cloudCoverImageRecordName: collectionToEdit.cloudCoverImageRecordName,
+                coverImageModifiedAt: collectionToEdit.coverImageModifiedAt
+            )
+        }
+
+        return CoverImageState(
+            coverImageType: .recipeGrid,
+            coverImageURL: nil,
+            cloudCoverImageRecordName: nil,
+            coverImageModifiedAt: nil
+        )
+    }
+
     private var selectedRecipes: [Recipe] {
         allRecipes.filter { selectedRecipeIds.contains($0.id) }
+    }
+
+    private var orderedSelectedRecipeIds: [UUID] {
+        var orderedIds: [UUID] = []
+        var seenIds = Set<UUID>()
+
+        if let collectionToEdit {
+            for recipeId in collectionToEdit.recipeIds where selectedRecipeIds.contains(recipeId) {
+                if seenIds.insert(recipeId).inserted {
+                    orderedIds.append(recipeId)
+                }
+            }
+        }
+
+        for recipeId in allRecipes.map(\.id) where selectedRecipeIds.contains(recipeId) {
+            if seenIds.insert(recipeId).inserted {
+                orderedIds.append(recipeId)
+            }
+        }
+
+        for recipeId in selectedRecipeIds.sorted(by: { $0.uuidString < $1.uuidString }) {
+            if seenIds.insert(recipeId).inserted {
+                orderedIds.append(recipeId)
+            }
+        }
+
+        return orderedIds
     }
 
     private var selectedColor: Color {
@@ -527,16 +824,13 @@ struct RecipeSelectorSheet: View {
         defer { isLoading = false }
 
         do {
-            // Load owned recipes from local storage
-            recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
-            )
+            recipes = try await loadLibraryRecipesIncludingSavedReferences(dependencies: dependencies)
             AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for selector")
         } catch {
             AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")
         }
     }
+
 
     private var emptyState: some View {
         VStack(spacing: 16) {
@@ -563,6 +857,85 @@ struct RecipeSelectorSheet: View {
             selectedRecipeIds.insert(recipeId)
         }
     }
+}
+
+private func loadLibraryRecipesIncludingSavedReferences(
+    dependencies: DependencyContainer
+) async throws -> [Recipe] {
+    var recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+        try await dependencies.recipeRepository.fetchAll(),
+        currentUserId: CurrentUserSession.shared.userId
+    )
+
+    guard let currentUserId = CurrentUserSession.shared.userId else {
+        return recipes
+    }
+
+    let references = try await dependencies.savedReferenceRepository.recipeReferences(for: currentUserId)
+    let representedSourceIds = Set(recipes.map(\.relatedGraphReferenceID))
+    let missingSourceIds = references.compactMap { reference -> UUID? in
+        guard reference.materializedRecipeId == nil,
+              !representedSourceIds.contains(reference.sourceRecipeId) else {
+            return nil
+        }
+        return reference.sourceRecipeId
+    }
+
+    if !missingSourceIds.isEmpty {
+        let fetchedRecipes = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: missingSourceIds)
+        recipes += references.compactMap { reference in
+            guard reference.materializedRecipeId == nil else { return nil }
+            return fetchedRecipes[reference.sourceRecipeId]
+        }
+    }
+
+    return recipes
+}
+
+private func externalRecipeIdsNeedingMaterialization(
+    recipeIds: [UUID],
+    recipesById: [UUID: Recipe],
+    currentUserId: UUID
+) -> [UUID] {
+    recipeIds.filter { recipeId in
+        guard let recipe = recipesById[recipeId] else {
+            return false
+        }
+        return recipe.isPreview || recipe.ownerId != currentUserId
+    }
+}
+
+private func materializeExternalRecipeIdsForOwnedCollection(
+    _ recipeIds: [UUID],
+    recipesById: [UUID: Recipe],
+    currentUserId: UUID,
+    collectionVisibility: RecipeVisibility,
+    dependencies: DependencyContainer
+) async throws -> [UUID] {
+    var resolvedRecipeIds: [UUID] = []
+    var seenRecipeIds = Set<UUID>()
+
+    for recipeId in recipeIds {
+        let resolvedRecipeId: UUID
+        if let recipe = recipesById[recipeId],
+           recipe.isPreview || recipe.ownerId != currentUserId {
+            let materializedRecipe = try await dependencies.recipeSaveService.materializeRecipeForOwnedCollectionMembership(
+                recipe,
+                minimumVisibility: collectionVisibility,
+                originalCreatorId: recipe.ownerId,
+                originalCreatorName: recipe.originalCreatorName
+            )
+            resolvedRecipeId = materializedRecipe.id
+        } else {
+            resolvedRecipeId = recipeId
+        }
+
+        if seenRecipeIds.insert(resolvedRecipeId).inserted {
+            resolvedRecipeIds.append(resolvedRecipeId)
+        }
+    }
+
+    return resolvedRecipeIds
 }
 
 #Preview {

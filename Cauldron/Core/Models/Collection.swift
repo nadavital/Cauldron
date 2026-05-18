@@ -108,8 +108,7 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
     nonisolated static func new(name: String, userId: UUID) -> Collection {
         Collection(
             name: name,
-            userId: userId,
-            visibility: .privateRecipe
+            userId: userId
         )
     }
 
@@ -126,12 +125,13 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         coverImageURL: URL? = nil,
         cloudCoverImageRecordName: String? = nil,
         coverImageModifiedAt: Date? = nil,
+        clearDescription: Bool = false,
         clearCoverImageMetadata: Bool = false
     ) -> Collection {
         Collection(
             id: self.id,
             name: name ?? self.name,
-            description: description ?? self.description,
+            description: clearDescription ? nil : (description ?? self.description),
             userId: self.userId,
             recipeIds: recipeIds ?? self.recipeIds,
             visibility: visibility ?? self.visibility,

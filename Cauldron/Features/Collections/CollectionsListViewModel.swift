@@ -13,6 +13,7 @@ import os
 @Observable
 final class CollectionsListViewModel {
     var ownedCollections: [Collection] = []
+    var savedCollections: [Collection] = []
     var isLoading = false
     var searchText = ""
     var showingCreateSheet = false
@@ -52,6 +53,9 @@ final class CollectionsListViewModel {
                 if let index = self.ownedCollections.firstIndex(where: { $0.id == collectionId }) {
                     self.ownedCollections[index] = updatedCollection
                 }
+                if let index = self.savedCollections.firstIndex(where: { $0.id == collectionId }) {
+                    self.savedCollections[index] = updatedCollection
+                }
             }
         }
 
@@ -89,7 +93,7 @@ final class CollectionsListViewModel {
         defer { isLoading = false }
 
         do {
-            async let fetchedCollections = dependencies.collectionRepository.fetchAll()
+            async let fetchedCollections = loadCollectionsIncludingSavedReferences()
             async let fetchedRecipes = dependencies.recipeRepository.fetchAll()
 
             let collections = try await fetchedCollections
@@ -97,17 +101,89 @@ final class CollectionsListViewModel {
                 try await fetchedRecipes,
                 currentUserId: CurrentUserSession.shared.userId
             )
-            recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
+            recipesById = RecipeDeduplication.byIdPreferringBest(recipes)
             recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }
-            ownedCollections = collections
-            AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) collections")
+            ownedCollections = collections.owned
+            savedCollections = collections.saved
+            AppLogger.general.info("✅ Loaded \(self.ownedCollections.count) owned collections and \(self.savedCollections.count) saved collections")
         } catch {
             AppLogger.general.error("❌ Failed to load collections: \(error.localizedDescription)")
             errorMessage = "Failed to load collections: \(error.localizedDescription)"
             showError = true
         }
+    }
+
+    private func loadCollectionsIncludingSavedReferences() async throws -> (owned: [Collection], saved: [Collection]) {
+        let localCollections = try await dependencies.collectionRepository.fetchAll()
+
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return Self.splitCollectionsForDisplay(
+                localCollections: localCollections,
+                savedReferences: [],
+                fetchedSourceCollections: [:],
+                currentUserId: nil
+            )
+        }
+
+        let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
+        let savedSourceIds = Set(references.map(\.sourceCollectionId))
+        let representedSourceIds = Set(localCollections.compactMap { collection -> UUID? in
+            let sourceId = collection.sourceCollectionReferenceId
+            return collection.userId != currentUserId && savedSourceIds.contains(sourceId) ? sourceId : nil
+        })
+        let missingSourceIds = references
+            .map(\.sourceCollectionId)
+            .filter { !representedSourceIds.contains($0) }
+
+        var fetchedSources: [UUID: Collection] = [:]
+        if !missingSourceIds.isEmpty {
+            fetchedSources = try await dependencies.collectionCloudService.fetchPublicCollections(ids: missingSourceIds)
+        }
+
+        return Self.splitCollectionsForDisplay(
+            localCollections: localCollections,
+            savedReferences: references,
+            fetchedSourceCollections: fetchedSources,
+            currentUserId: currentUserId
+        )
+    }
+
+    nonisolated static func splitCollectionsForDisplay(
+        localCollections: [Collection],
+        savedReferences: [SavedCollectionReference],
+        fetchedSourceCollections: [UUID: Collection],
+        currentUserId: UUID?
+    ) -> (owned: [Collection], saved: [Collection]) {
+        guard let currentUserId else {
+            return (
+                owned: localCollections.sorted { $0.updatedAt > $1.updatedAt },
+                saved: []
+            )
+        }
+
+        let savedSourceIds = Set(savedReferences.map(\.sourceCollectionId))
+        let ownedCollections = localCollections
+            .filter { $0.userId == currentUserId }
+            .sorted { $0.updatedAt > $1.updatedAt }
+
+        var savedCollectionsBySourceId = localCollections.reduce(into: [UUID: Collection]()) { result, collection in
+            let sourceId = collection.sourceCollectionReferenceId
+            guard collection.userId != currentUserId,
+                  savedSourceIds.contains(sourceId),
+                  result[sourceId] == nil else {
+                return
+            }
+            result[sourceId] = collection
+        }
+
+        for (sourceId, collection) in fetchedSourceCollections where savedCollectionsBySourceId[sourceId] == nil {
+            savedCollectionsBySourceId[sourceId] = collection
+        }
+
+        let savedCollections = savedReferences.compactMap { savedCollectionsBySourceId[$0.sourceCollectionId] }
+        return (owned: ownedCollections, saved: savedCollections)
     }
 
     /// Filtered collections based on search text
@@ -118,6 +194,19 @@ final class CollectionsListViewModel {
         return ownedCollections.filter { collection in
             collection.name.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    var filteredSavedCollections: [Collection] {
+        if searchText.isEmpty {
+            return savedCollections
+        }
+        return savedCollections.filter { collection in
+            collection.name.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    var hasVisibleCollections: Bool {
+        !filteredOwnedCollections.isEmpty || !filteredSavedCollections.isEmpty
     }
 
     /// Create a new collection
@@ -149,6 +238,17 @@ final class CollectionsListViewModel {
     /// Delete a collection
     func deleteCollection(_ collection: Collection) async {
         do {
+            if let currentUserId = CurrentUserSession.shared.userId,
+               collection.userId != currentUserId,
+               try await dependencies.savedReferenceRepository.deleteCollectionReference(
+                   userId: currentUserId,
+                   sourceCollectionId: collection.sourceCollectionReferenceId
+               ) {
+                await loadCollections()
+                AppLogger.general.info("Removed saved collection reference: \(collection.name)")
+                return
+            }
+
             try await dependencies.collectionRepository.delete(id: collection.id)
             await loadCollections()
             AppLogger.general.info("✅ Deleted collection: \(collection.name)")

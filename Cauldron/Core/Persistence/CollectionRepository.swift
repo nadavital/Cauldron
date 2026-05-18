@@ -32,6 +32,11 @@ actor CollectionRepository {
     private var syncRetryTask: Task<Void, Never>?
     private var operationQueueReplayTask: Task<Void, Never>?
 
+    private struct CollectionDeletePayload: Codable, Sendable {
+        let collectionId: UUID
+        let ownerId: UUID
+    }
+
     init(
         modelContainer: ModelContainer,
         cloudKitCore: CloudKitCore,
@@ -217,6 +222,13 @@ actor CollectionRepository {
         return allCollections.filter { $0.contains(recipeId: recipeId) }
     }
 
+    func publicCollectionsContainingRecipe(recipeId: UUID, ownerId: UUID) async throws -> [Collection] {
+        let collections = try await fetchCollections(containingRecipe: recipeId)
+        return collections.filter { collection in
+            collection.userId == ownerId && collection.visibility == .publicRecipe
+        }
+    }
+
     // MARK: - Update
 
     /// Update an existing collection (optimistic - returns immediately)
@@ -256,6 +268,9 @@ actor CollectionRepository {
         let oldColor = existingModel.color
         let oldDescription = existingModel.descriptionText
         let oldCoverImageType = existingModel.coverImageType
+        let oldCoverImagePath = existingModel.coverImagePath
+        let oldCloudCoverImageRecordName = existingModel.cloudCoverImageRecordName
+        let oldCoverImageModifiedAt = existingModel.coverImageModifiedAt
         try await assertCanModify(oldCollection)
 
         // 1. Update locally (immediate)
@@ -272,6 +287,9 @@ actor CollectionRepository {
         existingModel.symbolName = updatedModel.symbolName
         existingModel.color = updatedModel.color
         existingModel.coverImageType = updatedModel.coverImageType
+        existingModel.coverImagePath = updatedModel.coverImagePath
+        existingModel.cloudCoverImageRecordName = updatedModel.cloudCoverImageRecordName
+        existingModel.coverImageModifiedAt = updatedModel.coverImageModifiedAt
         existingModel.originalCollectionId = updatedModel.originalCollectionId
         existingModel.originalCollectionOwnerId = updatedModel.originalCollectionOwnerId
         existingModel.originalCollectionName = updatedModel.originalCollectionName
@@ -332,7 +350,10 @@ actor CollectionRepository {
                               oldSymbolName != collection.symbolName ||
                               oldColor != collection.color ||
                               oldDescription != collection.description ||
-                              oldCoverImageType != collection.coverImageType.rawValue
+                              oldCoverImageType != collection.coverImageType.rawValue ||
+                              oldCoverImagePath != collection.coverImageURL?.absoluteString ||
+                              oldCloudCoverImageRecordName != collection.cloudCoverImageRecordName ||
+                              oldCoverImageModifiedAt != collection.coverImageModifiedAt
         if metadataChanged {
             NotificationCenter.default.post(
                 name: .collectionMetadataChanged,
@@ -411,6 +432,16 @@ actor CollectionRepository {
         try await removeRecipesFromAllCollections([recipeId])
     }
 
+    @discardableResult
+    func removeRecipeFromOwnedPublicCollections(recipeId: UUID, ownerId: UUID) async throws -> [Collection] {
+        let collections = try await publicCollectionsContainingRecipe(recipeId: recipeId, ownerId: ownerId)
+        for collection in collections {
+            let updated = collection.removingRecipe(recipeId)
+            try await update(updated)
+        }
+        return collections
+    }
+
     /// Remove recipes from all collections in one pass. This is used after
     /// tombstone sync so deletion wins over stale collection membership edges.
     func removeRecipesFromAllCollections(_ recipeIds: Set<UUID>) async throws {
@@ -433,6 +464,43 @@ actor CollectionRepository {
         // Removed recipes from collections
     }
 
+    @discardableResult
+    func repairInvalidPublicCollectionMemberships(
+        recipeRepository: RecipeRepository,
+        ownerId: UUID
+    ) async throws -> Int {
+        let publicCollections = try await fetchAll().filter { collection in
+            collection.userId == ownerId && collection.visibility == .publicRecipe
+        }
+        guard !publicCollections.isEmpty else { return 0 }
+
+        let recipeIds = Array(Set(publicCollections.flatMap(\.recipeIds)))
+        guard !recipeIds.isEmpty else { return 0 }
+
+        let recipesById = RecipeDeduplication.byIdPreferringBest(
+            try await recipeRepository.fetch(ids: recipeIds)
+        )
+
+        var repairedCount = 0
+        for collection in publicCollections {
+            let validRecipeIds = collection.recipeIds.filter { recipeId in
+                guard let recipe = recipesById[recipeId] else {
+                    return true
+                }
+                return recipe.visibility == .publicRecipe
+            }
+
+            guard validRecipeIds != collection.recipeIds else { continue }
+            try await update(collectionWithRecipeIds(collection, validRecipeIds))
+            repairedCount += 1
+        }
+
+        if repairedCount > 0 {
+            logger.info("Repaired \(repairedCount) public collections with private recipe memberships")
+        }
+        return repairedCount
+    }
+
     private func applyMembershipOverlay(
         to collections: [Collection],
         context: ModelContext
@@ -449,54 +517,15 @@ actor CollectionRepository {
                 return collection
             }
 
-            return collectionWithRecipeIds(collection, activeRecipeIds(from: edges))
+            return CollectionMembershipProjection.collectionWithRecipeIds(
+                collection,
+                CollectionMembershipProjection.activeRecipeIds(from: edges)
+            )
         }
     }
 
-    private func activeRecipeIds(from edges: [CollectionMembershipEdge]) -> [UUID] {
-        let latestEdgesByRecipe = Dictionary(grouping: edges, by: \.recipeId)
-            .compactMapValues { recipeEdges in
-                recipeEdges.max { lhs, rhs in
-                    lhs.updatedAt < rhs.updatedAt
-                }
-            }
-
-        return latestEdgesByRecipe.values
-            .filter { $0.status == .active }
-            .sorted {
-                if $0.sortOrder == $1.sortOrder {
-                    return $0.updatedAt < $1.updatedAt
-                }
-                return $0.sortOrder < $1.sortOrder
-            }
-            .map(\.recipeId)
-    }
-
     private func collectionWithRecipeIds(_ collection: Collection, _ recipeIds: [UUID]) -> Collection {
-        Collection(
-            id: collection.id,
-            name: collection.name,
-            description: collection.description,
-            userId: collection.userId,
-            recipeIds: recipeIds,
-            visibility: collection.visibility,
-            emoji: collection.emoji,
-            symbolName: collection.symbolName,
-            color: collection.color,
-            coverImageType: collection.coverImageType,
-            coverImageURL: collection.coverImageURL,
-            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
-            coverImageModifiedAt: collection.coverImageModifiedAt,
-            cloudRecordName: collection.cloudRecordName,
-            originalCollectionId: collection.originalCollectionId,
-            originalCollectionOwnerId: collection.originalCollectionOwnerId,
-            originalCollectionName: collection.originalCollectionName,
-            savedAt: collection.savedAt,
-            sourceCollectionUpdatedAt: collection.sourceCollectionUpdatedAt,
-            followsSourceUpdates: collection.followsSourceUpdates,
-            createdAt: collection.createdAt,
-            updatedAt: collection.updatedAt
-        )
+        CollectionMembershipProjection.collectionWithRecipeIds(collection, recipeIds)
     }
 
     private func upsertLocalMembershipEdges(
@@ -598,6 +627,7 @@ actor CollectionRepository {
         try await assertCanModify(collection)
 
         // 1. Delete locally (immediate)
+        try deleteLocalMembershipEdges(collectionId: id, context: context)
         context.delete(model)
         try context.save()
 
@@ -611,11 +641,15 @@ actor CollectionRepository {
         await operationQueueService.addOperation(
             type: .delete,
             entityType: .collection,
-            entityId: id
+            entityId: id,
+            payload: try? JSONEncoder().encode(CollectionDeletePayload(
+                collectionId: id,
+                ownerId: collection.userId
+            ))
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, id, collectionCloudService] in
+        Task.detached { [weak self, id, collection, collectionCloudService] in
             guard let self = self else { return }
 
             // Mark operation as in progress
@@ -623,7 +657,7 @@ actor CollectionRepository {
 
             // Delete from CloudKit
             do {
-                try await collectionCloudService.deleteCollection(id)
+                try await collectionCloudService.deleteCollection(id, ownerId: collection.userId)
                 // Deleted collection from CloudKit
 
                 // Mark operation as completed
@@ -640,6 +674,15 @@ actor CollectionRepository {
                     error: error.localizedDescription
                 )
             }
+        }
+    }
+
+    private func deleteLocalMembershipEdges(collectionId: UUID, context: ModelContext) throws {
+        let descriptor = FetchDescriptor<CollectionMembershipModel>(
+            predicate: #Predicate { $0.collectionId == collectionId }
+        )
+        for model in try context.fetch(descriptor) {
+            context.delete(model)
         }
     }
 
@@ -677,6 +720,7 @@ actor CollectionRepository {
 
             // Syncing collection to CloudKit
             try await collectionCloudService.saveCollection(collectionToSync)
+            try await syncCoverImageIfNeeded(for: collectionToSync)
             // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
@@ -686,6 +730,52 @@ actor CollectionRepository {
             logger.error("❌ Error details: \(error)")
             pendingSyncCollections.insert(collection.id)
         }
+    }
+
+    private func syncCoverImageIfNeeded(for collection: Collection) async throws {
+        guard collection.coverImageType == .customImage,
+              let coverImageURL = collection.coverImageURL else {
+            return
+        }
+
+        let attributes = try? FileManager.default.attributesOfItem(atPath: coverImageURL.path)
+        let localModifiedAt = attributes?[.modificationDate] as? Date
+
+        guard collection.needsCoverImageUpload(localImageModified: localModifiedAt) else {
+            return
+        }
+
+        let imageData = try Data(contentsOf: coverImageURL)
+        let uploadedRecordName = try await collectionCloudService.uploadCollectionCoverImage(
+            collectionId: collection.id,
+            imageData: imageData
+        )
+        try await markCoverImageUploaded(
+            collectionId: collection.id,
+            recordName: uploadedRecordName,
+            modifiedAt: Date()
+        )
+    }
+
+    private func markCoverImageUploaded(
+        collectionId: UUID,
+        recordName: String,
+        modifiedAt: Date
+    ) async throws {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { model in
+                model.id == collectionId
+            }
+        )
+
+        guard let model = try context.fetch(descriptor).first else {
+            return
+        }
+
+        model.cloudCoverImageRecordName = recordName
+        model.coverImageModifiedAt = modifiedAt
+        try context.save()
     }
 
     private func syncPendingMembershipEdgesToCloudKit(collectionId: UUID) async -> Bool {
@@ -790,7 +880,11 @@ actor CollectionRepository {
 
         case .delete:
             do {
-                try await collectionCloudService.deleteCollection(operation.entityId)
+                if let payload = operation.payload.flatMap({ try? JSONDecoder().decode(CollectionDeletePayload.self, from: $0) }) {
+                    try await collectionCloudService.deleteCollection(payload.collectionId, ownerId: payload.ownerId)
+                } else {
+                    try await collectionCloudService.deleteCollection(operation.entityId)
+                }
                 await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
             } catch {
                 await operationQueueService.markFailed(
@@ -924,7 +1018,7 @@ actor CollectionRepository {
                     if let membershipEdges = cloudMembershipEdgesByCollection[cloudCollection.id], !membershipEdges.isEmpty {
                         let collectionWithCloudMembership = collectionWithRecipeIds(
                             cloudCollection,
-                            activeRecipeIds(from: membershipEdges)
+                            CollectionMembershipProjection.activeRecipeIds(from: membershipEdges)
                         )
                         try await insertSyncedCollection(collectionWithCloudMembership, seedMembershipEdges: false)
                     } else {

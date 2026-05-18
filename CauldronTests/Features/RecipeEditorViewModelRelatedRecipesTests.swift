@@ -9,6 +9,28 @@ import XCTest
 
 @MainActor
 final class RecipeEditorViewModelRelatedRecipesTests: XCTestCase {
+    private var currentUserId: UUID!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        CurrentUserSession.shared.signOut()
+        currentUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "editor",
+                displayName: "Editor",
+                createdAt: Date()
+            )
+        )
+    }
+
+    override func tearDown() async throws {
+        CurrentUserSession.shared.signOut()
+        currentUserId = nil
+        try await super.tearDown()
+    }
+
     func testSavePreservesUnresolvedRelatedRecipeIds() async throws {
         let dependencies = DependencyContainer.preview()
         let relatedRecipeId = UUID()
@@ -84,7 +106,7 @@ final class RecipeEditorViewModelRelatedRecipesTests: XCTestCase {
             steps: [
                 CookStep(index: 0, text: "Season.", timers: [])
             ],
-            ownerId: UUID(),
+            ownerId: currentUserId,
             originalRecipeId: originalRecipeId,
             sourceRecipeUpdatedAt: originalRecipeId == nil ? nil : Date(timeIntervalSince1970: 1_700_000_000),
             followsSourceUpdates: followsSourceUpdates,
