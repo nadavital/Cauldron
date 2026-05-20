@@ -34,7 +34,7 @@ enum RecipeGroupingService {
         let deduplicatedRecipes: [Recipe]
         guard let currentUserId else {
             deduplicatedRecipes = recipes
-            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes, currentUserId: nil) : deduplicatedRecipes
         }
 
         let ownedOriginalRecipeIds = Set(
@@ -46,7 +46,7 @@ enum RecipeGroupingService {
         )
 
         guard !ownedOriginalRecipeIds.isEmpty else {
-            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(recipes) : recipes
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(recipes, currentUserId: currentUserId) : recipes
         }
 
         var seenFollowingSourceIds = Set<UUID>()
@@ -64,16 +64,25 @@ enum RecipeGroupingService {
             return seenFollowingSourceIds.insert(originalRecipeId).inserted
         }
 
-        return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+        return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes, currentUserId: currentUserId) : deduplicatedRecipes
     }
 
     /// Hide recipes that are only displayed as related children of another recipe.
-    nonisolated static func hideRelatedRecipeReferences(_ recipes: [Recipe]) -> [Recipe] {
+    nonisolated static func hideRelatedRecipeReferences(
+        _ recipes: [Recipe],
+        currentUserId: UUID? = nil
+    ) -> [Recipe] {
         let referencedIds = Set(recipes.flatMap(\.relatedRecipeIds))
         guard !referencedIds.isEmpty else { return recipes }
 
         let visibleRecipes = recipes.filter { recipe in
-            !referencedIds.contains(recipe.id) && !referencedIds.contains(recipe.relatedGraphReferenceID)
+            if let currentUserId,
+               recipe.ownerId == currentUserId,
+               !recipe.isPreview {
+                return true
+            }
+
+            return !referencedIds.contains(recipe.id) && !referencedIds.contains(recipe.relatedGraphReferenceID)
         }
 
         // Avoid an empty library if legacy/cyclic data references every recipe.

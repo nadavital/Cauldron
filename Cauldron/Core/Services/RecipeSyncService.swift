@@ -138,8 +138,12 @@ actor RecipeSyncService {
         }
         let deletedRecipeIds = Set(try await deletedRecipeRepository.fetchAllDeletedRecipeIds())
 
-        // Fetch local recipes
-        let localRecipes = try await recipeRepository.fetchAll()
+        // Normalize legacy ownerless rows before narrowing the sync set. Sync
+        // should only compare current-user private records against current-user
+        // local library rows, never cached public/non-owned recipes.
+        try await recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+
+        let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
 
         // Merge strategies
         try await mergeRecipes(
@@ -164,7 +168,7 @@ actor RecipeSyncService {
         // Clean up orphaned public recipes using post-merge local state. Using
         // the pre-merge snapshot can delete public records for recipes that were
         // just restored from private CloudKit during this sync.
-        let reconciledLocalRecipes = try await recipeRepository.fetchAll()
+        let reconciledLocalRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
         await cleanupOrphanedPublicRecipes(userId: userId, localRecipeIds: Set(reconciledLocalRecipes.map { $0.id }))
 
         // Do not aggressively clean local tombstones here. Remote deleted-recipe
@@ -199,9 +203,8 @@ actor RecipeSyncService {
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
         }
 
-        // Fetch all local recipes
-        let localRecipes = try await recipeRepository.fetchAll()
-        // Found local recipes to sync
+        let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
+        // Found current-user local recipes to sync
 
         var syncedCount = 0
         var failedCount = 0
@@ -324,7 +327,11 @@ actor RecipeSyncService {
                 } else if localRecipe.updatedAt > cloudRecipe.updatedAt {
                     // Local version is newer - push to cloud (preserve CloudKit metadata)
                     // Updating cloud recipe from local
-                    if let ownerId = localRecipe.ownerId {
+                    let ownerId = userId
+                    if localRecipe.ownerId != userId {
+                        logger.warning("Repairing local ownerId during sync for recipe \(localRecipe.id)")
+                    }
+                    do {
                         let cloudSyncRecipe = Recipe(
                             id: localRecipe.id,
                             title: localRecipe.title,
@@ -513,9 +520,8 @@ actor RecipeSyncService {
     }
 
     private func syncFollowedRecipesFromSources(for userId: UUID) async throws {
-        let localRecipes = try await recipeRepository.fetchAll()
+        let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
         let followedRecipes = localRecipes.filter {
-            $0.ownerId == userId &&
             $0.originalRecipeId != nil &&
             $0.isFollowingSourceUpdates
         }

@@ -125,6 +125,26 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertTrue(collections.contains { $0.id == collection2.id })
     }
 
+    func testFetchUserCollectionsReturnsOnlyRequestedOwnerCollections() async throws {
+        let otherUserId = UUID()
+        let ownedCollection = Collection.new(name: "Mine", userId: testUserId)
+        let otherCollection = Collection.new(name: "Not Mine", userId: otherUserId)
+        let privateOwnedCollection = Collection.new(name: "Private Mine", userId: testUserId)
+
+        try await repository.create(ownedCollection)
+        try await repository.create(otherCollection)
+        try await repository.create(privateOwnedCollection)
+
+        let results = try await repository.fetchUserCollections(ownerId: testUserId)
+        let publicResults = try await repository.fetchUserCollections(
+            ownerId: testUserId,
+            visibility: .publicRecipe
+        )
+
+        XCTAssertEqual(Set(results.map(\.id)), Set([ownedCollection.id, privateOwnedCollection.id]))
+        XCTAssertTrue(publicResults.isEmpty)
+    }
+
     func testFetch_ById_Found() async throws {
         // Given
         let collection = Collection.new(name: "Test Collection", userId: testUserId)

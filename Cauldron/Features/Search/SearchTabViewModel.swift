@@ -105,7 +105,7 @@ import os
         do {
             // Load user's own recipes
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId,
                 hidingRelatedRecipeReferences: true
             )
@@ -383,7 +383,7 @@ import os
     private func refreshRecipeLibrary() async {
         do {
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId,
                 hidingRelatedRecipeReferences: true
             )

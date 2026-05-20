@@ -169,7 +169,10 @@ private struct CookTabDerivedSections {
                 preloadedData.allRecipes,
                 currentUserId: CurrentUserSession.shared.userId
             )
-            let preloadedRecipes = RecipeGroupingService.hideRelatedRecipeReferences(preloadedLibraryRecipes)
+            let preloadedRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+                preloadedLibraryRecipes,
+                currentUserId: CurrentUserSession.shared.userId
+            )
             // CRITICAL: Set allRecipes and collections IMMEDIATELY (not in a Task)
             // This happens synchronously during init, so when CookTabView's body renders
             // for the first time, allRecipes and collections are already populated and won't show empty state
@@ -255,7 +258,7 @@ private struct CookTabDerivedSections {
     private func fetchAllRecipesIncludingReferences() async throws -> [Recipe] {
         // Load owned recipes from local storage
         let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-            try await dependencies.recipeRepository.fetchAll(),
+            try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
             currentUserId: CurrentUserSession.shared.userId
         )
 
@@ -299,7 +302,9 @@ private struct CookTabDerivedSections {
 
     func refreshCollections() async {
         do {
-            collections = try await dependencies.collectionRepository.fetchAll()
+            collections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId
+            )
             collections.sort { $0.updatedAt > $1.updatedAt }
         } catch {
             AppLogger.general.error("Failed to refresh collections: \(error.localizedDescription)")
@@ -339,7 +344,10 @@ private struct CookTabDerivedSections {
                 }
                 return true
             }
-            filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(filteredRecipes)
+            filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+                filteredRecipes,
+                currentUserId: currentUserId
+            )
 
             // Fetch owner tiers and user objects for display
             await fetchOwnerTiersAndUsers(for: filteredRecipes, forceRefresh: forceRefresh)
@@ -455,7 +463,10 @@ private struct CookTabDerivedSections {
         async let fetchedRecipes = fetchAllRecipesIncludingReferences()
 
         let libraryRecipes = try await fetchedRecipes
-        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(libraryRecipes)
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            libraryRecipes,
+            currentUserId: CurrentUserSession.shared.userId
+        )
         let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
 
         allRecipes = recipes
@@ -466,7 +477,9 @@ private struct CookTabDerivedSections {
         updateSmartRecommendations()
 
         if loadCollections {
-            collections = try await dependencies.collectionRepository.fetchAll()
+            collections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId
+            )
             collections.sort { $0.updatedAt > $1.updatedAt }
         }
     }

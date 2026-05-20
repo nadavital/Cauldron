@@ -89,8 +89,10 @@ final class CollectionsListViewModel {
         defer { isLoading = false }
 
         do {
-            async let fetchedCollections = dependencies.collectionRepository.fetchAll()
-            async let fetchedRecipes = dependencies.recipeRepository.fetchAll()
+            async let fetchedCollections = dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId
+            )
+            async let fetchedRecipes = dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId)
 
             let collections = try await fetchedCollections
             let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(

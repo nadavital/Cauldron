@@ -172,7 +172,8 @@ actor CollectionRepository {
 
     // MARK: - Read
 
-    /// Fetch all collections for current user
+    /// Fetch all local collections, regardless of owner. Prefer
+    /// `fetchUserCollections(ownerId:visibility:)` for user-facing surfaces.
     func fetchAll() async throws -> [Collection] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionModel>(
@@ -191,6 +192,37 @@ actor CollectionRepository {
             predicate: #Predicate { $0.visibility == visibilityRaw },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
+
+        let models = try context.fetch(descriptor)
+        return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)
+    }
+
+    /// Fetch collections owned by a specific user. UI/library surfaces should use
+    /// this instead of raw `fetchAll()` when showing the current user's data.
+    func fetchUserCollections(
+        ownerId: UUID?,
+        visibility: RecipeVisibility? = nil
+    ) async throws -> [Collection] {
+        guard let ownerId else { return [] }
+
+        let context = ModelContext(modelContainer)
+        let descriptor: FetchDescriptor<CollectionModel>
+        if let visibility {
+            let visibilityRaw = visibility.rawValue
+            descriptor = FetchDescriptor<CollectionModel>(
+                predicate: #Predicate { model in
+                    model.userId == ownerId && model.visibility == visibilityRaw
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<CollectionModel>(
+                predicate: #Predicate { model in
+                    model.userId == ownerId
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        }
 
         let models = try context.fetch(descriptor)
         return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)

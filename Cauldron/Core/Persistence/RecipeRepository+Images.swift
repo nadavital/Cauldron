@@ -299,6 +299,7 @@ extension RecipeRepository {
         }
 
         var allSuccess = true
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
 
         for recipeId in pendingUploads {
             guard !Task.isCancelled else { break }
@@ -317,6 +318,19 @@ extension RecipeRepository {
             do {
                 guard let recipe = try await fetch(id: recipeId) else {
                     // Recipe was deleted, remove from pending
+                    await imageSyncManager.removePendingUpload(recipeId)
+                    imageRetryAttempts.removeValue(forKey: recipeId)
+                    continue
+                }
+
+                guard let currentUserId else {
+                    logger.info("Deferring pending image upload until current user is available: \(recipeId)")
+                    allSuccess = false
+                    continue
+                }
+
+                guard recipe.canMutateCloudState(for: currentUserId) else {
+                    logger.warning("Dropping pending image upload for recipe not owned by the current user: \(recipeId)")
                     await imageSyncManager.removePendingUpload(recipeId)
                     imageRetryAttempts.removeValue(forKey: recipeId)
                     continue

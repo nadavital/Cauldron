@@ -80,6 +80,7 @@ final class RecipeGroupingServiceTests: XCTestCase {
 
     func testDeduplicateLocalLibraryRecipes_CanHideRelatedReferenceRecipes() {
         let currentUserId = UUID()
+        let otherUserId = UUID()
         let parentId = UUID()
         let relatedId = UUID()
         let parent = makeRecipe(
@@ -93,7 +94,7 @@ final class RecipeGroupingServiceTests: XCTestCase {
         let related = makeRecipe(
             id: relatedId,
             title: "Tomato Sauce",
-            ownerId: currentUserId,
+            ownerId: otherUserId,
             tags: ["Sauce"],
             ingredients: ["tomato"]
         )
@@ -130,6 +131,58 @@ final class RecipeGroupingServiceTests: XCTestCase {
         let recipes = RecipeGroupingService.hideRelatedRecipeReferences([ownedRelatedCopy, parent])
 
         XCTAssertEqual(recipes.map(\.id), [parent.id])
+    }
+
+    func testHideRelatedRecipeReferences_KeepsCurrentUsersOwnedOriginalRecipe() {
+        let currentUserId = UUID()
+        let originalId = UUID()
+        let parent = makeRecipe(
+            title: "Dinner Plate",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["rice"],
+            relatedRecipeIds: [originalId]
+        )
+        let ownedOriginal = makeRecipe(
+            id: originalId,
+            title: "Tomato Sauce",
+            ownerId: currentUserId,
+            tags: ["Sauce"],
+            ingredients: ["tomato"]
+        )
+
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            [ownedOriginal, parent],
+            currentUserId: currentUserId
+        )
+
+        XCTAssertEqual(Set(recipes.map(\.id)), Set([ownedOriginal.id, parent.id]))
+    }
+
+    func testHideRelatedRecipeReferences_KeepsCurrentUsersOwnedSavedCopy() {
+        let currentUserId = UUID()
+        let sourceId = UUID()
+        let parent = makeRecipe(
+            title: "Dinner Plate",
+            ownerId: currentUserId,
+            tags: ["Dinner"],
+            ingredients: ["rice"],
+            relatedRecipeIds: [sourceId]
+        )
+        let ownedSavedCopy = makeRecipe(
+            title: "Saved Tomato Sauce",
+            ownerId: currentUserId,
+            tags: ["Sauce"],
+            ingredients: ["tomato"],
+            originalRecipeId: sourceId
+        )
+
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            [ownedSavedCopy, parent],
+            currentUserId: currentUserId
+        )
+
+        XCTAssertEqual(Set(recipes.map(\.id)), Set([ownedSavedCopy.id, parent.id]))
     }
 
     func testHideRelatedRecipeReferences_UsesLocalCopyIdForRemappedRelatedIds() {

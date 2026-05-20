@@ -866,7 +866,7 @@ struct CollectionRecipeSelectorSheet: View {
         do {
             // Load owned recipes from local storage
             recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for collection selector")

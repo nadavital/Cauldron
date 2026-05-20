@@ -95,9 +95,16 @@ actor CloudImageMigration {
             return
         }
 
+        guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            logger.info("Skipping cloud image migration: no current user")
+            migrationStatus = .failed("No current user")
+            return
+        }
+
         do {
-            // Get all recipes
-            let recipes = try await recipeRepository.fetchAll()
+            // Only migrate images for the current user's library. Cached public
+            // recipes and preview rows are local references, not cloud-owned assets.
+            let recipes = try await recipeRepository.fetchLibraryRecipes(ownerId: currentUserId)
             let recipesWithImages = recipes.filter { $0.imageURL != nil }
 
             logger.info("Found \(recipesWithImages.count) recipes with images")
@@ -251,9 +258,14 @@ actor CloudImageMigration {
             return
         }
 
+        guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            logger.info("Skipping force image re-upload: no current user")
+            return
+        }
+
         do {
-            // Get all recipes with images
-            let recipes = try await recipeRepository.fetchAll()
+            // Get current-user library recipes with images
+            let recipes = try await recipeRepository.fetchLibraryRecipes(ownerId: currentUserId)
             let recipesWithImages = recipes.filter { $0.imageURL != nil }
 
             logger.info("Found \(recipesWithImages.count) recipes with images to re-upload")

@@ -18,7 +18,8 @@ extension RecipeDetailView {
         do {
             let localResolution = try await dependencies.recipeRepository.resolveLocalRelatedRecipes(
                 referenceIds: recipe.relatedRecipeIds,
-                includePreviews: true
+                includePreviews: true,
+                preferredOwnerId: CurrentUserSession.shared.userId
             )
             var loadedRecipes = localResolution.recipes
             let missingIds = localResolution.missingIds
@@ -489,7 +490,8 @@ extension RecipeDetailView {
 
             let sourceRecipeID = recipe.relatedGraphReferenceID
             let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
-                originalRecipeIds: [sourceRecipeID]
+                originalRecipeIds: [sourceRecipeID],
+                ownerId: userId
             )
             hasOwnedCopy = ownedCopies.contains { $0.ownerId == userId }
             AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")

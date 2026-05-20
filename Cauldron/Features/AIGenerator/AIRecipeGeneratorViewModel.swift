@@ -232,8 +232,10 @@ final class AIRecipeGeneratorViewModel {
                 sourceNote
             }
 
-            // Get current user ID for CloudKit sync
-            let userId = CurrentUserSession.shared.userId
+            guard let userId = CurrentUserSession.shared.userId else {
+                errorMessage = "You must be signed in to save recipes."
+                return false
+            }
 
             let recipeToSave = Recipe(
                 id: recipe.id,
@@ -245,7 +247,7 @@ final class AIRecipeGeneratorViewModel {
                 tags: recipe.tags,
                 nutrition: recipe.nutrition,
                 notes: notesWithSource,
-                ownerId: userId  // Set ownerId so recipe syncs to CloudKit
+                ownerId: userId
             )
 
             // Save to repository (CloudKit sync happens automatically)

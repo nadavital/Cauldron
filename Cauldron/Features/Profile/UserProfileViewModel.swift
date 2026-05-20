@@ -260,7 +260,7 @@ import os
         // If viewing your own profile, fetch from local storage (same as Cook tab)
         if isCurrentUser {
             recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
@@ -283,7 +283,10 @@ import os
             partialResult[recipe.id] = recipe.imageURL
         }
 
-        let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(recipes)
+        let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            recipes,
+            currentUserId: user.id
+        )
         AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) visible profile recipes")
 
         // Convert to SharedRecipe
@@ -343,7 +346,10 @@ import os
 
         // If viewing own profile, load local collections (excluding private)
         if isCurrentUser {
-            let localCollections = try await dependencies.collectionRepository.fetchAll(visibility: .publicRecipe)
+            let localCollections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId,
+                visibility: .publicRecipe
+            )
             AppLogger.general.info("Found \(localCollections.count) total local collections")
             allCollections.append(contentsOf: localCollections)
             seenCollectionIds.formUnion(localCollections.map(\.id))

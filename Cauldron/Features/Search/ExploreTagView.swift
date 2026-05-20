@@ -375,8 +375,9 @@ final class ExploreTagViewModel {
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
-            // Parallelize tag-scoped fetches instead of loading every recipe and filtering in memory.
-            async let localRecipesTask = dependencies.recipeRepository.search(tag: normalizedTag)
+            // User-facing local tag browsing must stay on the owned-library
+            // boundary; raw tag search can include cached non-owned recipes.
+            async let localRecipesTask = dependencies.recipeRepository.fetchLibraryRecipes(ownerId: currentUserId)
             async let primarySharedRecipesTask = dependencies.recipeDiscoveryCache.querySharedRecipeSummaries(
                 ownerIds: nil,
                 visibility: .publicRecipe,
@@ -400,7 +401,14 @@ final class ExploreTagViewModel {
                 friendIDsFuture = nil
             }
 
-            let allUserRecipes = try await localRecipesTask
+            let localLibraryRecipes = try await localRecipesTask
+            let allUserRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                localLibraryRecipes.filter { recipe in
+                    recipe.tags.contains { $0.name.localizedCaseInsensitiveContains(normalizedTag) }
+                },
+                currentUserId: currentUserId,
+                hidingRelatedRecipeReferences: true
+            )
 
             // Process local recipes as soon as they are ready. Shared CloudKit/profile
             // lookups can still be in flight without blocking owned content.

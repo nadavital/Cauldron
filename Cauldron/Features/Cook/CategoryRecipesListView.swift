@@ -56,7 +56,7 @@ struct CategoryRecipesListView: View {
             // Refresh recipes when importer is dismissed
             Task {
                 do {
-                    let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                    let allRecipes = try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId)
                     let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                         allRecipes,
                         currentUserId: CurrentUserSession.shared.userId,

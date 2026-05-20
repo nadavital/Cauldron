@@ -240,7 +240,9 @@ struct ContentView: View {
 
                 // 1. Check if we already have this recipe locally (e.g. we are the owner)
                 // This prevents fetching a stale public version if we just made it private
-                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id) {
+                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id),
+                   localRecipe.ownerId == userSession.userId,
+                   !localRecipe.isPreview {
                     AppLogger.general.info("✅ ContentView: Found local copy of recipe, using that")
                     await MainActor.run {
                         let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
@@ -336,20 +338,6 @@ struct ContentView: View {
                 AppLogger.general.warning("Failed to remove duplicate recipes: \(error.localizedDescription)")
             }
 
-            // OPTIMIZATION: Parallelize independent data fetches using async let
-            async let ownedRecipes = dependencies.recipeRepository.fetchAll()
-            async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            async let localCollections = dependencies.collectionRepository.fetchAll()
-
-            // Wait for all to complete in parallel
-            let allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await ownedRecipes,
-                currentUserId: userSession.userId
-            )
-            let recentlyCookedIds = try await cookingHistory
-            let collections = try await localCollections
-            // Data preloaded successfully (don't log routine operations)
-
             // Run one-time migrations (for existing users)
             if hasLaunchedBefore, let userId = userSession.userId {
                 do {
@@ -362,6 +350,20 @@ struct ContentView: View {
                     AppLogger.general.warning("Migration failed (continuing): \(error.localizedDescription)")
                 }
             }
+
+            // OPTIMIZATION: Parallelize independent data fetches using async let
+            async let ownedRecipes = dependencies.recipeRepository.fetchLibraryRecipes(ownerId: userSession.userId)
+            async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
+            async let localCollections = dependencies.collectionRepository.fetchUserCollections(ownerId: userSession.userId)
+
+            // Wait for all to complete in parallel
+            let allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await ownedRecipes,
+                currentUserId: userSession.userId
+            )
+            let recentlyCookedIds = try await cookingHistory
+            let collections = try await localCollections
+            // Data preloaded successfully (don't log routine operations)
 
             if userSession.userId != nil {
                 // Run migration to ensure public recipes are in the public database.

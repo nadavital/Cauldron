@@ -185,7 +185,7 @@ struct NutritionInput {
     func loadAvailableRecipes() async {
         do {
             let all = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             // Filter out self if editing
@@ -240,7 +240,8 @@ struct NutritionInput {
                 do {
                     let localResolution = try await dependencies.recipeRepository.resolveLocalRelatedRecipes(
                         referenceIds: recipe.relatedRecipeIds,
-                        includePreviews: true
+                        includePreviews: true,
+                        preferredOwnerId: CurrentUserSession.shared.userId
                     )
                     let resolvedRelated = localResolution.recipes
 
@@ -535,6 +536,11 @@ struct NutritionInput {
             return false
         }
 
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            errorMessage = "Please sign in before saving recipes"
+            return false
+        }
+
         // Note: isSaving is set in the button action to prevent race condition
         // It will be reset there on failure, and on success the view will dismiss
 
@@ -575,10 +581,22 @@ struct NutritionInput {
             let recipeExists = await dependencies.recipeRepository.recipeExists(id: recipe.id)
 
             if recipeExists {
+                guard let persistedRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) else {
+                    throw RepositoryError.notFound
+                }
+
+                if let ownerId = persistedRecipe.ownerId, ownerId != currentUserId {
+                    errorMessage = "You can only edit recipes in your own library"
+                    AppLogger.general.warning("Blocked editing recipe \(recipe.id) owned by another user")
+                    return false
+                }
+
+                recipe = recipe.withRequiredOwner(currentUserId)
                 try await dependencies.recipeRepository.update(recipe)
                 // Notify other views that the recipe was updated
                 NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: nil)
             } else {
+                recipe = recipe.asIndependentLibraryRecipe(ownerId: currentUserId)
                 try await dependencies.recipeRepository.create(recipe)
                 // Notify other views that a recipe was added
                 NotificationCenter.default.post(name: NSNotification.Name("RecipeAdded"), object: nil)

@@ -189,15 +189,15 @@ struct SharedCollectionDetailView: View {
                                 .controlSize(.small)
                         } else {
                             Label(
-                                savedCollection == nil ? "Save" : "Saved",
-                                systemImage: savedCollection == nil ? "square.and.arrow.down" : "checkmark.circle.fill"
+                                savedCollection == nil ? "Save" : "Update",
+                                systemImage: savedCollection == nil ? "square.and.arrow.down" : "arrow.triangle.2.circlepath"
                             )
                             .labelStyle(.titleAndIcon)
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.cauldronOrange)
-                    .disabled(isLoading || isSavingCollection || savedCollection != nil)
+                    .disabled(isLoading || isSavingCollection)
                 }
             }
             .padding()

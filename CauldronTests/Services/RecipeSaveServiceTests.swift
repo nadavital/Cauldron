@@ -106,6 +106,27 @@ final class RecipeSaveServiceTests: XCTestCase {
         XCTAssertFalse(previewWasTombstoned)
     }
 
+    func testSaveRecipeToLibraryDoesNotReuseNonOwnedDirectLocalRecipe() async throws {
+        let sourceRecipeId = UUID()
+        let sourceRecipe = makeRecipe(
+            id: sourceRecipeId,
+            title: "Shared Noodles",
+            ownerId: sourceOwnerId
+        )
+        try await dependencies.recipeRepository.create(sourceRecipe, skipCloudSync: true)
+
+        let result = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        XCTAssertFalse(result.reusedExistingCopy)
+        XCTAssertNotEqual(result.recipe.id, sourceRecipeId)
+        XCTAssertEqual(result.recipe.ownerId, currentUserId)
+        XCTAssertEqual(result.recipe.originalRecipeId, sourceRecipeId)
+    }
+
     func testSaveRecipeToLibrary_savesAndRemapsRequestedRelatedRecipes() async throws {
         let relatedSourceId = UUID()
         let relatedRecipe = makeRecipe(
@@ -136,6 +157,39 @@ final class RecipeSaveServiceTests: XCTestCase {
         )
         XCTAssertEqual(relatedCopies.count, 1)
         XCTAssertEqual(result.recipe.relatedRecipeIds.first, relatedCopies.first?.id)
+    }
+
+    func testSaveRecipeToLibraryDoesNotReuseNonOwnedDirectLocalRelatedRecipe() async throws {
+        let relatedSourceId = UUID()
+        let relatedRecipe = makeRecipe(
+            id: relatedSourceId,
+            title: "Shared Salsa",
+            ownerId: sourceOwnerId
+        )
+        try await dependencies.recipeRepository.create(relatedRecipe, skipCloudSync: true)
+
+        let sourceRecipe = makeRecipe(
+            id: UUID(),
+            title: "Shared Tacos",
+            ownerId: sourceOwnerId,
+            relatedRecipeIds: [relatedSourceId]
+        )
+
+        let result = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef",
+            relatedRecipesToSave: [relatedRecipe]
+        )
+
+        let relatedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [relatedSourceId],
+            ownerId: currentUserId
+        )
+
+        XCTAssertEqual(relatedCopies.count, 1)
+        XCTAssertEqual(result.recipe.relatedRecipeIds.first, relatedCopies.first?.id)
+        XCTAssertNotEqual(result.recipe.relatedRecipeIds.first, relatedSourceId)
     }
 
     private func makeRecipe(

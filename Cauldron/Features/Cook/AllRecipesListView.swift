@@ -320,7 +320,7 @@ struct AllRecipesListView: View {
     private func refreshRecipes() {
         Task {
             do {
-                let recipes = try await dependencies.recipeRepository.fetchAll()
+                let recipes = try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId)
                 localRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                     recipes,
                     currentUserId: CurrentUserSession.shared.userId,

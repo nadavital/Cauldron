@@ -126,6 +126,112 @@ final class CollectionSaveServiceTests: XCTestCase {
         XCTAssertEqual(ownedRecipeCopies.count, 1)
     }
 
+    func testSaveCollectionToLibraryReconcilesExistingFollowingCopyWhenSourceChanges() async throws {
+        let originalRecipe = makeRecipe(title: "Soup")
+        let addedRecipe = makeRecipe(title: "Salad")
+        let sourceCollectionId = UUID()
+        let firstSourceCollection = Collection(
+            id: sourceCollectionId,
+            name: "Shared Dinner",
+            userId: sourceOwnerId,
+            recipeIds: [originalRecipe.id],
+            visibility: .publicRecipe,
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        let firstSave = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+            firstSourceCollection,
+            visibleRecipes: [originalRecipe],
+            sourceOwnerName: "Source Chef"
+        )
+
+        let updatedSourceCollection = Collection(
+            id: sourceCollectionId,
+            name: "Shared Dinner Updated",
+            userId: sourceOwnerId,
+            recipeIds: [addedRecipe.id, originalRecipe.id],
+            visibility: .publicRecipe,
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+
+        let secondSave = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+            updatedSourceCollection,
+            visibleRecipes: [originalRecipe, addedRecipe],
+            sourceOwnerName: "Source Chef"
+        )
+
+        XCTAssertTrue(secondSave.reusedExistingCopy)
+        XCTAssertEqual(secondSave.collection.id, firstSave.collection.id)
+        XCTAssertEqual(secondSave.collection.name, updatedSourceCollection.name)
+        XCTAssertEqual(secondSave.collection.sourceCollectionUpdatedAt, updatedSourceCollection.updatedAt)
+        XCTAssertEqual(secondSave.savedRecipeCount, 1)
+
+        let persistedCollection = try await dependencies.collectionRepository.fetch(id: firstSave.collection.id)
+        let fetchedCollection = try XCTUnwrap(persistedCollection)
+        XCTAssertEqual(fetchedCollection.recipeIds, secondSave.collection.recipeIds)
+        XCTAssertEqual(fetchedCollection.recipeIds.count, 2)
+
+        let originalCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [originalRecipe.id],
+            ownerId: currentUserId
+        )
+        let addedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [addedRecipe.id],
+            ownerId: currentUserId
+        )
+        XCTAssertEqual(originalCopies.count, 1)
+        XCTAssertEqual(addedCopies.count, 1)
+        XCTAssertEqual(fetchedCollection.recipeIds, [addedCopies[0].id, originalCopies[0].id])
+    }
+
+    func testSaveCollectionToLibraryThrowsWhenUpdatingExistingCopyFromPartialVisibleRecipes() async throws {
+        let visibleRecipe = makeRecipe(title: "Visible Soup")
+        let unrelatedExtraRecipe = makeRecipe(title: "Unrelated Cake")
+        let missingRecipeId = UUID()
+        let sourceCollectionId = UUID()
+        let originalSourceCollection = Collection(
+            id: sourceCollectionId,
+            name: "Shared Dinner",
+            userId: sourceOwnerId,
+            recipeIds: [visibleRecipe.id],
+            visibility: .publicRecipe,
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        let firstSave = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+            originalSourceCollection,
+            visibleRecipes: [visibleRecipe],
+            sourceOwnerName: "Source Chef"
+        )
+
+        let partiallyLoadedUpdatedSource = Collection(
+            id: sourceCollectionId,
+            name: "Shared Dinner Updated",
+            userId: sourceOwnerId,
+            recipeIds: [missingRecipeId, visibleRecipe.id],
+            visibility: .publicRecipe,
+            updatedAt: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+
+        do {
+            _ = try await dependencies.collectionSaveService.saveCollectionToLibrary(
+                partiallyLoadedUpdatedSource,
+                visibleRecipes: [visibleRecipe, unrelatedExtraRecipe],
+                sourceOwnerName: "Source Chef"
+            )
+            XCTFail("Expected partial source recipes to throw instead of silently no-oping")
+        } catch CollectionSaveServiceError.sourceRecipesUnavailable(let visibleCount, let totalCount) {
+            XCTAssertEqual(visibleCount, 1)
+            XCTAssertEqual(totalCount, 2)
+        }
+
+        let persistedCollection = try await dependencies.collectionRepository.fetch(id: firstSave.collection.id)
+        let savedCollection = try XCTUnwrap(persistedCollection)
+        XCTAssertEqual(savedCollection.name, firstSave.collection.name)
+        XCTAssertEqual(savedCollection.recipeIds, firstSave.collection.recipeIds)
+        XCTAssertEqual(savedCollection.sourceCollectionUpdatedAt, firstSave.collection.sourceCollectionUpdatedAt)
+    }
+
     func testSaveCollectionToLibraryCreatesOwnedCopyForEmptyCollection() async throws {
         let sourceCollection = Collection(
             id: UUID(),

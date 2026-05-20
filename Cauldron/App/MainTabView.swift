@@ -375,9 +375,15 @@ struct MainTabView: View {
             AppLogger.general.warning("⚠️ Failed to reparse prepared share recipe; falling back to preprocessed payload: \(error.localizedDescription)")
         }
 
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("❌ Cannot auto-save prepared share recipe without a current user")
+            openPreparedImporter(recipe: recipeForImport, sourceInfo: prepared.sourceInfo)
+            return
+        }
+
         let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
             from: recipeForImport,
-            userId: CurrentUserSession.shared.userId,
+            userId: userId,
             imageManager: dependencies.imageManager
         )
 
@@ -406,14 +412,9 @@ struct MainTabView: View {
         }
 
         do {
-            let allCollections = try await dependencies.collectionRepository.fetchAll()
-            let ownedCollections: [Collection]
-
-            if let currentUserID = CurrentUserSession.shared.userId {
-                ownedCollections = allCollections.filter { $0.userId == currentUserID }
-            } else {
-                ownedCollections = allCollections
-            }
+            let ownedCollections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId
+            )
 
             sidebarCollections = ownedCollections.sorted { $0.updatedAt > $1.updatedAt }
 

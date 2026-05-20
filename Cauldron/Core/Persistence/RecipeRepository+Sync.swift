@@ -78,6 +78,10 @@ extension RecipeRepository {
         let storedIds = ids.map(\.uuidString).sorted()
         UserDefaults.standard.set(storedIds, forKey: publicRecipeMigrationPendingIDsKey)
     }
+
+    private func currentUserIdForOwnership() async -> UUID? {
+        await MainActor.run(body: { CurrentUserSession.shared.userId })
+    }
     
     // MARK: - Local to Cloud Sync
     
@@ -89,6 +93,18 @@ extension RecipeRepository {
         // Only sync if we have an owner ID and CloudKit is available
         guard let ownerId = recipe.ownerId else {
             logger.info("Skipping CloudKit sync - no owner ID for recipe: \(recipe.title)")
+            return true
+        }
+
+        guard let currentUserId = await currentUserIdForOwnership() else {
+            logger.info("CloudKit sync deferred - no current user for recipe: \(recipe.title)")
+            pendingSyncRecipes.insert(recipe.id)
+            return false
+        }
+
+        guard ownerId == currentUserId else {
+            logger.warning("Skipping CloudKit sync for recipe not owned by the current user: \(recipe.title)")
+            pendingSyncRecipes.remove(recipe.id)
             return true
         }
 
@@ -122,6 +138,16 @@ extension RecipeRepository {
     /// Delete a recipe from CloudKit with proper error handling
     @discardableResult
     func deleteRecipeFromCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
+        guard let currentUserId = await currentUserIdForOwnership() else {
+            logger.info("CloudKit delete deferred - no current user for recipe: \(recipe.title)")
+            return false
+        }
+
+        guard recipe.canMutateCloudState(for: currentUserId) else {
+            logger.warning("Skipping CloudKit delete for recipe not owned by the current user: \(recipe.title)")
+            return true
+        }
+
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
@@ -148,6 +174,16 @@ extension RecipeRepository {
         // Don't sync preview recipes to PUBLIC database - they're local-only copies
         guard !recipe.isPreview else {
             logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
+            return .success
+        }
+
+        guard let currentUserId = await currentUserIdForOwnership() else {
+            logger.info("PUBLIC database sync deferred - no current user for recipe: \(recipe.title)")
+            return .retryNeeded
+        }
+
+        guard recipe.canMutateCloudState(for: currentUserId) else {
+            logger.warning("Skipping PUBLIC database sync for recipe not owned by the current user: \(recipe.title)")
             return .success
         }
 
@@ -204,6 +240,16 @@ extension RecipeRepository {
     /// Delete recipe from PUBLIC database
     @discardableResult
     func deleteRecipeFromPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
+        guard let currentUserId = await currentUserIdForOwnership() else {
+            logger.info("PUBLIC database delete deferred - no current user for recipe: \(recipe.title)")
+            return false
+        }
+
+        guard recipe.canMutateCloudState(for: currentUserId) else {
+            logger.warning("Skipping PUBLIC database delete for recipe not owned by the current user: \(recipe.title)")
+            return true
+        }
+
         // Only try to delete if CloudKit is available
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
@@ -239,8 +285,13 @@ extension RecipeRepository {
         }
 
         do {
-            let allRecipes = try await fetchAll()
-            let publicRecipes = allRecipes.filter { $0.visibility == .publicRecipe && $0.ownerId != nil }
+            guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+                logger.info("Skipping public recipe migration: no current user")
+                return
+            }
+
+            let ownedRecipes = try await fetchLibraryRecipes(ownerId: currentUserId)
+            let publicRecipes = ownedRecipes.filter { $0.visibility == .publicRecipe && $0.ownerId == currentUserId }
             let eligibleRecipeIds = Set(publicRecipes.map(\.id))
 
             if eligibleRecipeIds.isEmpty {
@@ -327,12 +378,20 @@ extension RecipeRepository {
         }
 
         do {
-            let summary = try await recipeCloudService.backfillPublicRecipeSearchMetadata(limit: 1_000)
-            defaults.set(true, forKey: publicRecipeSearchMetadataMigrationAttemptedKey)
+            let summary = try await recipeCloudService.backfillPublicRecipeSearchMetadata()
+            if Self.shouldMarkPublicRecipeSearchMetadataMigrationAttempted(summary) {
+                defaults.set(true, forKey: publicRecipeSearchMetadataMigrationAttemptedKey)
+            }
             logger.info("✅ Public recipe search metadata migration attempted: scanned \(summary.scanned), updated \(summary.updated), current \(summary.alreadyCurrent), failed \(summary.failed)")
         } catch {
             logger.error("❌ Public recipe search metadata migration failed: \(error.localizedDescription)")
         }
+    }
+
+    nonisolated static func shouldMarkPublicRecipeSearchMetadataMigrationAttempted(
+        _ summary: PublicRecipeSearchMetadataBackfillSummary
+    ) -> Bool {
+        !summary.mayHaveMore
     }
     
     // MARK: - Retry Logic
@@ -414,6 +473,20 @@ extension RecipeRepository {
                 return
             }
 
+            guard let currentUserId = await currentUserIdForOwnership() else {
+                await operationQueueService.markFailed(
+                    operationId: operation.id,
+                    error: "Recipe replay deferred: no current user"
+                )
+                return
+            }
+
+            guard recipe.canMutateCloudState(for: currentUserId) else {
+                logger.warning("Dropping queued recipe upsert for recipe not owned by the current user: \(operation.entityId)")
+                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                return
+            }
+
             let didSyncPrivate = await syncRecipeToCloudKit(
                 recipe,
                 cloudKitCore: cloudKitCore,
@@ -481,11 +554,26 @@ extension RecipeRepository {
         _ operation: SyncOperation,
         payload: RecipeDeleteOperationPayload
     ) async throws {
+        guard let currentUserId = await currentUserIdForOwnership() else {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe delete replay deferred: no current user"
+            )
+            return
+        }
+
+        guard !payload.wasPreview,
+              payload.ownerId == currentUserId else {
+            logger.warning("Dropping queued recipe delete for recipe not owned by the current user: \(payload.recipeId)")
+            await operationQueueService.markCompleted(entityId: payload.recipeId, entityType: .recipe)
+            return
+        }
+
         var tombstoneSucceeded = true
         var privateDeleteSucceeded = true
         var publicDeleteSucceeded = true
 
-        if !payload.wasPreview, let ownerId = payload.ownerId {
+        if let ownerId = payload.ownerId {
             do {
                 try await recipeCloudService.saveDeletedRecipeTombstone(
                     DeletedRecipeTombstone(
@@ -500,28 +588,26 @@ extension RecipeRepository {
             }
         }
 
-        if !payload.wasPreview {
-            if let cloudRecordName = payload.cloudRecordName, let ownerId = payload.ownerId {
-                let deletionRecipe = Recipe(
-                    id: payload.recipeId,
-                    title: "Deleted Recipe",
-                    ingredients: [],
-                    steps: [],
-                    ownerId: ownerId,
-                    cloudRecordName: cloudRecordName
-                )
-                do {
-                    try await recipeCloudService.deleteRecipe(deletionRecipe)
-                } catch {
-                    privateDeleteSucceeded = false
-                }
-            }
-
+        if let cloudRecordName = payload.cloudRecordName, let ownerId = payload.ownerId {
+            let deletionRecipe = Recipe(
+                id: payload.recipeId,
+                title: "Deleted Recipe",
+                ingredients: [],
+                steps: [],
+                ownerId: ownerId,
+                cloudRecordName: cloudRecordName
+            )
             do {
-                try await recipeCloudService.deletePublicRecipe(recipeId: payload.recipeId)
+                try await recipeCloudService.deleteRecipe(deletionRecipe)
             } catch {
-                publicDeleteSucceeded = false
+                privateDeleteSucceeded = false
             }
+        }
+
+        do {
+            try await recipeCloudService.deletePublicRecipe(recipeId: payload.recipeId)
+        } catch {
+            publicDeleteSucceeded = false
         }
 
         if tombstoneSucceeded, privateDeleteSucceeded, publicDeleteSucceeded {

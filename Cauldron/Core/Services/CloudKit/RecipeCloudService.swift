@@ -14,6 +14,7 @@ struct PublicRecipeSearchMetadataBackfillSummary: Sendable, Equatable {
     let updated: Int
     let alreadyCurrent: Int
     let failed: Int
+    let mayHaveMore: Bool
 }
 
 struct DeletedRecipeTombstone: Sendable, Equatable {
@@ -479,9 +480,9 @@ actor RecipeCloudService {
     /// records owned by another iCloud account may not be writable from this app
     /// instance, but records the current user owns will also be republished by
     /// the repository migration path.
-    func backfillPublicRecipeSearchMetadata(limit: Int = 1_000) async throws -> PublicRecipeSearchMetadataBackfillSummary {
+    func backfillPublicRecipeSearchMetadata(limit: Int = .max) async throws -> PublicRecipeSearchMetadataBackfillSummary {
         guard limit > 0 else {
-            return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0)
+            return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0, mayHaveMore: false)
         }
 
         let db = try await core.getPublicDatabase()
@@ -552,9 +553,10 @@ actor RecipeCloudService {
             scanned: scanned,
             updated: updated,
             alreadyCurrent: alreadyCurrent,
-            failed: failed
+            failed: failed,
+            mayHaveMore: cursor != nil
         )
-        logger.info("Public recipe search metadata backfill scanned=\(summary.scanned) updated=\(summary.updated) current=\(summary.alreadyCurrent) failed=\(summary.failed)")
+        logger.info("Public recipe search metadata backfill scanned=\(summary.scanned) updated=\(summary.updated) current=\(summary.alreadyCurrent) failed=\(summary.failed) mayHaveMore=\(summary.mayHaveMore)")
         return summary
     }
 
@@ -740,7 +742,8 @@ actor RecipeCloudService {
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: requiredPredicates)
 
         do {
-            return try await fetchSharedRecipes(matching: predicate, limit: limit)
+            let recipes = try await fetchSharedRecipes(matching: predicate, limit: groupedFetchLimit(for: limit))
+            return limitRecipesByGroup(recipes, to: limit)
         } catch {
             logger.warning("Falling back to recency-based public recipe discovery after search query failed: \(error.localizedDescription)")
             return try await fetchDiscoverablePublicRecipes(limit: limit)
@@ -846,9 +849,14 @@ actor RecipeCloudService {
     /// Fetch popular public recipes
     func fetchPopularPublicRecipes(limit: Int = 20) async throws -> [Recipe] {
         let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
-        let recipes = try await fetchSharedRecipes(matching: predicate, limit: max(limit, limit * 3))
+        let recipes = try await fetchSharedRecipes(matching: predicate, limit: groupedFetchLimit(for: limit))
         let filteredRecipes = filterDerivedCopies(in: recipes, includeDerivedCopies: false)
         return Array(filteredRecipes.prefix(limit))
+    }
+
+    private func groupedFetchLimit(for displayLimit: Int) -> Int {
+        guard displayLimit > 0 else { return 0 }
+        return max(displayLimit, displayLimit * 3)
     }
 
     private func filterDerivedCopies(in recipes: [Recipe], includeDerivedCopies: Bool) -> [Recipe] {
@@ -878,34 +886,45 @@ actor RecipeCloudService {
     private func limitRecipesByGroup(_ recipes: [Recipe], to limit: Int) -> [Recipe] {
         guard limit > 0 else { return [] }
 
-        var canonicalGroupIDs = Set<UUID>()
-        for recipe in recipes where !recipe.isFollowingSourceUpdates {
-            canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
-        }
+        var fallbackRecipesByGroupID: [UUID: Recipe] = [:]
+        var fallbackGroupOrder: [UUID] = []
+        var selectedCanonicalRecipes: [Recipe] = []
+        var seenGroupIDs = Set<UUID>()
 
-        var orderedCanonicalGroupIDs: [UUID] = []
-        var orderedFallbackGroupIDs: [UUID] = []
-        var seenCanonicalGroupIDs = Set<UUID>()
-        var seenFallbackGroupIDs = Set<UUID>()
         for recipe in recipes {
             let groupID = discoveryGroupID(for: recipe)
 
-            if canonicalGroupIDs.contains(groupID) {
-                if seenCanonicalGroupIDs.insert(groupID).inserted {
-                    orderedCanonicalGroupIDs.append(groupID)
+            if recipe.isFollowingSourceUpdates {
+                if !fallbackRecipesByGroupID.keys.contains(groupID) {
+                    fallbackRecipesByGroupID[groupID] = recipe
+                    fallbackGroupOrder.append(groupID)
                 }
-            } else if seenFallbackGroupIDs.insert(groupID).inserted {
-                orderedFallbackGroupIDs.append(groupID)
+                continue
+            }
+
+            guard seenGroupIDs.insert(groupID).inserted else {
+                continue
+            }
+
+            selectedCanonicalRecipes.append(recipe)
+
+            if selectedCanonicalRecipes.count == limit {
+                break
             }
         }
 
-        let allowedGroupIDs = Array(
-            (orderedCanonicalGroupIDs + orderedFallbackGroupIDs)
-                .prefix(limit)
-        )
-        let allowedGroupIDSet = Set(allowedGroupIDs)
+        var selectedRecipes = selectedCanonicalRecipes
+        for groupID in fallbackGroupOrder where selectedRecipes.count < limit {
+            guard !seenGroupIDs.contains(groupID),
+                  let fallbackRecipe = fallbackRecipesByGroupID[groupID] else {
+                continue
+            }
 
-        return recipes.filter { allowedGroupIDSet.contains(discoveryGroupID(for: $0)) }
+            seenGroupIDs.insert(groupID)
+            selectedRecipes.append(fallbackRecipe)
+        }
+
+        return selectedRecipes
     }
 
     // MARK: - Image Assets

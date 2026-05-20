@@ -291,7 +291,7 @@ struct CollectionFormView: View {
         do {
             // Load owned recipes from local storage
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("✅ Loaded \(allRecipes.count) owned recipes")
@@ -529,7 +529,7 @@ struct RecipeSelectorSheet: View {
         do {
             // Load owned recipes from local storage
             recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for selector")

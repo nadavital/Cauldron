@@ -33,6 +33,10 @@ actor RecipeSaveService {
     }
 
     func missingRelatedRecipesForSave(_ recipe: Recipe) async throws -> [Recipe] {
+        guard let userId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            throw RecipeSaveServiceError.notAuthenticated
+        }
+
         let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
         guard !canonicalRelatedRecipeIDs.isEmpty else {
             return []
@@ -40,7 +44,8 @@ actor RecipeSaveService {
 
         let localResolution = try await recipeRepository.resolveLocalRelatedRecipes(
             referenceIds: canonicalRelatedRecipeIDs,
-            includePreviews: false
+            includePreviews: false,
+            preferredOwnerId: userId
         )
         let missingIds = Set(localResolution.missingIds)
         guard !missingIds.isEmpty else {
@@ -69,11 +74,15 @@ actor RecipeSaveService {
         let canonicalRelatedRecipeIDs = try await recipeCloudService.resolveCanonicalRelatedRecipeIDs(for: recipe)
 
         if let existingLocalRecipe = try await recipeRepository.fetch(id: recipe.id),
-           !existingLocalRecipe.isPreview {
+           !existingLocalRecipe.isPreview,
+           existingLocalRecipe.ownerId == userId {
             return RecipeSaveResult(recipe: existingLocalRecipe, savedRelatedRecipeCount: 0, reusedExistingCopy: true)
         }
 
-        let existingOwnedCopies = try await recipeRepository.fetchOwnedCopies(originalRecipeIds: [sourceRecipeID])
+        let existingOwnedCopies = try await recipeRepository.fetchOwnedCopies(
+            originalRecipeIds: [sourceRecipeID],
+            ownerId: userId
+        )
         if let existingOwnedCopy = existingOwnedCopies.first {
             return RecipeSaveResult(recipe: existingOwnedCopy, savedRelatedRecipeCount: 0, reusedExistingCopy: true)
         }
@@ -130,13 +139,15 @@ actor RecipeSaveService {
             }
 
             if let localRelated = try await recipeRepository.fetch(id: relatedRecipe.id),
-               !localRelated.isPreview {
+               !localRelated.isPreview,
+               localRelated.ownerId == userId {
                 relatedRecipeIdMapping[relatedSourceRecipeId] = localRelated.id
                 continue
             }
 
             let existingRelatedCopies = try await recipeRepository.fetchOwnedCopies(
-                originalRecipeIds: [relatedSourceRecipeId]
+                originalRecipeIds: [relatedSourceRecipeId],
+                ownerId: userId
             )
             if let existingRelatedCopy = existingRelatedCopies.first {
                 relatedRecipeIdMapping[relatedSourceRecipeId] = existingRelatedCopy.id
@@ -178,23 +189,23 @@ actor RecipeSaveService {
     ) async throws -> Recipe {
         try await recipeRepository.delete(id: preview.id)
 
-        let originalRecipeId = preview.originalRecipeId ?? preview.id
+        let originalRecipeId = sourceRecipe.relatedGraphReferenceID
         let remappedRelatedIds = canonicalRelatedRecipeIDs.map { originalId in
             relatedRecipeIdMapping[originalId] ?? originalId
         }
 
         var copiedRecipe = Recipe(
             id: UUID(),
-            title: preview.title,
-            ingredients: preview.ingredients,
-            steps: preview.steps,
-            yields: preview.yields,
-            totalMinutes: preview.totalMinutes,
-            tags: preview.tags,
-            nutrition: preview.nutrition,
-            sourceURL: preview.sourceURL,
-            sourceTitle: preview.sourceTitle,
-            notes: preview.notes,
+            title: sourceRecipe.title,
+            ingredients: sourceRecipe.ingredients,
+            steps: sourceRecipe.steps,
+            yields: sourceRecipe.yields,
+            totalMinutes: sourceRecipe.totalMinutes,
+            tags: sourceRecipe.tags,
+            nutrition: sourceRecipe.nutrition,
+            sourceURL: sourceRecipe.sourceURL,
+            sourceTitle: sourceRecipe.sourceTitle,
+            notes: sourceRecipe.notes,
             imageURL: nil,
             isFavorite: false,
             visibility: .publicRecipe,
@@ -208,7 +219,7 @@ actor RecipeSaveService {
             originalCreatorId: preview.originalCreatorId ?? originalCreatorId ?? sourceRecipe.ownerId,
             originalCreatorName: preview.originalCreatorName ?? originalCreatorName,
             savedAt: Date(),
-            sourceRecipeUpdatedAt: preview.sourceRecipeUpdatedAt ?? sourceRecipe.updatedAt,
+            sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
             followsSourceUpdates: true,
             relatedRecipeIds: remappedRelatedIds,
             isPreview: false
@@ -216,8 +227,8 @@ actor RecipeSaveService {
 
         try await recipeRepository.create(copiedRecipe)
         copiedRecipe = try await localizePublicImageIfNeeded(
-            from: preview,
-            sourceImageRecipeID: originalRecipeId,
+            from: sourceRecipe,
+            sourceImageRecipeID: sourceRecipe.sourceAssetReferenceID,
             into: copiedRecipe
         )
 

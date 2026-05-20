@@ -213,4 +213,90 @@ final class ImporterViewModelTests: XCTestCase {
         // errorMessage will be set to new error
         XCTAssertNotEqual(viewModel.errorMessage, "Old error")
     }
+
+    func testImportedRecipeSaveBuilderUsesCurrentUserOwner() {
+        let sourceOwnerId = UUID()
+        let currentUserId = UUID()
+        let importedRecipe = Recipe(
+            title: "Shared Import",
+            ingredients: [],
+            steps: [],
+            ownerId: sourceOwnerId
+        )
+
+        let recipeForSave = ImportedRecipeSaveBuilder.recipeForSave(
+            from: importedRecipe,
+            userId: currentUserId
+        )
+
+        XCTAssertEqual(recipeForSave.ownerId, currentUserId)
+    }
+
+    func testImportedRecipeSaveBuilderDoesNotFallbackToSourceOwner() {
+        let sourceOwnerId = UUID()
+        let importedRecipe = Recipe(
+            title: "Shared Import",
+            ingredients: [],
+            steps: [],
+            ownerId: sourceOwnerId
+        )
+
+        let recipeForSave = ImportedRecipeSaveBuilder.recipeForSave(
+            from: importedRecipe,
+            userId: nil
+        )
+
+        XCTAssertNil(recipeForSave.ownerId)
+    }
+
+    func testImportedRecipeSaveBuilderClearsSourceCloudIdentity() {
+        let importedRecipe = Recipe(
+            title: "Cloudy Import",
+            ingredients: [],
+            steps: [],
+            cloudRecordName: "source-private-record",
+            cloudImageRecordName: "source-image-record",
+            imageModifiedAt: Date()
+        )
+
+        let recipeForSave = ImportedRecipeSaveBuilder.recipeForSave(
+            from: importedRecipe,
+            userId: UUID()
+        )
+
+        XCTAssertNil(recipeForSave.cloudRecordName)
+        XCTAssertNil(recipeForSave.cloudImageRecordName)
+        XCTAssertNil(recipeForSave.imageModifiedAt)
+    }
+
+    func testImportedRecipeSaveBuilderClearsSourceCopyMetadata() {
+        let sourceRecipeId = UUID()
+        let importedRecipe = Recipe(
+            title: "Copied Import",
+            ingredients: [],
+            steps: [],
+            originalRecipeId: sourceRecipeId,
+            originalCreatorId: UUID(),
+            originalCreatorName: "Someone Else",
+            savedAt: Date(),
+            sourceRecipeUpdatedAt: Date(),
+            followsSourceUpdates: true,
+            relatedRecipeIds: [UUID()],
+            isPreview: true
+        )
+
+        let recipeForSave = ImportedRecipeSaveBuilder.recipeForSave(
+            from: importedRecipe,
+            userId: UUID()
+        )
+
+        XCTAssertNil(recipeForSave.originalRecipeId)
+        XCTAssertNil(recipeForSave.originalCreatorId)
+        XCTAssertNil(recipeForSave.originalCreatorName)
+        XCTAssertNil(recipeForSave.savedAt)
+        XCTAssertNil(recipeForSave.sourceRecipeUpdatedAt)
+        XCTAssertFalse(recipeForSave.followsSourceUpdates)
+        XCTAssertEqual(recipeForSave.relatedRecipeIds, [])
+        XCTAssertFalse(recipeForSave.isPreview)
+    }
 }

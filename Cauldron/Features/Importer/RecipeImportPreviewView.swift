@@ -328,9 +328,15 @@ struct RecipeImportPreviewView: View {
         // It will be reset on error, and on success the view will dismiss
 
         do {
+            guard let userId = CurrentUserSession.shared.userId else {
+                AppLogger.parsing.error("Cannot save imported recipe without a current user")
+                isSaving = false
+                return
+            }
+
             let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
                 from: editedRecipe,
-                userId: CurrentUserSession.shared.userId,
+                userId: userId,
                 imageManager: dependencies.imageManager
             )
 
