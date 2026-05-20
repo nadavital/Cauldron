@@ -99,7 +99,9 @@ final class CollectionsListViewModel {
                 try await fetchedRecipes,
                 currentUserId: CurrentUserSession.shared.userId
             )
-            recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
+            recipesById = Dictionary(recipes.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            })
             recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
                 partialResult[recipe.id] = recipe.imageURL
             }

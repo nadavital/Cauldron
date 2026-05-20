@@ -52,10 +52,15 @@ struct FriendsTabView: View {
         .sheet(isPresented: $showingInviteSheet) {
             InviteFriendsSheetView(dependencies: dependencies)
         }
-        .task {
+        .task(id: userSession.userId) {
             // Configure dependencies if not already done
             viewModel.configure(dependencies: dependencies)
-            await viewModel.loadSharedRecipes()
+            await viewModel.loadSharedRecipes(forceRefresh: true)
+        }
+        .onChange(of: userSession.userId) { _, _ in
+            navigationPath = NavigationPath()
+            sidebarSelection = nil
+            collectionImageCache = [:]
         }
         .alert("Success", isPresented: $viewModel.showSuccessAlert) {
             Button("OK") { }

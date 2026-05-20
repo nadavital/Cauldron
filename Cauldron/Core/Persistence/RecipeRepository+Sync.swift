@@ -562,10 +562,25 @@ extension RecipeRepository {
             return
         }
 
-        guard !payload.wasPreview,
-              payload.ownerId == currentUserId else {
-            logger.warning("Dropping queued recipe delete for recipe not owned by the current user: \(payload.recipeId)")
+        guard !payload.wasPreview else {
+            logger.info("Completing queued delete for local-only preview recipe: \(payload.recipeId)")
             await operationQueueService.markCompleted(entityId: payload.recipeId, entityType: .recipe)
+            return
+        }
+
+        guard let ownerId = payload.ownerId else {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe delete replay missing owner identity"
+            )
+            return
+        }
+
+        guard ownerId == currentUserId else {
+            await operationQueueService.markFailed(
+                operationId: operation.id,
+                error: "Recipe delete replay belongs to a different user"
+            )
             return
         }
 
@@ -573,22 +588,20 @@ extension RecipeRepository {
         var privateDeleteSucceeded = true
         var publicDeleteSucceeded = true
 
-        if let ownerId = payload.ownerId {
-            do {
-                try await recipeCloudService.saveDeletedRecipeTombstone(
-                    DeletedRecipeTombstone(
-                        recipeId: payload.recipeId,
-                        ownerId: ownerId,
-                        cloudRecordName: payload.cloudRecordName,
-                        sourceDeviceId: payload.sourceDeviceId
-                    )
+        do {
+            try await recipeCloudService.saveDeletedRecipeTombstone(
+                DeletedRecipeTombstone(
+                    recipeId: payload.recipeId,
+                    ownerId: ownerId,
+                    cloudRecordName: payload.cloudRecordName,
+                    sourceDeviceId: payload.sourceDeviceId
                 )
-            } catch {
-                tombstoneSucceeded = false
-            }
+            )
+        } catch {
+            tombstoneSucceeded = false
         }
 
-        if let cloudRecordName = payload.cloudRecordName, let ownerId = payload.ownerId {
+        if let cloudRecordName = payload.cloudRecordName {
             let deletionRecipe = Recipe(
                 id: payload.recipeId,
                 title: "Deleted Recipe",

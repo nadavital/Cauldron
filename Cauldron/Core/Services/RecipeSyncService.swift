@@ -674,7 +674,22 @@ actor RecipeSyncService {
 
         // Download image from CloudKit
         do {
-            if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, fromPublic: fromPublic) {
+            let filename: String?
+            if !fromPublic, let cloudRecordName = recipe.cloudRecordName {
+                if let imageData = try await recipeCloudService.downloadImageAsset(
+                    recipeId: recipe.id,
+                    fromPublic: false,
+                    privateRecordName: cloudRecordName
+                ), let image = UIImage(data: imageData) {
+                    filename = try await imageManager.saveImage(image, recipeId: recipe.id)
+                } else {
+                    filename = nil
+                }
+            } else {
+                filename = try await imageManager.downloadImageFromCloud(recipeId: recipe.id, fromPublic: fromPublic)
+            }
+
+            if let filename {
 
                 // IMPORTANT: Update recipe's imageURL to point to the local file
                 // Build the proper local URL (not the CloudKit temporary path)

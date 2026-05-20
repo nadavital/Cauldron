@@ -88,6 +88,7 @@ class ConnectionManager: ObservableObject {
 
     // Cache management
     private var lastSyncTime: Date?
+    private var loadedUserId: UUID?
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
     private let isCloudSyncEnabled: Bool
 
@@ -119,6 +120,8 @@ class ConnectionManager: ObservableObject {
     ///   - userId: The user ID to load connections for
     ///   - forceRefresh: If true, bypasses cache and forces a CloudKit sync
     func loadConnections(forUserId userId: UUID, forceRefresh: Bool = false) async {
+        prepareForUser(userId)
+
         // Check if cache is still valid (don't log routine cache hits)
         if !forceRefresh, let lastSync = lastSyncTime {
             let timeSinceLastSync = Date().timeIntervalSince(lastSync)
@@ -144,6 +147,28 @@ class ConnectionManager: ObservableObject {
 
         // Update last sync time
         lastSyncTime = Date()
+    }
+
+    func resetSessionState() {
+        connections = [:]
+        syncErrors = [:]
+        processingConnectionIds = []
+        lastSyncTime = nil
+        loadedUserId = nil
+        pendingRejectIds = []
+        updateBadgeCount()
+    }
+
+    private func prepareForUser(_ userId: UUID) {
+        guard loadedUserId != userId else { return }
+
+        connections = [:]
+        syncErrors = [:]
+        processingConnectionIds = []
+        lastSyncTime = nil
+        pendingRejectIds = Self.loadPendingRejectIds()
+        loadedUserId = userId
+        updateBadgeCount()
     }
 
     /// Accept a connection request (optimistic update)

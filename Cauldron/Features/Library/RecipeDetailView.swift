@@ -358,11 +358,16 @@ struct RecipeDetailView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
-            if notification.object is UUID {
-                if !recipe.isOwnedByCurrentUser() {
-                    Task {
-                        await checkForOwnedCopy()
-                    }
+            if let deletedRecipeId = notification.object as? UUID,
+               deletedRecipeId == recipe.id {
+                recipeWasDeleted = true
+                return
+            }
+
+            if notification.object is UUID,
+               !recipe.isOwnedByCurrentUser() {
+                Task {
+                    await checkForOwnedCopy()
                 }
             }
         }

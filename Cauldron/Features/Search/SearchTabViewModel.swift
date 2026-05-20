@@ -38,6 +38,7 @@ import os
     @ObservationIgnored private var recipeLibraryRefreshTask: Task<Void, Never>?
     @ObservationIgnored private let connectionCoordinator: ConnectionInteractionCoordinator
     @ObservationIgnored private var hasLoadedOnce = false
+    @ObservationIgnored private var recipeSearchGeneration = 0
 
     // Public discovery caching
     private var publicRecipeSearchCache: [String: [Recipe]] = [:]
@@ -47,7 +48,7 @@ import os
 
     // Debouncing
     private let peopleSearchSubject = PassthroughSubject<String, Never>()
-    private let recipeSearchSubject = PassthroughSubject<(String, Set<RecipeCategory>), Never>()
+    private let recipeSearchSubject = PassthroughSubject<(String, Set<RecipeCategory>, Int), Never>()
 
     var currentUserId: UUID {
         CurrentUserSession.shared.userId ?? UUID()
@@ -76,17 +77,26 @@ import os
         // Set up debounced recipe search
         recipeSearchSubject
             .debounce(for: .milliseconds(280), scheduler: DispatchQueue.main)
-            .removeDuplicates { $0 == $1 }
-            .sink { [weak self] (query, categories) in
+            .removeDuplicates { lhs, rhs in
+                lhs.0 == rhs.0 && lhs.1 == rhs.1
+            }
+            .sink { [weak self] (query, categories, generation) in
                 guard let self = self else { return }
                 // Drop stale emissions that no longer match the latest UI state.
-                guard query == self.recipeSearchText,
-                      categories == self.selectedCategories else {
+                guard self.isCurrentRecipeSearch(
+                    generation: generation,
+                    query: query,
+                    selectedCategories: categories
+                ) else {
                     return
                 }
                 self.recipeSearchTask?.cancel()
                 self.recipeSearchTask = Task {
-                    await self.performRecipeSearch(query: query, categories: Array(categories))
+                    await self.performRecipeSearch(
+                        query: query,
+                        categories: Array(categories),
+                        generation: generation
+                    )
                 }
             }
             .store(in: &cancellables)
@@ -123,7 +133,8 @@ import os
             await performRecipeSearch(
                 query: recipeSearchText,
                 categories: Array(selectedCategories),
-                forceRefreshPublicRecipes: forceRefreshPublicRecipes
+                forceRefreshPublicRecipes: forceRefreshPublicRecipes,
+                generation: recipeSearchGeneration
             )
 
             hasLoadedOnce = true
@@ -261,30 +272,37 @@ import os
     func updateRecipeSearch(_ query: String) {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         recipeSearchText = normalizedQuery
+        let generation = advanceRecipeSearchGeneration()
         // Update local results immediately
-        filterLocalRecipes()
+        filterLocalRecipes(generation: generation)
 
         // Avoid debounce delay when query is empty so default discovery results appear instantly.
         if normalizedQuery.isEmpty {
             recipeSearchTask?.cancel()
             recipeSearchTask = Task {
-                await performRecipeSearch(query: "", categories: Array(selectedCategories))
+                await performRecipeSearch(
+                    query: "",
+                    categories: Array(selectedCategories),
+                    generation: generation
+                )
             }
             return
         }
 
         guard normalizedQuery.count >= minimumPublicRecipeSearchQueryLength else {
             recipeSearchTask?.cancel()
+            isLoading = false
             publicRecipes = []
             scheduleRecipeSearchResultsRebuild(
                 filterText: normalizedQuery,
-                selectedCategories: selectedCategories
+                selectedCategories: selectedCategories,
+                generation: generation
             )
             return
         }
 
         // Trigger debounced server search for active query.
-        recipeSearchSubject.send((normalizedQuery, selectedCategories))
+        recipeSearchSubject.send((normalizedQuery, selectedCategories, generation))
     }
     
     func toggleCategory(_ category: RecipeCategory) {
@@ -293,27 +311,34 @@ import os
         } else {
             selectedCategories.insert(category)
         }
+        let generation = advanceRecipeSearchGeneration()
         // Update local results immediately
-        filterLocalRecipes()
+        filterLocalRecipes(generation: generation)
 
         // Category toggles should feel snappy; run immediately.
         recipeSearchTask?.cancel()
         recipeSearchTask = Task {
-            await performRecipeSearch(query: recipeSearchText, categories: Array(selectedCategories))
+            await performRecipeSearch(
+                query: recipeSearchText,
+                categories: Array(selectedCategories),
+                generation: generation
+            )
         }
     }
     
-    private func filterLocalRecipes() {
+    private func filterLocalRecipes(generation: Int) {
         scheduleRecipeSearchResultsRebuild(
             filterText: recipeSearchText,
-            selectedCategories: selectedCategories
+            selectedCategories: selectedCategories,
+            generation: generation
         )
     }
     
     private func performRecipeSearch(
         query: String,
         categories: [RecipeCategory],
-        forceRefreshPublicRecipes: Bool = false
+        forceRefreshPublicRecipes: Bool = false,
+        generation: Int
     ) async {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let selectedCategories = Set(categories)
@@ -322,8 +347,17 @@ import os
             publicRecipes = []
             scheduleRecipeSearchResultsRebuild(
                 filterText: normalizedQuery,
-                selectedCategories: selectedCategories
+                selectedCategories: selectedCategories,
+                generation: generation
             )
+            return
+        }
+
+        guard isCurrentRecipeSearch(
+            generation: generation,
+            query: normalizedQuery,
+            selectedCategories: selectedCategories
+        ) else {
             return
         }
 
@@ -339,26 +373,35 @@ import os
             // Filter out own recipes (just in case)
             let filteredResults = results.filter { $0.ownerId != currentUserId }
 
-            if !Task.isCancelled {
+            if !Task.isCancelled,
+               isCurrentRecipeSearch(generation: generation, query: normalizedQuery, selectedCategories: selectedCategories) {
                 publicRecipes = filteredResults
 
                 // Fetch owner tiers for search ranking boost
                 await fetchOwnerTiers(for: filteredResults)
 
+                guard !Task.isCancelled,
+                      isCurrentRecipeSearch(generation: generation, query: normalizedQuery, selectedCategories: selectedCategories) else {
+                    return
+                }
+
                 // Re-merge with local results and process grouping
                 scheduleRecipeSearchResultsRebuild(
                     filterText: normalizedQuery,
-                    selectedCategories: selectedCategories
+                    selectedCategories: selectedCategories,
+                    generation: generation
                 )
                 isLoading = false
             }
         } catch {
-            if !Task.isCancelled {
+            if !Task.isCancelled,
+               isCurrentRecipeSearch(generation: generation, query: normalizedQuery, selectedCategories: selectedCategories) {
                 AppLogger.general.error("Failed to search public recipes: \(error.localizedDescription)")
                 publicRecipes = []
                 scheduleRecipeSearchResultsRebuild(
                     filterText: normalizedQuery,
-                    selectedCategories: selectedCategories
+                    selectedCategories: selectedCategories,
+                    generation: generation
                 )
                 isLoading = false
             }
@@ -390,11 +433,27 @@ import os
             groupRecipesByTags()
             scheduleRecipeSearchResultsRebuild(
                 filterText: recipeSearchText,
-                selectedCategories: selectedCategories
+                selectedCategories: selectedCategories,
+                generation: recipeSearchGeneration
             )
         } catch {
             AppLogger.general.error("Failed to refresh local search recipes: \(error.localizedDescription)")
         }
+    }
+
+    private func advanceRecipeSearchGeneration() -> Int {
+        recipeSearchGeneration += 1
+        return recipeSearchGeneration
+    }
+
+    private func isCurrentRecipeSearch(
+        generation: Int,
+        query: String,
+        selectedCategories: Set<RecipeCategory>
+    ) -> Bool {
+        generation == recipeSearchGeneration &&
+        query == recipeSearchText &&
+        selectedCategories == self.selectedCategories
     }
     
     private func loadPublicRecipeSearchResults(
@@ -436,7 +495,8 @@ import os
     // Process results: Filter local options, merge with public, group copies, rank, and extract friend context.
     private func scheduleRecipeSearchResultsRebuild(
         filterText: String,
-        selectedCategories: Set<RecipeCategory>
+        selectedCategories: Set<RecipeCategory>,
+        generation: Int
     ) {
         let localRecipesSnapshot = allRecipes
         let publicRecipesSnapshot = publicRecipes
@@ -463,7 +523,14 @@ import os
                 groupingTask.cancel()
             }
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  self.isCurrentRecipeSearch(
+                    generation: generation,
+                    query: filterText,
+                    selectedCategories: selectedCategories
+                  ) else {
+                return
+            }
             self.recipeSearchResults = groups
         }
     }

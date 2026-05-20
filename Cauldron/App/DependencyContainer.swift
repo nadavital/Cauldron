@@ -297,6 +297,7 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,
@@ -320,6 +321,7 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,

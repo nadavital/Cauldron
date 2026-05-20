@@ -595,9 +595,7 @@ actor RecipeCloudService {
                 }
 
                 recipes.append(recipe)
-                if !recipe.isFollowingSourceUpdates {
-                    canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
-                }
+                canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
             }
 
             fetchedPageCount += 1
@@ -608,7 +606,7 @@ actor RecipeCloudService {
             logger.warning("Stopped discovery fetch after \(fetchedPageCount) pages with \(canonicalGroupIDs.count) canonical groups")
         }
 
-        return limitRecipesByGroup(recipes, to: limit)
+        return limitRecipeGroupsPreservingCopies(recipes, to: limit)
     }
 
     func fetchPublicRecipesForSearch(
@@ -654,9 +652,7 @@ actor RecipeCloudService {
                 }
 
                 matchingRecipes.append(recipe)
-                if !recipe.isFollowingSourceUpdates {
-                    canonicalMatchingGroupIDs.insert(discoveryGroupID(for: recipe))
-                }
+                canonicalMatchingGroupIDs.insert(discoveryGroupID(for: recipe))
             }
 
             fetchedPageCount += 1
@@ -667,7 +663,7 @@ actor RecipeCloudService {
             logger.warning("Stopped public search fetch after \(fetchedPageCount) pages with \(canonicalMatchingGroupIDs.count) canonical matching groups")
         }
 
-        return limitRecipesByGroup(matchingRecipes, to: limit)
+        return limitRecipeGroupsPreservingCopies(matchingRecipes, to: limit)
     }
 
     func resolveCanonicalRelatedRecipeIDs(for recipe: Recipe) async throws -> [UUID] {
@@ -927,10 +923,33 @@ actor RecipeCloudService {
         return selectedRecipes
     }
 
+    private func limitRecipeGroupsPreservingCopies(_ recipes: [Recipe], to limit: Int) -> [Recipe] {
+        guard limit > 0 else { return [] }
+
+        var selectedGroupIDs = Set<UUID>()
+        var orderedGroupIDs: [UUID] = []
+
+        for recipe in recipes {
+            let groupID = discoveryGroupID(for: recipe)
+            guard selectedGroupIDs.insert(groupID).inserted else { continue }
+            orderedGroupIDs.append(groupID)
+            if orderedGroupIDs.count == limit {
+                break
+            }
+        }
+
+        return recipes.filter { selectedGroupIDs.contains(discoveryGroupID(for: $0)) }
+    }
+
     // MARK: - Image Assets
 
     /// Upload image as CKAsset to CloudKit
-    func uploadImageAsset(recipeId: UUID, imageData: Data, toPublic: Bool) async throws -> String {
+    func uploadImageAsset(
+        recipeId: UUID,
+        imageData: Data,
+        toPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws -> String {
         let optimizedData = try await core.optimizeImageForCloudKit(imageData)
 
         let tempURL = FileManager.default.temporaryDirectory
@@ -954,7 +973,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -978,7 +997,11 @@ actor RecipeCloudService {
     }
 
     /// Download image asset from CloudKit
-    func downloadImageAsset(recipeId: UUID, fromPublic: Bool) async throws -> Data? {
+    func downloadImageAsset(
+        recipeId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws -> Data? {
         let database: CKDatabase
         let recordID: CKRecord.ID
 
@@ -988,7 +1011,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -1011,7 +1034,11 @@ actor RecipeCloudService {
     }
 
     /// Delete image asset from CloudKit
-    func deleteImageAsset(recipeId: UUID, fromPublic: Bool) async throws {
+    func deleteImageAsset(
+        recipeId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws {
         logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
 
         let database: CKDatabase
@@ -1023,7 +1050,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -1317,6 +1344,15 @@ actor RecipeCloudService {
 
         record["yields"] = recipe.yields as CKRecordValue
         record["totalMinutes"] = recipe.totalMinutes as CKRecordValue?
+        record["sourceURL"] = recipe.sourceURL?.absoluteString as CKRecordValue?
+        record["sourceTitle"] = recipe.sourceTitle as CKRecordValue?
+        if let nutrition = recipe.nutrition,
+           let nutritionData = try? encoder.encode(nutrition) {
+            record["nutritionData"] = nutritionData as CKRecordValue
+        } else {
+            record["nutritionData"] = nil
+        }
+        record["isFavorite"] = recipe.isFavorite as CKRecordValue
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
 
@@ -1460,6 +1496,15 @@ actor RecipeCloudService {
 
         let yields = record["yields"] as? String ?? "4 servings"
         let totalMinutes = record["totalMinutes"] as? Int
+        let sourceURL = (record["sourceURL"] as? String).flatMap(URL.init(string:))
+        let sourceTitle = record["sourceTitle"] as? String
+        let nutrition: Nutrition?
+        if let nutritionData = record["nutritionData"] as? Data {
+            nutrition = try? decoder.decode(Nutrition.self, from: nutritionData)
+        } else {
+            nutrition = nil
+        }
+        let isFavorite = Self.boolValue(for: record["isFavorite"])
 
         let relatedRecipeIds: [UUID]
         if let relatedIdsData = record["relatedRecipeIdsData"] as? Data {
@@ -1506,12 +1551,12 @@ actor RecipeCloudService {
             yields: yields,
             totalMinutes: totalMinutes,
             tags: tags,
-            nutrition: nil,
-            sourceURL: nil,
-            sourceTitle: nil,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
             notes: notes,
             imageURL: imageURL,
-            isFavorite: false,
+            isFavorite: isFavorite,
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: record.recordID.recordName,

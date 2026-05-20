@@ -94,7 +94,15 @@ extension RecipeRepository {
         }
 
         let directMatches = try await fetch(ids: referenceIds)
-        let directMatchesById = Dictionary(uniqueKeysWithValues: directMatches.map { ($0.id, $0) })
+        let directMatchesById = Dictionary(directMatches.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+            if current.isPreview, !candidate.isPreview {
+                return candidate
+            }
+            if let preferredOwnerId, current.ownerId != preferredOwnerId, candidate.ownerId == preferredOwnerId {
+                return candidate
+            }
+            return current
+        })
 
         let sourceCopyLookupIds = referenceIds.filter { referenceId in
             guard let directMatch = directMatchesById[referenceId] else {

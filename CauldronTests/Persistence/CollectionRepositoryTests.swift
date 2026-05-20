@@ -27,7 +27,8 @@ final class CollectionRepositoryTests: XCTestCase {
         // Create in-memory model container for testing
         modelContainer = try TestModelContainer.create(with: [
             CollectionModel.self,
-            CollectionMembershipModel.self
+            CollectionMembershipModel.self,
+            DeletedCollectionModel.self
         ])
 
         // Create CloudKit services (will use real services)
@@ -527,6 +528,26 @@ final class CollectionRepositoryTests: XCTestCase {
         // Then
         let fetched = try await repository.fetch(id: collection.id)
         XCTAssertNil(fetched)
+    }
+
+    func testDelete_CreatesTombstoneAndRemovedMembershipEdges() async throws {
+        let recipeId = UUID()
+        let collection = Collection(name: "Test Collection", userId: testUserId, recipeIds: [recipeId])
+        try await repository.create(collection)
+
+        try await repository.delete(id: collection.id)
+
+        let context = ModelContext(modelContainer)
+        let tombstones = try context.fetch(FetchDescriptor<DeletedCollectionModel>())
+        let membershipEdges = try context.fetch(FetchDescriptor<CollectionMembershipModel>())
+
+        XCTAssertEqual(tombstones.count, 1)
+        XCTAssertEqual(tombstones.first?.collectionId, collection.id)
+        XCTAssertEqual(tombstones.first?.ownerId, testUserId)
+        XCTAssertEqual(membershipEdges.count, 1)
+        XCTAssertEqual(membershipEdges.first?.collectionId, collection.id)
+        XCTAssertEqual(membershipEdges.first?.recipeId, recipeId)
+        XCTAssertEqual(membershipEdges.first?.status, CollectionMembershipStatus.removed.rawValue)
     }
 
     func testDelete_NonExistentCollection_ThrowsError() async throws {

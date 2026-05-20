@@ -11,6 +11,20 @@ import os
 import CloudKit
 import UIKit
 
+enum AccountDeletionRecipeCleanupError: LocalizedError {
+    case ownerMismatch(UUID)
+    case remoteDeletionIncomplete(UUID, [String])
+
+    var errorDescription: String? {
+        switch self {
+        case .ownerMismatch(let recipeId):
+            return "Recipe \(recipeId) is not owned by the account being deleted."
+        case .remoteDeletionIncomplete(let recipeId, let failures):
+            return "Could not fully delete recipe \(recipeId) from iCloud: \(failures.joined(separator: "; "))"
+        }
+    }
+}
+
 extension RecipeRepository {
     
     // MARK: - Create
@@ -903,13 +917,94 @@ extension RecipeRepository {
         let models = try context.fetch(descriptor)
         logger.info("Found \(models.count) recipes to delete")
 
-        // Delete each recipe (includes CloudKit cleanup and image deletion)
+        var recipes: [Recipe] = []
         for model in models {
-            let recipe = try model.toDomain()
-            try await delete(id: recipe.id)
+            recipes.append(try model.toDomain())
         }
 
+        if !RuntimeEnvironment.isRunningTests {
+            let accountStatus = await cloudKitCore.checkAccountStatus()
+            guard accountStatus.isAvailable else {
+                throw CloudKitError.accountNotAvailable(accountStatus)
+            }
+        }
+
+        // Account deletion must not rely on the normal optimistic delete queue.
+        // Finish destructive CloudKit work while the deleting user is still active.
+        for recipe in recipes {
+            try await deleteRemoteRecipeArtifactsForAccountDeletion(recipe, deletingUserId: userId)
+        }
+
+        let deletionContext = ModelContext(modelContainer)
+        for recipe in recipes {
+            let recipeDescriptor = FetchDescriptor<RecipeModel>(
+                predicate: #Predicate { model in
+                    model.id == recipe.id && model.ownerId == userId
+                }
+            )
+
+            for model in try deletionContext.fetch(recipeDescriptor) {
+                deletionContext.delete(model)
+            }
+
+            if let collectionRepository = collectionRepository {
+                try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
+            }
+
+            if recipe.imageURL != nil {
+                await imageManager.deleteImage(recipeId: recipe.id)
+                await imageSyncManager.removePendingUpload(recipe.id)
+            }
+
+            await operationQueueService.markCompleted(entityId: recipe.id, entityType: .recipe)
+            NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
+        }
+
+        try deletionContext.save()
         logger.info("✅ Deleted all user recipes")
+    }
+
+    private func deleteRemoteRecipeArtifactsForAccountDeletion(
+        _ recipe: Recipe,
+        deletingUserId: UUID
+    ) async throws {
+        guard !RuntimeEnvironment.isRunningTests else { return }
+        guard !recipe.isPreview else { return }
+        guard recipe.ownerId == deletingUserId else {
+            throw AccountDeletionRecipeCleanupError.ownerMismatch(recipe.id)
+        }
+
+        var failures: [String] = []
+
+        do {
+            try await recipeCloudService.saveDeletedRecipeTombstone(
+                DeletedRecipeTombstone(
+                    recipeId: recipe.id,
+                    ownerId: deletingUserId,
+                    cloudRecordName: recipe.cloudRecordName
+                )
+            )
+        } catch {
+            failures.append("tombstone: \(error.localizedDescription)")
+        }
+
+        if recipe.cloudRecordName != nil {
+            do {
+                try await recipeCloudService.deleteRecipe(recipe)
+            } catch {
+                failures.append("private recipe: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+        } catch {
+            failures.append("public recipe: \(error.localizedDescription)")
+        }
+
+        if !failures.isEmpty {
+            throw AccountDeletionRecipeCleanupError.remoteDeletionIncomplete(recipe.id, failures)
+        }
     }
 
     private func preferredRecipeModel(

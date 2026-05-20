@@ -549,7 +549,7 @@ struct NutritionInput {
             let didChangeImageSelection = didUserChangeImageSelection
 
             // Handle image changes
-            if let image = selectedImage {
+            if didChangeImageSelection, let image = selectedImage {
                 // New or changed image - save it
                 let filename = try await dependencies.imageManager.saveImage(image, recipeId: recipe.id)
                 let imageURL = await dependencies.imageManager.imageURL(for: filename)
@@ -561,8 +561,8 @@ struct NutritionInput {
                 await MainActor.run {
                     ImageCache.shared.set(cacheKey, image: image)
                 }
-            } else if existingRecipe?.imageURL != nil && selectedImage == nil {
-                // Image was removed (existing recipe had image, but selectedImage is nil and wasn't loaded)
+            } else if didChangeImageSelection, existingRecipe?.imageURL != nil, selectedImage == nil {
+                // Image was explicitly removed by the user.
                 // Clear the image URL so it gets deleted from CloudKit
                 recipe = recipe.withImageURL(nil)
 
@@ -596,6 +596,12 @@ struct NutritionInput {
                 // Notify other views that the recipe was updated
                 NotificationCenter.default.post(name: NSNotification.Name("RecipeUpdated"), object: nil)
             } else {
+                guard !isEditing else {
+                    errorMessage = "This recipe was deleted on another device. Reopen your library before saving changes."
+                    AppLogger.general.warning("Blocked recreating deleted recipe \(recipe.id) from stale editor")
+                    return false
+                }
+
                 recipe = recipe.asIndependentLibraryRecipe(ownerId: currentUserId)
                 try await dependencies.recipeRepository.create(recipe)
                 // Notify other views that a recipe was added

@@ -8,6 +8,11 @@
 import Foundation
 
 enum ShareExtensionImportStore {
+    struct PendingPreparedSharedRecipe {
+        let preparedRecipe: PreparedSharedRecipe
+        let payloadData: Data
+    }
+
     static func pendingRecipeURL() -> URL? {
         pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
@@ -18,6 +23,41 @@ enum ShareExtensionImportStore {
             return nil
         }
         return URL(string: urlString)
+    }
+
+    static func pendingRecipeText() -> String? {
+        pendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func pendingRecipeText(in defaults: UserDefaults?) -> String? {
+        guard let defaults else { return nil }
+        return defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+    }
+
+    static func pendingPreparedRecipe() -> PendingPreparedSharedRecipe? {
+        pendingPreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func pendingPreparedRecipe(in defaults: UserDefaults?) -> PendingPreparedSharedRecipe? {
+        guard let defaults,
+              let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
+            return nil
+        }
+
+        guard let preparedRecipe = preparedRecipe(from: payloadData) else {
+            defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+            return nil
+        }
+
+        return PendingPreparedSharedRecipe(preparedRecipe: preparedRecipe, payloadData: payloadData)
+    }
+
+    static func firstHTTPURL(in text: String) -> URL? {
+        ShareExtensionImportContract.firstHTTPURL(in: text)
+    }
+
+    static func plainTextRecipeShouldTakePrecedenceOverURL(_ text: String) -> Bool {
+        ShareExtensionImportContract.plainTextRecipeShouldTakePrecedenceOverURL(text)
     }
 
     static func consumePendingRecipeURL() -> URL? {
@@ -70,6 +110,47 @@ enum ShareExtensionImportStore {
         return preparedRecipe
     }
 
+    static func acknowledgePendingRecipeURL(matching url: URL? = nil) {
+        acknowledgePendingRecipeURL(matching: url, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func acknowledgePendingRecipeURL(matching url: URL? = nil, in defaults: UserDefaults?) {
+        guard let defaults else { return }
+        if let url, pendingRecipeURL(in: defaults) != url {
+            return
+        }
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+    }
+
+    static func acknowledgePendingRecipeText(matching text: String? = nil) {
+        acknowledgePendingRecipeText(matching: text, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func acknowledgePendingRecipeText(matching text: String? = nil, in defaults: UserDefaults?) {
+        guard let defaults else { return }
+        if let text, pendingRecipeText(in: defaults) != text {
+            return
+        }
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+    }
+
+    static func acknowledgePreparedRecipe(matching payloadData: Data? = nil) {
+        acknowledgePreparedRecipe(matching: payloadData, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    static func acknowledgePreparedRecipe(matching payloadData: Data? = nil, in defaults: UserDefaults?) {
+        guard let defaults else { return }
+        if let payloadData,
+           defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) != payloadData {
+            return
+        }
+
+        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+        // Prepared payload supersedes a plain pending URL or text from the same share.
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+    }
+
     static func preparedRecipe(from payloadData: Data) -> PreparedSharedRecipe? {
         do {
             let payload = try JSONDecoder().decode(PreparedShareRecipePayload.self, from: payloadData)
@@ -79,6 +160,7 @@ enum ShareExtensionImportStore {
             return nil
         }
     }
+
 }
 
 struct PreparedSharedRecipe {

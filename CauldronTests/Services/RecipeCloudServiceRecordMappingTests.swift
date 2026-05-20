@@ -62,6 +62,61 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertEqual((record["schemaVersion"] as? NSNumber)?.intValue, 7)
     }
 
+    func testPopulateAndDecodeDeletedCollectionTombstone() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let deletedAt = Date(timeIntervalSince1970: 1_800_000_100)
+        let tombstone = DeletedCollectionTombstone(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            deletedAt: deletedAt,
+            cloudRecordName: "collection-record",
+            sourceDeviceId: "device-b",
+            schemaVersion: 3
+        )
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.deletedCollection,
+            recordID: CollectionCloudService.deletedCollectionRecordID(collectionId: collectionId)
+        )
+
+        await service.populateDeletedCollectionRecord(record, from: tombstone)
+        let decoded = try await service.deletedCollectionTombstone(from: record)
+
+        XCTAssertEqual(decoded, tombstone)
+        XCTAssertEqual(record["collectionId"] as? String, collectionId.uuidString)
+        XCTAssertEqual(record["ownerId"] as? String, ownerId.uuidString)
+        XCTAssertEqual(record["deletedAt"] as? Date, deletedAt)
+        XCTAssertEqual(record["cloudRecordName"] as? String, "collection-record")
+        XCTAssertEqual(record["sourceDeviceId"] as? String, "device-b")
+        XCTAssertEqual((record["schemaVersion"] as? NSNumber)?.intValue, 3)
+    }
+
+    func testDecodeCollectionRecordPreservesCloudCoverImageMetadata() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let modifiedAt = Date(timeIntervalSince1970: 1_800_000_200)
+        let recordName = collectionId.uuidString
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: recordName)
+        )
+        record["collectionId"] = collectionId.uuidString as CKRecordValue
+        record["name"] = "Brunch"
+        record["userId"] = ownerId.uuidString as CKRecordValue
+        record["visibility"] = RecipeVisibility.publicRecipe.rawValue as CKRecordValue
+        record["createdAt"] = Date(timeIntervalSince1970: 1_800_000_000) as CKRecordValue
+        record["updatedAt"] = Date(timeIntervalSince1970: 1_800_000_100) as CKRecordValue
+        record["coverImageType"] = CoverImageType.customImage.rawValue as CKRecordValue
+        record["coverImageModifiedAt"] = modifiedAt as CKRecordValue
+
+        let collection = try await service.collectionFromRecord(record)
+
+        XCTAssertEqual(collection.cloudCoverImageRecordName, recordName)
+        XCTAssertEqual(collection.coverImageModifiedAt, modifiedAt)
+    }
+
     func testPopulateAndDecodeRecipeRecordPreservesSourceLineageAndPreviewState() async throws {
         let service = RecipeCloudService(core: CloudKitCore())
         let ownerId = UUID()
@@ -73,6 +128,15 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         let updatedAt = Date(timeIntervalSince1970: 1_700_000_200)
         let relatedId = UUID()
         let recipeId = UUID()
+        let nutrition = Nutrition(
+            calories: 420,
+            protein: 18,
+            fat: 12,
+            carbohydrates: 58,
+            fiber: 4,
+            sugar: 3,
+            sodium: 640
+        )
         let recipe = Recipe(
             id: recipeId,
             title: "Lemon Pasta",
@@ -81,7 +145,7 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
             yields: "2 servings",
             totalMinutes: 18,
             tags: [Tag(name: "Weeknight Dinner")],
-            nutrition: nil,
+            nutrition: nutrition,
             sourceURL: URL(string: "https://example.com/lemon-pasta"),
             sourceTitle: "Example Lemon Pasta",
             notes: "Use extra lemon.",
@@ -119,6 +183,10 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         let decodedYields = decoded.yields
         let decodedTotalMinutes = decoded.totalMinutes
         let decodedTagNames = decoded.tags.map { $0.name }
+        let decodedNutrition = decoded.nutrition
+        let decodedSourceURL = decoded.sourceURL
+        let decodedSourceTitle = decoded.sourceTitle
+        let decodedIsFavorite = decoded.isFavorite
         let decodedNotes = decoded.notes
         let decodedVisibility = decoded.visibility
         let decodedCloudRecordName = decoded.cloudRecordName
@@ -139,6 +207,10 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertEqual(decodedYields, "2 servings")
         XCTAssertEqual(decodedTotalMinutes, 18)
         XCTAssertEqual(decodedTagNames, ["Weeknight Dinner"])
+        XCTAssertEqual(decodedNutrition, nutrition)
+        XCTAssertEqual(decodedSourceURL, URL(string: "https://example.com/lemon-pasta"))
+        XCTAssertEqual(decodedSourceTitle, "Example Lemon Pasta")
+        XCTAssertTrue(decodedIsFavorite)
         XCTAssertEqual(decodedNotes, "Use extra lemon.")
         XCTAssertEqual(decodedVisibility, .publicRecipe)
         XCTAssertEqual(decodedCloudRecordName, cloudRecordName)
@@ -161,6 +233,10 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
             recordID: CKRecord.ID(recordName: "recipe-record")
         )
         record["totalMinutes"] = 45 as CKRecordValue
+        record["sourceURL"] = "https://example.com/old" as CKRecordValue
+        record["sourceTitle"] = "Old Source" as CKRecordValue
+        record["nutritionData"] = (try? JSONEncoder().encode(Nutrition(calories: 100))) as CKRecordValue?
+        record["isFavorite"] = true as CKRecordValue
         record["notes"] = "old notes" as CKRecordValue
         record["originalRecipeId"] = staleSourceId.uuidString as CKRecordValue
         record["originalCreatorId"] = UUID().uuidString as CKRecordValue
@@ -191,6 +267,10 @@ final class RecipeCloudServiceRecordMappingTests: XCTestCase {
         await service.populateRecipeRecord(record, from: localOnlyRecipe, ownerId: ownerId)
 
         XCTAssertNil(record["totalMinutes"])
+        XCTAssertNil(record["sourceURL"])
+        XCTAssertNil(record["sourceTitle"])
+        XCTAssertNil(record["nutritionData"])
+        XCTAssertEqual(record["isFavorite"] as? Bool, false)
         XCTAssertNil(record["notes"])
         XCTAssertNil(record["originalRecipeId"])
         XCTAssertNil(record["originalCreatorId"])

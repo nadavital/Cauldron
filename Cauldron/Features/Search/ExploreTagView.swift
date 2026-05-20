@@ -536,8 +536,10 @@ final class ExploreTagViewModel {
     }
 
     private func cachedOwnerMap(for ownerIds: Set<UUID>) -> [UUID: User] {
-        Dictionary(uniqueKeysWithValues: ownerIds.compactMap { ownerId in
+        Dictionary(ownerIds.compactMap { ownerId in
             ownerCache[ownerId].map { (ownerId, $0) }
+        }, uniquingKeysWith: { current, candidate in
+            candidate.createdAt > current.createdAt ? candidate : current
         })
     }
 

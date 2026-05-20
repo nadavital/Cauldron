@@ -32,6 +32,12 @@ actor PendingShareManager {
         return pendingURL
     }
 
+    /// Clear the pending share URL only if it matches the URL already being handled.
+    func clearPendingURL(matching url: URL) {
+        guard pendingURL == url else { return }
+        pendingURL = nil
+    }
+
     /// Store pending CloudKit share metadata
     func setPendingMetadata(_ metadata: CKShare.Metadata) {
         pendingMetadata = metadata

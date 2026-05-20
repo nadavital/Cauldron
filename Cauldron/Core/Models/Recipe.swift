@@ -252,6 +252,40 @@ struct Recipe: Sendable, Hashable, Identifiable {
         )
     }
 
+    /// Create a copy with updated favorite state while preserving all metadata.
+    nonisolated func withFavorite(_ isFavorite: Bool) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
     /// Create a copy with updated local/cloud image state while preserving timestamps.
     nonisolated func withImageState(
         imageURL: URL?,

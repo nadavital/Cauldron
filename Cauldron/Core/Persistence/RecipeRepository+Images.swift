@@ -45,7 +45,19 @@ extension RecipeRepository {
 
         do {
             let toPublic = databaseType == .public
-            let recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, toPublic: toPublic)
+            let recordName: String
+            if !toPublic, let cloudRecordName = recipe.cloudRecordName {
+                let imageURL = await imageManager.imageURL(recipeId: recipe.id)
+                let imageData = try Data(contentsOf: imageURL)
+                recordName = try await recipeCloudService.uploadImageAsset(
+                    recipeId: recipe.id,
+                    imageData: imageData,
+                    toPublic: false,
+                    privateRecordName: cloudRecordName
+                )
+            } else {
+                recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, toPublic: toPublic)
+            }
 
             // Update recipe with cloud metadata
             let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
@@ -89,7 +101,11 @@ extension RecipeRepository {
 
         do {
             logger.info("🗑️ Deleting image from PRIVATE database for recipe: \(recipe.title)")
-            try await recipeCloudService.deleteImageAsset(recipeId: recipe.id, fromPublic: false)
+            try await recipeCloudService.deleteImageAsset(
+                recipeId: recipe.id,
+                fromPublic: false,
+                privateRecordName: recipe.cloudRecordName
+            )
             logger.info("✅ Image deleted from PRIVATE database")
         } catch {
             logger.error("❌ Failed to delete image from PRIVATE database: \(error.localizedDescription)")

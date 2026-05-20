@@ -512,6 +512,31 @@ final class RecipeGroupingServiceTests: XCTestCase {
         XCTAssertEqual(groups.first?.id, groupId)
     }
 
+    func testDeduplicateSharedFeedRecipes_CollapsesFollowingCopiesIntoOriginal() {
+        let originalId = UUID()
+        let original = makeRecipe(
+            id: originalId,
+            title: "Roast Chicken",
+            ownerId: UUID(),
+            tags: ["Dinner"],
+            ingredients: ["chicken"],
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let followingCopy = makeRecipe(
+            id: UUID(),
+            title: "Roast Chicken",
+            ownerId: UUID(),
+            tags: ["Dinner"],
+            ingredients: ["chicken"],
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            originalRecipeId: originalId
+        )
+
+        let deduped = RecipeGroupingService.deduplicateSharedFeedRecipes([followingCopy, original])
+
+        XCTAssertEqual(deduped.map(\.id), [originalId])
+    }
+
     private func makeRecipe(
         id: UUID = UUID(),
         title: String,

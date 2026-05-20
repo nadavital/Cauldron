@@ -119,6 +119,9 @@ struct CollectionDetailView: View {
                 await loadRecipes()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { notification in
+            handleCollectionDeleted(notification)
+        }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
                 ShareSheet(items: [link])
@@ -237,6 +240,10 @@ struct CollectionDetailView: View {
                 if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
                     collection = updatedCollection
                     AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
+                } else {
+                    AppLogger.general.info("Collection detail dismissed because collection was deleted: \(collection.id)")
+                    dismissDeletedCollection()
+                    return
                 }
 
                 let fetchedRecipes = try await dependencies.recipeRepository.fetch(ids: collection.recipeIds)
@@ -260,9 +267,11 @@ struct CollectionDetailView: View {
                 guard let imageURL = recipe.imageURL else { return nil }
                 return (recipe.id, imageURL)
             }
-            let imageByRecipeId = Dictionary(uniqueKeysWithValues: imagePairs)
+            let imageByRecipeId = Dictionary(imagePairs, uniquingKeysWith: { current, _ in current })
             recipeImages = Array(collection.recipeIds.compactMap { imageByRecipeId[$0] }.prefix(4).map(Optional.some))
-            let recipesById = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
+            let recipesById = Dictionary(recipes.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+                candidate.updatedAt > current.updatedAt ? candidate : current
+            })
             recipeImageSources = collection.recipeIds.prefix(4).map { recipeId in
                 let recipe = recipesById[recipeId]
                 return CollectionRecipeImageSource(
@@ -280,6 +289,18 @@ struct CollectionDetailView: View {
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
             showError = true
         }
+    }
+
+    private func handleCollectionDeleted(_ notification: Notification) {
+        let deletedCollectionId = notification.object as? UUID
+            ?? notification.userInfo?["collectionId"] as? UUID
+        guard deletedCollectionId == collection.id else { return }
+        dismissDeletedCollection()
+    }
+
+    private func dismissDeletedCollection() {
+        activeSheet = nil
+        dismiss()
     }
 
     private func removeRecipe(_ recipe: Recipe) async {

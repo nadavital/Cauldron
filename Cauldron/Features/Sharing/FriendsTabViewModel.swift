@@ -32,6 +32,8 @@ final class FriendsTabViewModel {
     private(set) var dependencies: DependencyContainer?
     @ObservationIgnored
     private var hasLoadedOnce = false
+    @ObservationIgnored
+    private var loadedUserId: UUID?
 
     private init() {
         // Private init for singleton
@@ -44,10 +46,34 @@ final class FriendsTabViewModel {
         self.dependencies = dependencies
     }
 
+    func resetSessionState() {
+        sharedRecipes = []
+        sharedCollections = []
+        isLoading = false
+        showSuccessAlert = false
+        showErrorAlert = false
+        alertMessage = ""
+        recentlyAdded = []
+        tagSections = []
+        sharerTiers = [:]
+        hasLoadedOnce = false
+        loadedUserId = nil
+    }
+
     func loadSharedRecipes(forceRefresh: Bool = false) async {
         guard let dependencies = dependencies else {
             AppLogger.general.warning("FriendsTabViewModel not configured with dependencies")
             return
+        }
+
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            resetSessionState()
+            return
+        }
+
+        if loadedUserId != currentUserId {
+            resetSessionState()
+            loadedUserId = currentUserId
         }
 
         if RuntimeEnvironment.isSimulatorQAMode {
@@ -57,7 +83,7 @@ final class FriendsTabViewModel {
 
         // On first load, try to use cached data for instant display
         if !hasLoadedOnce {
-            if let cached = await dependencies.sharingService.getCachedSharedRecipes() {
+            if let cached = await dependencies.sharingService.getCachedSharedRecipes(for: currentUserId) {
                 // Show cached data immediately
                 sharedRecipes = cached
                 organizeRecipesIntoSections()

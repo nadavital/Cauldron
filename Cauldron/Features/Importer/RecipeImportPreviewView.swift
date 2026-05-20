@@ -343,6 +343,7 @@ struct RecipeImportPreviewView: View {
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
+            NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
 
             // Call the callback to notify parent view
             onSave()

@@ -208,15 +208,23 @@ actor UserCloudService {
         }
         if let emoji = user.profileEmoji {
             record["profileEmoji"] = emoji as CKRecordValue
+        } else {
+            record["profileEmoji"] = nil
         }
         if let color = user.profileColor {
             record["profileColor"] = color as CKRecordValue
+        } else {
+            record["profileColor"] = nil
         }
         if let cloudImageRecordName = user.cloudProfileImageRecordName {
             record["cloudProfileImageRecordName"] = cloudImageRecordName as CKRecordValue
+        } else {
+            record["cloudProfileImageRecordName"] = nil
         }
         if let imageModifiedAt = user.profileImageModifiedAt {
             record["profileImageModifiedAt"] = imageModifiedAt as CKRecordValue
+        } else {
+            record["profileImageModifiedAt"] = nil
         }
         record["createdAt"] = user.createdAt as CKRecordValue
 
@@ -365,23 +373,39 @@ actor UserCloudService {
         logger.info("🗑️ Deleting user profile from CloudKit: \(userId)")
 
         let db = try await core.getPublicDatabase()
-        let systemUserRecordID = try await core.getCurrentUserRecordID()
-        let recordName = "user_\(systemUserRecordID.recordName)"
-        let recordID = CKRecord.ID(recordName: recordName)
+        var profileRecordIDs = Set<CKRecord.ID>()
+        var profileImageRecordIDs: Set<CKRecord.ID> = [
+            CKRecord.ID(recordName: "profileImage_\(userId.uuidString)")
+        ]
 
         do {
-            try await deleteUserProfileImage(userId: userId)
-
-            _ = try await db.deleteRecord(withID: recordID)
-            logger.info("✅ Deleted user profile from CloudKit")
-        } catch let error as CKError {
-            if error.code == .unknownItem {
-                logger.info("User record not found: \(userId)")
-                return
-            }
-            logger.error("Failed to delete user profile: \(error.localizedDescription)")
-            throw error
+            let systemUserRecordID = try await core.getCurrentUserRecordID()
+            profileRecordIDs.insert(systemUserRecordID)
+            profileRecordIDs.insert(CKRecord.ID(recordName: "user_\(systemUserRecordID.recordName)"))
+        } catch {
+            logger.warning("Could not resolve current CloudKit user record during profile deletion: \(error.localizedDescription)")
         }
+
+        let userRecords = try await fetchRecords(
+            in: db,
+            recordType: CloudKitCore.RecordType.user,
+            predicate: NSPredicate(format: "userId == %@", userId.uuidString)
+        )
+
+        for record in userRecords {
+            profileRecordIDs.insert(record.recordID)
+            if let imageRecordName = record["cloudProfileImageRecordName"] as? String {
+                profileImageRecordIDs.insert(CKRecord.ID(recordName: imageRecordName))
+            }
+        }
+
+        let referralRecordIDs = try await fetchReferralRecordIDs(for: userId, in: db)
+
+        try await deleteRecordsIgnoringMissing(profileImageRecordIDs, in: db, label: "profile image")
+        try await deleteRecordsIgnoringMissing(referralRecordIDs, in: db, label: "referral")
+        try await deleteRecordsIgnoringMissing(profileRecordIDs, in: db, label: "user profile")
+
+        logger.info("✅ Deleted \(profileRecordIDs.count) user profile record(s), \(profileImageRecordIDs.count) profile image record(s), and \(referralRecordIDs.count) referral record(s) from CloudKit")
     }
 
     // MARK: - Profile Image
@@ -483,6 +507,71 @@ actor UserCloudService {
                 return
             }
             throw error
+        }
+    }
+
+    private func fetchRecords(
+        in db: CKDatabase,
+        recordType: String,
+        predicate: NSPredicate,
+        resultsLimit: Int = 500
+    ) async throws -> [CKRecord] {
+        let query = CKQuery(recordType: recordType, predicate: predicate)
+        var cursor: CKQueryOperation.Cursor?
+        var records: [CKRecord] = []
+
+        repeat {
+            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+            if let cursor {
+                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: resultsLimit)
+            } else {
+                results = try await db.records(matching: query, resultsLimit: resultsLimit)
+            }
+
+            for (_, result) in results.matchResults {
+                if let record = try? result.get() {
+                    records.append(record)
+                }
+            }
+
+            cursor = results.queryCursor
+        } while cursor != nil
+
+        return records
+    }
+
+    private func fetchReferralRecordIDs(for userId: UUID, in db: CKDatabase) async throws -> Set<CKRecord.ID> {
+        let userIdString = userId.uuidString
+        let predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+            NSPredicate(format: "newUserId == %@", userIdString),
+            NSPredicate(format: "referrerId == %@", userIdString)
+        ])
+
+        let records = try await fetchRecords(
+            in: db,
+            recordType: CloudKitCore.RecordType.referralSignup,
+            predicate: predicate
+        )
+
+        var recordIDs = Set(records.map(\.recordID))
+        recordIDs.insert(CKRecord.ID(recordName: "referral_\(userIdString)"))
+        return recordIDs
+    }
+
+    private func deleteRecordsIgnoringMissing(
+        _ recordIDs: Set<CKRecord.ID>,
+        in db: CKDatabase,
+        label: String
+    ) async throws {
+        for recordID in recordIDs {
+            do {
+                try await db.deleteRecord(withID: recordID)
+            } catch let error as CKError where error.code == .unknownItem {
+                logger.info("\(label) record already absent: \(recordID.recordName)")
+            } catch {
+                logger.error("Failed to delete \(label) record \(recordID.recordName): \(error.localizedDescription)")
+                throw error
+            }
         }
     }
 
@@ -607,7 +696,9 @@ actor UserCloudService {
         var seen = Set<UUID>()
         let dedupedOrderedIds = orderedUserIds.filter { seen.insert($0).inserted }
         let fetchedUsers = try await fetchUsers(byUserIds: dedupedOrderedIds)
-        let usersById = Dictionary(uniqueKeysWithValues: fetchedUsers.map { ($0.id, $0) })
+        let usersById = Dictionary(fetchedUsers.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+            candidate.createdAt > current.createdAt ? candidate : current
+        })
 
         return dedupedOrderedIds.compactMap { usersById[$0] }
     }

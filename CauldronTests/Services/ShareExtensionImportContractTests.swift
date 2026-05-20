@@ -98,6 +98,79 @@ final class ShareExtensionImportContractTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey))
     }
 
+    func testPendingPreparedRecipeRead_DoesNotConsumePayloadBeforeAcknowledgement() throws {
+        let defaults = try makeIsolatedDefaults()
+        let payload = PreparedShareRecipePayload(
+            title: "Durable Soup",
+            ingredients: ["1 cup stock"],
+            steps: ["Warm stock"]
+        )
+        let data = try JSONEncoder().encode(payload)
+        defaults.set(data, forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+        defaults.set("https://example.com/durable-soup", forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+        defaults.set("old text", forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+
+        let pending = try XCTUnwrap(ShareExtensionImportStore.pendingPreparedRecipe(in: defaults))
+
+        XCTAssertEqual(pending.preparedRecipe.recipe.title, "Durable Soup")
+        XCTAssertEqual(defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey), data)
+
+        ShareExtensionImportStore.acknowledgePreparedRecipe(matching: Data("new payload".utf8), in: defaults)
+        XCTAssertEqual(defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey), data)
+
+        ShareExtensionImportStore.acknowledgePreparedRecipe(matching: pending.payloadData, in: defaults)
+        XCTAssertNil(defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey))
+        XCTAssertNil(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey))
+        XCTAssertNil(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey))
+    }
+
+    func testPendingURLAndTextAcknowledgement_OnlyClearsMatchingPayload() throws {
+        let defaults = try makeIsolatedDefaults()
+        defaults.set("https://example.com/recipe", forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+        defaults.set("1 cup flour", forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+
+        ShareExtensionImportStore.acknowledgePendingRecipeURL(matching: URL(string: "https://example.com/other"), in: defaults)
+        ShareExtensionImportStore.acknowledgePendingRecipeText(matching: "other text", in: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey), "https://example.com/recipe")
+        XCTAssertEqual(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey), "1 cup flour")
+
+        ShareExtensionImportStore.acknowledgePendingRecipeURL(matching: URL(string: "https://example.com/recipe"), in: defaults)
+        ShareExtensionImportStore.acknowledgePendingRecipeText(matching: "1 cup flour", in: defaults)
+
+        XCTAssertNil(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey))
+        XCTAssertNil(defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey))
+    }
+
+    func testPlainRecipeTextWithSourceURLTakesPrecedenceOverURLImport() {
+        let text = """
+        Ingredients
+        1 cup flour
+        2 tbsp olive oil
+
+        Instructions
+        Mix everything and bake until golden.
+
+        Source: https://example.com/flatbread
+        """
+
+        XCTAssertTrue(ShareExtensionImportStore.plainTextRecipeShouldTakePrecedenceOverURL(text))
+        XCTAssertEqual(
+            ShareExtensionImportStore.firstHTTPURL(in: text),
+            URL(string: "https://example.com/flatbread")
+        )
+    }
+
+    func testBareSharedURLDoesNotTakeTextPrecedence() {
+        let text = "https://example.com/recipe"
+
+        XCTAssertFalse(ShareExtensionImportStore.plainTextRecipeShouldTakePrecedenceOverURL(text))
+        XCTAssertEqual(
+            ShareExtensionImportStore.firstHTTPURL(in: text),
+            URL(string: "https://example.com/recipe")
+        )
+    }
+
     private func makeIsolatedDefaults() throws -> UserDefaults {
         let suiteName = "CauldronTests.ShareExtensionImportContract.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

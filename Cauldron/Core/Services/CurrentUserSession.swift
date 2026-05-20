@@ -266,14 +266,6 @@ class CurrentUserSession: ObservableObject {
 
         let userId = UUID()
 
-        // Handle profile image if provided (mutually exclusive with emoji)
-        var profileImageURL: URL?
-        if let profileImage = profileImage {
-            // Save profile image locally
-            profileImageURL = try await dependencies.profileImageManager.saveImage(profileImage, userId: userId)
-            logger.info("Saved profile image locally")
-        }
-
         // Try to create in CloudKit first
         var cloudUser: User?
         do {
@@ -284,31 +276,56 @@ class CurrentUserSession: ObservableObject {
                 profileColor: profileColor
             )
             logger.info("User created in CloudKit")
-
-            // Upload profile image to CloudKit if provided
-            if profileImage != nil, let cloudUser = cloudUser {
-                do {
-                    let recordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: cloudUser.id)
-                    logger.info("Uploaded profile image to CloudKit: \(recordName)")
-                } catch {
-                    logger.warning("Failed to upload profile image to CloudKit: \(error.localizedDescription)")
-                    // Continue - local image is still available
-                }
-            }
         } catch {
             logger.warning("CloudKit user creation failed (ok if not enabled): \(error.localizedDescription)")
             // Continue with local user
         }
 
         // Use CloudKit user if available, otherwise create local
-        let user = cloudUser ?? User(
+        let baseUser = cloudUser ?? User(
             id: userId,
             username: username,
             displayName: displayName,
             profileEmoji: profileImage == nil ? profileEmoji : nil,  // Clear emoji if using photo
             profileColor: profileColor,
-            profileImageURL: profileImageURL
+            profileImageURL: nil
         )
+        var user = baseUser
+
+        if let profileImage {
+            let profileImageURL = try await dependencies.profileImageManager.saveImage(profileImage, userId: baseUser.id)
+            logger.info("Saved profile image locally")
+
+            var cloudProfileImageRecordName = baseUser.cloudProfileImageRecordName
+            var profileImageModifiedAt = baseUser.profileImageModifiedAt
+
+            if cloudUser != nil {
+                do {
+                    cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: baseUser.id)
+                    profileImageModifiedAt = Date()
+                    logger.info("Uploaded profile image to CloudKit: \(cloudProfileImageRecordName ?? "")")
+                } catch {
+                    logger.warning("Failed to upload profile image to CloudKit: \(error.localizedDescription)")
+                    // Continue - local image is still available
+                }
+            }
+
+            user = baseUser.updatedProfile(
+                profileEmoji: nil,
+                profileColor: profileColor,
+                profileImageURL: profileImageURL,
+                cloudProfileImageRecordName: cloudProfileImageRecordName,
+                profileImageModifiedAt: profileImageModifiedAt
+            )
+
+            if cloudUser != nil, cloudProfileImageRecordName != nil {
+                do {
+                    try await dependencies.userCloudService.saveUser(user)
+                } catch {
+                    logger.warning("Failed to update CloudKit user profile image metadata: \(error.localizedDescription)")
+                }
+            }
+        }
 
         // Save to UserDefaults
         saveUserToDefaults(user)

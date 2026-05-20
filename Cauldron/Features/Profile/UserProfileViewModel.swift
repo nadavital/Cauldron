@@ -42,6 +42,8 @@ import os
     private let connectionCoordinator: ConnectionInteractionCoordinator
     private var recipeImageURLsById: [UUID: URL?] = [:]
     private var collectionImageRecipesById: [UUID: Recipe] = [:]
+    private var authoritativeRecipeCount: Int?
+    private let profileRecipeDisplayLimit = 500
 
     var currentUserId: UUID {
         dependencies.connectionManager.currentUserId
@@ -213,6 +215,7 @@ import os
             collectionImageRecipesById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
             }
+            await refreshAuthoritativeRecipeCount(forceRefresh: false)
             updateTierFromRecipes()
             return
         }
@@ -222,6 +225,7 @@ import os
 
         do {
             userRecipes = try await fetchUserRecipes()
+            await refreshAuthoritativeRecipeCount(forceRefresh: forceRefresh)
 
             // Cache the results
             dependencies.profileCacheManager.cacheRecipes(
@@ -245,8 +249,25 @@ import os
 
     /// Update the user's tier based on their recipe count
     private func updateTierFromRecipes() {
-        userRecipeCount = userRecipes.count
+        userRecipeCount = authoritativeRecipeCount ?? userRecipes.count
         userTier = UserTier.tier(for: userRecipeCount)
+    }
+
+    private func refreshAuthoritativeRecipeCount(forceRefresh: Bool) async {
+        guard !isCurrentUser else {
+            authoritativeRecipeCount = nil
+            return
+        }
+
+        do {
+            let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
+                forOwnerIds: [user.id],
+                forceRefresh: forceRefresh
+            )
+            authoritativeRecipeCount = counts[user.id]
+        } catch {
+            AppLogger.general.warning("Failed to fetch authoritative public recipe count for \(self.user.username): \(error.localizedDescription)")
+        }
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
@@ -269,7 +290,8 @@ import os
             recipes = try await dependencies.recipeDiscoveryCache.querySharedRecipes(
                 ownerIds: [user.id],
                 visibility: .publicRecipe,
-                includeDerivedCopies: true
+                includeDerivedCopies: true,
+                limit: profileRecipeDisplayLimit
             )
             AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
         }

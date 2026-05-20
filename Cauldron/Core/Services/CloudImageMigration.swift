@@ -128,7 +128,7 @@ actor CloudImageMigration {
                 }
 
                 // Skip if already migrated (has cloud image record name)
-                if recipe.cloudImageRecordName != nil {
+                if recipe.cloudImageRecordName != nil && recipe.visibility != .publicRecipe {
                     skippedCount += 1
                     continue
                 }
@@ -146,24 +146,26 @@ actor CloudImageMigration {
 
                     logger.info("📤 Migrating image for: \(recipe.title)")
 
-                    let recordName = try await recipeCloudService.uploadImageAsset(
-                        recipeId: recipe.id,
-                        imageData: imageData,
-                        toPublic: false
-                    )
+                    if recipe.cloudImageRecordName == nil {
+                        let recordName = try await recipeCloudService.uploadImageAsset(
+                            recipeId: recipe.id,
+                            imageData: imageData,
+                            toPublic: false
+                        )
 
-                    // Update recipe with cloud metadata (migration - don't update timestamp, skip image sync since we just uploaded)
-                    let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
-                    let updatedRecipe = recipe.withCloudImageMetadata(
-                        recordName: recordName,
-                        modifiedAt: modificationDate
-                    )
+                        // Update recipe with cloud metadata (migration - don't update timestamp, skip image sync since we just uploaded)
+                        let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
+                        let updatedRecipe = recipe.withCloudImageMetadata(
+                            recordName: recordName,
+                            modifiedAt: modificationDate
+                        )
 
-                    try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                        try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                    }
 
                     // If recipe is public, also upload to Public database
                     if recipe.visibility == .publicRecipe {
-                        _ = try? await recipeCloudService.uploadImageAsset(
+                        _ = try await recipeCloudService.uploadImageAsset(
                             recipeId: recipe.id,
                             imageData: imageData,
                             toPublic: true
@@ -185,9 +187,17 @@ actor CloudImageMigration {
                 }
             }
 
-            migrationStatus = .completed(migratedCount: migratedCount)
+            guard failedCount == 0 else {
+                let message = "Image migration incomplete: \(failedCount) image(s) failed"
+                migrationStatus = .failed(message)
+                UserDefaults.standard.removeObject(forKey: migrationCompletedKey)
+                UserDefaults.standard.set(Date(), forKey: lastMigrationAttemptKey)
+                logger.error("\(message, privacy: .public) - Migrated: \(migratedCount), Skipped: \(skippedCount)")
+                return
+            }
 
             // Persist completion status
+            migrationStatus = .completed(migratedCount: migratedCount)
             UserDefaults.standard.set(true, forKey: migrationCompletedKey)
             UserDefaults.standard.set(migratedCount, forKey: "com.cauldron.imageMigrationCount")
             UserDefaults.standard.set(Date(), forKey: lastMigrationAttemptKey)
@@ -310,7 +320,7 @@ actor CloudImageMigration {
                     // If recipe is public, ALSO upload to Public database (for discovery/sharing)
                     if recipe.visibility == .publicRecipe {
                         logger.info("📤 Force uploading image for: \(recipe.title) to PUBLIC DB")
-                        _ = try? await recipeCloudService.uploadImageAsset(
+                        _ = try await recipeCloudService.uploadImageAsset(
                             recipeId: recipe.id,
                             imageData: imageData,
                             toPublic: true

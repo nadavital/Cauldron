@@ -126,7 +126,7 @@ struct CookTabView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
                         dependencies: viewModel.dependencies,
-                        showingEditor: $showingEditor,
+                        showingEditor: createRecipeEditorBinding,
                         showingAIGenerator: $showingAIGenerator,
                         showingImporter: $showingImporter,
                         showingCollectionForm: $showingCollectionForm
@@ -643,7 +643,7 @@ struct CookTabView: View {
 
                 HStack(spacing: 16) {
                     Button {
-                        showingEditor = true
+                        showCreateRecipeEditor()
                     } label: {
                         Label("Create", systemImage: "square.and.pencil")
                             .frame(maxWidth: .infinity)
@@ -696,7 +696,7 @@ struct CookTabView: View {
                 .tint(.cauldronOrange)
 
                 Button {
-                    showingEditor = true
+                    showCreateRecipeEditor()
                 } label: {
                     Label("Create", systemImage: "square.and.pencil")
                         .font(.subheadline)
@@ -838,8 +838,7 @@ struct CookTabView: View {
         }
         
         Button {
-            selectedRecipe = recipe
-            showingEditor = true
+            showEditRecipeEditor(recipe)
         } label: {
             Label("Edit Recipe", systemImage: "pencil")
         }
@@ -868,6 +867,28 @@ struct CookTabView: View {
                 await viewModel.dependencies.cookModeCoordinator.startCooking(recipe)
             }
         }
+    }
+
+    private var createRecipeEditorBinding: Binding<Bool> {
+        Binding(
+            get: { showingEditor },
+            set: { isPresented in
+                if isPresented {
+                    selectedRecipe = nil
+                }
+                showingEditor = isPresented
+            }
+        )
+    }
+
+    private func showCreateRecipeEditor() {
+        selectedRecipe = nil
+        showingEditor = true
+    }
+
+    private func showEditRecipeEditor(_ recipe: Recipe) {
+        selectedRecipe = recipe
+        showingEditor = true
     }
 
     private func deleteRecipe(_ recipe: Recipe) {

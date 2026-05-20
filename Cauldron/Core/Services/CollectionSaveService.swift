@@ -203,7 +203,9 @@ actor CollectionSaveService {
         sourceCollection: Collection,
         visibleRecipes: [Recipe]
     ) -> [Recipe] {
-        let recipesById = Dictionary(uniqueKeysWithValues: visibleRecipes.map { ($0.id, $0) })
+        let recipesById = Dictionary(visibleRecipes.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+            candidate.updatedAt > current.updatedAt ? candidate : current
+        })
         var seenRecipeIds = Set<UUID>()
         var orderedRecipes: [Recipe] = []
 
