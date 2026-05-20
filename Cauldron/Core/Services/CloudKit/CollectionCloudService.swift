@@ -71,6 +71,12 @@ actor CollectionCloudService {
         let recordID = CKRecord.ID(recordName: collection.id.uuidString)
         var conflictCandidate: CKRecord?
 
+        if try await isSuppressedByDeletedCollectionTombstone(collection, in: db) {
+            logger.warning("Skipping save for collection suppressed by deleted tombstone: \(collection.id)")
+            try await deleteCollectionRecordIfPresent(collection.id, in: db)
+            throw CloudKitError.invalidRecord
+        }
+
         for attempt in 1...maxSaveAttempts {
             let record: CKRecord
             if let conflictCandidate {
@@ -231,6 +237,10 @@ actor CollectionCloudService {
         logger.info("🗑️ Deleting collection: \(collectionId)")
 
         let db = try await core.getPublicDatabase()
+        try await deleteCollectionRecordIfPresent(collectionId, in: db)
+    }
+
+    private func deleteCollectionRecordIfPresent(_ collectionId: UUID, in db: CKDatabase) async throws {
         let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
         do {
@@ -647,6 +657,7 @@ actor CollectionCloudService {
     }
 
     private func overlayMembershipEdges(on collections: [Collection]) async throws -> [Collection] {
+        let collections = try await filterDeletedCollections(collections)
         guard !collections.isEmpty else { return [] }
 
         var allEdges: [CollectionMembershipEdge] = []
@@ -662,6 +673,37 @@ actor CollectionCloudService {
                 return collection
             }
             return collectionWithRecipeIds(collection, activeRecipeIds(from: edges))
+        }
+    }
+
+    private func filterDeletedCollections(_ collections: [Collection]) async throws -> [Collection] {
+        guard !collections.isEmpty else { return [] }
+
+        var deletedCollectionIds = Set<UUID>()
+        for ownerId in Set(collections.map(\.userId)) {
+            let tombstones = try await fetchDeletedCollectionTombstones(ownerId: ownerId)
+            deletedCollectionIds.formUnion(tombstones.map(\.collectionId))
+        }
+
+        guard !deletedCollectionIds.isEmpty else { return collections }
+
+        for collectionId in deletedCollectionIds where collections.contains(where: { $0.id == collectionId }) {
+            try? await deleteCollection(collectionId)
+        }
+
+        return collections.filter { !deletedCollectionIds.contains($0.id) }
+    }
+
+    private func isSuppressedByDeletedCollectionTombstone(_ collection: Collection, in db: CKDatabase) async throws -> Bool {
+        let tombstoneRecordID = Self.deletedCollectionRecordID(collectionId: collection.id)
+        do {
+            let record = try await db.record(for: tombstoneRecordID)
+            let tombstone = try deletedCollectionTombstone(from: record)
+            return tombstone.ownerId == collection.userId
+        } catch let error as CKError where error.code == .unknownItem {
+            return false
+        } catch let error as CKError where error.errorCode == 11 || error.code == .invalidArguments {
+            return false
         }
     }
 

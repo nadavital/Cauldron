@@ -118,6 +118,11 @@ struct CollectionsListView: View {
                 await viewModel.loadCollections()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { _ in
+            Task {
+                await viewModel.loadCollections()
+            }
+        }
     }
 
     private var gridColumns: [GridItem] {

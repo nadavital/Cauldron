@@ -134,6 +134,11 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openRecipeImportURL)) { notification in
             guard let url = notification.object as? URL else { return }
+            if ShareExtensionImportStore.pendingPreparedRecipe() != nil {
+                AppLogger.general.info("📥 Prepared Share Extension payload supersedes URL handoff")
+                openPendingImporterIfNeeded()
+                return
+            }
             AppLogger.general.info("📥 Opening importer from Share Extension URL: \(url.absoluteString)")
             openImporter(with: url, acknowledgement: .url(url))
         }
@@ -177,6 +182,9 @@ struct MainTabView: View {
             scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { _ in
+            scheduleSidebarCollectionsRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { _ in
             scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { notification in

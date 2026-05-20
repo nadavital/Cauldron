@@ -380,7 +380,6 @@ actor UserCloudService {
 
         do {
             let systemUserRecordID = try await core.getCurrentUserRecordID()
-            profileRecordIDs.insert(systemUserRecordID)
             profileRecordIDs.insert(CKRecord.ID(recordName: "user_\(systemUserRecordID.recordName)"))
         } catch {
             logger.warning("Could not resolve current CloudKit user record during profile deletion: \(error.localizedDescription)")

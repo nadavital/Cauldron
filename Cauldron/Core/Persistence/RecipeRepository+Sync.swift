@@ -90,6 +90,12 @@ extension RecipeRepository {
     /// Visibility only controls who else can see the recipe, not whether it syncs.
     @discardableResult
     func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
+        if await isMarkedDeleted(recipeId: recipe.id) {
+            logger.info("Skipping private recipe sync because recipe is tombstoned: \(recipe.title)")
+            pendingSyncRecipes.remove(recipe.id)
+            return await deleteRecipeFromCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
+        }
+
         // Only sync if we have an owner ID and CloudKit is available
         guard let ownerId = recipe.ownerId else {
             logger.info("Skipping CloudKit sync - no owner ID for recipe: \(recipe.title)")
@@ -171,6 +177,16 @@ extension RecipeRepository {
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
     @discardableResult
     func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> PublicRecipeSyncResult {
+        if await isMarkedDeleted(recipeId: recipe.id) {
+            logger.info("Skipping PUBLIC recipe sync because recipe is tombstoned: \(recipe.title)")
+            let didDeletePublicRecipe = await deleteRecipeFromPublicDatabase(
+                recipe,
+                cloudKitCore: cloudKitCore,
+                recipeCloudService: recipeCloudService
+            )
+            return didDeletePublicRecipe ? .success : .retryNeeded
+        }
+
         // Don't sync preview recipes to PUBLIC database - they're local-only copies
         guard !recipe.isPreview else {
             logger.info("Skipping PUBLIC database sync for preview recipe: \(recipe.title)")
@@ -271,6 +287,10 @@ extension RecipeRepository {
             logger.error("❌ PUBLIC database deletion failed for recipe '\(recipe.title)': \(error.localizedDescription)")
             return false
         }
+    }
+
+    private func isMarkedDeleted(recipeId: UUID) async -> Bool {
+        (try? await deletedRecipeRepository.isDeleted(recipeId: recipeId)) ?? false
     }
     
     /// Migrate all public recipes to the public database
