@@ -282,7 +282,14 @@ struct SearchTabView: View {
     
     private var recipeSearchResultsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if viewModel.recipeSearchResults.isEmpty {
+            if viewModel.recipeSearchResults.isEmpty && viewModel.isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView("Searching...")
+                    Spacer()
+                }
+                .padding(.vertical, 40)
+            } else if viewModel.recipeSearchResults.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 48))
@@ -300,6 +307,16 @@ struct SearchTabView: View {
                 Text("\(viewModel.recipeSearchResults.count) recipes found")
                     .font(.headline)
                     .foregroundColor(.secondary)
+
+                if viewModel.isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 ForEach(viewModel.recipeSearchResults) { group in
                     Button {

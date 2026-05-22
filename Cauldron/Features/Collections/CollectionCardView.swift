@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct CollectionRecipeImageSource: Hashable {
+struct CollectionRecipeImageSource: Hashable, Sendable {
     let recipeId: UUID?
     let imageURL: URL?
     let ownerId: UUID?
@@ -22,6 +22,20 @@ struct CollectionRecipeImageSource: Hashable {
 
     var canLoadImage: Bool {
         imageURL != nil || (recipeId != nil && hasCloudImage)
+    }
+}
+
+enum CollectionCoverPagePolicy {
+    static func shouldReserveCustomCoverPage(
+        coverImageType: CoverImageType,
+        coverImageURL: URL?,
+        cloudCoverImageRecordName: String?,
+        hasLoadedCustomCoverImage: Bool
+    ) -> Bool {
+        guard coverImageType == .customImage else { return false }
+        return hasLoadedCustomCoverImage ||
+            coverImageURL != nil ||
+            cloudCoverImageRecordName != nil
     }
 }
 
@@ -155,8 +169,7 @@ struct CollectionCardView: View {
     }
 
     private var customCoverTaskID: String {
-        let remoteKey = collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName ?? "no-cover"
-        return "\(collection.id.uuidString)|\(collection.coverImageType.rawValue)|\(remoteKey)"
+        collection.customCoverImageCacheKey
     }
 
     private var coverImageSources: [CollectionRecipeImageSource] {
@@ -199,7 +212,12 @@ struct CollectionCardView: View {
 
     @ViewBuilder
     private var coverContent: some View {
-        if collection.coverImageType == .customImage {
+        if CollectionCoverPagePolicy.shouldReserveCustomCoverPage(
+            coverImageType: collection.coverImageType,
+            coverImageURL: collection.coverImageURL,
+            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
+            hasLoadedCustomCoverImage: customCoverImage != nil
+        ) {
             customImageView
         } else {
             collectionCoverArtwork

@@ -612,16 +612,6 @@ struct RecipeEditorView: View {
                 // Delete from local database
                 try await viewModel.dependencies.recipeRepository.delete(id: recipe.id)
 
-                // Delete from CloudKit if it was synced
-                if recipe.cloudRecordName != nil {
-                    do {
-                        try await viewModel.dependencies.recipeSyncService.deleteRecipeFromCloud(recipe)
-                        AppLogger.general.info("Recipe deleted from CloudKit: \(recipe.title)")
-                    } catch {
-                        AppLogger.general.warning("Failed to delete from CloudKit (continuing): \(error.localizedDescription)")
-                    }
-                }
-
                 // Notify parent view that recipe was deleted
                 onDelete?()
 

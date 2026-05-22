@@ -27,11 +27,54 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testMigrateRecipeOwnershipSetsCurrentUserAndPreservesPreviousOwnerAsCreator() async throws {
+    func testMigrateRecipeOwnershipSetsCurrentUserForLegacyRecipesWithoutOwner() async throws {
+        let currentUserId = UUID()
+        let model = RecipeModel(
+            title: "Legacy Recipe",
+            ingredientsBlob: Data(),
+            stepsBlob: Data(),
+            tagsBlob: Data()
+        )
+        let context = ModelContext(modelContainer)
+        context.insert(model)
+        try context.save()
+
+        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+
+        let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
+        XCTAssertEqual(migrated.ownerId, currentUserId)
+        XCTAssertNil(migrated.originalCreatorId)
+    }
+
+    func testMigrateRecipeOwnershipDoesNotClaimStandaloneRecipesOwnedBySomeoneElse() async throws {
+        let currentUserId = UUID()
+        let previousOwnerId = UUID()
+        let existingCreatorId = UUID()
+        let model = RecipeModel(
+            title: "Legacy Saved Recipe",
+            ingredientsBlob: Data(),
+            stepsBlob: Data(),
+            tagsBlob: Data(),
+            ownerId: previousOwnerId,
+            cloudRecordName: "cached-public-record",
+            originalCreatorId: existingCreatorId
+        )
+        let context = ModelContext(modelContainer)
+        context.insert(model)
+        try context.save()
+
+        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+
+        let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
+        XCTAssertEqual(migrated.ownerId, previousOwnerId)
+        XCTAssertEqual(migrated.originalCreatorId, existingCreatorId)
+    }
+
+    func testMigrateRecipeOwnershipDoesNotClaimWrongOwnerStandaloneRecipesWithoutCloudIdentity() async throws {
         let currentUserId = UUID()
         let previousOwnerId = UUID()
         let model = RecipeModel(
-            title: "Legacy Recipe",
+            title: "Legacy Local Recipe",
             ingredientsBlob: Data(),
             stepsBlob: Data(),
             tagsBlob: Data(),
@@ -44,21 +87,23 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
-        XCTAssertEqual(migrated.ownerId, currentUserId)
-        XCTAssertEqual(migrated.originalCreatorId, previousOwnerId)
+        XCTAssertEqual(migrated.ownerId, previousOwnerId)
+        XCTAssertNil(migrated.originalCreatorId)
     }
 
-    func testMigrateRecipeOwnershipDoesNotOverwriteExistingOriginalCreator() async throws {
+    func testMigrateRecipeOwnershipClaimsLegacySavedCopiesAndPreservesAttribution() async throws {
         let currentUserId = UUID()
-        let previousOwnerId = UUID()
-        let existingCreatorId = UUID()
+        let sourceOwnerId = UUID()
+        let sourceRecipeId = UUID()
         let model = RecipeModel(
-            title: "Legacy Saved Recipe",
+            title: "Legacy Saved Copy",
             ingredientsBlob: Data(),
             stepsBlob: Data(),
             tagsBlob: Data(),
-            ownerId: previousOwnerId,
-            originalCreatorId: existingCreatorId
+            ownerId: sourceOwnerId,
+            originalRecipeId: sourceRecipeId,
+            savedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            followsSourceUpdates: true
         )
         let context = ModelContext(modelContainer)
         context.insert(model)
@@ -68,7 +113,9 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, currentUserId)
-        XCTAssertEqual(migrated.originalCreatorId, existingCreatorId)
+        XCTAssertEqual(migrated.originalCreatorId, sourceOwnerId)
+        XCTAssertEqual(migrated.originalRecipeId, sourceRecipeId)
+        XCTAssertTrue(migrated.followsSourceUpdates)
     }
 
     func testMigrateRecipeOwnershipDoesNotClaimPreviewRecipes() async throws {
@@ -114,6 +161,26 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, previewOwnerId)
         XCTAssertEqual(migrated.originalCreatorId, previewOwnerId)
+    }
+
+    func testPublicRecipeSearchMetadataMigrationAttemptedAfterFullBestEffortScan() {
+        let completedWithFailures = PublicRecipeSearchMetadataBackfillSummary(
+            scanned: 20,
+            updated: 5,
+            alreadyCurrent: 10,
+            failed: 5,
+            mayHaveMore: false
+        )
+        let incomplete = PublicRecipeSearchMetadataBackfillSummary(
+            scanned: 1_000,
+            updated: 900,
+            alreadyCurrent: 100,
+            failed: 0,
+            mayHaveMore: true
+        )
+
+        XCTAssertTrue(RecipeRepository.shouldMarkPublicRecipeSearchMetadataMigrationAttempted(completedWithFailures))
+        XCTAssertFalse(RecipeRepository.shouldMarkPublicRecipeSearchMetadataMigrationAttempted(incomplete))
     }
 
     func testFixCorruptedImageFilenamesClearsMissingLocalImageAndMarksMigrationComplete() async throws {

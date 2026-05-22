@@ -87,6 +87,71 @@ final class ConnectionManagerTests: XCTestCase {
         }
     }
 
+    func testConnectionsViewModelAcceptRefreshesLocalArrays() async throws {
+        let dependencies = DependencyContainer.preview()
+        let currentUserId = UUID()
+        let fromUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "receiver",
+                displayName: "Receiver",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+        let pendingConnection = Connection(
+            id: UUID(),
+            fromUserId: fromUserId,
+            toUserId: currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(pendingConnection)
+        let viewModel = ConnectionsViewModel(dependencies: dependencies)
+        await viewModel.loadConnections()
+        XCTAssertEqual(viewModel.receivedRequests.map(\.id), [pendingConnection.id])
+
+        await viewModel.acceptRequest(pendingConnection)
+
+        XCTAssertTrue(viewModel.receivedRequests.isEmpty)
+        XCTAssertEqual(viewModel.connections.map(\.id), [pendingConnection.id])
+        XCTAssertEqual(viewModel.connections.first?.status, .accepted)
+    }
+
+    func testConnectionsViewModelRejectRefreshesLocalArrays() async throws {
+        let dependencies = DependencyContainer.preview()
+        let currentUserId = UUID()
+        let fromUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "receiver",
+                displayName: "Receiver",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+        let pendingConnection = Connection(
+            id: UUID(),
+            fromUserId: fromUserId,
+            toUserId: currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(pendingConnection)
+        let viewModel = ConnectionsViewModel(dependencies: dependencies)
+        await viewModel.loadConnections()
+        XCTAssertEqual(viewModel.receivedRequests.map(\.id), [pendingConnection.id])
+
+        await viewModel.rejectRequest(pendingConnection)
+
+        XCTAssertTrue(viewModel.receivedRequests.isEmpty)
+        XCTAssertTrue(viewModel.connections.isEmpty)
+    }
+
     func testSendConnectionRequestCreatesOptimisticState() async throws {
         let (connectionManager, _, _) = makeConnectionManager()
 

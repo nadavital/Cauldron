@@ -332,7 +332,7 @@ struct AllRecipesListView: View {
     private func refreshRecipes() {
         Task {
             do {
-                let recipes = try await dependencies.recipeRepository.fetchAll()
+                let recipes = try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId)
                 localRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                     recipes,
                     currentUserId: CurrentUserSession.shared.userId,
@@ -349,24 +349,7 @@ struct AllRecipesListView: View {
         // Update the local recipe in the list
         if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
             let current = localRecipes[index]
-            let toggled = Recipe(
-                id: current.id,
-                title: current.title,
-                ingredients: current.ingredients,
-                steps: current.steps,
-                yields: current.yields,
-                totalMinutes: current.totalMinutes,
-                tags: current.tags,
-                nutrition: current.nutrition,
-                sourceURL: current.sourceURL,
-                sourceTitle: current.sourceTitle,
-                notes: current.notes,
-                imageURL: current.imageURL,
-                isFavorite: !current.isFavorite,
-                createdAt: current.createdAt,
-                updatedAt: current.updatedAt
-            )
-            localRecipes[index] = toggled
+            localRecipes[index] = current.withFavorite(!current.isFavorite)
         }
     }
 }

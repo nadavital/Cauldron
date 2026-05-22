@@ -88,6 +88,7 @@ class ConnectionManager: ObservableObject {
 
     // Cache management
     private var lastSyncTime: Date?
+    private var loadedUserId: UUID?
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
     private let isCloudSyncEnabled: Bool
 
@@ -119,6 +120,8 @@ class ConnectionManager: ObservableObject {
     ///   - userId: The user ID to load connections for
     ///   - forceRefresh: If true, bypasses cache and forces a CloudKit sync
     func loadConnections(forUserId userId: UUID, forceRefresh: Bool = false) async {
+        prepareForUser(userId)
+
         // Check if cache is still valid (don't log routine cache hits)
         if !forceRefresh, let lastSync = lastSyncTime {
             let timeSinceLastSync = Date().timeIntervalSince(lastSync)
@@ -133,6 +136,7 @@ class ConnectionManager: ObservableObject {
 
         // First, load from local cache for instant display
         await loadFromCache(userId: userId)
+        guard isCurrentLoadValid(for: userId) else { return }
 
         guard isCloudSyncEnabled else {
             lastSyncTime = Date()
@@ -141,9 +145,37 @@ class ConnectionManager: ObservableObject {
 
         // Then fetch from CloudKit in background
         await syncFromCloudKit(userId: userId)
+        guard isCurrentLoadValid(for: userId) else { return }
 
         // Update last sync time
         lastSyncTime = Date()
+    }
+
+    func resetSessionState() {
+        connections = [:]
+        syncErrors = [:]
+        processingConnectionIds = []
+        lastSyncTime = nil
+        loadedUserId = nil
+        pendingRejectIds = []
+        updateBadgeCount()
+    }
+
+    private func prepareForUser(_ userId: UUID) {
+        guard loadedUserId != userId else { return }
+
+        connections = [:]
+        syncErrors = [:]
+        processingConnectionIds = []
+        lastSyncTime = nil
+        pendingRejectIds = Self.loadPendingRejectIds()
+        loadedUserId = userId
+        updateBadgeCount()
+    }
+
+    private func isCurrentLoadValid(for userId: UUID) -> Bool {
+        let sessionUserId = CurrentUserSession.shared.userId
+        return !Task.isCancelled && loadedUserId == userId && (sessionUserId == nil || sessionUserId == userId)
     }
 
     /// Accept a connection request (optimistic update)
@@ -407,6 +439,7 @@ class ConnectionManager: ObservableObject {
     private func syncFromCloudKit(userId: UUID) async {
         do {
             let cloudConnections = try await dependencies.connectionCloudService.fetchConnections(forUserId: userId)
+            guard isCurrentLoadValid(for: userId) else { return }
 
             // Track cloud connection IDs
             let cloudConnectionIds = Set(cloudConnections.map { $0.id })
@@ -427,9 +460,11 @@ class ConnectionManager: ObservableObject {
             // Update local cache and state with cloud connections
             for connection in filteredConnections {
                 try? await dependencies.connectionRepository.save(connection)
+                guard isCurrentLoadValid(for: userId) else { return }
 
                 // Don't override optimistic local states while an operation is queued.
                 if !(await hasQueuedConnectionOperation(for: connection.id)) {
+                    guard isCurrentLoadValid(for: userId) else { return }
                     connections[connection.id] = ManagedConnection(
                         connection: connection,
                         syncState: .synced
@@ -446,6 +481,7 @@ class ConnectionManager: ObservableObject {
                 if await hasQueuedConnectionOperation(for: deletedId) {
                     continue
                 }
+                guard isCurrentLoadValid(for: userId) else { return }
 
                 // Remove from in-memory state
                 if let connection = connections[deletedId]?.connection {

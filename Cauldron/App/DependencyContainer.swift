@@ -102,6 +102,7 @@ class DependencyContainer: ObservableObject {
     let recipeSaveService: RecipeSaveService
     let publicCollectionMembershipResolver: PublicCollectionMembershipResolver
     let collectionSaveService: CollectionSaveService
+    let libraryRelationResolver: LibraryRelationResolver
     let externalShareService: ExternalShareService
     let recipeSyncService: RecipeSyncService
     let imageMigrationService: CloudImageMigration
@@ -123,6 +124,7 @@ class DependencyContainer: ObservableObject {
     // UI Services (MainActor)
     let timerManager: TimerManager
     let profileCacheManager: ProfileCacheManager
+    let libraryPresentationStore: LibraryPresentationStore
     lazy var imageSyncViewModel: ImageSyncViewModel = ImageSyncViewModel(
         imageSyncManager: imageSyncManager,
         imageMigrationService: imageMigrationService
@@ -218,6 +220,7 @@ class DependencyContainer: ObservableObject {
         self.recipeLineClassificationService = RecipeLineClassificationService()
         self.timerManager = TimerManager()
         self.profileCacheManager = ProfileCacheManager()
+        self.libraryPresentationStore = LibraryPresentationStore()
 
         self.groceryService = GroceryService(
             unitsService: unitsService
@@ -238,6 +241,10 @@ class DependencyContainer: ObservableObject {
             collectionRepository: collectionRepository,
             savedReferenceRepository: savedReferenceRepository,
             recipeSaveService: recipeSaveService
+        )
+        self.libraryRelationResolver = LibraryRelationResolver(
+            recipeRepository: recipeRepository,
+            savedReferenceRepository: savedReferenceRepository
         )
 
         self.sharingService = SharingService(
@@ -315,6 +322,7 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,
@@ -340,6 +348,7 @@ class DependencyContainer: ObservableObject {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
             GroceryListModel.self,
             GroceryItemModel.self,
             CookingHistoryModel.self,

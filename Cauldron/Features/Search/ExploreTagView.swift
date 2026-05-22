@@ -375,8 +375,9 @@ final class ExploreTagViewModel {
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 
         do {
-            // Parallelize tag-scoped fetches instead of loading every recipe and filtering in memory.
-            async let localRecipesTask = dependencies.recipeRepository.search(tag: normalizedTag)
+            // User-facing local tag browsing must stay on the owned-library
+            // boundary; raw tag search can include cached non-owned recipes.
+            async let localRecipesTask = dependencies.recipeRepository.fetchLibraryRecipes(ownerId: currentUserId)
             async let primarySharedRecipesTask = dependencies.recipeDiscoveryCache.querySharedRecipeSummaries(
                 ownerIds: nil,
                 visibility: .publicRecipe,
@@ -400,7 +401,14 @@ final class ExploreTagViewModel {
                 friendIDsFuture = nil
             }
 
-            let allUserRecipes = try await localRecipesTask
+            let localLibraryRecipes = try await localRecipesTask
+            let allUserRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                localLibraryRecipes.filter { recipe in
+                    recipe.tags.contains { $0.name.localizedCaseInsensitiveContains(normalizedTag) }
+                },
+                currentUserId: currentUserId,
+                hidingRelatedRecipeReferences: true
+            )
 
             // Process local recipes as soon as they are ready. Shared CloudKit/profile
             // lookups can still be in flight without blocking owned content.
@@ -528,8 +536,10 @@ final class ExploreTagViewModel {
     }
 
     private func cachedOwnerMap(for ownerIds: Set<UUID>) -> [UUID: User] {
-        Dictionary(uniqueKeysWithValues: ownerIds.compactMap { ownerId in
+        Dictionary(ownerIds.compactMap { ownerId in
             ownerCache[ownerId].map { (ownerId, $0) }
+        }, uniquingKeysWith: { current, candidate in
+            candidate.createdAt > current.createdAt ? candidate : current
         })
     }
 
@@ -841,6 +851,16 @@ private struct PublicRecipeDetailLoaderView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
 
+    init(summary: SharedRecipeSummary, dependencies: DependencyContainer) {
+        self.summary = summary
+        self.dependencies = dependencies
+
+        let previewRecipe = summary.recipe.previewRecipe
+        let cachedRecipe = dependencies.libraryPresentationStore.recipeSnapshot(for: previewRecipe)?.recipe
+        self._fullRecipe = State(initialValue: cachedRecipe)
+        self._isLoading = State(initialValue: cachedRecipe == nil)
+    }
+
     var body: some View {
         Group {
             if let fullRecipe {
@@ -874,6 +894,11 @@ private struct PublicRecipeDetailLoaderView: View {
         do {
             if let recipe = try await dependencies.recipeDiscoveryCache.fetchPublicRecipe(id: summary.recipe.id) {
                 fullRecipe = recipe
+                dependencies.libraryPresentationStore.seedRecipe(
+                    recipe,
+                    sharedBy: summary.sharedBy,
+                    sharedAt: summary.sharedAt
+                )
             } else {
                 loadFailed = true
             }

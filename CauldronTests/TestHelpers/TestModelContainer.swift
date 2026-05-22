@@ -20,6 +20,7 @@ struct TestModelContainer {
             CollectionModel.self,
             CollectionMembershipModel.self,
             DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
             ConnectionModel.self,
             UserModel.self,
             SharedRecipeModel.self,

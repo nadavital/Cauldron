@@ -142,6 +142,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
 
         try optimizedData.write(to: fileURL)
+        removeCacheEntry(entityId: entityId)
         return fileURL
     }
 
@@ -178,11 +179,13 @@ actor EntityImageManager<Entity: ImageManageable> {
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
 
-        // Clear from ImageCache if cache key generator is configured
-        if let cacheKeyGenerator = cacheKeyGenerator {
-            Task { @MainActor in
-                ImageCache.shared.remove(cacheKeyGenerator(entityId))
-            }
+        removeCacheEntry(entityId: entityId)
+    }
+
+    private func removeCacheEntry(entityId: UUID) {
+        guard let cacheKeyGenerator else { return }
+        Task { @MainActor in
+            ImageCache.shared.remove(cacheKeyGenerator(entityId))
         }
     }
 
@@ -278,6 +281,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         }
 
         try FileManager.default.copyItem(at: sourceURL, to: targetURL)
+        removeCacheEntry(entityId: targetId)
         return targetFilename
     }
 

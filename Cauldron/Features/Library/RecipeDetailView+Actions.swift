@@ -18,7 +18,8 @@ extension RecipeDetailView {
         do {
             let localResolution = try await dependencies.recipeRepository.resolveLocalRelatedRecipes(
                 referenceIds: recipe.relatedRecipeIds,
-                includePreviews: true
+                includePreviews: true,
+                preferredOwnerId: CurrentUserSession.shared.userId
             )
             var loadedRecipes = localResolution.recipes
             let missingIds = localResolution.missingIds
@@ -183,6 +184,12 @@ extension RecipeDetailView {
                 localIsFavorite = updatedRecipe.isFavorite
                 currentVisibility = updatedRecipe.visibility
                 imageRefreshID = UUID()
+                dependencies.libraryPresentationStore.seedRecipe(
+                    updatedRecipe,
+                    sharedBy: sharedBy,
+                    sharedAt: sharedAt,
+                    relation: recipeLibraryRelation
+                )
 
                 AppLogger.general.info("✅ Refreshed recipe: \(updatedRecipe.title)")
                 await loadRelatedRecipes()
@@ -211,6 +218,12 @@ extension RecipeDetailView {
             recipe = refreshedRecipe
             currentVisibility = refreshedRecipe.visibility
             imageRefreshID = UUID()
+            dependencies.libraryPresentationStore.seedRecipe(
+                refreshedRecipe,
+                sharedBy: sharedBy,
+                sharedAt: sharedAt,
+                relation: recipeLibraryRelation
+            )
             AppLogger.general.info("✅ Refreshed public recipe before preview save: \(refreshedRecipe.title)")
         } catch {
             AppLogger.general.warning("Failed to refresh public recipe: \(error.localizedDescription)")
@@ -260,6 +273,8 @@ extension RecipeDetailView {
         if recipe.ownerId == userId {
             AppLogger.general.info("Skipping save - recipe already belongs to current user: \(recipe.title)")
             hasOwnedCopy = true
+            recipeLibraryRelation = .owned
+            dependencies.libraryPresentationStore.updateRecipeRelation(.owned, for: recipe)
             return
         }
 
@@ -286,6 +301,8 @@ extension RecipeDetailView {
         if recipe.ownerId == userId {
             AppLogger.general.info("Skipping save - recipe already belongs to current user: \(recipe.title)")
             hasOwnedCopy = true
+            recipeLibraryRelation = .owned
+            dependencies.libraryPresentationStore.updateRecipeRelation(.owned, for: recipe)
             return
         }
 
@@ -305,9 +322,16 @@ extension RecipeDetailView {
                 currentVisibility = result.recipe.visibility
                 localIsFavorite = result.recipe.isFavorite
                 hasOwnedCopy = true
+                recipeLibraryRelation = .saved(materializedRecipeId: result.recipe.id)
                 showSaveSuccessToast = !result.reusedExistingCopy
                 imageRefreshID = UUID()
             }
+            dependencies.libraryPresentationStore.seedRecipe(
+                result.recipe,
+                sharedBy: sharedBy,
+                sharedAt: sharedAt,
+                relation: recipeLibraryRelation
+            )
 
             relatedRecipesToSave = []
         } catch {
@@ -481,29 +505,31 @@ extension RecipeDetailView {
         defer { isCheckingDuplicates = false }
 
         do {
-            if recipe.ownerId == userId {
-                hasOwnedCopy = true
+            let relation = try await dependencies.libraryRelationResolver.recipeRelation(
+                for: recipe,
+                currentUserId: userId
+            )
+            recipeLibraryRelation = relation
+            hasOwnedCopy = relation.isSavedOrOwned
+            dependencies.libraryPresentationStore.updateRecipeRelation(relation, for: recipe)
+
+            if relation == .owned {
                 AppLogger.general.info("Owned copy check: true for current user's recipe '\(recipe.title)'")
                 return
             }
 
-            let sourceRecipeID = recipe.relatedGraphReferenceID
-            if try await dependencies.savedReferenceRepository.recipeReference(
-                userId: userId,
-                sourceRecipeId: sourceRecipeID
-            ) != nil {
-                hasOwnedCopy = true
+            if relation.isSavedOrOwned {
                 AppLogger.general.info("Saved reference check: true for recipe '\(recipe.title)'")
                 return
             }
-
-            let ownedCopies = try await dependencies.recipeRepository.fetchOwnedCopies(
-                originalRecipeIds: [sourceRecipeID]
-            )
-            hasOwnedCopy = ownedCopies.contains { $0.ownerId == userId }
-            AppLogger.general.info("Owned copy check: \(hasOwnedCopy) for recipe '\(recipe.title)'")
+            AppLogger.general.info("Owned copy check: false for recipe '\(recipe.title)'")
         } catch {
             AppLogger.general.error("Failed to check for owned copy: \(error.localizedDescription)")
+            if recipeLibraryRelation == .unknown {
+                recipeLibraryRelation = .notSaved
+                hasOwnedCopy = false
+                dependencies.libraryPresentationStore.updateRecipeRelation(.notSaved, for: recipe)
+            }
         }
     }
 
@@ -592,8 +618,15 @@ extension RecipeDetailView {
                 currentVisibility = editableRecipe.visibility
                 localIsFavorite = editableRecipe.isFavorite
                 hasOwnedCopy = true
+                recipeLibraryRelation = .saved(materializedRecipeId: editableRecipe.id)
                 imageRefreshID = UUID()
             }
+            dependencies.libraryPresentationStore.seedRecipe(
+                editableRecipe,
+                sharedBy: sharedBy,
+                sharedAt: sharedAt,
+                relation: recipeLibraryRelation
+            )
             showingEditSheet = true
         } catch {
             AppLogger.general.error("Failed to prepare recipe for editing: \(error.localizedDescription)")

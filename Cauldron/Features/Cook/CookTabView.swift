@@ -130,7 +130,7 @@ struct CookTabView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
                         dependencies: viewModel.dependencies,
-                        showingEditor: $showingEditor,
+                        showingEditor: createRecipeEditorBinding,
                         showingAIGenerator: $showingAIGenerator,
                         showingImporter: $showingImporter,
                         showingCollectionForm: $showingCollectionForm
@@ -226,12 +226,52 @@ struct CookTabView: View {
                     await viewModel.refreshCollections()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { notification in
+                guard let collectionId = notification.userInfo?["collectionId"] as? UUID,
+                      let recipeIds = notification.userInfo?["recipeIds"] as? [UUID] else {
+                    return
+                }
+                let collection = notification.userInfo?["collection"] as? Collection
+                viewModel.handleCollectionRecipesChanged(
+                    collectionId: collectionId,
+                    recipeIds: recipeIds,
+                    collection: collection
+                )
+                Task {
+                    await viewModel.refreshLibraryAfterCollectionMembershipChange()
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
                 Task {
                     await refreshCookLibrary()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { _ in
+                Task {
+                    await refreshCookLibrary()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { notification in
+                let collectionId = notification.object as? UUID
+                    ?? notification.userInfo?["collectionId"] as? UUID
+                guard let collectionId else { return }
+                viewModel.handleCollectionDeleted(collectionId)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .savedCollectionReferencesChanged)) { notification in
+                let changeType = notification.userInfo?["changeType"] as? String
+                if changeType == "saved",
+                   let collection = notification.userInfo?["collection"] as? Collection {
+                    viewModel.handleSavedCollectionReferenceSaved(collection)
+                } else if changeType == "saved" {
+                    Task {
+                        await viewModel.refreshCollections()
+                    }
+                } else if changeType == "removed",
+                          let sourceCollectionId = notification.userInfo?["sourceCollectionId"] as? UUID {
+                    viewModel.handleSavedCollectionReferenceRemoved(sourceCollectionId: sourceCollectionId)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .savedRecipeReferencesChanged)) { _ in
                 Task {
                     await refreshCookLibrary()
                 }
@@ -387,14 +427,16 @@ struct CookTabView: View {
                 collectionRowSection(
                     title: "My Collections",
                     systemImage: "folder.fill",
-                    collections: []
+                    collections: [],
+                    relation: .owned
                 )
             } else {
                 if !viewModel.collections.isEmpty {
                     collectionRowSection(
                         title: "My Collections",
                         systemImage: "folder.fill",
-                        collections: viewModel.collections
+                        collections: viewModel.collections,
+                        relation: .owned
                     )
                 }
 
@@ -402,7 +444,8 @@ struct CookTabView: View {
                     collectionRowSection(
                         title: "Saved Collections",
                         systemImage: "bookmark.fill",
-                        collections: viewModel.savedCollections
+                        collections: viewModel.savedCollections,
+                        relation: .saved(referenceId: nil)
                     )
                 }
             }
@@ -412,7 +455,8 @@ struct CookTabView: View {
     private func collectionRowSection(
         title: String,
         systemImage: String,
-        collections: [Collection]
+        collections: [Collection],
+        relation: CollectionLibraryRelation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -440,7 +484,13 @@ struct CookTabView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(collections.prefix(10)) { collection in
-                            NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
+                            NavigationLink(destination: CollectionDetailView(
+                                collection: collection,
+                                dependencies: viewModel.dependencies,
+                                initialRecipeImages: viewModel.getRecipeImages(for: collection),
+                                initialRecipeImageSources: viewModel.getRecipeImageSources(for: collection),
+                                initialRelation: relation
+                            )) {
                                 CollectionCardView(
                                     collection: collection,
                                     recipeImages: viewModel.getRecipeImages(for: collection),
@@ -679,7 +729,7 @@ struct CookTabView: View {
 
                 HStack(spacing: 16) {
                     Button {
-                        showingEditor = true
+                        showCreateRecipeEditor()
                     } label: {
                         Label("Create", systemImage: "square.and.pencil")
                             .frame(maxWidth: .infinity)
@@ -732,7 +782,7 @@ struct CookTabView: View {
                 .tint(.cauldronOrange)
 
                 Button {
-                    showingEditor = true
+                    showCreateRecipeEditor()
                 } label: {
                     Label("Create", systemImage: "square.and.pencil")
                         .font(.subheadline)
@@ -874,8 +924,7 @@ struct CookTabView: View {
         }
         
         Button {
-            selectedRecipe = recipe
-            showingEditor = true
+            showEditRecipeEditor(recipe)
         } label: {
             Label("Edit Recipe", systemImage: "pencil")
         }
@@ -904,6 +953,28 @@ struct CookTabView: View {
                 await viewModel.dependencies.cookModeCoordinator.startCooking(recipe)
             }
         }
+    }
+
+    private var createRecipeEditorBinding: Binding<Bool> {
+        Binding(
+            get: { showingEditor },
+            set: { isPresented in
+                if isPresented {
+                    selectedRecipe = nil
+                }
+                showingEditor = isPresented
+            }
+        )
+    }
+
+    private func showCreateRecipeEditor() {
+        selectedRecipe = nil
+        showingEditor = true
+    }
+
+    private func showEditRecipeEditor(_ recipe: Recipe) {
+        selectedRecipe = recipe
+        showingEditor = true
     }
 
     private func deleteRecipe(_ recipe: Recipe) {

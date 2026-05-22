@@ -9,6 +9,33 @@ import Foundation
 import CloudKit
 import os
 
+struct DeletedCollectionTombstone: Sendable, Equatable {
+    nonisolated static let currentSchemaVersion = 1
+
+    let collectionId: UUID
+    let ownerId: UUID
+    let deletedAt: Date
+    let cloudRecordName: String?
+    let sourceDeviceId: String?
+    let schemaVersion: Int
+
+    nonisolated init(
+        collectionId: UUID,
+        ownerId: UUID,
+        deletedAt: Date,
+        cloudRecordName: String?,
+        sourceDeviceId: String?,
+        schemaVersion: Int = Self.currentSchemaVersion
+    ) {
+        self.collectionId = collectionId
+        self.ownerId = ownerId
+        self.deletedAt = deletedAt
+        self.cloudRecordName = cloudRecordName
+        self.sourceDeviceId = sourceDeviceId
+        self.schemaVersion = schemaVersion
+    }
+}
+
 /// CloudKit service for collection-related operations.
 ///
 /// Handles:
@@ -43,6 +70,12 @@ actor CollectionCloudService {
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: collection.id.uuidString)
         var conflictCandidate: CKRecord?
+
+        if try await isSuppressedByDeletedCollectionTombstone(collection, in: db) {
+            logger.warning("Skipping save for collection suppressed by deleted tombstone: \(collection.id)")
+            try await deleteCollectionRecordIfPresent(collection.id, in: db)
+            throw CloudKitError.invalidRecord
+        }
 
         for attempt in 1...maxSaveAttempts {
             let record: CKRecord
@@ -93,23 +126,31 @@ actor CollectionCloudService {
         var collections: [Collection] = []
         var cursor: CKQueryOperation.Cursor?
 
-        repeat {
-            let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
-            if let cursor {
-                results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
-            } else {
-                results = try await db.records(matching: query, resultsLimit: 500)
-            }
-
-            for (_, result) in results.matchResults {
-                if let record = try? result.get(),
-                   let collection = try? collectionFromRecord(record) {
-                    collections.append(collection)
+        do {
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, resultsLimit: 500)
                 }
-            }
 
-            cursor = results.queryCursor
-        } while cursor != nil
+                for (_, result) in results.matchResults {
+                    if let record = try? result.get(),
+                       let collection = try? collectionFromRecord(record) {
+                        collections.append(collection)
+                    }
+                }
+
+                cursor = results.queryCursor
+            } while cursor != nil
+        } catch let error as CKError {
+            if error.code == .unknownItem || error.errorCode == 11 {
+                logger.info("Collection record type not yet in CloudKit schema - returning empty owner collection list")
+                return []
+            }
+            throw error
+        }
 
         let collectionsWithMemberships = await applyMembershipOverlay(to: collections)
         logger.info("✅ Fetched \(collectionsWithMemberships.count) collections")
@@ -223,6 +264,10 @@ actor CollectionCloudService {
         }
 
         let db = try await core.getPublicDatabase()
+        try await deleteCollectionRecordIfPresent(collectionId, in: db)
+    }
+
+    private func deleteCollectionRecordIfPresent(_ collectionId: UUID, in db: CKDatabase) async throws {
         let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
         do {
@@ -234,6 +279,88 @@ actor CollectionCloudService {
     }
 
     // MARK: - Collection Membership
+
+    nonisolated static func deletedCollectionRecordID(collectionId: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: "deletedCollection_\(collectionId.uuidString)")
+    }
+
+    func saveDeletedCollectionTombstone(_ tombstone: DeletedCollectionTombstone) async throws {
+        let db = try await core.getPublicDatabase()
+        let recordID = Self.deletedCollectionRecordID(collectionId: tombstone.collectionId)
+        var tombstoneToSave = tombstone
+        var conflictCandidate: CKRecord?
+
+        for attempt in 1...maxSaveAttempts {
+            let record: CKRecord
+            if let conflictCandidate {
+                record = conflictCandidate
+            } else {
+                record = try await fetchOrCreateDeletedCollectionRecord(recordID: recordID, in: db)
+            }
+
+            populateDeletedCollectionRecord(record, from: tombstoneToSave)
+
+            do {
+                _ = try await db.save(record)
+                return
+            } catch let error as CKError where error.code == .serverRecordChanged {
+                guard let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord else {
+                    throw error
+                }
+
+                let serverTombstone = try? deletedCollectionTombstone(from: serverRecord)
+                tombstoneToSave = DeletedCollectionTombstone(
+                    collectionId: tombstone.collectionId,
+                    ownerId: tombstone.ownerId,
+                    deletedAt: max(tombstone.deletedAt, serverTombstone?.deletedAt ?? tombstone.deletedAt),
+                    cloudRecordName: tombstone.cloudRecordName ?? serverTombstone?.cloudRecordName,
+                    sourceDeviceId: tombstone.sourceDeviceId ?? serverTombstone?.sourceDeviceId,
+                    schemaVersion: max(tombstone.schemaVersion, serverTombstone?.schemaVersion ?? tombstone.schemaVersion)
+                )
+                conflictCandidate = serverRecord
+                logger.warning("DeletedCollection save conflict for \(tombstone.collectionId), retrying \(attempt)/\(self.maxSaveAttempts)")
+            } catch {
+                throw error
+            }
+        }
+
+        throw CloudKitError.syncConflict
+    }
+
+    func fetchDeletedCollectionTombstones(ownerId: UUID) async throws -> [DeletedCollectionTombstone] {
+        let db = try await core.getPublicDatabase()
+        let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.deletedCollection, predicate: predicate)
+        query.sortDescriptors = [NSSortDescriptor(key: "deletedAt", ascending: false)]
+
+        do {
+            var tombstones: [DeletedCollectionTombstone] = []
+            var cursor: CKQueryOperation.Cursor?
+
+            repeat {
+                let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
+                if let cursor {
+                    results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
+                } else {
+                    results = try await db.records(matching: query, resultsLimit: 500)
+                }
+
+                tombstones += results.matchResults.compactMap { _, result in
+                    guard let record = try? result.get() else { return nil }
+                    return try? deletedCollectionTombstone(from: record)
+                }
+                cursor = results.queryCursor
+            } while cursor != nil
+
+            return tombstones
+        } catch let error as CKError {
+            if error.code == .unknownItem || error.errorCode == 11 {
+                logger.info("DeletedCollection record type not yet in CloudKit schema - returning empty list")
+                return []
+            }
+            throw error
+        }
+    }
 
     nonisolated static func membershipRecordID(collectionId: UUID, recipeId: UUID) -> CKRecord.ID {
         CKRecord.ID(recordName: "membership_\(collectionId.uuidString)_\(recipeId.uuidString)")
@@ -504,6 +631,15 @@ actor CollectionCloudService {
     private func applyMembershipOverlay(to collections: [Collection]) async -> [Collection] {
         guard !collections.isEmpty else { return [] }
 
+        var collections = collections
+        do {
+            collections = try await filterDeletedCollections(collections)
+        } catch {
+            logger.warning("Failed to filter deleted collections before membership overlay: \(error.localizedDescription)")
+        }
+
+        guard !collections.isEmpty else { return [] }
+
         var edges: [CollectionMembershipEdge] = []
         for ownerId in Set(collections.map(\.userId)) {
             do {
@@ -537,6 +673,14 @@ actor CollectionCloudService {
         return stride(from: 0, to: values.count, by: size).map { startIndex in
             let endIndex = min(startIndex + size, values.count)
             return Array(values[startIndex..<endIndex])
+        }
+    }
+
+    private func fetchOrCreateDeletedCollectionRecord(recordID: CKRecord.ID, in db: CKDatabase) async throws -> CKRecord {
+        do {
+            return try await db.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return CKRecord(recordType: CloudKitCore.RecordType.deletedCollection, recordID: recordID)
         }
     }
 
@@ -639,8 +783,9 @@ actor CollectionCloudService {
         let color = record["color"] as? String
         let coverImageTypeString = record["coverImageType"] as? String
         let coverImageType = coverImageTypeString.flatMap { CoverImageType(rawValue: $0) } ?? .recipeGrid
-        let hasCloudCoverImage = record["coverImageAsset"] as? CKAsset != nil
         let coverImageModifiedAt = record["coverImageModifiedAt"] as? Date
+        let hasCloudCoverImage = record["coverImageAsset"] as? CKAsset != nil || coverImageModifiedAt != nil
+        let cloudCoverImageRecordName = hasCloudCoverImage ? record.recordID.recordName : nil
         let originalCollectionId = (record["originalCollectionId"] as? String).flatMap(UUID.init(uuidString:))
         let originalCollectionOwnerId = (record["originalCollectionOwnerId"] as? String).flatMap(UUID.init(uuidString:))
         let followsSourceUpdates = Self.boolValue(for: record["followsSourceUpdates"])
@@ -656,7 +801,7 @@ actor CollectionCloudService {
             symbolName: symbolName,
             color: color,
             coverImageType: coverImageType,
-            cloudCoverImageRecordName: hasCloudCoverImage ? record.recordID.recordName : nil,
+            cloudCoverImageRecordName: cloudCoverImageRecordName,
             coverImageModifiedAt: coverImageModifiedAt,
             cloudRecordName: record.recordID.recordName,
             originalCollectionId: originalCollectionId,
@@ -667,6 +812,96 @@ actor CollectionCloudService {
             followsSourceUpdates: followsSourceUpdates,
             createdAt: createdAt,
             updatedAt: updatedAt
+        )
+    }
+
+    private func overlayMembershipEdges(on collections: [Collection]) async throws -> [Collection] {
+        let collections = try await filterDeletedCollections(collections)
+        guard !collections.isEmpty else { return [] }
+
+        var allEdges: [CollectionMembershipEdge] = []
+        for ownerId in Set(collections.map(\.userId)) {
+            allEdges.append(contentsOf: try await fetchMembershipEdges(forUserId: ownerId))
+        }
+
+        let edgesByCollectionId = Dictionary(grouping: allEdges, by: \.collectionId)
+        guard !edgesByCollectionId.isEmpty else { return collections }
+
+        return collections.map { collection in
+            guard let edges = edgesByCollectionId[collection.id] else {
+                return collection
+            }
+            return collectionWithRecipeIds(collection, activeRecipeIds(from: edges))
+        }
+    }
+
+    private func filterDeletedCollections(_ collections: [Collection]) async throws -> [Collection] {
+        guard !collections.isEmpty else { return [] }
+
+        var deletedCollectionIds = Set<UUID>()
+        for ownerId in Set(collections.map(\.userId)) {
+            let tombstones = try await fetchDeletedCollectionTombstones(ownerId: ownerId)
+            deletedCollectionIds.formUnion(tombstones.map(\.collectionId))
+        }
+
+        guard !deletedCollectionIds.isEmpty else { return collections }
+
+        for collectionId in deletedCollectionIds where collections.contains(where: { $0.id == collectionId }) {
+            try? await deleteCollection(collectionId)
+        }
+
+        return collections.filter { !deletedCollectionIds.contains($0.id) }
+    }
+
+    private func isSuppressedByDeletedCollectionTombstone(_ collection: Collection, in db: CKDatabase) async throws -> Bool {
+        let tombstoneRecordID = Self.deletedCollectionRecordID(collectionId: collection.id)
+        do {
+            let record = try await db.record(for: tombstoneRecordID)
+            let tombstone = try deletedCollectionTombstone(from: record)
+            return tombstone.ownerId == collection.userId
+        } catch let error as CKError where error.code == .unknownItem {
+            return false
+        } catch let error as CKError where error.errorCode == 11 || error.code == .invalidArguments {
+            return false
+        }
+    }
+
+    private func activeRecipeIds(from edges: [CollectionMembershipEdge]) -> [UUID] {
+        edges
+            .filter { $0.status == .active }
+            .sorted(by: { (lhs: CollectionMembershipEdge, rhs: CollectionMembershipEdge) in
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.updatedAt < rhs.updatedAt
+            })
+            .map(\.recipeId)
+    }
+
+    private func collectionWithRecipeIds(_ collection: Collection, _ recipeIds: [UUID]) -> Collection {
+        Collection(
+            id: collection.id,
+            name: collection.name,
+            description: collection.description,
+            userId: collection.userId,
+            recipeIds: recipeIds,
+            visibility: collection.visibility,
+            emoji: collection.emoji,
+            symbolName: collection.symbolName,
+            color: collection.color,
+            coverImageType: collection.coverImageType,
+            coverImageURL: collection.coverImageURL,
+            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
+            coverImageModifiedAt: collection.coverImageModifiedAt,
+            cloudRecordName: collection.cloudRecordName,
+            originalCollectionId: collection.originalCollectionId,
+            originalCollectionOwnerId: collection.originalCollectionOwnerId,
+            originalCollectionName: collection.originalCollectionName,
+            savedAt: collection.savedAt,
+            sourceCollectionUpdatedAt: collection.sourceCollectionUpdatedAt,
+            followsSourceUpdates: collection.followsSourceUpdates,
+            createdAt: collection.createdAt,
+            updatedAt: collection.updatedAt
         )
     }
 
@@ -713,6 +948,34 @@ actor CollectionCloudService {
             sortOrder: sortOrder,
             sourceDeviceId: record["sourceDeviceId"] as? String,
             schemaVersion: schemaVersion
+        )
+    }
+
+    func populateDeletedCollectionRecord(_ record: CKRecord, from tombstone: DeletedCollectionTombstone) {
+        record["collectionId"] = tombstone.collectionId.uuidString as CKRecordValue
+        record["ownerId"] = tombstone.ownerId.uuidString as CKRecordValue
+        record["deletedAt"] = tombstone.deletedAt as CKRecordValue
+        record["cloudRecordName"] = tombstone.cloudRecordName as CKRecordValue?
+        record["sourceDeviceId"] = tombstone.sourceDeviceId as CKRecordValue?
+        record["schemaVersion"] = tombstone.schemaVersion as NSNumber
+    }
+
+    func deletedCollectionTombstone(from record: CKRecord) throws -> DeletedCollectionTombstone {
+        guard let collectionIdString = record["collectionId"] as? String,
+              let collectionId = UUID(uuidString: collectionIdString),
+              let ownerIdString = record["ownerId"] as? String,
+              let ownerId = UUID(uuidString: ownerIdString),
+              let deletedAt = record["deletedAt"] as? Date else {
+            throw CloudKitError.invalidRecord
+        }
+
+        return DeletedCollectionTombstone(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            deletedAt: deletedAt,
+            cloudRecordName: record["cloudRecordName"] as? String,
+            sourceDeviceId: record["sourceDeviceId"] as? String,
+            schemaVersion: (record["schemaVersion"] as? NSNumber)?.intValue ?? DeletedCollectionTombstone.currentSchemaVersion
         )
     }
 

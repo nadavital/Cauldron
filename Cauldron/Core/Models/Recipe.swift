@@ -252,6 +252,40 @@ struct Recipe: Sendable, Hashable, Identifiable {
         )
     }
 
+    /// Create a copy with updated favorite state while preserving all metadata.
+    nonisolated func withFavorite(_ isFavorite: Bool) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: ownerId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
     /// Create a copy with updated local/cloud image state while preserving timestamps.
     nonisolated func withImageState(
         imageURL: URL?,
@@ -401,6 +435,84 @@ struct Recipe: Sendable, Hashable, Identifiable {
         }
 
         return id
+    }
+
+    nonisolated func isOwned(by userId: UUID) -> Bool {
+        ownerId == userId
+    }
+
+    nonisolated func canMutateCloudState(for userId: UUID) -> Bool {
+        !isPreview && isOwned(by: userId)
+    }
+
+    nonisolated func withRequiredOwner(_ userId: UUID) -> Recipe {
+        guard ownerId != userId else {
+            return self
+        }
+
+        return Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: userId,
+            cloudRecordName: cloudRecordName,
+            cloudImageRecordName: cloudImageRecordName,
+            imageModifiedAt: imageModifiedAt,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: originalCreatorId,
+            originalCreatorName: originalCreatorName,
+            savedAt: savedAt,
+            sourceRecipeUpdatedAt: sourceRecipeUpdatedAt,
+            followsSourceUpdates: followsSourceUpdates,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: isPreview
+        )
+    }
+
+    nonisolated func asIndependentLibraryRecipe(ownerId userId: UUID) -> Recipe {
+        Recipe(
+            id: id,
+            title: title,
+            ingredients: ingredients,
+            steps: steps,
+            yields: yields,
+            totalMinutes: totalMinutes,
+            tags: tags,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
+            notes: notes,
+            imageURL: imageURL,
+            isFavorite: isFavorite,
+            visibility: visibility,
+            ownerId: userId,
+            cloudRecordName: nil,
+            cloudImageRecordName: nil,
+            imageModifiedAt: nil,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            originalRecipeId: nil,
+            originalCreatorId: nil,
+            originalCreatorName: nil,
+            savedAt: nil,
+            sourceRecipeUpdatedAt: nil,
+            followsSourceUpdates: false,
+            relatedRecipeIds: relatedRecipeIds,
+            isPreview: false
+        )
     }
 
     /// Compare source-owned content fields to determine whether a saved copy

@@ -596,7 +596,7 @@ struct UserProfileView: View {
             }
 
             // Content
-            if viewModel.isLoadingCollections {
+            if viewModel.isLoadingCollections && viewModel.userCollections.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView()
@@ -606,12 +606,26 @@ struct UserProfileView: View {
             } else if viewModel.userCollections.isEmpty {
                 emptyCollectionsState
             } else {
+                if viewModel.isLoadingCollections {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(viewModel.userCollections.prefix(10), id: \.id) { collection in
                             NavigationLink(destination: CollectionDetailView(
                                 collection: collection,
-                                dependencies: viewModel.dependencies
+                                dependencies: viewModel.dependencies,
+                                initialOwner: user,
+                                initialRecipeImages: viewModel.getRecipeImages(for: collection),
+                                initialRecipeImageSources: viewModel.getRecipeImageSources(for: collection),
+                                initialRelation: viewModel.isCurrentUser ? .owned : .unknown
                             )) {
                                 CollectionCardView(
                                     collection: collection,
@@ -691,7 +705,7 @@ struct UserProfileView: View {
             }
 
             // Content
-            if viewModel.isLoadingRecipes {
+            if viewModel.isLoadingRecipes && viewModel.filteredRecipes.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView()
@@ -701,6 +715,16 @@ struct UserProfileView: View {
             } else if viewModel.filteredRecipes.isEmpty {
                 emptyRecipesState
             } else {
+                if viewModel.isLoadingRecipes {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if horizontalSizeClass == .regular {
                     LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
                         ForEach(displayedRecipes, id: \.id) { sharedRecipe in

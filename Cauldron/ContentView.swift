@@ -35,6 +35,8 @@ struct ContentView: View {
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var isDataReady = false
     @State private var preloadedData: PreloadedRecipeData?
+    @State private var loadedUserId: UUID?
+    @State private var sessionReloadTask: Task<Void, Never>?
     @State private var sharedContentWrapper: SharedContentWrapper?
     @State private var isLoadingShare = false
     @State private var showShareError = false
@@ -78,7 +80,12 @@ struct ContentView: View {
                         // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
                         // This data pipeline ensures CookTabViewModel initializes with populated arrays
                         // instead of empty arrays, preventing the empty state from ever rendering.
-                        MainTabView(dependencies: dependencies, preloadedData: preloadedData)
+                        MainTabView(
+                            dependencies: dependencies,
+                            preloadedData: preloadedData,
+                            pendingSharedContent: $sharedContentWrapper
+                        )
+                            .id(userSession.userId)
                     }
                 }
             }
@@ -157,8 +164,11 @@ struct ContentView: View {
             // Step 2: Preload ALL recipe data BEFORE showing UI
             // This is the key to preventing empty state flash - we load everything
             // synchronously before setting isDataReady = true
-            if userSession.currentUser != nil {
-                preloadedData = await performInitialLoad()
+            if let userId = userSession.userId {
+                preloadedData = await performInitialLoad(for: userId)
+                loadedUserId = userId
+            } else {
+                loadedUserId = nil
             }
 
             // Step 3: Restore cook mode session if exists
@@ -183,15 +193,82 @@ struct ContentView: View {
         .onChange(of: userSession.isInitialized) { _, _ in
             maybeShowSplashScreen()
         }
+        .onChange(of: userSession.userId) { oldUserId, newUserId in
+            guard userSession.isInitialized,
+                  isDataReady,
+                  oldUserId != newUserId else {
+                return
+            }
+
+            sessionReloadTask?.cancel()
+            sessionReloadTask = Task {
+                await handleSessionChange(to: newUserId)
+            }
+        }
         .onChange(of: userSession.needsOnboarding) { _, _ in
+            scheduleSessionReloadIfNeeded()
             maybeShowSplashScreen()
         }
         .onChange(of: userSession.needsiCloudSignIn) { _, _ in
+            scheduleSessionReloadIfNeeded()
             maybeShowSplashScreen()
         }
         .onChange(of: isDataReady) { _, _ in
             maybeShowSplashScreen()
         }
+    }
+
+    @MainActor
+    private func handleSessionChange(to userId: UUID?) async {
+        resetSessionScopedState()
+
+        dependencies.connectionManager.resetSessionState()
+        FriendsTabViewModel.shared.resetSessionState()
+        await dependencies.sharingService.resetSharedRecipeCache()
+
+        guard let userId,
+              !userSession.needsOnboarding,
+              !userSession.needsiCloudSignIn else {
+            loadedUserId = nil
+            isDataReady = true
+            maybeShowSplashScreen()
+            return
+        }
+
+        preloadedData = await performInitialLoad(for: userId)
+        guard !Task.isCancelled, userSession.userId == userId else { return }
+
+        loadedUserId = userId
+        isDataReady = true
+        maybeShowSplashScreen()
+    }
+
+    @MainActor
+    private func scheduleSessionReloadIfNeeded() {
+        guard userSession.isInitialized,
+              isDataReady,
+              let userId = userSession.userId,
+              !userSession.needsOnboarding,
+              !userSession.needsiCloudSignIn,
+              loadedUserId != userId else {
+            return
+        }
+
+        sessionReloadTask?.cancel()
+        sessionReloadTask = Task {
+            await handleSessionChange(to: userId)
+        }
+    }
+
+    @MainActor
+    private func resetSessionScopedState() {
+        isDataReady = false
+        preloadedData = nil
+        loadedUserId = nil
+        isLoadingShare = false
+        showShareError = false
+        shareErrorMessage = ""
+        dependencies.libraryPresentationStore.clear()
     }
 
     private func maybeShowSplashScreen() {
@@ -237,6 +314,7 @@ struct ContentView: View {
     }
 
     private func loadSharedContent(url: URL) async {
+        await PendingShareManager.shared.clearPendingURL(matching: url)
         isLoadingShare = true
         defer { isLoadingShare = false }
         
@@ -250,11 +328,13 @@ struct ContentView: View {
 
                 // 1. Check if we already have this recipe locally (e.g. we are the owner)
                 // This prevents fetching a stale public version if we just made it private
-                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id) {
+                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id),
+                   localRecipe.ownerId == userSession.userId,
+                   !localRecipe.isPreview {
                     AppLogger.general.info("✅ ContentView: Found local copy of recipe, using that")
                     await MainActor.run {
                         let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
-                        NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
+                        sharedContentWrapper = wrapper
                     }
                     return
                 }
@@ -267,7 +347,7 @@ struct ContentView: View {
                         // Post notification to navigate to the recipe in the Search tab
                         // Use the full recipe but keep the owner info from the share if available
                         let wrapper = SharedContentWrapper(content: .recipe(fullRecipe, originalCreator: owner))
-                        NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
+                        sharedContentWrapper = wrapper
                     }
                 } else {
                     AppLogger.general.error("❌ ContentView: Recipe not found in public database")
@@ -281,7 +361,7 @@ struct ContentView: View {
                 // For profiles and collections, the share data is usually sufficient or handled differently
                 await MainActor.run {
                     let wrapper = SharedContentWrapper(content: content)
-                    NotificationCenter.default.post(name: .navigateToSharedContent, object: wrapper)
+                    sharedContentWrapper = wrapper
                 }
             }
         } catch {
@@ -293,7 +373,7 @@ struct ContentView: View {
         }
     }
 
-    private func performInitialLoad() async -> PreloadedRecipeData? {
+    private func performInitialLoad(for userId: UUID) async -> PreloadedRecipeData? {
         // Preload ALL data that will be needed by the main view
         do {
             // IMPORTANT: On first app launch (or after reinstall), we need to sync from CloudKit FIRST
@@ -306,16 +386,14 @@ struct ContentView: View {
                 AppLogger.general.info("🚀 First launch detected - syncing from CloudKit before showing UI...")
 
                 // Run one-time migration to fix recipe ownership from old reference system
-                if let userId = userSession.userId {
-                    do {
-                        try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
-                    } catch {
-                        AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
-                    }
+                do {
+                    try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+                } catch {
+                    AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
                 }
 
                 // Perform sync (this will download images)
-                if let userId = userSession.userId, userSession.isCloudSyncAvailable {
+                if userSession.isCloudSyncAvailable {
                     do {
                         try await dependencies.recipeSyncService.performFullSync(for: userId)
                         AppLogger.general.info("✅ Initial CloudKit sync completed with images")
@@ -334,34 +412,18 @@ struct ContentView: View {
                 if removedCount > 0 {
                     AppLogger.general.info("🧹 Cleaned up \(removedCount) duplicate recipes")
                 }
-                if let userId = userSession.userId {
-                    let removedSelfCopyCount = try await dependencies.recipeRepository.removeSelfSavedRecipeCopies(
-                        currentUserId: userId
-                    )
-                    if removedSelfCopyCount > 0 {
-                        AppLogger.general.info("🧹 Cleaned up \(removedSelfCopyCount) self-saved recipe copies")
-                    }
+                let removedSelfCopyCount = try await dependencies.recipeRepository.removeSelfSavedRecipeCopies(
+                    currentUserId: userId
+                )
+                if removedSelfCopyCount > 0 {
+                    AppLogger.general.info("🧹 Cleaned up \(removedSelfCopyCount) self-saved recipe copies")
                 }
             } catch {
                 AppLogger.general.warning("Failed to remove duplicate recipes: \(error.localizedDescription)")
             }
 
-            // OPTIMIZATION: Parallelize independent data fetches using async let
-            async let ownedRecipes = dependencies.recipeRepository.fetchAll()
-            async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
-            async let localCollections = dependencies.collectionRepository.fetchAll()
-
-            // Wait for all to complete in parallel
-            let allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await ownedRecipes,
-                currentUserId: userSession.userId
-            )
-            let recentlyCookedIds = try await cookingHistory
-            let collections = try await localCollections
-            // Data preloaded successfully (don't log routine operations)
-
             // Run one-time migrations (for existing users)
-            if hasLaunchedBefore, let userId = userSession.userId {
+            if hasLaunchedBefore {
                 do {
                     // Fix recipe ownership from old reference system
                     try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
@@ -373,21 +435,40 @@ struct ContentView: View {
                 }
             }
 
-            if userSession.userId != nil {
-                // Run migration to ensure public recipes are in the public database.
-                // This is safe on both first launch and subsequent launches because the
-                // repository only marks the migration complete after every eligible
-                // public recipe has actually been backfilled.
-                Task.detached(priority: .utility) {
-                    await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
-                    await dependencies.recipeRepository.migratePublicRecipeSearchMetadata()
+            // OPTIMIZATION: Parallelize independent data fetches using async let
+            async let ownedRecipes = dependencies.recipeRepository.fetchLibraryRecipes(ownerId: userId)
+            async let cookingHistory = dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10)
+            async let localCollections = dependencies.collectionRepository.fetchUserCollections(ownerId: userId)
+
+            // Wait for all to complete in parallel
+            let allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
+                try await ownedRecipes,
+                currentUserId: userId
+            )
+            let recentlyCookedIds = try await cookingHistory
+            let collections = try await localCollections
+            // Data preloaded successfully (don't log routine operations)
+
+            // Run migration to ensure public recipes are in the public database.
+            // This is safe on both first launch and subsequent launches because the
+            // repository only marks the migration complete after every eligible
+            // public recipe has actually been backfilled.
+            Task.detached(priority: .utility) {
+                guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                    return
                 }
+                await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
+                await dependencies.recipeRepository.migratePublicRecipeSearchMetadata()
             }
 
             // OPTIMIZATION: For subsequent launches, start background sync AFTER UI is shown
             // This keeps the UI responsive while CloudKit syncs in the background
-            if hasLaunchedBefore, let userId = userSession.userId, userSession.isCloudSyncAvailable {
+            if hasLaunchedBefore, userSession.isCloudSyncAvailable {
                 Task.detached(priority: .utility) {
+                    guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                        return
+                    }
+
                     do {
                         try await dependencies.recipeSyncService.performFullSync(for: userId)
                         // Background sync completed (don't log routine operations)
@@ -397,9 +478,7 @@ struct ContentView: View {
                 }
             }
 
-            if let userId = userSession.userId {
-                scheduleBackgroundWarmup(for: userId)
-            }
+            scheduleBackgroundWarmup(for: userId)
 
             return PreloadedRecipeData(allRecipes: allRecipes, recentlyCookedIds: recentlyCookedIds, collections: collections)
         } catch {
@@ -416,7 +495,15 @@ struct ContentView: View {
         let profileImageManager = dependencies.profileImageManager
 
         Task.detached(priority: .utility) {
+            guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                return
+            }
+
             _ = try? await sharingService.getSharedRecipes()
+
+            guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                return
+            }
 
             guard let connections = try? await connectionCloudService.fetchConnections(forUserId: userId) else {
                 return
@@ -439,6 +526,10 @@ struct ContentView: View {
             }
 
             if let cloudUsers = try? await userCloudService.fetchUsers(byUserIds: Array(relatedUserIds)) {
+                guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                    return
+                }
+
                 for cloudUser in cloudUsers {
                     usersById[cloudUser.id] = cloudUser
                     try? await sharingRepository.save(cloudUser)
@@ -478,6 +569,7 @@ struct ContentView: View {
                     if let image {
                         let cacheKey = ImageCache.profileImageKey(userId: warmedUserId)
                         await MainActor.run {
+                            guard CurrentUserSession.shared.userId == userId else { return }
                             ImageCache.shared.set(cacheKey, image: image)
                         }
                     }

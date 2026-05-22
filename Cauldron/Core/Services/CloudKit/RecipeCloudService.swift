@@ -14,6 +14,7 @@ struct PublicRecipeSearchMetadataBackfillSummary: Sendable, Equatable {
     let updated: Int
     let alreadyCurrent: Int
     let failed: Int
+    let mayHaveMore: Bool
 }
 
 struct DeletedRecipeTombstone: Sendable, Equatable {
@@ -313,7 +314,7 @@ actor RecipeCloudService {
             throw CloudKitError.invalidRecord
         }
 
-        populateRecipeRecord(record, from: recipe, ownerId: ownerId)
+        populateRecipeRecord(record, from: recipe, ownerId: ownerId, includesUserPrivateState: false)
 
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")
@@ -474,9 +475,9 @@ actor RecipeCloudService {
     /// records owned by another iCloud account may not be writable from this app
     /// instance, but records the current user owns will also be republished by
     /// the repository migration path.
-    func backfillPublicRecipeSearchMetadata(limit: Int = 1_000) async throws -> PublicRecipeSearchMetadataBackfillSummary {
+    func backfillPublicRecipeSearchMetadata(limit: Int = .max) async throws -> PublicRecipeSearchMetadataBackfillSummary {
         guard limit > 0 else {
-            return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0)
+            return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0, mayHaveMore: false)
         }
 
         let db = try await core.getPublicDatabase()
@@ -547,9 +548,10 @@ actor RecipeCloudService {
             scanned: scanned,
             updated: updated,
             alreadyCurrent: alreadyCurrent,
-            failed: failed
+            failed: failed,
+            mayHaveMore: cursor != nil
         )
-        logger.info("Public recipe search metadata backfill scanned=\(summary.scanned) updated=\(summary.updated) current=\(summary.alreadyCurrent) failed=\(summary.failed)")
+        logger.info("Public recipe search metadata backfill scanned=\(summary.scanned) updated=\(summary.updated) current=\(summary.alreadyCurrent) failed=\(summary.failed) mayHaveMore=\(summary.mayHaveMore)")
         return summary
     }
 
@@ -588,9 +590,7 @@ actor RecipeCloudService {
                 }
 
                 recipes.append(recipe)
-                if !recipe.isFollowingSourceUpdates {
-                    canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
-                }
+                canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
             }
 
             fetchedPageCount += 1
@@ -601,7 +601,7 @@ actor RecipeCloudService {
             logger.warning("Stopped discovery fetch after \(fetchedPageCount) pages with \(canonicalGroupIDs.count) canonical groups")
         }
 
-        return limitRecipesByGroup(recipes, to: limit)
+        return limitRecipeGroupsPreservingCopies(recipes, to: limit)
     }
 
     func fetchPublicRecipesForSearch(
@@ -647,9 +647,7 @@ actor RecipeCloudService {
                 }
 
                 matchingRecipes.append(recipe)
-                if !recipe.isFollowingSourceUpdates {
-                    canonicalMatchingGroupIDs.insert(discoveryGroupID(for: recipe))
-                }
+                canonicalMatchingGroupIDs.insert(discoveryGroupID(for: recipe))
             }
 
             fetchedPageCount += 1
@@ -660,7 +658,7 @@ actor RecipeCloudService {
             logger.warning("Stopped public search fetch after \(fetchedPageCount) pages with \(canonicalMatchingGroupIDs.count) canonical matching groups")
         }
 
-        return limitRecipesByGroup(matchingRecipes, to: limit)
+        return limitRecipeGroupsPreservingCopies(matchingRecipes, to: limit)
     }
 
     func resolveCanonicalRelatedRecipeIDs(for recipe: Recipe) async throws -> [UUID] {
@@ -735,7 +733,8 @@ actor RecipeCloudService {
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: requiredPredicates)
 
         do {
-            return try await fetchSharedRecipes(matching: predicate, limit: limit)
+            let recipes = try await fetchSharedRecipes(matching: predicate, limit: groupedFetchLimit(for: limit))
+            return limitRecipesByGroup(recipes, to: limit)
         } catch {
             logger.warning("Falling back to recency-based public recipe discovery after search query failed: \(error.localizedDescription)")
             return try await fetchDiscoverablePublicRecipes(limit: limit)
@@ -841,9 +840,14 @@ actor RecipeCloudService {
     /// Fetch popular public recipes
     func fetchPopularPublicRecipes(limit: Int = 20) async throws -> [Recipe] {
         let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
-        let recipes = try await fetchSharedRecipes(matching: predicate, limit: max(limit, limit * 3))
+        let recipes = try await fetchSharedRecipes(matching: predicate, limit: groupedFetchLimit(for: limit))
         let filteredRecipes = filterDerivedCopies(in: recipes, includeDerivedCopies: false)
         return Array(filteredRecipes.prefix(limit))
+    }
+
+    private func groupedFetchLimit(for displayLimit: Int) -> Int {
+        guard displayLimit > 0 else { return 0 }
+        return max(displayLimit, displayLimit * 3)
     }
 
     private func filterDerivedCopies(in recipes: [Recipe], includeDerivedCopies: Bool) -> [Recipe] {
@@ -873,40 +877,74 @@ actor RecipeCloudService {
     private func limitRecipesByGroup(_ recipes: [Recipe], to limit: Int) -> [Recipe] {
         guard limit > 0 else { return [] }
 
-        var canonicalGroupIDs = Set<UUID>()
-        for recipe in recipes where !recipe.isFollowingSourceUpdates {
-            canonicalGroupIDs.insert(discoveryGroupID(for: recipe))
-        }
+        var fallbackRecipesByGroupID: [UUID: Recipe] = [:]
+        var fallbackGroupOrder: [UUID] = []
+        var selectedCanonicalRecipes: [Recipe] = []
+        var seenGroupIDs = Set<UUID>()
 
-        var orderedCanonicalGroupIDs: [UUID] = []
-        var orderedFallbackGroupIDs: [UUID] = []
-        var seenCanonicalGroupIDs = Set<UUID>()
-        var seenFallbackGroupIDs = Set<UUID>()
         for recipe in recipes {
             let groupID = discoveryGroupID(for: recipe)
 
-            if canonicalGroupIDs.contains(groupID) {
-                if seenCanonicalGroupIDs.insert(groupID).inserted {
-                    orderedCanonicalGroupIDs.append(groupID)
+            if recipe.isFollowingSourceUpdates {
+                if !fallbackRecipesByGroupID.keys.contains(groupID) {
+                    fallbackRecipesByGroupID[groupID] = recipe
+                    fallbackGroupOrder.append(groupID)
                 }
-            } else if seenFallbackGroupIDs.insert(groupID).inserted {
-                orderedFallbackGroupIDs.append(groupID)
+                continue
+            }
+
+            guard seenGroupIDs.insert(groupID).inserted else {
+                continue
+            }
+
+            selectedCanonicalRecipes.append(recipe)
+
+            if selectedCanonicalRecipes.count == limit {
+                break
             }
         }
 
-        let allowedGroupIDs = Array(
-            (orderedCanonicalGroupIDs + orderedFallbackGroupIDs)
-                .prefix(limit)
-        )
-        let allowedGroupIDSet = Set(allowedGroupIDs)
+        var selectedRecipes = selectedCanonicalRecipes
+        for groupID in fallbackGroupOrder where selectedRecipes.count < limit {
+            guard !seenGroupIDs.contains(groupID),
+                  let fallbackRecipe = fallbackRecipesByGroupID[groupID] else {
+                continue
+            }
 
-        return recipes.filter { allowedGroupIDSet.contains(discoveryGroupID(for: $0)) }
+            seenGroupIDs.insert(groupID)
+            selectedRecipes.append(fallbackRecipe)
+        }
+
+        return selectedRecipes
+    }
+
+    private func limitRecipeGroupsPreservingCopies(_ recipes: [Recipe], to limit: Int) -> [Recipe] {
+        guard limit > 0 else { return [] }
+
+        var selectedGroupIDs = Set<UUID>()
+        var orderedGroupIDs: [UUID] = []
+
+        for recipe in recipes {
+            let groupID = discoveryGroupID(for: recipe)
+            guard selectedGroupIDs.insert(groupID).inserted else { continue }
+            orderedGroupIDs.append(groupID)
+            if orderedGroupIDs.count == limit {
+                break
+            }
+        }
+
+        return recipes.filter { selectedGroupIDs.contains(discoveryGroupID(for: $0)) }
     }
 
     // MARK: - Image Assets
 
     /// Upload image as CKAsset to CloudKit
-    func uploadImageAsset(recipeId: UUID, imageData: Data, toPublic: Bool) async throws -> String {
+    func uploadImageAsset(
+        recipeId: UUID,
+        imageData: Data,
+        toPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws -> String {
         let optimizedData = try await core.optimizeImageForCloudKit(imageData)
 
         let tempURL = FileManager.default.temporaryDirectory
@@ -930,7 +968,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -954,7 +992,11 @@ actor RecipeCloudService {
     }
 
     /// Download image asset from CloudKit
-    func downloadImageAsset(recipeId: UUID, fromPublic: Bool) async throws -> Data? {
+    func downloadImageAsset(
+        recipeId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws -> Data? {
         let database: CKDatabase
         let recordID: CKRecord.ID
 
@@ -964,7 +1006,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -987,7 +1029,11 @@ actor RecipeCloudService {
     }
 
     /// Delete image asset from CloudKit
-    func deleteImageAsset(recipeId: UUID, fromPublic: Bool) async throws {
+    func deleteImageAsset(
+        recipeId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String? = nil
+    ) async throws {
         logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
 
         let database: CKDatabase
@@ -999,7 +1045,7 @@ actor RecipeCloudService {
         } else {
             database = try await core.getPrivateDatabase()
             let zoneID = try await core.getCustomZoneID()
-            recordID = CKRecord.ID(recordName: recipeId.uuidString, zoneID: zoneID)
+            recordID = CKRecord.ID(recordName: privateRecordName ?? recipeId.uuidString, zoneID: zoneID)
         }
 
         do {
@@ -1253,7 +1299,12 @@ actor RecipeCloudService {
 
     private static let publicRecipeIdQueryChunkSize = 100
 
-    func populateRecipeRecord(_ record: CKRecord, from recipe: Recipe, ownerId: UUID) {
+    func populateRecipeRecord(
+        _ record: CKRecord,
+        from recipe: Recipe,
+        ownerId: UUID,
+        includesUserPrivateState: Bool = true
+    ) {
         record["recipeId"] = recipe.id.uuidString as CKRecordValue
         record["ownerId"] = ownerId.uuidString as CKRecordValue
         record["title"] = recipe.title as CKRecordValue
@@ -1293,6 +1344,15 @@ actor RecipeCloudService {
 
         record["yields"] = recipe.yields as CKRecordValue
         record["totalMinutes"] = recipe.totalMinutes as CKRecordValue?
+        record["sourceURL"] = recipe.sourceURL?.absoluteString as CKRecordValue?
+        record["sourceTitle"] = recipe.sourceTitle as CKRecordValue?
+        if let nutrition = recipe.nutrition,
+           let nutritionData = try? encoder.encode(nutrition) {
+            record["nutritionData"] = nutritionData as CKRecordValue
+        } else {
+            record["nutritionData"] = nil
+        }
+        record["isFavorite"] = (includesUserPrivateState ? recipe.isFavorite : false) as CKRecordValue
         record["createdAt"] = recipe.createdAt as CKRecordValue
         record["updatedAt"] = recipe.updatedAt as CKRecordValue
 
@@ -1436,6 +1496,17 @@ actor RecipeCloudService {
 
         let yields = record["yields"] as? String ?? "4 servings"
         let totalMinutes = record["totalMinutes"] as? Int
+        let sourceURL = (record["sourceURL"] as? String).flatMap(URL.init(string:))
+        let sourceTitle = record["sourceTitle"] as? String
+        let nutrition: Nutrition?
+        if let nutritionData = record["nutritionData"] as? Data {
+            nutrition = try? decoder.decode(Nutrition.self, from: nutritionData)
+        } else {
+            nutrition = nil
+        }
+        let isFavorite = record.recordType == CloudKitCore.RecordType.sharedRecipe
+            ? false
+            : Self.boolValue(for: record["isFavorite"])
 
         let relatedRecipeIds: [UUID]
         if let relatedIdsData = record["relatedRecipeIdsData"] as? Data {
@@ -1482,12 +1553,12 @@ actor RecipeCloudService {
             yields: yields,
             totalMinutes: totalMinutes,
             tags: tags,
-            nutrition: nil,
-            sourceURL: nil,
-            sourceTitle: nil,
+            nutrition: nutrition,
+            sourceURL: sourceURL,
+            sourceTitle: sourceTitle,
             notes: notes,
             imageURL: imageURL,
-            isFavorite: false,
+            isFavorite: isFavorite,
             visibility: visibility,
             ownerId: ownerId,
             cloudRecordName: record.recordID.recordName,

@@ -32,6 +32,8 @@ final class FriendsTabViewModel {
     private(set) var dependencies: DependencyContainer?
     @ObservationIgnored
     private var hasLoadedOnce = false
+    @ObservationIgnored
+    private var loadedUserId: UUID?
 
     private init() {
         // Private init for singleton
@@ -44,10 +46,34 @@ final class FriendsTabViewModel {
         self.dependencies = dependencies
     }
 
+    func resetSessionState() {
+        sharedRecipes = []
+        sharedCollections = []
+        isLoading = false
+        showSuccessAlert = false
+        showErrorAlert = false
+        alertMessage = ""
+        recentlyAdded = []
+        tagSections = []
+        sharerTiers = [:]
+        hasLoadedOnce = false
+        loadedUserId = nil
+    }
+
     func loadSharedRecipes(forceRefresh: Bool = false) async {
         guard let dependencies = dependencies else {
             AppLogger.general.warning("FriendsTabViewModel not configured with dependencies")
             return
+        }
+
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            resetSessionState()
+            return
+        }
+
+        if loadedUserId != currentUserId {
+            resetSessionState()
+            loadedUserId = currentUserId
         }
 
         if RuntimeEnvironment.isSimulatorQAMode {
@@ -57,16 +83,18 @@ final class FriendsTabViewModel {
 
         // On first load, try to use cached data for instant display
         if !hasLoadedOnce {
-            if let cached = await dependencies.sharingService.getCachedSharedRecipes() {
+            if let cached = await dependencies.sharingService.getCachedSharedRecipes(for: currentUserId) {
+                guard isCurrentLoadValid(for: currentUserId) else { return }
                 // Show cached data immediately
                 sharedRecipes = cached
                 organizeRecipesIntoSections()
                 await preloadImagesForSharedRecipes()
+                guard isCurrentLoadValid(for: currentUserId) else { return }
                 hasLoadedOnce = true
 
                 // Fetch tiers in background
-                await fetchSharerTiers()
-                await loadSharedCollections()
+                await fetchSharerTiers(for: currentUserId)
+                await loadSharedCollections(for: currentUserId)
                 return
             }
             // No cache, show loading indicator
@@ -74,19 +102,23 @@ final class FriendsTabViewModel {
         }
 
         defer {
-            isLoading = false
-            hasLoadedOnce = true
+            if isCurrentLoadValid(for: currentUserId) {
+                isLoading = false
+                hasLoadedOnce = true
+            }
         }
 
         do {
-            sharedRecipes = try await dependencies.sharingService.getSharedRecipes(forceRefresh: forceRefresh)
+            let recipes = try await dependencies.sharingService.getSharedRecipes(forceRefresh: forceRefresh)
+            guard isCurrentLoadValid(for: currentUserId) else { return }
+            sharedRecipes = recipes
             organizeRecipesIntoSections()
 
             // Fetch tier information for sharers
-            await fetchSharerTiers()
+            await fetchSharerTiers(for: currentUserId)
 
             // Load friends' shared collections
-            await loadSharedCollections()
+            await loadSharedCollections(for: currentUserId)
 
             // Preload images into memory cache to prevent flickering
             await preloadImagesForSharedRecipes()
@@ -97,13 +129,18 @@ final class FriendsTabViewModel {
         }
     }
 
-    private func loadSharedCollections() async {
+    private func isCurrentLoadValid(for userId: UUID) -> Bool {
+        !Task.isCancelled && CurrentUserSession.shared.userId == userId && loadedUserId == userId
+    }
+
+    private func loadSharedCollections(for expectedUserId: UUID) async {
         guard let dependencies = dependencies else { return }
 
         guard let currentUser = CurrentUserSession.shared.currentUser else {
             sharedCollections = []
             return
         }
+        guard currentUser.id == expectedUserId else { return }
 
         do {
             let connections = try await dependencies.connectionCloudService.fetchConnections(forUserId: currentUser.id)
@@ -121,17 +158,20 @@ final class FriendsTabViewModel {
             })
 
             guard !friendIds.isEmpty else {
+                guard isCurrentLoadValid(for: expectedUserId) else { return }
                 sharedCollections = []
                 return
             }
 
             let collections = try await dependencies.collectionCloudService.fetchSharedCollections(friendIds: Array(friendIds))
+            guard isCurrentLoadValid(for: expectedUserId) else { return }
             var deduped: [UUID: Collection] = [:]
             for collection in collections {
                 deduped[collection.id] = collection
             }
             sharedCollections = Array(deduped.values).sorted { $0.updatedAt > $1.updatedAt }
         } catch {
+            guard isCurrentLoadValid(for: expectedUserId) else { return }
             AppLogger.general.warning("Failed to load shared collections: \(error.localizedDescription)")
             sharedCollections = []
         }
@@ -218,7 +258,7 @@ final class FriendsTabViewModel {
     }
 
     /// Fetch tier information for users who shared recipes
-    private func fetchSharerTiers() async {
+    private func fetchSharerTiers(for expectedUserId: UUID) async {
         guard let dependencies = dependencies else { return }
 
         // Collect unique sharer user IDs
@@ -234,6 +274,7 @@ final class FriendsTabViewModel {
                 forOwnerIds: Array(uncachedSharerIds)
             )
 
+            guard isCurrentLoadValid(for: expectedUserId) else { return }
             for sharerId in uncachedSharerIds {
                 let count = counts[sharerId] ?? 0
                 sharerTiers[sharerId] = UserTier.tier(for: count)

@@ -144,7 +144,7 @@ final class CollectionSaveServiceTests: XCTestCase {
         XCTAssertTrue(references.isEmpty)
     }
 
-    func testExistingSavedCollectionTreatsLegacyOwnedCopyAsSavedAndCreatesReference() async throws {
+    func testLegacyOwnedCollectionCopyMarksSourceAsSavedAndBridgesReference() async throws {
         let sourceCollection = Collection(
             id: UUID(),
             name: "Shared Brunch",
@@ -166,6 +166,9 @@ final class CollectionSaveServiceTests: XCTestCase {
         )
         try await dependencies.collectionRepository.create(legacyCopy)
 
+        let existing = try await dependencies.collectionSaveService.existingSavedCollection(for: sourceCollection)
+        XCTAssertEqual(existing?.id, legacyCopy.id)
+
         let result = try await dependencies.collectionSaveService.saveCollectionToLibrary(
             sourceCollection,
             visibleRecipes: [],
@@ -173,7 +176,7 @@ final class CollectionSaveServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(result.reusedExistingCopy)
-        XCTAssertEqual(result.collection.id, sourceCollection.id)
+        XCTAssertEqual(result.collection.id, legacyCopy.id)
         XCTAssertEqual(result.savedReference?.sourceCollectionId, sourceCollection.id)
 
         let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
@@ -188,7 +191,7 @@ final class CollectionSaveServiceTests: XCTestCase {
             userId: sourceOwnerId,
             recipeIds: [],
             visibility: .publicRecipe,
-            emoji: "✨",
+            emoji: "*",
             color: "#6C5CE7"
         )
 

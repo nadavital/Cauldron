@@ -863,7 +863,7 @@ private func loadLibraryRecipesIncludingSavedReferences(
     dependencies: DependencyContainer
 ) async throws -> [Recipe] {
     var recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-        try await dependencies.recipeRepository.fetchAll(),
+        try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
         currentUserId: CurrentUserSession.shared.userId
     )
 

@@ -328,15 +328,22 @@ struct RecipeImportPreviewView: View {
         // It will be reset on error, and on success the view will dismiss
 
         do {
+            guard let userId = CurrentUserSession.shared.userId else {
+                AppLogger.parsing.error("Cannot save imported recipe without a current user")
+                isSaving = false
+                return
+            }
+
             let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
                 from: editedRecipe,
-                userId: CurrentUserSession.shared.userId,
+                userId: userId,
                 imageManager: dependencies.imageManager
             )
 
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
+            NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
 
             // Call the callback to notify parent view
             onSave()

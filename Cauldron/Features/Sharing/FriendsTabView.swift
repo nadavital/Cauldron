@@ -52,10 +52,15 @@ struct FriendsTabView: View {
         .sheet(isPresented: $showingInviteSheet) {
             InviteFriendsSheetView(dependencies: dependencies)
         }
-        .task {
+        .task(id: userSession.userId) {
             // Configure dependencies if not already done
             viewModel.configure(dependencies: dependencies)
             await viewModel.loadSharedRecipes()
+        }
+        .onChange(of: userSession.userId) { _, _ in
+            navigationPath = NavigationPath()
+            sidebarSelection = nil
+            collectionImageCache = [:]
         }
         .alert("Success", isPresented: $viewModel.showSuccessAlert) {
             Button("OK") { }
@@ -276,12 +281,23 @@ struct FriendsTabView: View {
 
                 inviteInlineCard
 
-                if viewModel.isLoading {
+                if viewModel.isLoading && viewModel.sharedRecipes.isEmpty {
                     ProgressView("Loading recipes...")
                         .padding(.vertical, 40)
                 } else if viewModel.sharedRecipes.isEmpty {
                     emptyRecipesState
                 } else {
+                    if viewModel.isLoading {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Refreshing")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 12)
+                    }
+
                     // Recently Added Section
                     if !viewModel.recentlyAdded.isEmpty {
                         recentlyAddedSection
@@ -554,7 +570,9 @@ struct FriendsTabView: View {
                     ForEach(viewModel.sharedCollections.prefix(10), id: \.id) { collection in
                         NavigationLink(destination: CollectionDetailView(
                             collection: collection,
-                            dependencies: dependencies
+                            dependencies: dependencies,
+                            initialRecipeImages: collectionImageCache[collection.id] ?? [],
+                            initialRelation: .unknown
                         )) {
                             CollectionCardView(
                                 collection: collection,
@@ -869,7 +887,9 @@ struct AllFriendsCollectionsListView: View {
                 ForEach(collections, id: \.id) { collection in
                     NavigationLink(destination: CollectionDetailView(
                         collection: collection,
-                        dependencies: dependencies
+                        dependencies: dependencies,
+                        initialRecipeImages: collectionImageCache[collection.id] ?? [],
+                        initialRelation: .unknown
                     )) {
                         CollectionCardView(
                             collection: collection,

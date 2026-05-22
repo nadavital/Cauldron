@@ -23,6 +23,7 @@ struct RecipeDetailView: View {
     @State var recipeOwner: User?
     @State var isLoadingOwner = false
     @State var hasOwnedCopy = false
+    @State var recipeLibraryRelation: RecipeLibraryRelation
     @State private var showReferenceRemovedToast = false
     @State var currentVisibility: RecipeVisibility
     @State var isChangingVisibility = false
@@ -58,14 +59,32 @@ struct RecipeDetailView: View {
     let explicitHighlightedStepIndex: Int?
 
     init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil, highlightedStepIndex: Int? = nil) {
-        self.initialRecipe = recipe
+        let snapshot = dependencies.libraryPresentationStore.recipeSnapshot(for: recipe)
+        let seededRecipe = snapshot?.recipe ?? recipe
+        let seededSharedBy = sharedBy ?? snapshot?.sharedBy
+        let seededSharedAt = sharedAt ?? snapshot?.sharedAt
+        let seededRelation = snapshot?.relation
+            ?? dependencies.libraryPresentationStore.recipeRelation(for: recipe)
+            ?? Self.initialRelation(for: recipe)
+
+        self.initialRecipe = seededRecipe
         self.dependencies = dependencies
-        self.sharedBy = sharedBy
-        self.sharedAt = sharedAt
+        self.sharedBy = seededSharedBy
+        self.sharedAt = seededSharedAt
         self.explicitHighlightedStepIndex = highlightedStepIndex
-        self._recipe = State(initialValue: recipe)
-        self._localIsFavorite = State(initialValue: recipe.isFavorite)
-        self._currentVisibility = State(initialValue: recipe.visibility)
+        self._recipe = State(initialValue: seededRecipe)
+        self._localIsFavorite = State(initialValue: seededRecipe.isFavorite)
+        self._currentVisibility = State(initialValue: seededRecipe.visibility)
+        self._hasOwnedCopy = State(initialValue: seededRelation.isSavedOrOwned)
+        self._recipeLibraryRelation = State(initialValue: seededRelation)
+        self._isCheckingDuplicates = State(initialValue: seededRelation == .unknown)
+    }
+
+    private static func initialRelation(for recipe: Recipe) -> RecipeLibraryRelation {
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return .notSaved
+        }
+        return recipe.ownerId == currentUserId && !recipe.isPreview ? .owned : .unknown
     }
 
     private var highlightedStepIndex: Int? {
@@ -101,9 +120,9 @@ struct RecipeDetailView: View {
             scaledRecipe: scaledRecipe,
             scaledResult: scaledResult,
             localIsFavorite: $localIsFavorite,
-            hasOwnedCopy: hasOwnedCopy,
+            hasOwnedCopy: recipeLibraryRelation.isSavedOrOwned || hasOwnedCopy,
             isSavingRecipe: isSavingRecipe,
-            isCheckingDuplicates: isCheckingDuplicates,
+            isCheckingDuplicates: isCheckingDuplicates || recipeLibraryRelation == .unknown,
             hasUpdates: hasUpdates,
             isUpdatingRecipe: isUpdatingRecipe,
             isLoadingCreator: isLoadingCreator,
@@ -379,15 +398,48 @@ struct RecipeDetailView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
-            if notification.object is UUID {
-                if !recipe.isOwnedByCurrentUser() {
-                    Task {
-                        await checkForOwnedCopy()
-                    }
+            if let deletedRecipeId = notification.object as? UUID,
+               deletedRecipeId == recipe.id {
+                recipeWasDeleted = true
+                return
+            }
+
+            if notification.object is UUID,
+               !recipe.isOwnedByCurrentUser() {
+                Task {
+                    await checkForOwnedCopy()
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .savedRecipeReferencesChanged)) { notification in
+            guard let sourceRecipeId = notification.userInfo?["sourceRecipeId"] as? UUID,
+                  sourceRecipeId == recipe.relatedGraphReferenceID,
+                  let changeType = notification.userInfo?["changeType"] as? String else {
+                return
+            }
+
+            if changeType == "saved" {
+                let reference = notification.userInfo?["reference"] as? SavedRecipeReference
+                let relation: RecipeLibraryRelation = .saved(materializedRecipeId: reference?.materializedRecipeId)
+                recipeLibraryRelation = relation
+                hasOwnedCopy = true
+                isCheckingDuplicates = false
+                dependencies.libraryPresentationStore.updateRecipeRelation(relation, for: recipe)
+            } else if changeType == "removed" {
+                recipeLibraryRelation = .notSaved
+                hasOwnedCopy = false
+                isCheckingDuplicates = false
+                dependencies.libraryPresentationStore.updateRecipeRelation(.notSaved, for: recipe)
+            }
+        }
         .task {
+            dependencies.libraryPresentationStore.seedRecipe(
+                recipe,
+                sharedBy: sharedBy,
+                sharedAt: sharedAt,
+                relation: recipeLibraryRelation
+            )
+
             let currentUserId = CurrentUserSession.shared.userId
             if RecipeDetailDisplayPolicy.shouldRefreshPublicRecipeOnOpen(recipe, currentUserId: currentUserId) {
                 await refreshPublicRecipeIfNeeded()
@@ -494,7 +546,7 @@ struct RecipeDetailView: View {
                     } label: {
                         Label("Delete Recipe", systemImage: "trash")
                     }
-                } else if hasOwnedCopy {
+                } else if recipeLibraryRelation.isSavedOrOwned || hasOwnedCopy {
                     Divider()
 
                     Button {

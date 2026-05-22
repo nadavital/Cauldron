@@ -27,7 +27,8 @@ final class CollectionRepositoryTests: XCTestCase {
         // Create in-memory model container for testing
         modelContainer = try TestModelContainer.create(with: [
             CollectionModel.self,
-            CollectionMembershipModel.self
+            CollectionMembershipModel.self,
+            DeletedCollectionModel.self
         ])
 
         // Create CloudKit services (will use real services)
@@ -69,6 +70,74 @@ final class CollectionRepositoryTests: XCTestCase {
     }
 
     // MARK: - Create Tests
+
+    func testCollectionDeletionSyncPolicyRequiresRemoteTombstoneBeforeActiveDelete() {
+        XCTAssertTrue(CollectionDeletionSyncPolicy.canDeleteActiveRecord(tombstoneSaveError: nil))
+        XCTAssertFalse(
+            CollectionDeletionSyncPolicy.canDeleteActiveRecord(
+                tombstoneSaveError: NSError(domain: "CloudKit", code: 11)
+            )
+        )
+    }
+
+    func testCollectionDeleteReplayPolicyRequiresTombstoneOrOwnerPayload() throws {
+        XCTAssertNil(
+            CollectionDeleteReplayPolicy.tombstoneForReplay(
+                localTombstone: nil,
+                payloadData: nil,
+                defaultDeletedAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )
+        )
+    }
+
+    func testCollectionDeleteReplayPolicySynthesizesTombstoneFromQueuedPayload() throws {
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let deletedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let payload = CollectionRepository.CollectionDeletePayload(
+            collectionId: collectionId,
+            ownerId: ownerId
+        )
+
+        let tombstone = CollectionDeleteReplayPolicy.tombstoneForReplay(
+            localTombstone: nil,
+            payloadData: try JSONEncoder().encode(payload),
+            defaultDeletedAt: deletedAt
+        )
+
+        XCTAssertEqual(tombstone?.collectionId, collectionId)
+        XCTAssertEqual(tombstone?.ownerId, ownerId)
+        XCTAssertEqual(tombstone?.deletedAt, deletedAt)
+    }
+
+    func testCollectionSuppressedActiveRecordCleanupCanUseLocalTombstone() {
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let tombstone = DeletedCollectionTombstone(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            deletedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            cloudRecordName: "collection-record",
+            sourceDeviceId: "test-device"
+        )
+
+        let selected = CollectionDeleteReplayPolicy.tombstoneForSuppressedActiveRecord(
+            localTombstone: tombstone,
+            remoteTombstone: nil
+        )
+
+        XCTAssertEqual(selected?.collectionId, collectionId)
+        XCTAssertEqual(selected?.ownerId, ownerId)
+    }
+
+    func testCollectionSuppressedActiveRecordCleanupRequiresAnyTombstone() {
+        XCTAssertNil(
+            CollectionDeleteReplayPolicy.tombstoneForSuppressedActiveRecord(
+                localTombstone: nil,
+                remoteTombstone: nil
+            )
+        )
+    }
 
     func testCreate_SavesCollectionLocally() async throws {
         // Given
@@ -129,6 +198,27 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(collections.count, 2)
         XCTAssertTrue(collections.contains { $0.id == collection1.id })
         XCTAssertTrue(collections.contains { $0.id == collection2.id })
+    }
+
+    func testFetchUserCollectionsReturnsOnlyRequestedOwnerCollections() async throws {
+        let otherUserId = UUID()
+        let ownedCollection = Collection.new(name: "Mine", userId: testUserId)
+        let otherCollection = Collection.new(name: "Not Mine", userId: otherUserId)
+        let privateOwnedCollection = Collection.new(name: "Private Mine", userId: testUserId)
+            .updated(visibility: .privateRecipe)
+
+        try await repository.create(ownedCollection)
+        try await repository.create(otherCollection)
+        try await repository.create(privateOwnedCollection)
+
+        let results = try await repository.fetchUserCollections(ownerId: testUserId)
+        let publicResults = try await repository.fetchUserCollections(
+            ownerId: testUserId,
+            visibility: .publicRecipe
+        )
+
+        XCTAssertEqual(Set(results.map(\.id)), Set([ownedCollection.id, privateOwnedCollection.id]))
+        XCTAssertEqual(Set(publicResults.map(\.id)), Set([ownedCollection.id]))
     }
 
     func testFetch_ById_Found() async throws {
@@ -533,27 +623,25 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertNil(fetched)
     }
 
-    func testDelete_RemovesLocalMembershipEdges() async throws {
-        // Given
-        let recipeId1 = UUID()
-        let recipeId2 = UUID()
-        let collection = Collection(
-            name: "Test Collection",
-            userId: testUserId,
-            recipeIds: [recipeId1, recipeId2]
-        )
+    func testDelete_CreatesTombstoneAndRemovedMembershipEdges() async throws {
+        let recipeId = UUID()
+        let collection = Collection(name: "Test Collection", userId: testUserId, recipeIds: [recipeId])
         try await repository.create(collection)
 
-        // When
         try await repository.delete(id: collection.id)
 
-        // Then
         let context = ModelContext(modelContainer)
-        let collectionId = collection.id
-        let descriptor = FetchDescriptor<CollectionMembershipModel>(
-            predicate: #Predicate { $0.collectionId == collectionId }
-        )
-        XCTAssertTrue(try context.fetch(descriptor).isEmpty)
+        let tombstones = try context.fetch(FetchDescriptor<DeletedCollectionModel>())
+        let membershipEdges = try context.fetch(FetchDescriptor<CollectionMembershipModel>())
+
+        XCTAssertEqual(tombstones.count, 1)
+        XCTAssertEqual(tombstones.first?.collectionId, collection.id)
+        XCTAssertEqual(tombstones.first?.ownerId, testUserId)
+        XCTAssertEqual(tombstones.first?.schemaVersion, DeletedCollectionTombstone.currentSchemaVersion)
+        XCTAssertEqual(membershipEdges.count, 1)
+        XCTAssertEqual(membershipEdges.first?.collectionId, collection.id)
+        XCTAssertEqual(membershipEdges.first?.recipeId, recipeId)
+        XCTAssertEqual(membershipEdges.first?.status, CollectionMembershipStatus.removed.rawValue)
     }
 
     func testDelete_NonOwnedCollection_ThrowsNotAuthorized() async throws {

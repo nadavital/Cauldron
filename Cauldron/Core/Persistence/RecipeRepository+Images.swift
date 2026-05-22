@@ -45,7 +45,19 @@ extension RecipeRepository {
 
         do {
             let toPublic = databaseType == .public
-            let recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, toPublic: toPublic)
+            let recordName: String
+            if !toPublic, let cloudRecordName = recipe.cloudRecordName {
+                let imageURL = await imageManager.imageURL(recipeId: recipe.id)
+                let imageData = try Data(contentsOf: imageURL)
+                recordName = try await recipeCloudService.uploadImageAsset(
+                    recipeId: recipe.id,
+                    imageData: imageData,
+                    toPublic: false,
+                    privateRecordName: cloudRecordName
+                )
+            } else {
+                recordName = try await imageManager.uploadImageToCloud(recipeId: recipe.id, toPublic: toPublic)
+            }
 
             // Update recipe with cloud metadata
             let modificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
@@ -89,7 +101,11 @@ extension RecipeRepository {
 
         do {
             logger.info("🗑️ Deleting image from PRIVATE database for recipe: \(recipe.title)")
-            try await recipeCloudService.deleteImageAsset(recipeId: recipe.id, fromPublic: false)
+            try await recipeCloudService.deleteImageAsset(
+                recipeId: recipe.id,
+                fromPublic: false,
+                privateRecordName: recipe.cloudRecordName
+            )
             logger.info("✅ Image deleted from PRIVATE database")
         } catch {
             logger.error("❌ Failed to delete image from PRIVATE database: \(error.localizedDescription)")
@@ -299,6 +315,7 @@ extension RecipeRepository {
         }
 
         var allSuccess = true
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
 
         for recipeId in pendingUploads {
             guard !Task.isCancelled else { break }
@@ -317,6 +334,19 @@ extension RecipeRepository {
             do {
                 guard let recipe = try await fetch(id: recipeId) else {
                     // Recipe was deleted, remove from pending
+                    await imageSyncManager.removePendingUpload(recipeId)
+                    imageRetryAttempts.removeValue(forKey: recipeId)
+                    continue
+                }
+
+                guard let currentUserId else {
+                    logger.info("Deferring pending image upload until current user is available: \(recipeId)")
+                    allSuccess = false
+                    continue
+                }
+
+                guard recipe.canMutateCloudState(for: currentUserId) else {
+                    logger.warning("Dropping pending image upload for recipe not owned by the current user: \(recipeId)")
                     await imageSyncManager.removePendingUpload(recipeId)
                     imageRetryAttempts.removeValue(forKey: recipeId)
                     continue

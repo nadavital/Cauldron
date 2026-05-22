@@ -40,6 +40,15 @@ final class RecipeRepositorySearchTests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testRecipeDeletionSyncPolicyRequiresRemoteTombstoneBeforeActiveDelete() {
+        XCTAssertTrue(RecipeDeletionSyncPolicy.canDeleteActiveRecords(tombstoneSaveError: nil))
+        XCTAssertFalse(
+            RecipeDeletionSyncPolicy.canDeleteActiveRecords(
+                tombstoneSaveError: NSError(domain: "CloudKit", code: 11)
+            )
+        )
+    }
+
     func testSearchByTagExcludesPreviewRecipes() async throws {
         let tag = Tag(name: "Dinner")
         let ownedRecipe = makeRecipe(
@@ -117,6 +126,115 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(results.map(\.id), [recentOwnedRecipe.id, oldOwnedRecipe.id])
     }
 
+    func testFetchLibraryRecipesReturnsOnlyRequestedOwnersNonPreviewRecipes() async throws {
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let currentUsersRecipe = makeRecipe(
+            title: "My Soup",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+        let otherUsersRecipe = makeRecipe(
+            title: "Other Soup",
+            ownerId: otherUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 3_000),
+            isPreview: false
+        )
+        let previewRecipe = makeRecipe(
+            title: "Preview Soup",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 4_000),
+            isPreview: true
+        )
+
+        try await repository.create(currentUsersRecipe, skipCloudSync: true)
+        try await repository.create(otherUsersRecipe, skipCloudSync: true)
+        try await repository.create(previewRecipe, skipCloudSync: true)
+
+        let results = try await repository.fetchLibraryRecipes(ownerId: currentUserId)
+
+        XCTAssertEqual(results.map(\.id), [currentUsersRecipe.id])
+    }
+
+    func testFetchByIdPrefersRequestedOwnerWhenDuplicateIdsExist() async throws {
+        let sharedRecipeId = UUID()
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let currentUsersRecipe = makeRecipe(
+            id: sharedRecipeId,
+            title: "Current User Copy",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let otherUsersRecipe = makeRecipe(
+            id: sharedRecipeId,
+            title: "Other User Cached Copy",
+            ownerId: otherUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        try await repository.create(currentUsersRecipe, skipCloudSync: true)
+        try await repository.create(otherUsersRecipe, skipCloudSync: true)
+
+        let fetched = try await repository.fetch(id: sharedRecipeId, preferredOwnerId: currentUserId)
+
+        XCTAssertEqual(fetched?.title, "Current User Copy")
+        XCTAssertEqual(fetched?.ownerId, currentUserId)
+    }
+
+    func testUpdateRecipeInDatabaseUpdatesMatchingOwnerWhenDuplicateIdsExist() async throws {
+        let sharedRecipeId = UUID()
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let currentUsersRecipe = makeRecipe(
+            id: sharedRecipeId,
+            title: "Current User Copy",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            isPreview: false
+        )
+        let otherUsersRecipe = makeRecipe(
+            id: sharedRecipeId,
+            title: "Other User Cached Copy",
+            ownerId: otherUserId,
+            originalRecipeId: nil,
+            isPreview: false
+        )
+
+        try await repository.create(currentUsersRecipe, skipCloudSync: true)
+        try await repository.create(otherUsersRecipe, skipCloudSync: true)
+
+        let updatedCurrentUsersRecipe = makeRecipe(
+            id: sharedRecipeId,
+            title: "Updated Current User Copy",
+            ownerId: currentUserId,
+            originalRecipeId: nil,
+            isPreview: false
+        )
+        try await repository.updateRecipeInDatabase(
+            updatedCurrentUsersRecipe,
+            shouldUpdateTimestamp: false
+        )
+
+        let context = ModelContext(modelContainer)
+        let models = try context.fetch(FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.id == sharedRecipeId }
+        ))
+        let currentModel = try XCTUnwrap(models.first { $0.ownerId == currentUserId })
+        let otherModel = try XCTUnwrap(models.first { $0.ownerId == otherUserId })
+
+        XCTAssertEqual(currentModel.title, "Updated Current User Copy")
+        XCTAssertEqual(otherModel.title, "Other User Cached Copy")
+    }
+
     func testFetchOwnedCopiesReturnsOnlyMatchingNonPreviewCopies() async throws {
         let sourceId = UUID()
         let otherSourceId = UUID()
@@ -187,6 +305,113 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertTrue(results.isEmpty)
     }
 
+    func testFetchOwnedCopiesCanRequireCopiesThatStillFollowSource() async throws {
+        let sourceId = UUID()
+        let ownerId = UUID()
+        let followingCopy = makeRecipe(
+            title: "Following Sauce",
+            ownerId: ownerId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: true,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let editedFork = makeRecipe(
+            title: "Edited Sauce",
+            ownerId: ownerId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: false,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        try await repository.create(followingCopy, skipCloudSync: true)
+        try await repository.create(editedFork, skipCloudSync: true)
+
+        let results = try await repository.fetchOwnedCopies(
+            originalRecipeIds: [sourceId],
+            ownerId: ownerId,
+            followingSourceOnly: true
+        )
+
+        XCTAssertEqual(results.map(\.id), [followingCopy.id])
+    }
+
+    func testFetchOwnedCopiesUsesCurrentSessionWhenOwnerIsOmitted() async throws {
+        let sourceId = UUID()
+        let ownedCopy = makeRecipe(
+            title: "My Saved Sauce",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: true,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+
+        try await repository.create(ownedCopy, skipCloudSync: true)
+
+        let results = try await repository.fetchOwnedCopies(originalRecipeIds: [sourceId])
+
+        XCTAssertEqual(results.map(\.id), [ownedCopy.id])
+    }
+
+    func testToggleFavoritePrefersCurrentUsersDuplicateRecipeRow() async throws {
+        let recipeId = UUID()
+        let otherUserId = UUID()
+        let nonOwnedSource = Recipe(
+            id: recipeId,
+            title: "Source Sauce",
+            ingredients: [Ingredient(name: "Salt", quantity: nil)],
+            steps: [CookStep(index: 0, text: "Season.", timers: [])],
+            isFavorite: false,
+            visibility: .publicRecipe,
+            ownerId: otherUserId,
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let ownedCopy = Recipe(
+            id: recipeId,
+            title: "My Sauce",
+            ingredients: [Ingredient(name: "Salt", quantity: nil)],
+            steps: [CookStep(index: 0, text: "Season.", timers: [])],
+            isFavorite: false,
+            visibility: .privateRecipe,
+            ownerId: currentUserId,
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        try await repository.create(nonOwnedSource, skipCloudSync: true)
+        try await repository.create(ownedCopy, skipCloudSync: true)
+
+        try await repository.toggleFavorite(id: recipeId)
+
+        let currentUserRows = try await repository.fetchLibraryRecipes(ownerId: currentUserId)
+        let otherUserRows = try await repository.fetchLibraryRecipes(ownerId: otherUserId)
+        XCTAssertEqual(currentUserRows.first?.isFavorite, true)
+        XCTAssertEqual(otherUserRows.first?.isFavorite, false)
+    }
+
+    func testReplayStaleRecipeUpdateCompletesWhenRemoteTombstoneAlreadyWon() async throws {
+        let recipeId = UUID()
+        await repository.operationQueueService.addOperation(
+            type: .update,
+            entityType: .recipe,
+            entityId: recipeId
+        )
+        guard let operation = await repository.operationQueueService.getOperation(for: recipeId, entityType: .recipe) else {
+            return XCTFail("Expected queued recipe update operation")
+        }
+        try await repository.deletedRecipeRepository.markAsDeleted(
+            recipeId: recipeId,
+            cloudRecordName: nil,
+            deletedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        await repository.replayRecipeUpsertOperationForTesting(operation)
+
+        let queued = await repository.operationQueueService.getOperation(for: recipeId, entityType: .recipe)
+        XCTAssertNil(queued)
+    }
+
     func testResolveLocalRelatedRecipesPrefersOwnedCopyOverPreview() async throws {
         let sourceId = UUID()
         let preview = makeRecipe(
@@ -236,6 +461,118 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(resolution.missingIds, [sourceId])
     }
 
+    func testResolveLocalRelatedRecipesPrefersCurrentUsersOwnedCopy() async throws {
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let sourceId = UUID()
+        let currentUsersCopy = makeRecipe(
+            title: "My Saved Sauce",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let otherUsersCopy = makeRecipe(
+            title: "Someone Else's Saved Sauce",
+            ownerId: otherUserId,
+            originalRecipeId: sourceId,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        try await repository.create(currentUsersCopy, skipCloudSync: true)
+        try await repository.create(otherUsersCopy, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: true,
+            preferredOwnerId: currentUserId
+        )
+
+        XCTAssertEqual(resolution.recipes.map(\.id), [currentUsersCopy.id])
+        XCTAssertTrue(resolution.missingIds.isEmpty)
+    }
+
+    func testResolveLocalRelatedRecipesPrefersCurrentUsersOwnedCopyOverNonOwnedDirectMatch() async throws {
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let sourceId = UUID()
+        let nonOwnedDirectMatch = makeRecipe(
+            id: sourceId,
+            title: "Original Sauce",
+            ownerId: otherUserId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+        let currentUsersCopy = makeRecipe(
+            title: "My Saved Sauce",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+
+        try await repository.create(nonOwnedDirectMatch, skipCloudSync: true)
+        try await repository.create(currentUsersCopy, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: true,
+            preferredOwnerId: currentUserId
+        )
+
+        XCTAssertEqual(resolution.recipes.map(\.id), [currentUsersCopy.id])
+        XCTAssertTrue(resolution.missingIds.isEmpty)
+    }
+
+    func testResolveLocalRelatedRecipesTreatsNonOwnedDirectMatchAsMissingWhenPreferredOwnerIsSet() async throws {
+        let currentUserId = UUID()
+        let otherUserId = UUID()
+        let sourceId = UUID()
+        let nonOwnedDirectMatch = makeRecipe(
+            id: sourceId,
+            title: "Original Sauce",
+            ownerId: otherUserId,
+            originalRecipeId: nil,
+            isPreview: false
+        )
+
+        try await repository.create(nonOwnedDirectMatch, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: true,
+            preferredOwnerId: currentUserId
+        )
+
+        XCTAssertTrue(resolution.recipes.isEmpty)
+        XCTAssertEqual(resolution.missingIds, [sourceId])
+    }
+
+    func testResolveLocalRelatedRecipesDoesNotSubstituteEditedForkForCanonicalReference() async throws {
+        let currentUserId = UUID()
+        let sourceId = UUID()
+        let editedFork = makeRecipe(
+            title: "My Edited Sauce",
+            ownerId: currentUserId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: false,
+            isPreview: false
+        )
+
+        try await repository.create(editedFork, skipCloudSync: true)
+
+        let resolution = try await repository.resolveLocalRelatedRecipes(
+            referenceIds: [sourceId],
+            includePreviews: false,
+            preferredOwnerId: currentUserId
+        )
+
+        XCTAssertTrue(resolution.recipes.isEmpty)
+        XCTAssertEqual(resolution.missingIds, [sourceId])
+    }
+
     func testRemoveSelfSavedRecipeCopiesDeletesFollowingCopyOfOwnedOriginal() async throws {
         let currentUserId = try XCTUnwrap(self.currentUserId)
         let sourceId = UUID()
@@ -271,6 +608,27 @@ final class RecipeRepositorySearchTests: XCTestCase {
 
         XCTAssertEqual(removedCount, 1)
         XCTAssertEqual(Set(remainingRecipes.map(\.id)), Set([sourceId, externalCopy.id]))
+    }
+
+    func testCreatePreviewDoesNotClearDeletedRecipeTombstone() async throws {
+        let recipeId = UUID()
+        let ownerId = UUID()
+        let preview = makeRecipe(
+            id: recipeId,
+            title: "Preview Soup",
+            ownerId: ownerId,
+            originalRecipeId: nil,
+            isPreview: true
+        )
+
+        try await repository.deletedRecipeRepository.markAsDeleted(
+            recipeId: recipeId,
+            cloudRecordName: recipeId.uuidString
+        )
+        try await repository.create(preview, skipCloudSync: true)
+
+        let isDeleted = try await repository.deletedRecipeRepository.isDeleted(recipeId: recipeId)
+        XCTAssertTrue(isDeleted)
     }
 
     func testRemoveDuplicateRecipesMergesIntoCanonicalNonPreviewRecipe() async throws {
@@ -323,6 +681,86 @@ final class RecipeRepositorySearchTests: XCTestCase {
         XCTAssertEqual(remaining.first?.visibility, .publicRecipe)
         XCTAssertTrue(remaining.first?.isFavorite ?? false)
         XCTAssertFalse(remaining.first?.isPreview ?? true)
+    }
+
+    func testRemoveDuplicateRecipesDoesNotGraftCopyLineageOntoOriginalCanonical() async throws {
+        let recipeId = UUID()
+        let ownerId = UUID()
+        let sourceId = UUID()
+        let copiedDuplicate = makeRecipe(
+            id: recipeId,
+            title: "Copied Duplicate",
+            ownerId: ownerId,
+            originalRecipeId: sourceId,
+            followsSourceUpdates: true,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let originalCanonical = Recipe(
+            id: recipeId,
+            title: "Owned Original",
+            ingredients: [
+                Ingredient(name: "Flour", quantity: Quantity(value: 2, unit: .cup))
+            ],
+            steps: [
+                CookStep(index: 0, text: "Mix.", timers: [])
+            ],
+            visibility: .publicRecipe,
+            ownerId: ownerId,
+            cloudRecordName: "private-record",
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        let context = ModelContext(modelContainer)
+        context.insert(try RecipeModel.from(copiedDuplicate))
+        context.insert(try RecipeModel.from(originalCanonical))
+        try context.save()
+
+        let removedCount = try await repository.removeDuplicateRecipes()
+        let remaining = try await repository.fetchAll()
+
+        XCTAssertEqual(removedCount, 1)
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.id, recipeId)
+        XCTAssertEqual(remaining.first?.title, "Owned Original")
+        XCTAssertNil(remaining.first?.originalRecipeId)
+        XCTAssertNil(remaining.first?.savedAt)
+        XCTAssertFalse(remaining.first?.isFollowingSourceUpdates ?? true)
+    }
+
+    func testRemoveDuplicateRecipesDoesNotMergeRecipesWithDifferentOwners() async throws {
+        let recipeId = UUID()
+        let firstOwnerId = UUID()
+        let secondOwnerId = UUID()
+        let firstRecipe = makeRecipe(
+            id: recipeId,
+            title: "First Owner Recipe",
+            ownerId: firstOwnerId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            isPreview: false
+        )
+        let secondRecipe = makeRecipe(
+            id: recipeId,
+            title: "Second Owner Recipe",
+            ownerId: secondOwnerId,
+            originalRecipeId: nil,
+            updatedAt: Date(timeIntervalSince1970: 2_000),
+            isPreview: false
+        )
+
+        let context = ModelContext(modelContainer)
+        context.insert(try RecipeModel.from(firstRecipe))
+        context.insert(try RecipeModel.from(secondRecipe))
+        try context.save()
+
+        let removedCount = try await repository.removeDuplicateRecipes()
+        let remaining = try await repository.fetchAll()
+
+        XCTAssertEqual(removedCount, 0)
+        XCTAssertEqual(remaining.count, 2)
+        XCTAssertEqual(Set(remaining.compactMap(\.ownerId)), [firstOwnerId, secondOwnerId])
     }
 
     private func makeRecipe(

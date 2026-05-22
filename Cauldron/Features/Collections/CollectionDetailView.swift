@@ -28,6 +28,7 @@ struct CollectionDetailView: View {
     @State private var collectionOwner: User?
     @State private var isSavingCollection = false
     @State private var savedCollection: Collection?
+    @State private var collectionRelation: CollectionLibraryRelation
     @State private var customCoverImage: UIImage?
     @State private var loadedCoverKey: String?
     @State private var isLoadingCoverImage = false
@@ -105,10 +106,42 @@ struct CollectionDetailView: View {
         CurrentUserSession.shared.userId != nil && !isOwned
     }
 
-    init(collection: Collection, dependencies: DependencyContainer) {
+    init(
+        collection: Collection,
+        dependencies: DependencyContainer,
+        initialOwner: User? = nil,
+        initialRecipes: [Recipe] = [],
+        initialRecipeImages: [URL?] = [],
+        initialRecipeImageSources: [CollectionRecipeImageSource] = [],
+        initialRelation: CollectionLibraryRelation? = nil
+    ) {
+        let snapshot = dependencies.libraryPresentationStore.collectionSnapshot(for: collection)
+        let seededCollection = snapshot?.collection ?? collection
+        let seededRecipes = initialRecipes.isEmpty ? (snapshot?.recipes ?? []) : initialRecipes
+        let seededRelation = initialRelation
+            ?? snapshot?.relation
+            ?? dependencies.libraryPresentationStore.collectionRelation(for: collection)
+            ?? Self.initialRelation(for: collection)
+        let seededSavedCollection = snapshot?.savedCollection
+            ?? (seededRelation.isSavedOrOwned ? seededCollection : nil)
+
         self.initialCollection = collection
         self.dependencies = dependencies
-        self._collection = State(initialValue: collection)
+        self._collection = State(initialValue: seededCollection)
+        self._recipes = State(initialValue: seededRecipes)
+        self._visibleRecipes = State(initialValue: seededRecipes)
+        self._recipeImages = State(initialValue: initialRecipeImages.isEmpty ? (snapshot?.recipeImages ?? []) : initialRecipeImages)
+        self._recipeImageSources = State(initialValue: initialRecipeImageSources.isEmpty ? (snapshot?.recipeImageSources ?? []) : initialRecipeImageSources)
+        self._collectionOwner = State(initialValue: initialOwner ?? snapshot?.owner)
+        self._savedCollection = State(initialValue: seededSavedCollection)
+        self._collectionRelation = State(initialValue: seededRelation)
+    }
+
+    private static func initialRelation(for collection: Collection) -> CollectionLibraryRelation {
+        guard let currentUserId = CurrentUserSession.shared.userId else {
+            return .notSaved
+        }
+        return collection.userId == currentUserId ? .owned : .unknown
     }
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
@@ -143,8 +176,7 @@ struct CollectionDetailView: View {
     }
 
     private var customCoverTaskID: String {
-        let remoteKey = collection.coverImageURL?.absoluteString ?? collection.cloudCoverImageRecordName ?? "no-cover"
-        return "\(collection.id.uuidString)|\(collection.coverImageType.rawValue)|\(remoteKey)"
+        collection.customCoverImageCacheKey
     }
 
     private var recipeLayoutToolbarMenu: some View {
@@ -213,9 +245,10 @@ struct CollectionDetailView: View {
             Text(publicMembershipRepairConfirmationMessage)
         }
         .task {
-            await loadCollectionOwner()
+            async let ownerLoad: Void = loadCollectionOwner()
+            async let savedStateLoad: Void = loadExistingSavedCollection()
             await loadRecipes()
-            await loadExistingSavedCollection()
+            _ = await (ownerLoad, savedStateLoad)
         }
         .task(id: customCoverTaskID) {
             await loadCustomCoverImage()
@@ -228,6 +261,36 @@ struct CollectionDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             Task {
                 await loadRecipes()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { notification in
+            handleCollectionDeleted(notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .savedCollectionReferencesChanged)) { notification in
+            guard let sourceCollectionId = notification.userInfo?["sourceCollectionId"] as? UUID,
+                  sourceCollectionId == collection.sourceCollectionReferenceId,
+                  let changeType = notification.userInfo?["changeType"] as? String else {
+                return
+            }
+
+            if changeType == "saved" {
+                let reference = notification.userInfo?["reference"] as? SavedCollectionReference
+                let relation: CollectionLibraryRelation = .saved(referenceId: reference?.id)
+                collectionRelation = relation
+                savedCollection = notification.userInfo?["collection"] as? Collection ?? collection
+                dependencies.libraryPresentationStore.updateCollectionRelation(
+                    relation,
+                    for: collection,
+                    savedCollection: savedCollection
+                )
+            } else if changeType == "removed" {
+                collectionRelation = .notSaved
+                savedCollection = nil
+                dependencies.libraryPresentationStore.updateCollectionRelation(
+                    .notSaved,
+                    for: collection,
+                    savedCollection: nil
+                )
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -337,8 +400,15 @@ struct CollectionDetailView: View {
     // MARK: - Actions
 
     private func loadRecipes(forceRefresh: Bool = false) async {
-        isLoading = true
-        defer { isLoading = false }
+        let shouldShowLoading = recipes.isEmpty
+        if shouldShowLoading {
+            isLoading = true
+        }
+        defer {
+            if shouldShowLoading {
+                isLoading = false
+            }
+        }
 
         do {
             // For owned collections, refresh from local database
@@ -347,6 +417,10 @@ struct CollectionDetailView: View {
                 if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
                     collection = updatedCollection
                     AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
+                } else {
+                    AppLogger.general.info("Collection detail dismissed because collection was deleted: \(collection.id)")
+                    dismissDeletedCollection()
+                    return
                 }
 
                 let fetchedRecipes = try await dependencies.recipeRepository.fetch(ids: collection.recipeIds)
@@ -389,6 +463,7 @@ struct CollectionDetailView: View {
             }
             updateVisibleRecipes()
             promptForPublicMembershipRepairIfNeeded()
+            storeCollectionSnapshot()
 
             AppLogger.general.info("✅ Loaded \(recipes.count) recipes for collection: \(collection.name)")
         } catch {
@@ -461,6 +536,18 @@ struct CollectionDetailView: View {
         }
     }
 
+    private func handleCollectionDeleted(_ notification: Notification) {
+        let deletedCollectionId = notification.object as? UUID
+            ?? notification.userInfo?["collectionId"] as? UUID
+        guard deletedCollectionId == collection.id else { return }
+        dismissDeletedCollection()
+    }
+
+    private func dismissDeletedCollection() {
+        activeSheet = nil
+        dismiss()
+    }
+
     private func removeRecipe(_ recipe: Recipe) async {
         do {
             try await dependencies.collectionRepository.removeRecipe(recipe.id, from: collection.id)
@@ -502,15 +589,41 @@ struct CollectionDetailView: View {
     }
 
     private func loadExistingSavedCollection() async {
-        guard canSaveCollection else {
+        guard !isOwned else {
             savedCollection = nil
+            collectionRelation = .owned
+            dependencies.libraryPresentationStore.updateCollectionRelation(.owned, for: collection)
+            return
+        }
+
+        guard canSaveCollection else {
+            collectionRelation = .notSaved
+            dependencies.libraryPresentationStore.updateCollectionRelation(.notSaved, for: collection)
             return
         }
 
         do {
-            savedCollection = try await dependencies.collectionSaveService.existingSavedCollection(for: collection)
+            let relation = try await dependencies.libraryRelationResolver.collectionRelation(
+                for: collection,
+                currentUserId: CurrentUserSession.shared.userId
+            )
+            collectionRelation = relation
+            savedCollection = relation.isSavedOrOwned ? collection : nil
+            dependencies.libraryPresentationStore.updateCollectionRelation(
+                relation,
+                for: collection,
+                savedCollection: savedCollection
+            )
         } catch {
             AppLogger.general.warning("Failed to check saved collection state: \(error.localizedDescription)")
+            if collectionRelation == .unknown {
+                collectionRelation = .notSaved
+                dependencies.libraryPresentationStore.updateCollectionRelation(
+                    .notSaved,
+                    for: collection,
+                    savedCollection: nil
+                )
+            }
         }
     }
 
@@ -522,6 +635,7 @@ struct CollectionDetailView: View {
 
         do {
             collectionOwner = try await dependencies.userCloudService.fetchUser(byUserId: collection.userId)
+            storeCollectionSnapshot()
         } catch {
             AppLogger.general.warning("Failed to fetch collection owner: \(error.localizedDescription)")
         }
@@ -540,11 +654,60 @@ struct CollectionDetailView: View {
                 sourceOwnerName: collectionOwner?.displayName
             )
             savedCollection = result.collection
+            collectionRelation = .saved(referenceId: result.savedReference?.id)
+            dependencies.libraryPresentationStore.updateCollectionRelation(
+                collectionRelation,
+                for: collection,
+                savedCollection: result.collection
+            )
         } catch {
             AppLogger.general.error("❌ Failed to save collection: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             showError = true
         }
+    }
+
+    private func removeSavedCollectionFromLibrary() async {
+        guard !isSavingCollection,
+              let currentUserId = CurrentUserSession.shared.userId else {
+            return
+        }
+
+        isSavingCollection = true
+        let previousSavedCollection = savedCollection
+        savedCollection = nil
+        defer { isSavingCollection = false }
+
+        do {
+            _ = try await dependencies.savedReferenceRepository.deleteCollectionReference(
+                userId: currentUserId,
+                sourceCollectionId: collection.sourceCollectionReferenceId
+            )
+            collectionRelation = .notSaved
+            dependencies.libraryPresentationStore.updateCollectionRelation(
+                .notSaved,
+                for: collection,
+                savedCollection: nil
+            )
+        } catch {
+            savedCollection = previousSavedCollection
+            collectionRelation = previousSavedCollection == nil ? .notSaved : .saved(referenceId: nil)
+            AppLogger.general.error("❌ Failed to remove saved collection: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+
+    private func storeCollectionSnapshot() {
+        dependencies.libraryPresentationStore.seedCollection(
+            collection,
+            owner: collectionOwner,
+            recipes: recipes,
+            recipeImages: recipeImages,
+            recipeImageSources: recipeImageSources,
+            relation: collectionRelation,
+            savedCollection: savedCollection
+        )
     }
 
     @MainActor
@@ -632,7 +795,12 @@ struct CollectionDetailView: View {
     }
 
     private var showsCustomCollectionCoverPage: Bool {
-        collection.coverImageType == .customImage
+        CollectionCoverPagePolicy.shouldReserveCustomCoverPage(
+            coverImageType: collection.coverImageType,
+            coverImageURL: collection.coverImageURL,
+            cloudCoverImageRecordName: collection.cloudCoverImageRecordName,
+            hasLoadedCustomCoverImage: customCoverImage != nil
+        )
     }
 
     private var collectionCoverPageCount: Int {
@@ -856,14 +1024,33 @@ struct CollectionDetailView: View {
     @ViewBuilder
     private var collectionPrimaryAction: some View {
         if canSaveCollection {
-            if savedCollection != nil {
-                Label("Saved", systemImage: "checkmark")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
+            if collectionRelation == .unknown {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.horizontal, 18)
                     .padding(.vertical, 8)
-                    .foregroundStyle(.green)
-                    .background(Color.green.opacity(0.12), in: Capsule())
-                    .accessibilityLabel("Saved")
+                    .background(Color.cauldronOrange.opacity(0.12), in: Capsule())
+                    .accessibilityLabel("Checking saved collection state")
+            } else if savedCollection != nil || collectionRelation.isSavedOrOwned {
+                Menu {
+                    Button(role: .destructive) {
+                        Task {
+                            await removeSavedCollectionFromLibrary()
+                        }
+                    } label: {
+                        Label("Remove from Library", systemImage: "bookmark.slash")
+                    }
+                    .disabled(isSavingCollection)
+                } label: {
+                    Label("Saved", systemImage: "checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.green)
+                        .background(Color.green.opacity(0.12), in: Capsule())
+                }
+                .disabled(isSavingCollection)
+                .accessibilityLabel("Saved Collection Actions")
             } else {
                 Button {
                     Task {
@@ -1322,7 +1509,7 @@ struct CollectionRecipeSelectorSheet: View {
         do {
             // Load owned recipes from local storage
             recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for collection selector")

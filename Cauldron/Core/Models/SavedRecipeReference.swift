@@ -47,7 +47,7 @@ nonisolated struct SavedRecipeReference: Codable, Sendable, Hashable, Identifiab
         self.updatedAt = updatedAt
     }
 
-    nonisolated func withMaterializedRecipeId(_ recipeId: UUID) -> SavedRecipeReference {
+    nonisolated func withMaterializedRecipeId(_ recipeId: UUID?) -> SavedRecipeReference {
         SavedRecipeReference(
             id: id,
             userId: userId,

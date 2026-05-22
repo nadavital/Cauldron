@@ -100,6 +100,11 @@ struct CollectionsListView: View {
                 await viewModel.loadCollections()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { _ in
+            Task {
+                await viewModel.loadCollections()
+            }
+        }
     }
 
     private var gridColumns: [GridItem] {
@@ -138,7 +143,13 @@ struct CollectionsListView: View {
 
                 LazyVGrid(columns: gridColumns, spacing: 12) {
                     ForEach(collections) { collection in
-                        NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
+                        NavigationLink(destination: CollectionDetailView(
+                            collection: collection,
+                            dependencies: dependencies,
+                            initialRecipeImages: viewModel.recipeImages(for: collection),
+                            initialRecipeImageSources: viewModel.recipeImageSources(for: collection),
+                            initialRelation: isSavedSection ? .saved(referenceId: nil) : .owned
+                        )) {
                             CollectionCardView(
                                 collection: collection,
                                 recipeImages: viewModel.recipeImages(for: collection),

@@ -191,6 +191,45 @@ final class RecipeSaveServiceTests: XCTestCase {
         XCTAssertEqual(reference.materializedRecipeId, firstEditable.id)
     }
 
+    func testDeletedMaterializedCopyRepairsReferenceAndCanMaterializeAgain() async throws {
+        let sourceRecipeId = UUID()
+        let sourceRecipe = makeRecipe(
+            id: sourceRecipeId,
+            title: "Shared Toast",
+            ownerId: sourceOwnerId
+        )
+
+        let firstEditable = try await dependencies.recipeSaveService.materializeSavedRecipeForEditing(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+        try await dependencies.recipeRepository.delete(id: firstEditable.id)
+
+        let resaved = try await dependencies.recipeSaveService.saveRecipeToLibrary(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        XCTAssertEqual(resaved.recipe.id, sourceRecipeId)
+        XCTAssertNil(resaved.savedReference?.materializedRecipeId)
+
+        let secondEditable = try await dependencies.recipeSaveService.materializeSavedRecipeForEditing(
+            sourceRecipe,
+            originalCreatorId: sourceOwnerId,
+            originalCreatorName: "Source Chef"
+        )
+
+        XCTAssertNotEqual(secondEditable.id, firstEditable.id)
+        XCTAssertEqual(secondEditable.ownerId, currentUserId)
+        let repairedReference = try await dependencies.savedReferenceRepository.recipeReference(
+            userId: currentUserId,
+            sourceRecipeId: sourceRecipeId
+        )
+        XCTAssertEqual(repairedReference?.materializedRecipeId, secondEditable.id)
+    }
+
     func testMaterializeRecipeForOwnedCollectionMembershipLinksReferenceAndReturnsOwnedRecipe() async throws {
         let sourceRecipeId = UUID()
         let sourceRecipe = makeRecipe(
