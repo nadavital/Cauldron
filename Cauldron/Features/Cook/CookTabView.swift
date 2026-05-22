@@ -39,83 +39,7 @@ struct CookTabView: View {
 
     private var cookNavigationContent: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // New User CTA (if no own recipes) - show social content for new users
-                    if viewModel.allRecipes.isEmpty {
-                        newUserCTA
-
-                        if !viewModel.collections.isEmpty || !viewModel.savedCollections.isEmpty {
-                            collectionSections
-                        }
-
-                        // From Friends (show early for new users)
-                        if !viewModel.friendsRecipes.isEmpty {
-                            friendsRecipesSection
-                        }
-
-                        // Popular in Cauldron (show early for new users)
-                        if !viewModel.popularRecipes.isEmpty {
-                            popularRecipesSection
-                        }
-                    } else {
-                        // User has recipes - show their content first
-
-                        if shouldSpotlightRecentlyAdded, !viewModel.recentlyAddedRecipes.isEmpty {
-                            recentlyAddedSection
-                                .id(recentlyAddedSectionID)
-                        }
-
-                        // Dynamic Tag Rows (Promoted & Standard)
-                        ForEach(viewModel.tagRows, id: \.tag) { tagRow in
-                            tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
-                        }
-
-                        // Quick & Easy
-                        if !viewModel.quickRecipes.isEmpty {
-                            quickRecipesSection
-                        }
-
-                        // On Rotation
-                        if !viewModel.onRotationRecipes.isEmpty {
-                            onRotationSection
-                        }
-
-                        // Rediscover Favorites
-                        if !viewModel.forgottenFavorites.isEmpty {
-                            forgottenFavoritesSection
-                        }
-
-                        // Collections
-                        collectionSections
-
-                        // Recently Cooked
-                        if !viewModel.recentlyCookedRecipes.isEmpty {
-                            recentlyCookedSection
-                        }
-
-                        // Favorites
-                        if !viewModel.favoriteRecipes.isEmpty {
-                            favoritesSection
-                        }
-
-                        // All Recipes
-                        allRecipesSection
-
-                        // Social content at bottom for users with recipes
-                        // From Friends (inspiration section)
-                        if !viewModel.friendsRecipes.isEmpty {
-                            friendsRecipesSection
-                        }
-
-                        // Popular in Cauldron (discovery section)
-                        if !viewModel.popularRecipes.isEmpty {
-                            popularRecipesSection
-                        }
-                    }
-                }
-                .padding(.vertical)
-            }
+            cookScrollContent
             .navigationTitle("Cook")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -208,18 +132,7 @@ struct CookTabView: View {
                 await viewModel.loadData(forceSync: true)
             }
             .onReceive(NotificationCenter.default.publisher(for: .recipeAdded)) { _ in
-                Task {
-                    await refreshCookLibrary()
-                    let hasRecentlyAdded = !viewModel.recentlyAddedRecipes.isEmpty
-                    await MainActor.run {
-                        guard hasRecentlyAdded else { return }
-                        shouldSpotlightRecentlyAdded = true
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            proxy.scrollTo(recentlyAddedSectionID, anchor: .top)
-                        }
-                        scheduleRecentlyAddedSpotlightReset()
-                    }
-                }
+                handleRecipeAdded(proxy: proxy)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { _ in
                 Task {
@@ -227,19 +140,7 @@ struct CookTabView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { notification in
-                guard let collectionId = notification.userInfo?["collectionId"] as? UUID,
-                      let recipeIds = notification.userInfo?["recipeIds"] as? [UUID] else {
-                    return
-                }
-                let collection = notification.userInfo?["collection"] as? Collection
-                viewModel.handleCollectionRecipesChanged(
-                    collectionId: collectionId,
-                    recipeIds: recipeIds,
-                    collection: collection
-                )
-                Task {
-                    await viewModel.refreshLibraryAfterCollectionMembershipChange()
-                }
+                handleCollectionRecipesChanged(notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
                 Task {
@@ -252,24 +153,10 @@ struct CookTabView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { notification in
-                let collectionId = notification.object as? UUID
-                    ?? notification.userInfo?["collectionId"] as? UUID
-                guard let collectionId else { return }
-                viewModel.handleCollectionDeleted(collectionId)
+                handleCollectionDeleted(notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: .savedCollectionReferencesChanged)) { notification in
-                let changeType = notification.userInfo?["changeType"] as? String
-                if changeType == "saved",
-                   let collection = notification.userInfo?["collection"] as? Collection {
-                    viewModel.handleSavedCollectionReferenceSaved(collection)
-                } else if changeType == "saved" {
-                    Task {
-                        await viewModel.refreshCollections()
-                    }
-                } else if changeType == "removed",
-                          let sourceCollectionId = notification.userInfo?["sourceCollectionId"] as? UUID {
-                    viewModel.handleSavedCollectionReferenceRemoved(sourceCollectionId: sourceCollectionId)
-                }
+                handleSavedCollectionReferencesChanged(notification)
             }
             .onReceive(NotificationCenter.default.publisher(for: .savedRecipeReferencesChanged)) { _ in
                 Task {
@@ -283,6 +170,144 @@ struct CookTabView: View {
                 recentlyAddedSpotlightTask?.cancel()
                 recentlyAddedSpotlightTask = nil
             }
+        }
+    }
+
+    private var cookScrollContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                cookSections
+            }
+            .padding(.vertical)
+        }
+    }
+
+    @ViewBuilder
+    private var cookSections: some View {
+        // New User CTA (if no own recipes) - show social content for new users
+        if viewModel.allRecipes.isEmpty {
+            newUserCTA
+
+            if !viewModel.collections.isEmpty || !viewModel.savedCollections.isEmpty {
+                collectionSections
+            }
+
+            // From Friends (show early for new users)
+            if !viewModel.friendsRecipes.isEmpty {
+                friendsRecipesSection
+            }
+
+            // Popular in Cauldron (show early for new users)
+            if !viewModel.popularRecipes.isEmpty {
+                popularRecipesSection
+            }
+        } else {
+            // User has recipes - show their content first
+
+            if shouldSpotlightRecentlyAdded, !viewModel.recentlyAddedRecipes.isEmpty {
+                recentlyAddedSection
+                    .id(recentlyAddedSectionID)
+            }
+
+            // Dynamic Tag Rows (Promoted & Standard)
+            ForEach(viewModel.tagRows, id: \.tag) { tagRow in
+                tagRowSection(tag: tagRow.tag, recipes: tagRow.recipes)
+            }
+
+            // Quick & Easy
+            if !viewModel.quickRecipes.isEmpty {
+                quickRecipesSection
+            }
+
+            // On Rotation
+            if !viewModel.onRotationRecipes.isEmpty {
+                onRotationSection
+            }
+
+            // Rediscover Favorites
+            if !viewModel.forgottenFavorites.isEmpty {
+                forgottenFavoritesSection
+            }
+
+            // Collections
+            collectionSections
+
+            // Recently Cooked
+            if !viewModel.recentlyCookedRecipes.isEmpty {
+                recentlyCookedSection
+            }
+
+            // Favorites
+            if !viewModel.favoriteRecipes.isEmpty {
+                favoritesSection
+            }
+
+            // All Recipes
+            allRecipesSection
+
+            // Social content at bottom for users with recipes
+            // From Friends (inspiration section)
+            if !viewModel.friendsRecipes.isEmpty {
+                friendsRecipesSection
+            }
+
+            // Popular in Cauldron (discovery section)
+            if !viewModel.popularRecipes.isEmpty {
+                popularRecipesSection
+            }
+        }
+    }
+
+    private func handleRecipeAdded(proxy: ScrollViewProxy) {
+        Task {
+            await refreshCookLibrary()
+            let hasRecentlyAdded = !viewModel.recentlyAddedRecipes.isEmpty
+            await MainActor.run {
+                guard hasRecentlyAdded else { return }
+                shouldSpotlightRecentlyAdded = true
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(recentlyAddedSectionID, anchor: .top)
+                }
+                scheduleRecentlyAddedSpotlightReset()
+            }
+        }
+    }
+
+    private func handleCollectionRecipesChanged(_ notification: Notification) {
+        guard let collectionId = notification.userInfo?["collectionId"] as? UUID,
+              let recipeIds = notification.userInfo?["recipeIds"] as? [UUID] else {
+            return
+        }
+        let collection = notification.userInfo?["collection"] as? Collection
+        viewModel.handleCollectionRecipesChanged(
+            collectionId: collectionId,
+            recipeIds: recipeIds,
+            collection: collection
+        )
+        Task {
+            await viewModel.refreshLibraryAfterCollectionMembershipChange()
+        }
+    }
+
+    private func handleCollectionDeleted(_ notification: Notification) {
+        let collectionId = notification.object as? UUID
+            ?? notification.userInfo?["collectionId"] as? UUID
+        guard let collectionId else { return }
+        viewModel.handleCollectionDeleted(collectionId)
+    }
+
+    private func handleSavedCollectionReferencesChanged(_ notification: Notification) {
+        let changeType = notification.userInfo?["changeType"] as? String
+        if changeType == "saved",
+           let collection = notification.userInfo?["collection"] as? Collection {
+            viewModel.handleSavedCollectionReferenceSaved(collection)
+        } else if changeType == "saved" {
+            Task {
+                await viewModel.refreshCollections()
+            }
+        } else if changeType == "removed",
+                  let sourceCollectionId = notification.userInfo?["sourceCollectionId"] as? UUID {
+            viewModel.handleSavedCollectionReferenceRemoved(sourceCollectionId: sourceCollectionId)
         }
     }
 
