@@ -99,5 +99,82 @@ final class SearchTabViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.recipeSearchResults.isEmpty)
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertFalse(viewModel.isLoadingPeople)
+        XCTAssertEqual(viewModel.timeFilter, .any)
+        XCTAssertEqual(viewModel.sortOrder, .relevance)
+        XCTAssertFalse(viewModel.hasActiveRefinements)
+    }
+
+    // MARK: - Filtering & Sorting
+
+    private func makeGroup(title: String, minutes: Int?, created: Date = Date()) -> SearchRecipeGroup {
+        SearchRecipeGroup(
+            id: UUID(),
+            primaryRecipe: Recipe(title: title, ingredients: [], steps: [], totalMinutes: minutes, createdAt: created),
+            saveCount: 0,
+            friendSavers: [],
+            ownerTier: .apprentice,
+            relevanceScore: 0
+        )
+    }
+
+    func testTimeFilterKeepsOnlyMatchingRecipes() {
+        let viewModel = makeViewModel()
+        viewModel.recipeSearchResults = [
+            makeGroup(title: "Quick", minutes: 10),
+            makeGroup(title: "Medium", minutes: 40),
+            makeGroup(title: "Unknown", minutes: nil)
+        ]
+
+        viewModel.timeFilter = .under15
+        let titles = viewModel.displayedRecipeResults.map(\.primaryRecipe.title)
+        XCTAssertEqual(titles, ["Quick"])
+    }
+
+    func testTimeFilterAnyKeepsEverythingIncludingUnknownTimes() {
+        let viewModel = makeViewModel()
+        viewModel.recipeSearchResults = [
+            makeGroup(title: "A", minutes: 10),
+            makeGroup(title: "B", minutes: nil)
+        ]
+
+        viewModel.timeFilter = .any
+        XCTAssertEqual(viewModel.displayedRecipeResults.count, 2)
+    }
+
+    func testSortQuickestOrdersByTimeWithUnknownLast() {
+        let viewModel = makeViewModel()
+        viewModel.recipeSearchResults = [
+            makeGroup(title: "Slow", minutes: 60),
+            makeGroup(title: "Unknown", minutes: nil),
+            makeGroup(title: "Fast", minutes: 10)
+        ]
+
+        viewModel.sortOrder = .quickest
+        let titles = viewModel.displayedRecipeResults.map(\.primaryRecipe.title)
+        XCTAssertEqual(titles, ["Fast", "Slow", "Unknown"])
+    }
+
+    func testSortAlphabeticalIsCaseInsensitive() {
+        let viewModel = makeViewModel()
+        viewModel.recipeSearchResults = [
+            makeGroup(title: "banana bread", minutes: nil),
+            makeGroup(title: "Apple Pie", minutes: nil)
+        ]
+
+        viewModel.sortOrder = .alphabetical
+        let titles = viewModel.displayedRecipeResults.map(\.primaryRecipe.title)
+        XCTAssertEqual(titles, ["Apple Pie", "banana bread"])
+    }
+
+    func testClearRefinementsResetsFilterAndSort() {
+        let viewModel = makeViewModel()
+        viewModel.timeFilter = .under30
+        viewModel.sortOrder = .newest
+        XCTAssertTrue(viewModel.hasActiveRefinements)
+
+        viewModel.clearRefinements()
+        XCTAssertEqual(viewModel.timeFilter, .any)
+        XCTAssertEqual(viewModel.sortOrder, .relevance)
+        XCTAssertFalse(viewModel.hasActiveRefinements)
     }
 }

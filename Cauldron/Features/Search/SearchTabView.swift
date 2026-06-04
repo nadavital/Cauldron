@@ -282,35 +282,105 @@ struct SearchTabView: View {
     
     private var recipeSearchResultsView: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            let results = viewModel.displayedRecipeResults
+
             if viewModel.recipeSearchResults.isEmpty {
-                VStack(spacing: Theme.Spacing.md) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary)
-                    Text("No recipes found")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("Try searching for different keywords")
+                EmptyStateView(
+                    title: "No Recipes Found",
+                    message: "Try searching for different keywords.",
+                    systemImage: "magnifyingglass"
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Spacing.xxl)
+            } else {
+                refinementBar
+
+                if results.isEmpty {
+                    EmptyStateView(
+                        title: "No Matches",
+                        message: "No recipes match the current filters.",
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.xl)
+                } else {
+                    Text("\(results.count) recipe\(results.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
-            } else {
-                Text("\(viewModel.recipeSearchResults.count) recipes found")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
 
-                ForEach(viewModel.recipeSearchResults) { group in
-                    Button {
-                        navigationPath.append(group.primaryRecipe)
-                    } label: {
-                        SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
+                    ForEach(results) { group in
+                        Button {
+                            navigationPath.append(group.primaryRecipe)
+                        } label: {
+                            SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(PressableScaleStyle())
                     }
-                    .buttonStyle(PressableScaleStyle())
                 }
             }
         }
+    }
+
+    /// Time filter + sort controls shown above recipe results.
+    private var refinementBar: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Menu {
+                Picker("Time", selection: $viewModel.timeFilter) {
+                    ForEach(RecipeTimeFilter.allCases) { filter in
+                        Text(filter.label).tag(filter)
+                    }
+                }
+            } label: {
+                refinementChip(
+                    title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
+                    systemImage: "clock",
+                    isActive: viewModel.timeFilter != .any
+                )
+            }
+
+            Menu {
+                Picker("Sort", selection: $viewModel.sortOrder) {
+                    ForEach(RecipeSortOrder.allCases) { order in
+                        Text(order.label).tag(order)
+                    }
+                }
+            } label: {
+                refinementChip(
+                    title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
+                    systemImage: "arrow.up.arrow.down",
+                    isActive: viewModel.sortOrder != .relevance
+                )
+            }
+
+            if viewModel.hasActiveRefinements {
+                Button {
+                    withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Clear filters")
+            }
+
+            Spacer()
+        }
+    }
+
+    private func refinementChip(title: String, systemImage: String, isActive: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.xxs) {
+            Image(systemName: systemImage)
+            Text(title)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.semibold))
+        }
+        .font(.subheadline)
+        .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+        .background(
+            (isActive ? Color.cauldronOrange.opacity(0.15) : Color(.secondarySystemBackground)),
+            in: Capsule()
+        )
     }
     
     private var peopleSearchView: some View {
