@@ -93,7 +93,7 @@ enum Theme {
         /// Large screen / hero title.
         static let screenTitle = SwiftUI.Font.largeTitle.weight(.bold)
         /// Section header within a screen.
-        static let sectionTitle = SwiftUI.Font.title3.weight(.semibold)
+        static let sectionTitle = SwiftUI.Font.title2.weight(.bold)
         /// Card / row title.
         static let cardTitle = SwiftUI.Font.headline
         /// Secondary metadata (time, counts, captions).

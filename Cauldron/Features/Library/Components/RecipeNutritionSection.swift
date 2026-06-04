@@ -12,9 +12,7 @@ struct RecipeNutritionSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Nutrition", systemImage: "chart.bar.fill")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Nutrition", systemImage: "chart.bar.fill")
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 if let calories = nutrition.calories {

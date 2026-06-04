@@ -13,9 +13,7 @@ struct RecipeRelatedSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Related Recipes", systemImage: "link")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Related Recipes", systemImage: "link")
 
             VStack(spacing: 0) {
                 ForEach(relatedRecipes) { relatedRecipe in
