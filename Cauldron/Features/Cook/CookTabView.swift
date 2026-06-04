@@ -40,7 +40,7 @@ struct CookTabView: View {
     private var cookNavigationContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     // New User CTA (if no own recipes) - show social content for new users
                     if viewModel.allRecipes.isEmpty {
                         newUserCTA
@@ -262,7 +262,7 @@ struct CookTabView: View {
     }
 
     private var recentlyAddedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "clock.badge.plus")
                     .foregroundColor(.cauldronOrange)
@@ -272,20 +272,24 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: AllRecipesListView(recipes: viewModel.recentlyAddedRecipes, dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.recentlyAddedRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -295,14 +299,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
 
     private var recentlyCookedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundColor(.cauldronOrange)
@@ -312,20 +316,24 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: RecentlyCookedListView(recipes: viewModel.recentlyCookedRecipes, dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.recentlyCookedRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -335,14 +343,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
 
     private var favoritesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "star.fill")
                     .foregroundColor(.yellow)
@@ -352,20 +360,24 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: FavoritesListView(recipes: viewModel.favoriteRecipes, dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.favoriteRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -375,14 +387,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
 
     private var collectionSections: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             if viewModel.collections.isEmpty && viewModel.savedCollections.isEmpty {
                 collectionRowSection(
                     title: "My Collections",
@@ -414,7 +426,7 @@ struct CookTabView: View {
         systemImage: String,
         collections: [Collection]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: systemImage)
                     .foregroundColor(.cauldronOrange)
@@ -424,21 +436,25 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: CollectionsListView(dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             if collections.isEmpty {
                 Text("Organize your recipes into collections")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Theme.Spacing.md)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: Theme.Spacing.md) {
                         ForEach(collections.prefix(10)) { collection in
                             NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
                                 CollectionCardView(
@@ -448,18 +464,18 @@ struct CookTabView: View {
                                     dependencies: viewModel.dependencies
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableScaleStyle())
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.bottom, Theme.Spacing.xs)
                 }
             }
         }
     }
     
     private var quickRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "timer")
                     .foregroundColor(.cauldronOrange)
@@ -468,15 +484,15 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.quickRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -486,14 +502,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
 
     private var onRotationSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .foregroundColor(.cauldronOrange)
@@ -502,15 +518,15 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.onRotationRecipes.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -520,14 +536,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
     
     private var forgottenFavoritesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "sparkles")
                     .foregroundColor(.cauldronOrange)
@@ -536,15 +552,15 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.forgottenFavorites.prefix(10)) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -554,14 +570,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
 
     private var allRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Label {
                     Text("All Recipes")
@@ -575,23 +591,27 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: AllRecipesListView(recipes: viewModel.allRecipes, dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             if viewModel.allRecipes.isEmpty {
                 emptyState
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: Theme.Spacing.md) {
                         ForEach(viewModel.allRecipes.prefix(10)) { recipe in
                             NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                                 RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableScaleStyle())
                             .contextMenu {
                                 recipeContextMenu(for: recipe)
                             } preview: {
@@ -601,15 +621,15 @@ struct CookTabView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.bottom, Theme.Spacing.xs)
                 }
             }
         }
     }
     
     private func tagRowSection(tag: String, recipes: [Recipe]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "tag.fill")
                     .foregroundColor(.cauldronOrange)
@@ -619,20 +639,24 @@ struct CookTabView: View {
                 Spacer()
 
                 NavigationLink(destination: ExploreTagView(tag: Tag(name: tag), dependencies: viewModel.dependencies)) {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
+                    HStack(spacing: Theme.Spacing.xxs) {
+                        Text("See All")
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(recipes) { recipe in
                         NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                             RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .contextMenu {
                             recipeContextMenu(for: recipe)
                         } preview: {
@@ -642,14 +666,14 @@ struct CookTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
     
     private var emptyState: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "book.closed")
                 .font(.system(size: 60))
                 .foregroundColor(.gray)
@@ -661,7 +685,7 @@ struct CookTabView: View {
             Text("Add your first recipe to get started")
                 .foregroundColor(.secondary)
 
-            VStack(spacing: 12) {
+            VStack(spacing: Theme.Spacing.sm) {
                 // AI Generation button (if available)
                 if isAIAvailable {
                     Button {
@@ -677,7 +701,7 @@ struct CookTabView: View {
                     .tint(.blue)
                 }
 
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     Button {
                         showingEditor = true
                     } label: {
@@ -700,13 +724,13 @@ struct CookTabView: View {
             .padding(.horizontal, 40)
         }
         .padding(.vertical, 40)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Theme.Spacing.md)
     }
 
     // MARK: - New User CTA
 
     private var newUserCTA: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Theme.Spacing.md) {
             Image(systemName: "plus.rectangle.on.folder")
                 .font(.system(size: 48))
                 .foregroundColor(.cauldronOrange)
@@ -720,7 +744,7 @@ struct CookTabView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Spacing.sm) {
                 Button {
                     showingImporter = true
                 } label: {
@@ -761,13 +785,13 @@ struct CookTabView: View {
         .frame(maxWidth: .infinity)
         .background(Color.cauldronSecondaryBackground)
         .cornerRadius(16)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Theme.Spacing.md)
     }
 
     // MARK: - Friends' Recipes Section
 
     private var friendsRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "person.2.fill")
                     .foregroundColor(.cauldronOrange)
@@ -776,10 +800,10 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.friendsRecipes.prefix(10), id: \.id) { sharedRecipe in
                         NavigationLink(destination: RecipeDetailView(
                             recipe: sharedRecipe.recipe,
@@ -793,11 +817,11 @@ struct CookTabView: View {
                                 dependencies: viewModel.dependencies
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
@@ -805,7 +829,7 @@ struct CookTabView: View {
     // MARK: - Popular Recipes Section
 
     private var popularRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "flame.fill")
                     .foregroundColor(.cauldronOrange)
@@ -814,15 +838,15 @@ struct CookTabView: View {
                     .fontWeight(.bold)
                 Spacer()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.Spacing.md)
 
             Text("Discover recipes from the Cauldron community")
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.popularRecipes.prefix(10)) { recipe in
                         // Get owner info if available
                         if let ownerId = recipe.ownerId,
@@ -839,18 +863,18 @@ struct CookTabView: View {
                                     creatorTier: viewModel.popularRecipeTiers[ownerId]
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableScaleStyle())
                         } else {
                             // Fallback for recipes without owner info
                             NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
                                 RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableScaleStyle())
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
             }
         }
     }
@@ -975,7 +999,7 @@ struct CategoryCardView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             // Icon
             ZStack {
                 Circle()
