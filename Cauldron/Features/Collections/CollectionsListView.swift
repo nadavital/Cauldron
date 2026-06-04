@@ -19,7 +19,7 @@ struct CollectionsListView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: Theme.Spacing.md) {
                 collectionSection(
                     title: "My Collections",
                     collections: viewModel.filteredOwnedCollections,
@@ -34,33 +34,13 @@ struct CollectionsListView: View {
 
                 // Empty State
                 if !viewModel.hasVisibleCollections {
-                    VStack(spacing: 16) {
-                        Spacer()
-                            .frame(height: 60)
-
-                        Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 60))
-                            .foregroundColor(.secondary)
-
-                        Text("No Collections Yet")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-
-                        Text("Create a collection to organize your recipes")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        Button {
-                            showingCreateSheet = true
-                        } label: {
-                            Label("Create Collection", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.cauldronOrange)
-                        .padding(.top, 8)
-                    }
+                    EmptyStateView(
+                        title: "No Collections Yet",
+                        message: "Create a collection to organize your recipes.",
+                        systemImage: "folder.badge.plus",
+                        actionTitle: "Create Collection",
+                        action: { showingCreateSheet = true }
+                    )
                     .padding()
                 }
             }
@@ -104,11 +84,11 @@ struct CollectionsListView: View {
 
     private var gridColumns: [GridItem] {
         if horizontalSizeClass == .regular {
-            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: 12)]
+            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: Theme.Spacing.sm)]
         }
         return [
-            GridItem(.flexible(minimum: 150), spacing: 12),
-            GridItem(.flexible(minimum: 150), spacing: 12)
+            GridItem(.flexible(minimum: 150), spacing: Theme.Spacing.sm),
+            GridItem(.flexible(minimum: 150), spacing: Theme.Spacing.sm)
         ]
     }
 
@@ -119,7 +99,7 @@ struct CollectionsListView: View {
         isSavedSection: Bool
     ) -> some View {
         if !collections.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack {
                     Text(title)
                         .font(.headline)
@@ -136,7 +116,7 @@ struct CollectionsListView: View {
                 }
                 .padding(.horizontal)
 
-                LazyVGrid(columns: gridColumns, spacing: 12) {
+                LazyVGrid(columns: gridColumns, spacing: Theme.Spacing.sm) {
                     ForEach(collections) { collection in
                         NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
                             CollectionCardView(

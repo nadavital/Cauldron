@@ -18,7 +18,7 @@ struct SharedRecipeRowView: View {
             // Recipe Image
             RecipeImageView(thumbnailForRecipe: sharedRecipe.recipe, recipeImageService: dependencies.recipeImageService)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 // Title
                 Text(sharedRecipe.recipe.title)
                     .font(.headline)
@@ -48,7 +48,7 @@ struct SharedRecipeRowView: View {
                 }
 
                 // Time and tags
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Spacing.xs) {
                     if let time = sharedRecipe.recipe.displayTime {
                         Label(time, systemImage: "clock.fill")
                             .font(.caption2)
@@ -83,7 +83,7 @@ struct SectionHeader: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.xs) {
             Image(systemName: icon)
                 .font(.subheadline)
                 .foregroundColor(color)
@@ -112,7 +112,7 @@ struct ConnectionsInlineView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             // Pending requests (most important - shown first)
             if !viewModel.receivedRequests.isEmpty {
                 ForEach(viewModel.receivedRequests.prefix(3), id: \.id) { connection in
@@ -145,7 +145,7 @@ struct ConnectionsInlineView: View {
             // Friends display
             if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
                 // Empty state
-                VStack(spacing: 12) {
+                VStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: "person.2.circle")
                         .font(.system(size: 40))
                         .foregroundColor(.gray.opacity(0.5))
@@ -182,7 +182,7 @@ struct ConnectionsInlineView: View {
                     .padding(.top, 4)
 
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
+                        HStack(spacing: Theme.Spacing.md) {
                             ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
                                 if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
                                    let user = viewModel.usersMap[otherUserId] {

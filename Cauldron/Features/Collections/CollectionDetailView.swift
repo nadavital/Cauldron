@@ -302,12 +302,12 @@ struct CollectionDetailView: View {
         Button {
             activeSheet = .conformance
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
                     .font(.title3)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text("\(nonConformingRecipes.count) recipe\(nonConformingRecipes.count == 1 ? "" : "s") won't be visible")
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -329,7 +329,7 @@ struct CollectionDetailView: View {
             .background(Color.orange.opacity(0.1))
             .cornerRadius(12)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }
@@ -818,8 +818,8 @@ struct CollectionDetailView: View {
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                 Text(collection.name.recipeDetailLineBreakFriendly())
                     .font(.title.bold())
                     .fontDesign(.serif)
@@ -911,13 +911,13 @@ struct CollectionDetailView: View {
                 .padding(.vertical, 6)
                 .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableScaleStyle())
         }
     }
 
     @ViewBuilder
     private var recipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("Recipes")
                 .font(.title3)
                 .fontWeight(.bold)
@@ -930,7 +930,7 @@ struct CollectionDetailView: View {
                 }
                 .padding(.vertical, 40)
             } else if visibleRecipes.isEmpty {
-                VStack(spacing: 12) {
+                VStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: emptyStateIconName)
                         .font(.system(size: 40))
                         .foregroundColor(.secondary)
@@ -978,7 +978,7 @@ struct CollectionDetailView: View {
             } label: {
                 RecipeRowView(recipe: recipe, dependencies: dependencies)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableScaleStyle())
             .contextMenu {
                 if isOwned {
                     Button(role: .destructive) {
@@ -994,7 +994,7 @@ struct CollectionDetailView: View {
     }
 
     private var recipesGridContent: some View {
-        LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+        LazyVGrid(columns: recipeGridColumns, spacing: Theme.Spacing.md) {
             ForEach(visibleRecipes) { recipe in
                 NavigationLink {
                     recipeDestination(for: recipe)
@@ -1002,7 +1002,7 @@ struct CollectionDetailView: View {
                     recipeCard(for: recipe)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableScaleStyle())
                 .contextMenu {
                     if isOwned {
                         Button(role: .destructive) {
@@ -1019,7 +1019,7 @@ struct CollectionDetailView: View {
     }
 
     private var recipeGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: Theme.Spacing.md)]
     }
 
     private var editCollectionButton: some View {
@@ -1040,7 +1040,7 @@ struct CollectionDetailView: View {
             .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
     }
 
     private var addRecipesButton: some View {
@@ -1061,7 +1061,7 @@ struct CollectionDetailView: View {
             .background(Color.cauldronOrange.opacity(0.1), in: Capsule())
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
     }
 
     // MARK: - Helpers

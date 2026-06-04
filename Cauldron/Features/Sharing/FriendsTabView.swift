@@ -144,7 +144,7 @@ struct FriendsTabView: View {
                         } label: {
                             ProfileAvatar(user: user, size: 32, dependencies: dependencies)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                     }
                 }
             }
@@ -263,7 +263,7 @@ struct FriendsTabView: View {
 
     private var combinedFeedSection: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
+            LazyVStack(spacing: Theme.Spacing.md) {
                 // Friends section
                 VStack(spacing: 0) {
                     SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
@@ -355,7 +355,7 @@ struct FriendsTabView: View {
             )
             .clipShape(.rect(cornerRadius: 16))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
         .padding(.horizontal, 16)
     }
 
@@ -363,7 +363,7 @@ struct FriendsTabView: View {
         VStack(spacing: 0) {
             SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
 
-            VStack(spacing: 16) {
+            VStack(spacing: Theme.Spacing.md) {
                 ZStack {
                     Circle()
                         .fill(
@@ -403,7 +403,7 @@ struct FriendsTabView: View {
     }
 
     private var recentlyAddedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundColor(.cauldronOrange)
@@ -415,7 +415,7 @@ struct FriendsTabView: View {
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.recentlyAdded.prefix(10)) { sharedRecipe in
                         NavigationLink(destination: RecipeDetailView(
                             recipe: sharedRecipe.recipe,
@@ -429,7 +429,7 @@ struct FriendsTabView: View {
                                 dependencies: dependencies
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -439,7 +439,7 @@ struct FriendsTabView: View {
     }
 
     private func tagSectionView(tag: String, recipes: [SharedRecipe]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "tag.fill")
                     .foregroundColor(.cauldronOrange)
@@ -461,7 +461,7 @@ struct FriendsTabView: View {
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(recipes.prefix(10)) { sharedRecipe in
                         NavigationLink(destination: RecipeDetailView(
                             recipe: sharedRecipe.recipe,
@@ -475,7 +475,7 @@ struct FriendsTabView: View {
                                 dependencies: dependencies
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -485,7 +485,7 @@ struct FriendsTabView: View {
     }
 
     private var allRecipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "book.fill")
                     .foregroundColor(.cauldronOrange)
@@ -507,7 +507,7 @@ struct FriendsTabView: View {
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.sharedRecipes.prefix(10)) { sharedRecipe in
                         NavigationLink(destination: RecipeDetailView(
                             recipe: sharedRecipe.recipe,
@@ -521,7 +521,7 @@ struct FriendsTabView: View {
                                 dependencies: dependencies
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -531,7 +531,7 @@ struct FriendsTabView: View {
     }
 
     private var allCollectionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
                 Image(systemName: "folder.fill")
                     .foregroundColor(.purple)
@@ -552,7 +552,7 @@ struct FriendsTabView: View {
             .padding(.horizontal, 16)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.sharedCollections.prefix(10), id: \.id) { collection in
                         NavigationLink(destination: CollectionDetailView(
                             collection: collection,
@@ -564,7 +564,7 @@ struct FriendsTabView: View {
                                 dependencies: dependencies
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableScaleStyle())
                         .task(id: collection.id) {
                             if collectionImageCache[collection.id] == nil {
                                 let images = await viewModel.getRecipeImages(for: collection)
