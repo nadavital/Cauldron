@@ -81,7 +81,7 @@ struct RecipeCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             // Image with contextual overlays
             ZStack {
                 RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
@@ -99,7 +99,7 @@ struct RecipeCardView: View {
 
             // Title - single line for clean look
             Text(recipe.title)
-                .font(.headline)
+                .font(Theme.Typography.cardTitle)
                 .lineLimit(1)
                 .frame(width: cardWidth, height: 20, alignment: .leading)
 
@@ -107,6 +107,30 @@ struct RecipeCardView: View {
             metadataRow
         }
         .frame(width: cardWidth)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Composed VoiceOver description: title, optional creator, time, favorite.
+    private var accessibilityLabel: String {
+        var parts: [String] = [recipe.title]
+        if let creator = sharedBy {
+            parts.append("shared by \(creator.displayName)")
+        }
+        if let time = recipe.displayTime {
+            parts.append(time)
+        }
+        if let tier = creatorTier, tier != .apprentice {
+            parts.append("\(tier.displayName) tier")
+        }
+        if !isSharedRecipe, recipe.isFavorite {
+            parts.append("favorite")
+        }
+        if let firstTag = recipe.tags.first {
+            parts.append(firstTag.name)
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: - Overlay Views

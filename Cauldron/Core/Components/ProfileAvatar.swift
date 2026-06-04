@@ -83,6 +83,8 @@ struct ProfileAvatar: View {
                     )
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(displayUser.displayName), profile picture")
         .task {
             await loadProfileImage()
         }

@@ -154,6 +154,7 @@ extension RecipeDetailView {
             do {
                 try await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
                 localIsFavorite.toggle()
+                Haptics.light()
             } catch {
                 AppLogger.general.error("Failed to toggle favorite: \(error.localizedDescription)")
             }

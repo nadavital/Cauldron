@@ -414,7 +414,9 @@ final class ConnectionsViewModel {
             if let cloudUsers = try? await dependencies.userCloudService.fetchUsers(byUserIds: Array(userIds)) {
                 for cloudUser in cloudUsers {
                     usersMap[cloudUser.id] = cloudUser
-                    try? await dependencies.sharingRepository.save(cloudUser)
+                    await bestEffort("Cache connection user") {
+                        try await dependencies.sharingRepository.save(cloudUser)
+                    }
                 }
             }
 

@@ -180,10 +180,10 @@ extension View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
-            .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
+            .cornerRadius(Theme.Radius.card)
+            .shadow(Theme.Shadow.card)
     }
-    
+
     func prominentButton() -> some View {
         self
             .font(.headline)
@@ -191,6 +191,6 @@ extension View {
             .padding()
             .frame(maxWidth: .infinity)
             .background(Color.cauldronOrange)
-            .cornerRadius(12)
+            .cornerRadius(Theme.Radius.card)
     }
 }

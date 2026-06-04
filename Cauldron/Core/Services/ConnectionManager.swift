@@ -185,7 +185,9 @@ class ConnectionManager: ObservableObject {
         )
 
         // Save to local cache immediately
-        try? await dependencies.connectionRepository.save(acceptedConnection)
+        await bestEffort("Cache accepted connection", logger: logger) {
+            try await dependencies.connectionRepository.save(acceptedConnection)
+        }
 
         guard isCloudSyncEnabled else {
             connections[connection.id] = ManagedConnection(
@@ -213,7 +215,9 @@ class ConnectionManager: ObservableObject {
         connections.removeValue(forKey: connection.id)
 
         // Delete from local cache immediately
-        try? await dependencies.connectionRepository.delete(connection)
+        await bestEffort("Delete rejected connection from cache", logger: logger) {
+            try await dependencies.connectionRepository.delete(connection)
+        }
 
         // Track pending reject to avoid re-adding from CloudKit during sync
         pendingRejectIds.insert(connection.id)
@@ -275,10 +279,14 @@ class ConnectionManager: ObservableObject {
         )
 
         // Cache the user (so they can see the request on their device)
-        try? await dependencies.sharingRepository.save(user)
+        await bestEffort("Cache user for connection request", logger: logger) {
+            try await dependencies.sharingRepository.save(user)
+        }
 
         // Save to local cache immediately
-        try? await dependencies.connectionRepository.save(connection)
+        await bestEffort("Cache sent connection request", logger: logger) {
+            try await dependencies.connectionRepository.save(connection)
+        }
 
         guard isCloudSyncEnabled else {
             connections[connection.id] = ManagedConnection(
@@ -378,7 +386,9 @@ class ConnectionManager: ObservableObject {
             for connection in cachedConnections {
                 if pendingRejectIds.contains(connection.id) {
                     // Clean up any cached entries for pending rejects
-                    try? await dependencies.connectionRepository.delete(connection)
+                    await bestEffort("Clean up rejected connection from cache", logger: logger) {
+                        try await dependencies.connectionRepository.delete(connection)
+                    }
                     continue
                 }
 
@@ -426,7 +436,9 @@ class ConnectionManager: ObservableObject {
 
             // Update local cache and state with cloud connections
             for connection in filteredConnections {
-                try? await dependencies.connectionRepository.save(connection)
+                await bestEffort("Cache synced connection", logger: logger) {
+                    try await dependencies.connectionRepository.save(connection)
+                }
 
                 // Don't override optimistic local states while an operation is queued.
                 if !(await hasQueuedConnectionOperation(for: connection.id)) {
@@ -452,7 +464,9 @@ class ConnectionManager: ObservableObject {
                     connections.removeValue(forKey: deletedId)
 
                     // Remove from local cache
-                    try? await dependencies.connectionRepository.delete(connection)
+                    await bestEffort("Remove deleted connection from cache", logger: logger) {
+                        try await dependencies.connectionRepository.delete(connection)
+                    }
                 }
             }
 

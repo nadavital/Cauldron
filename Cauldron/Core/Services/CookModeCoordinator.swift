@@ -124,9 +124,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("🔄 Step changed from Live Activity: \(newStep + 1)/\(self.totalSteps)")
     }
@@ -191,9 +189,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("→ Next step: \(self.currentStepIndex + 1)/\(self.totalSteps)")
     }
@@ -208,9 +204,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("← Previous step: \(self.currentStepIndex + 1)/\(self.totalSteps)")
     }
