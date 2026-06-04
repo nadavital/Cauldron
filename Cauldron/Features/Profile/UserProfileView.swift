@@ -49,7 +49,7 @@ struct UserProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: Theme.Spacing.lg) {
                 // Profile Header
                 profileHeader
 
@@ -129,7 +129,7 @@ struct UserProfileView: View {
     }
 
     private var profileHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
             // Avatar
             ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
 
@@ -160,7 +160,7 @@ struct UserProfileView: View {
                     .foregroundColor(.secondary)
 
                 // Tier badge and friends/connection row
-                HStack(spacing: 12) {
+                HStack(spacing: Theme.Spacing.sm) {
                     // Tier badge - clickable for own profile to see roadmap
                     if viewModel.isCurrentUser {
                         Button {
@@ -174,7 +174,7 @@ struct UserProfileView: View {
 
                     if viewModel.isCurrentUser {
                         NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: Theme.Spacing.xxs) {
                                 Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
                                 Image(systemName: "chevron.right")
                                     .font(.caption2)
@@ -200,7 +200,7 @@ struct UserProfileView: View {
     // MARK: - App Icons Section
 
     private var rewardsSection: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Theme.Spacing.md) {
             // Header
             HStack {
                 Text("App Icons")
@@ -212,7 +212,7 @@ struct UserProfileView: View {
                 Button {
                     showAppIconPicker = true
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Text("\(appIconManager.unlockedIcons.count)/\(appIconManager.availableIcons.count)")
                             .font(.caption)
                         Text("View All")
@@ -227,7 +227,7 @@ struct UserProfileView: View {
 
             // Horizontal scrolling icons with progress
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Spacing.md) {
                     ForEach(appIconManager.availableIcons) { theme in
                         iconCellWithProgress(theme: theme)
                     }
@@ -332,7 +332,7 @@ struct UserProfileView: View {
                 let code = referralManager.generateReferralCode(for: user)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Spacing.xs) {
                         Text("Referral code")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -423,7 +423,7 @@ struct UserProfileView: View {
                         Label("Remove Friend", systemImage: "person.badge.minus")
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
                         Text("Friends")
@@ -448,7 +448,7 @@ struct UserProfileView: View {
                         Label("Cancel Request", systemImage: "xmark.circle")
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Image(systemName: "clock.fill")
                             .font(.caption)
                         Text("Pending")
@@ -464,7 +464,7 @@ struct UserProfileView: View {
 
             case .pendingIncoming:
                 // Request received badge - shown in header, actions below
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "person.badge.clock")
                         .font(.caption)
                     Text("Respond")
@@ -484,7 +484,7 @@ struct UserProfileView: View {
                         await viewModel.sendConnectionRequest()
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Image(systemName: "person.badge.plus")
                             .font(.caption)
                         Text("Add Friend")
@@ -508,7 +508,7 @@ struct UserProfileView: View {
                         await viewModel.loadConnectionStatus()
                     }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption)
                         Text("Retry")
@@ -533,12 +533,12 @@ struct UserProfileView: View {
     @ViewBuilder
     private var connectionSection: some View {
         if viewModel.connectionState == .pendingIncoming && !viewModel.isProcessing && !viewModel.isLoadingConnectionState {
-            VStack(spacing: 12) {
+            VStack(spacing: Theme.Spacing.sm) {
                 Text("\(user.displayName) wants to be friends")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
-                HStack(spacing: 12) {
+                HStack(spacing: Theme.Spacing.sm) {
                     Button {
                         Task {
                             await viewModel.acceptConnection()
@@ -577,14 +577,10 @@ struct UserProfileView: View {
     }
 
     private var collectionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             // Section header
             HStack {
-                Image(systemName: "folder.fill")
-                    .foregroundColor(.purple)
-                Text("Collections")
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(title: "Collections", systemImage: "folder.fill", iconColor: .purple)
 
                 Spacer()
 
@@ -607,7 +603,7 @@ struct UserProfileView: View {
                 emptyCollectionsState
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: Theme.Spacing.md) {
                         ForEach(viewModel.userCollections.prefix(10), id: \.id) { collection in
                             NavigationLink(destination: CollectionDetailView(
                                 collection: collection,
@@ -629,7 +625,7 @@ struct UserProfileView: View {
     }
 
     private var emptyCollectionsState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Theme.Spacing.sm) {
             ZStack {
                 Circle()
                     .fill(
@@ -666,14 +662,13 @@ struct UserProfileView: View {
     }
 
     private var recipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             // Section header
             HStack {
-                Image(systemName: "book.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text(viewModel.searchText.isEmpty ? "Recipes" : "Search Results")
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(
+                    title: viewModel.searchText.isEmpty ? "Recipes" : "Search Results",
+                    systemImage: "book.fill"
+                )
 
                 Spacer()
 
@@ -702,7 +697,7 @@ struct UserProfileView: View {
                 emptyRecipesState
             } else {
                 if horizontalSizeClass == .regular {
-                    LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+                    LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: Theme.Spacing.md) {
                         ForEach(displayedRecipes, id: \.id) { sharedRecipe in
                             NavigationLink(destination: RecipeDetailView(
                                 recipe: sharedRecipe.recipe,
@@ -718,7 +713,7 @@ struct UserProfileView: View {
                 } else {
                     if viewModel.searchText.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
+                            HStack(spacing: Theme.Spacing.md) {
                                 ForEach(displayedRecipes, id: \.id) { sharedRecipe in
                                     NavigationLink(destination: RecipeDetailView(
                                         recipe: sharedRecipe.recipe,
@@ -734,7 +729,7 @@ struct UserProfileView: View {
                         }
                     } else {
                         // List view for search results (matches Search tab style)
-                        VStack(spacing: 12) {
+                        VStack(spacing: Theme.Spacing.sm) {
                             ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
                                 NavigationLink(destination: RecipeDetailView(
                                     recipe: sharedRecipe.recipe,
@@ -761,7 +756,7 @@ struct UserProfileView: View {
     }
 
     private var emptyRecipesState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Theme.Spacing.sm) {
             ZStack {
                 Circle()
                     .fill(
@@ -890,7 +885,7 @@ struct AllProfileRecipesListView: View {
 
     private var gridContent: some View {
         ScrollView {
-            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
+            LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: Theme.Spacing.md) {
                 ForEach(recipes) { sharedRecipe in
                     NavigationLink(destination: RecipeDetailView(
                         recipe: sharedRecipe.recipe,
