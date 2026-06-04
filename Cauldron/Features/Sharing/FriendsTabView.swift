@@ -405,11 +405,7 @@ struct FriendsTabView: View {
     private var recentlyAddedSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
-                Image(systemName: "clock.arrow.circlepath")
-                    .foregroundColor(.cauldronOrange)
-                Text("Recently Added")
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(title: "Recently Added", systemImage: "clock.arrow.circlepath")
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -441,11 +437,7 @@ struct FriendsTabView: View {
     private func tagSectionView(tag: String, recipes: [SharedRecipe]) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
-                Image(systemName: "tag.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text(tag)
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(title: tag, systemImage: "tag.fill")
                 Spacer()
 
                 NavigationLink(destination: AllFriendsRecipesListView(
@@ -487,11 +479,7 @@ struct FriendsTabView: View {
     private var allRecipesSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
-                Image(systemName: "book.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text("All Friends' Recipes")
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(title: "All Friends' Recipes", systemImage: "book.fill")
                 Spacer()
 
                 NavigationLink(destination: AllFriendsRecipesListView(
@@ -533,11 +521,7 @@ struct FriendsTabView: View {
     private var allCollectionsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
-                Image(systemName: "folder.fill")
-                    .foregroundColor(.purple)
-                Text("Friends' Collections")
-                    .font(.title2)
-                    .fontWeight(.bold)
+                SectionHeaderLabel(title: "Friends' Collections", systemImage: "folder.fill", iconColor: .purple)
                 Spacer()
 
                 NavigationLink(destination: AllFriendsCollectionsListView(
