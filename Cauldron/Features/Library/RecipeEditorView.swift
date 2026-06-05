@@ -181,7 +181,7 @@ struct RecipeEditorView: View {
                     showingImageOptions = true
                 } label: {
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.1))
+                        .fill(Color.appSurface)
                         .frame(height: 200)
                         .overlay {
                             VStack(spacing: 12) {
@@ -780,7 +780,7 @@ struct StepEditorRow: View {
             TextEditor(text: $step.text)
                 .frame(minHeight: 80)
                 .padding(8)
-                .background(Color(.systemGray6))
+                .background(Color.appSurface)
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -868,7 +868,7 @@ struct TimerEditorRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(.systemGray6))
+        .background(Color.appSurface)
         .cornerRadius(8)
         .onAppear {
             // Initialize display value based on seconds

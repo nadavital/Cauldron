@@ -144,7 +144,7 @@ struct CollectionFormView: View {
                                     RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
                                 } else {
                                     RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.gray.opacity(0.2))
+                                        .fill(Color.appSurface)
                                         .frame(width: 60, height: 60)
                                         .overlay(
                                             Image(systemName: "photo")

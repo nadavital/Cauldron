@@ -28,7 +28,7 @@ struct AIRecipeGeneratorView: View {
                     .ignoresSafeArea()
                 
                 ScrollView {
-                    VStack(spacing: 24) {
+                    VStack(spacing: Theme.Spacing.xl) {
                         if !isAvailable {
                             unavailableSection
                         } else {
