@@ -339,6 +339,8 @@ struct RecipeImportPreviewView: View {
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
 
+            Haptics.success()
+
             // Call the callback to notify parent view
             onSave()
 

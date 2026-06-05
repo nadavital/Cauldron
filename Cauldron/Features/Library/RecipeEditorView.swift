@@ -57,6 +57,7 @@ struct RecipeEditorView: View {
 
                         Task {
                             if await viewModel.save() {
+                                Haptics.success()
                                 dismiss()
                                 // Call callback if provided (used during import flow)
                                 onSaveAndDismiss?()

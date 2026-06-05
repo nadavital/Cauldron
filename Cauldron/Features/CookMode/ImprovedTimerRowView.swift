@@ -14,6 +14,7 @@ struct ImprovedTimerRowView: View {
 
     @State private var remainingSeconds: Int = 0
     @State private var updateTask: Task<Void, Never>?
+    @State private var didComplete = false
     /// Scales the large timer readout with Dynamic Type.
     @ScaledMetric(relativeTo: .largeTitle) private var timerFontSize: CGFloat = 32
     
@@ -73,9 +74,24 @@ struct ImprovedTimerRowView: View {
             }
         }
         .padding(16)
-        .background(Color.cauldronSecondaryBackground)
+        .background(didComplete ? Color.cauldronOrange.opacity(0.18) : Color.cauldronSecondaryBackground)
         .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.cauldronOrange.opacity(didComplete ? 0.6 : 0), lineWidth: 2)
+        )
+        .scaleEffect(didComplete ? 1.03 : 1.0)
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .animation(Theme.Animation.spring, value: didComplete)
+        .onChange(of: remainingSeconds) { _, newValue in
+            // Celebrate the moment a running timer hits zero.
+            if newValue <= 0 && !didComplete {
+                didComplete = true
+                Haptics.success()
+            } else if newValue > 0 && didComplete {
+                didComplete = false
+            }
+        }
         .onAppear {
             startUpdating()
         }
