@@ -145,6 +145,8 @@ struct RecipeHeaderSection: View {
     private var primaryHeaderAction: some View {
         if recipe.isOwnedByCurrentUser() {
             Button {
+                // Haptic reflects the state we're moving to.
+                if localIsFavorite { Haptics.light() } else { Haptics.success() }
                 onToggleFavorite()
             } label: {
                 Image(systemName: localIsFavorite ? "star.fill" : "star")
@@ -152,6 +154,7 @@ struct RecipeHeaderSection: View {
                     .frame(width: 36, height: 36)
                     .foregroundStyle(localIsFavorite ? .yellow : .secondary)
                     .background(.ultraThinMaterial, in: Circle())
+                    .symbolEffect(.bounce, value: localIsFavorite)
             }
             .accessibilityLabel(localIsFavorite ? "Remove Favorite" : "Favorite")
         } else if hasOwnedCopy {
