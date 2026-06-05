@@ -233,6 +233,7 @@ struct RecipeImportPreviewView: View {
                     .padding(.vertical)
                 }
             }
+            .warmCanvas()
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
