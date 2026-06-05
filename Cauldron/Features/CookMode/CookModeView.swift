@@ -60,6 +60,7 @@ struct CookModeView: View {
                 compactContent
             }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

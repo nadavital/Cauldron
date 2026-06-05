@@ -45,6 +45,15 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    /// Force the onboarding flow for visual review (it's normally skipped in QA seed mode).
+    nonisolated static var shouldForceOnboarding: Bool {
+        #if DEBUG
+        arguments.contains("--cauldron-show-onboarding")
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var canUseCloudKit: Bool {
         !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }
