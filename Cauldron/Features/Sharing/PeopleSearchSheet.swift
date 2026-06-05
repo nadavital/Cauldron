@@ -411,12 +411,24 @@ final class PeopleSearchViewModel {
             userIds.insert(connection.toUserId)
         }
 
-        for userId in userIds {
-            if usersMap[userId] == nil {
-                if let user = try? await dependencies.userCloudService.fetchUser(byUserId: userId) {
-                    usersMap[userId] = user
-                }
+        // Resolve users local-first (works offline), then cloud.
+        for userId in userIds where usersMap[userId] == nil {
+            if let cached = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                usersMap[userId] = cached
+            } else if let user = try? await dependencies.userCloudService.fetchUser(byUserId: userId) {
+                usersMap[userId] = user
             }
+        }
+
+        // Final fallback: build a minimal user from the request's embedded
+        // sender info so a pending request always renders (badge ↔ row stay in
+        // sync even when cloud/local lookups miss).
+        for connection in receivedRequests where usersMap[connection.fromUserId] == nil {
+            usersMap[connection.fromUserId] = User(
+                id: connection.fromUserId,
+                username: connection.fromUsername ?? "",
+                displayName: connection.fromDisplayName ?? connection.fromUsername ?? "Friend"
+            )
         }
     }
 
