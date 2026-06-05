@@ -24,13 +24,6 @@ struct TierRoadmapView: View {
             ScrollView {
                 GlassEffectContainer(spacing: 2) {
                     VStack(spacing: 16) {
-                        // Explainer
-                        Text("The more recipes you save, the higher your tier and search visibility boost.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-
                         // Combined current + next tier section
                         combinedProgressSection
 
@@ -142,14 +135,14 @@ struct TierRoadmapView: View {
 
                     // Recipe count and next tier
                     HStack {
-                        Text("\(recipeCount)/\(nextTier.requiredRecipes) recipes")
+                        Text("\(recipeCount)/\(nextTier.requiredRecipes)")
                             .font(.caption)
                             .foregroundColor(.secondary)
 
                         Spacer()
 
                         HStack(spacing: 4) {
-                            Text("Next:")
+                            Text("\(recipesNeeded) to")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Image(systemName: nextTier.icon)
@@ -161,12 +154,6 @@ struct TierRoadmapView: View {
                                 .foregroundColor(nextTier.color)
                         }
                     }
-
-                    // Recipes needed hint
-                    Text("\(recipesNeeded) more \(recipesNeeded == 1 ? "recipe" : "recipes") to unlock +\(Int((nextTier.searchBoost - currentTier.searchBoost) * 100))% boost")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 // Max tier reached
@@ -199,10 +186,6 @@ struct TierRoadmapView: View {
                     .fontWeight(.medium)
                 Spacer()
             }
-
-            Text("Import from links, generate with AI, or create your own to level up faster")
-                .font(.caption)
-                .foregroundColor(.secondary)
 
             if isAIAvailable {
                 Button {
