@@ -499,6 +499,7 @@ struct FriendsTabView: View {
                             CollectionCardView(
                                 collection: collection,
                                 recipeImages: collectionImageCache[collection.id] ?? [],
+                                owner: viewModel.owner(for: collection),
                                 dependencies: dependencies
                             )
                         }

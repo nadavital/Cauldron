@@ -28,6 +28,12 @@ final class FriendsTabViewModel {
     // Tier information for shared recipe creators
     var sharerTiers: [UUID: UserTier] = [:]
 
+    /// Look up the owner of a friend's shared collection from the friends who
+    /// have shared recipes (used to tag collection cards with their creator).
+    func owner(for collection: Collection) -> User? {
+        sharedRecipes.first(where: { $0.sharedBy.id == collection.userId })?.sharedBy
+    }
+
     @ObservationIgnored
     private(set) var dependencies: DependencyContainer?
     @ObservationIgnored
