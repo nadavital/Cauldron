@@ -167,7 +167,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         // Match navigation titles to the app's serif section headers.
-        Self.configureNavigationBarAppearance()
+        // Skipped under tests (no UI host); still applied in QA/preview + production.
+        if !RuntimeEnvironment.isRunningTests {
+            Self.configureNavigationBarAppearance()
+        }
 
         if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isSimulatorQAMode {
             return true

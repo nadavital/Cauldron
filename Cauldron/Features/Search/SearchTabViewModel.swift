@@ -66,7 +66,7 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
     var recipesByTag: [String: [Recipe]] = [:]
     var recipeSearchResults: [SearchRecipeGroup] = []
     var peopleSearchResults: [User] = []
-    var friends: [User] = []
+    var friends: [User] = [] // Used for friend-saver social proof in recipe search ranking
     var isLoading = false
     var isLoadingPeople = false
     var connections: [Connection] = [] // Derived from connectionManager
@@ -229,7 +229,7 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
         // Update local connections array from manager
         connections = dependencies.connectionManager.connections.values.map { $0.connection }
 
-        // Load friends details
+        // Load friends details (used for friend-saver social proof in search ranking)
         await loadFriends()
     }
 
@@ -237,19 +237,19 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
         let friendIds = connections
             .filter { $0.isAccepted }
             .compactMap { $0.otherUserId(currentUserId: currentUserId) }
-            
+
         guard !friendIds.isEmpty else {
             friends = []
             return
         }
-        
+
         do {
             friends = try await dependencies.sharingService.getUsers(byIds: friendIds)
         } catch {
             AppLogger.general.error("Failed to load friends: \(error.localizedDescription)")
         }
     }
-    
+
     var recommendedUsers: [User] = []
     
     func loadRecommendations() async {
