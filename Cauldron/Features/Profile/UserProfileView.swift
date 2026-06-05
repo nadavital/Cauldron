@@ -49,27 +49,29 @@ struct UserProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: Theme.Spacing.lg) {
-                // Profile Header
-                profileHeader
+            GlassEffectContainer(spacing: 2) {
+                VStack(spacing: Theme.Spacing.lg) {
+                    // Profile Header
+                    profileHeader
 
-                // Rewards & Progress Section (only for current user)
-                if viewModel.isCurrentUser {
-                    rewardsSection
+                    // Rewards & Progress Section (only for current user)
+                    if viewModel.isCurrentUser {
+                        rewardsSection
+                    }
+
+                    // Connection Management Section
+                    if !viewModel.isCurrentUser {
+                        connectionSection
+                    }
+
+                    // Collections Section (only show if user has collections OR still loading the first time)
+                    if !viewModel.userCollections.isEmpty || (viewModel.isLoadingCollections && !hasLoadedInitialData) {
+                        collectionsSection
+                    }
+
+                    // Recipes Section
+                    recipesSection
                 }
-
-                // Connection Management Section
-                if !viewModel.isCurrentUser {
-                    connectionSection
-                }
-
-                // Collections Section (only show if user has collections OR still loading the first time)
-                if !viewModel.userCollections.isEmpty || (viewModel.isLoadingCollections && !hasLoadedInitialData) {
-                    collectionsSection
-                }
-
-                // Recipes Section
-                recipesSection
             }
             .padding()
         }
@@ -139,8 +141,7 @@ struct UserProfileView: View {
                 // Name row with edit button
                 HStack {
                     Text(displayUser.displayName)
-                        .font(.title3)
-                        .fontWeight(.bold)
+                        .font(.system(.title2, design: .serif).weight(.bold))
 
                     Spacer()
 
@@ -194,8 +195,7 @@ struct UserProfileView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .glassCard(cornerRadius: 16)
     }
 
     // MARK: - App Icons Section
@@ -238,8 +238,7 @@ struct UserProfileView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .glassCard(cornerRadius: 16)
     }
 
     private func iconCellWithProgress(theme: AppIconTheme) -> some View {
@@ -572,8 +571,7 @@ struct UserProfileView: View {
                 }
             }
             .padding()
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(16)
+            .glassCard(cornerRadius: 16)
         }
     }
 
