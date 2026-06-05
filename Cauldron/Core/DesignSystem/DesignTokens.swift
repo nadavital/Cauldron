@@ -152,7 +152,7 @@ extension View {
     /// a `GlassEffectContainer` so they render and clip correctly (a standalone
     /// glass element in a scroll view can otherwise float above sibling content).
     func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
-        glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        glassEffect(.clear, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 

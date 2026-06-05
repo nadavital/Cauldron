@@ -213,7 +213,7 @@ struct SearchTabView: View {
 
     @ToolbarContentBuilder
     private var searchToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .navigationBarTrailing) {
             if let user = currentUserSession.currentUser {
                 Button {
                     showingProfileSheet = true

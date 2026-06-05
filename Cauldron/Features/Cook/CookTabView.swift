@@ -121,15 +121,6 @@ struct CookTabView: View {
             .navigationTitle("Cook")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if let user = currentUserSession.currentUser {
-                        Button {
-                            showingProfileSheet = true
-                        } label: {
-                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
-                        }
-                    }
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
                         dependencies: viewModel.dependencies,
@@ -138,6 +129,15 @@ struct CookTabView: View {
                         showingImporter: $showingImporter,
                         showingCollectionForm: $showingCollectionForm
                     )
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $showingImporter, onDismiss: {

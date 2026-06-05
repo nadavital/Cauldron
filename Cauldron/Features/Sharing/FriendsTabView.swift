@@ -189,15 +189,6 @@ struct FriendsTabView: View {
 
     @ToolbarContentBuilder
     private var friendsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
-            if let user = userSession.currentUser {
-                Button {
-                    showingProfileSheet = true
-                } label: {
-                    ProfileAvatar(user: user, size: 32, dependencies: dependencies)
-                }
-            }
-        }
         ToolbarItemGroup(placement: .navigationBarTrailing) {
             Button {
                 showingInviteSheet = true
@@ -209,6 +200,14 @@ struct FriendsTabView: View {
                 showingPeopleSearch = true
             } label: {
                 Image(systemName: "plus")
+            }
+
+            if let user = userSession.currentUser {
+                Button {
+                    showingProfileSheet = true
+                } label: {
+                    ProfileAvatar(user: user, size: 30, dependencies: dependencies)
+                }
             }
         }
     }

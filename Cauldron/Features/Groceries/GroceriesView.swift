@@ -39,16 +39,6 @@ struct GroceriesView: View {
             .navigationTitle("Groceries")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if let user = currentUserSession.currentUser {
-                        Button {
-                            showingProfileSheet = true
-                        } label: {
-                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
-                        }
-                    }
-                }
-
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Picker("Sort By", selection: $viewMode) {
@@ -82,6 +72,16 @@ struct GroceriesView: View {
                         showingAddItem = true
                     } label: {
                         Image(systemName: "plus")
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
+                        }
                     }
                 }
             }
