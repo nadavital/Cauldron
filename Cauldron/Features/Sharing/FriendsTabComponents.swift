@@ -105,7 +105,6 @@ struct SectionHeader: View {
 
 struct ConnectionsInlineView: View {
     @State private var viewModel: ConnectionsViewModel
-    @State private var showingRequests = false
     let dependencies: DependencyContainer
     var onAddFriend: (() -> Void)?
 
@@ -122,24 +121,36 @@ struct ConnectionsInlineView: View {
             onAddFriend?()
         } label: {
             VStack(spacing: 6) {
-                ZStack {
+                ZStack(alignment: .topTrailing) {
                     Circle()
                         .strokeBorder(
                             Color.cauldronOrange.opacity(0.8),
                             style: StrokeStyle(lineWidth: 2, dash: [5, 4])
                         )
                         .frame(width: 56, height: 56)
-                    Image(systemName: "plus")
-                        .font(.title3.weight(.semibold))
-                        .foregroundColor(.cauldronOrange)
+                        .overlay(
+                            Image(systemName: "plus")
+                                .font(.title3.weight(.semibold))
+                                .foregroundColor(.cauldronOrange)
+                        )
+
+                    // Pending-request count badge
+                    if !viewModel.receivedRequests.isEmpty {
+                        Text("\(viewModel.receivedRequests.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(5)
+                            .background(Color.red, in: Circle())
+                            .offset(x: 4, y: -4)
+                    }
                 }
-                Text("Add")
+                Text(viewModel.receivedRequests.isEmpty ? "Add" : "Requests")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
         }
         .buttonStyle(PressableScaleStyle())
-        .accessibilityLabel("Add friends")
+        .accessibilityLabel(viewModel.receivedRequests.isEmpty ? "Add friends" : "\(viewModel.receivedRequests.count) friend requests and add friends")
     }
 
     private var hasAnyConnectionsActivity: Bool {
@@ -148,36 +159,14 @@ struct ConnectionsInlineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            // Top row: requests badge (left) + See All (right)
-            if !viewModel.receivedRequests.isEmpty || !viewModel.connections.isEmpty {
-                HStack(spacing: Theme.Spacing.sm) {
-                    if !viewModel.receivedRequests.isEmpty {
-                        Button {
-                            showingRequests = true
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "person.crop.circle.badge.plus")
-                                Text("\(viewModel.receivedRequests.count) \(viewModel.receivedRequests.count == 1 ? "request" : "requests")")
-                                    .fontWeight(.semibold)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.cauldronOrange, in: Capsule())
-                        }
-                        .buttonStyle(PressableScaleStyle())
-                        .accessibilityLabel("\(viewModel.receivedRequests.count) friend requests, tap to review")
-                    }
-
+            // Top row: See All (right)
+            if !viewModel.connections.isEmpty {
+                HStack {
                     Spacer()
-
-                    if !viewModel.connections.isEmpty {
-                        NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
-                            Text("See All")
-                                .font(.subheadline)
-                                .foregroundColor(.cauldronOrange)
-                        }
+                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
+                        Text("See All")
+                            .font(.subheadline)
+                            .foregroundColor(.cauldronOrange)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -204,9 +193,6 @@ struct ConnectionsInlineView: View {
                     .padding(.vertical, 8)
                 }
             }
-        }
-        .sheet(isPresented: $showingRequests) {
-            requestsSheet
         }
         .task {
             await viewModel.loadConnections()
@@ -243,41 +229,4 @@ struct ConnectionsInlineView: View {
         .padding(.vertical, 20)
     }
 
-    private var requestsSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: Theme.Spacing.sm) {
-                    if viewModel.receivedRequests.isEmpty {
-                        ContentUnavailableView(
-                            "No Pending Requests",
-                            systemImage: "person.crop.circle.badge.checkmark",
-                            description: Text("You're all caught up.")
-                        )
-                        .padding(.top, 60)
-                    } else {
-                        ForEach(viewModel.receivedRequests, id: \.id) { connection in
-                            if let user = viewModel.usersMap[connection.fromUserId] {
-                                ConnectionRequestCard(
-                                    user: user,
-                                    connection: connection,
-                                    dependencies: dependencies,
-                                    onAccept: { await viewModel.acceptRequest(connection) },
-                                    onReject: { await viewModel.rejectRequest(connection) }
-                                )
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical)
-            }
-            .navigationTitle("Friend Requests")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showingRequests = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
 }

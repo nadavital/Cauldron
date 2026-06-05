@@ -135,6 +135,10 @@ struct CollectionCardView: View {
     @State private var customCoverImage: UIImage?
     @State private var loadedCoverKey: String?
     @State private var isLoadingImage = false
+    /// Owner-tag text adapts to the cover's top luminance (white over dark
+    /// covers, black over light ones). Defaults to white for gradient/collage
+    /// covers, which read well with white text.
+    @State private var overlayPrefersDarkText = false
 
     init(
         collection: Collection,
@@ -185,7 +189,7 @@ struct CollectionCardView: View {
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .lineLimit(1)
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(overlayPrefersDarkText ? .black : .white)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
@@ -283,6 +287,9 @@ struct CollectionCardView: View {
                 customCoverImage = image
             }
             loadedCoverKey = customCoverTaskID
+            if let luminance = image.topRegionLuminance() {
+                overlayPrefersDarkText = luminance > 0.6
+            }
         } else {
             customCoverImage = nil
             loadedCoverKey = nil
