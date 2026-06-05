@@ -116,6 +116,8 @@ struct CookTabView: View {
                 }
                 .padding(.vertical)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("Cook")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -304,7 +306,7 @@ struct CookTabView: View {
                     } preview: {
                         RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             .padding()
-                            .background(Color(.systemBackground))
+                            .background(Color.appSurfaceElevated)
                     }
                 }
             }

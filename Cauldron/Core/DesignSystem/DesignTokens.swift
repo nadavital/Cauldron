@@ -89,13 +89,18 @@ enum Theme {
     /// Semantic, Dynamic-Type-friendly text styles. These build on the system
     /// text styles (so they scale automatically) while standardizing the few
     /// places the app wants a rounded, branded feel.
+    /// Editorial voice: a serif (system New York) for titles and section
+    /// headers gives recipes a warm, cookbook feel, while SF stays for body and
+    /// UI chrome. All styles build on system text styles so Dynamic Type works.
     enum Typography {
-        /// Large screen / hero title.
-        static let screenTitle = SwiftUI.Font.largeTitle.weight(.bold)
-        /// Section header within a screen.
-        static let sectionTitle = SwiftUI.Font.title2.weight(.bold)
-        /// Card / row title.
-        static let cardTitle = SwiftUI.Font.headline
+        /// Large screen / hero title (serif).
+        static let screenTitle = SwiftUI.Font.system(.largeTitle, design: .serif).weight(.bold)
+        /// Hero recipe title on the detail screen (serif).
+        static let recipeTitle = SwiftUI.Font.system(.title, design: .serif).weight(.semibold)
+        /// Section header within a screen (serif — ties screens together).
+        static let sectionTitle = SwiftUI.Font.system(.title2, design: .serif).weight(.bold)
+        /// Recipe card / row title (serif, smaller).
+        static let cardTitle = SwiftUI.Font.system(.headline, design: .serif)
         /// Secondary metadata (time, counts, captions).
         static let metadata = SwiftUI.Font.caption
         /// Numeric, rounded display (timers, counts) — pair with `.monospacedDigit()`.

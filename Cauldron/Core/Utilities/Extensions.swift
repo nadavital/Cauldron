@@ -179,8 +179,8 @@ extension View {
     func cardStyle() -> some View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(Theme.Radius.card)
+            .background(Color.appSurface)
+            .cornerRadius(Theme.Radius.large)
             .shadow(Theme.Shadow.card)
     }
 
