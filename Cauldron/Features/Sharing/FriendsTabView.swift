@@ -196,12 +196,6 @@ struct FriendsTabView: View {
                 Label("Invite", systemImage: "gift.fill")
             }
 
-            Button {
-                showingPeopleSearch = true
-            } label: {
-                Image(systemName: "plus")
-            }
-
             if let user = userSession.currentUser {
                 Button {
                     showingProfileSheet = true
@@ -272,15 +266,13 @@ struct FriendsTabView: View {
                     VStack(spacing: 0) {
                         SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
-                        ConnectionsInlineView(dependencies: dependencies)
+                        ConnectionsInlineView(dependencies: dependencies, onAddFriend: { showingPeopleSearch = true })
                             .padding(.bottom, 8)
                     }
                     .glassCard(cornerRadius: 16)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-
-                inviteInlineCard
 
                 if viewModel.isLoading {
                     ProgressView("Loading recipes...")
@@ -308,49 +300,6 @@ struct FriendsTabView: View {
             }
         }
         .background(Color.cauldronBackground.ignoresSafeArea())
-    }
-
-    private var inviteInlineCard: some View {
-        Button {
-            showingInviteSheet = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "person.badge.plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.cauldronOrange)
-                    .frame(width: 32, height: 32)
-                    .background(Color.cauldronOrange.opacity(0.12), in: Circle())
-
-                Text("Invite friends & unlock rewards")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                LinearGradient(
-                    colors: [Color.cauldronOrange.opacity(0.12), Color.cauldronSecondaryBackground],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.cauldronOrange.opacity(0.28), lineWidth: 1)
-            )
-            .clipShape(.rect(cornerRadius: 16))
-        }
-        .buttonStyle(PressableScaleStyle())
-        .padding(.horizontal, 16)
     }
 
     private var emptyRecipesState: some View {

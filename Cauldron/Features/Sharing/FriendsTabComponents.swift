@@ -106,10 +106,39 @@ struct SectionHeader: View {
 struct ConnectionsInlineView: View {
     @State private var viewModel: ConnectionsViewModel
     let dependencies: DependencyContainer
+    var onAddFriend: (() -> Void)?
 
-    init(dependencies: DependencyContainer) {
+    init(dependencies: DependencyContainer, onAddFriend: (() -> Void)? = nil) {
         self.dependencies = dependencies
+        self.onAddFriend = onAddFriend
         _viewModel = State(initialValue: ConnectionsViewModel(dependencies: dependencies))
+    }
+
+    /// Dashed "+" tile that opens the add-friends flow, shown at the start of
+    /// the friends row (replaces the toolbar "+" button).
+    private var addFriendTile: some View {
+        Button {
+            onAddFriend?()
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(
+                            Color.cauldronOrange.opacity(0.8),
+                            style: StrokeStyle(lineWidth: 2, dash: [5, 4])
+                        )
+                        .frame(width: 56, height: 56)
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.semibold))
+                        .foregroundColor(.cauldronOrange)
+                }
+                Text("Add")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(PressableScaleStyle())
+        .accessibilityLabel("Add friends")
     }
 
     var body: some View {
@@ -160,9 +189,11 @@ struct ConnectionsInlineView: View {
                         .font(.caption)
                         .foregroundColor(.cauldronOrange)
                         .onTapGesture {
-                            // Ideally switch tab, but for now just show text
-                            // Or use a notification to switch tab
-                            NotificationCenter.default.post(name: NSNotification.Name("SwitchToSearchTab"), object: nil)
+                            if let onAddFriend {
+                                onAddFriend()
+                            } else {
+                                NotificationCenter.default.post(name: NSNotification.Name("SwitchToSearchTab"), object: nil)
+                            }
                         }
                 }
                 .frame(maxWidth: .infinity)
@@ -184,6 +215,9 @@ struct ConnectionsInlineView: View {
 
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: Theme.Spacing.md) {
+                            if onAddFriend != nil {
+                                addFriendTile
+                            }
                             ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
                                 if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
                                    let user = viewModel.usersMap[otherUserId] {
