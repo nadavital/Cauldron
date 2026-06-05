@@ -216,6 +216,8 @@ struct GroceriesView: View {
             HStack {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
                     .foregroundColor(item.isChecked ? .cauldronOrange : .secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: item.isChecked)
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text(item.name)

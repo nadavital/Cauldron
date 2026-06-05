@@ -25,6 +25,7 @@ struct CookTabView: View {
     @State private var isAIAvailable = false
     @State private var shouldSpotlightRecentlyAdded = false
     @State private var recentlyAddedSpotlightTask: Task<Void, Never>?
+    @Namespace private var recipeTransition
     private let recentlyAddedSectionID = "cookRecentlyAddedSection"
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
@@ -293,14 +294,19 @@ struct CookTabView: View {
     }
 
     /// Standard horizontal carousel of the user's own recipe cards, with context menu + preview.
+    /// Cards zoom into the detail screen for a continuous, delightful transition.
     private func recipeCarousel(_ recipes: [Recipe], limit: Int = 10) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.md) {
                 ForEach(recipes.prefix(limit)) { recipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                    NavigationLink {
+                        RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                            .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
+                    } label: {
                         RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                     }
                     .buttonStyle(PressableScaleStyle())
+                    .matchedTransitionSource(id: recipe.id, in: recipeTransition)
                     .contextMenu {
                         recipeContextMenu(for: recipe)
                     } preview: {
