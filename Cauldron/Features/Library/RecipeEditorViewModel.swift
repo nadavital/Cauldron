@@ -49,68 +49,6 @@ struct AdditionalQuantityInput: Identifiable {
     }
 }
 
-private enum QuantityTextParser {
-    static func parse(_ rawText: String) -> (value: Double, upperValue: Double?)? {
-        guard !rawText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-
-        let trimmed = rawText.trimmingCharacters(in: .whitespaces)
-
-        // Handle Range: "1-2" or "1 - 2"
-        if trimmed.contains("-") {
-            let components = trimmed.components(separatedBy: "-")
-            if components.count == 2,
-               let lower = parseSingleValue(components[0]),
-               let upper = parseSingleValue(components[1]) {
-                return (lower, upper)
-            }
-        }
-
-        // Handle Single Value
-        if let val = parseSingleValue(trimmed) {
-            return (val, nil)
-        }
-
-        return nil
-    }
-
-    private static func parseSingleValue(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty { return nil }
-        
-        // Handle fractions like "1/2", "1/4", "2/3"
-        if trimmed.contains("/") {
-            let parts = trimmed.split(separator: "/")
-            if parts.count == 2,
-               let numerator = Double(parts[0].trimmingCharacters(in: .whitespaces)),
-               let denominator = Double(parts[1].trimmingCharacters(in: .whitespaces)),
-               denominator != 0 {
-                return numerator / denominator
-            }
-        }
-        
-        // Handle mixed numbers like "1 1/2" (1 and a half)
-        if trimmed.contains(" ") {
-            let parts = trimmed.split(separator: " ")
-            if parts.count == 2,
-               let whole = Double(parts[0].trimmingCharacters(in: .whitespaces)) {
-                let fractionPart = String(parts[1].trimmingCharacters(in: .whitespaces))
-                if fractionPart.contains("/") {
-                    let fracParts = fractionPart.split(separator: "/")
-                    if fracParts.count == 2,
-                       let numerator = Double(fracParts[0].trimmingCharacters(in: .whitespaces)),
-                       let denominator = Double(fracParts[1].trimmingCharacters(in: .whitespaces)),
-                       denominator != 0 {
-                        return whole + (numerator / denominator)
-                    }
-                }
-            }
-        }
-        
-        // Handle regular decimals
-        return Double(trimmed)
-    }
-}
-
 struct StepInput: Identifiable {
     let id = UUID()
     var text: String = ""
