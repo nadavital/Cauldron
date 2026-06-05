@@ -64,6 +64,7 @@ struct TagView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(displayName) tag")
             }
         }
         .padding(.horizontal, 10)
@@ -75,6 +76,15 @@ struct TagView: View {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(color, lineWidth: isSelected ? 1.5 : 0)
         )
+        // Collapse into a single labeled element only for display-only tags.
+        // When a remove button is present we keep children accessible so the
+        // remove action stays reachable by VoiceOver.
+        .if(onRemove == nil) { view in
+            view
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(displayName)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        }
     }
 }
 

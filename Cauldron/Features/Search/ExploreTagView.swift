@@ -521,7 +521,9 @@ final class ExploreTagViewModel {
         for owner in cloudOwners {
             ownersMap[owner.id] = owner
             ownerCache[owner.id] = owner
-            try? await dependencies.sharingRepository.save(owner)
+            await bestEffort("Cache recipe owner") {
+                try await dependencies.sharingRepository.save(owner)
+            }
         }
 
         return ownersMap

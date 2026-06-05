@@ -172,6 +172,7 @@ struct CollectionDetailView: View {
                 .padding(.bottom, 100)
             }
         }
+        .warmCanvas()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search recipes")
@@ -302,12 +303,12 @@ struct CollectionDetailView: View {
         Button {
             activeSheet = .conformance
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
                     .font(.title3)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text("\(nonConformingRecipes.count) recipe\(nonConformingRecipes.count == 1 ? "" : "s") won't be visible")
                         .font(.subheadline)
                         .fontWeight(.semibold)
@@ -329,7 +330,7 @@ struct CollectionDetailView: View {
             .background(Color.orange.opacity(0.1))
             .cornerRadius(12)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }
@@ -619,7 +620,7 @@ struct CollectionDetailView: View {
             .shadow(color: Color.black.opacity(0.07), radius: 14, y: 6)
             .background {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .fill(Color.appSurface)
             }
 
             if collectionCoverPageCount > 1 {
@@ -818,8 +819,8 @@ struct CollectionDetailView: View {
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                 Text(collection.name.recipeDetailLineBreakFriendly())
                     .font(.title.bold())
                     .fontDesign(.serif)
@@ -909,15 +910,15 @@ struct CollectionDetailView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+                .background(Color.appSurface, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableScaleStyle())
         }
     }
 
     @ViewBuilder
     private var recipesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("Recipes")
                 .font(.title3)
                 .fontWeight(.bold)
@@ -930,7 +931,7 @@ struct CollectionDetailView: View {
                 }
                 .padding(.vertical, 40)
             } else if visibleRecipes.isEmpty {
-                VStack(spacing: 12) {
+                VStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: emptyStateIconName)
                         .font(.system(size: 40))
                         .foregroundColor(.secondary)
@@ -978,7 +979,7 @@ struct CollectionDetailView: View {
             } label: {
                 RecipeRowView(recipe: recipe, dependencies: dependencies)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableScaleStyle())
             .contextMenu {
                 if isOwned {
                     Button(role: .destructive) {
@@ -994,7 +995,7 @@ struct CollectionDetailView: View {
     }
 
     private var recipesGridContent: some View {
-        LazyVGrid(columns: recipeGridColumns, spacing: 16) {
+        LazyVGrid(columns: recipeGridColumns, spacing: Theme.Spacing.md) {
             ForEach(visibleRecipes) { recipe in
                 NavigationLink {
                     recipeDestination(for: recipe)
@@ -1002,7 +1003,7 @@ struct CollectionDetailView: View {
                     recipeCard(for: recipe)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableScaleStyle())
                 .contextMenu {
                     if isOwned {
                         Button(role: .destructive) {
@@ -1019,7 +1020,7 @@ struct CollectionDetailView: View {
     }
 
     private var recipeGridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 16)]
+        [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: Theme.Spacing.md)]
     }
 
     private var editCollectionButton: some View {
@@ -1037,10 +1038,10 @@ struct CollectionDetailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .background(Color.appSurface, in: Capsule())
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
     }
 
     private var addRecipesButton: some View {
@@ -1061,7 +1062,7 @@ struct CollectionDetailView: View {
             .background(Color.cauldronOrange.opacity(0.1), in: Capsule())
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableScaleStyle())
     }
 
     // MARK: - Helpers
@@ -1076,766 +1077,6 @@ struct CollectionDetailView: View {
         visibleRecipes = recipes.filter { recipe in
             recipe.title.localizedCaseInsensitiveContains(trimmedSearchText) ||
             recipe.tags.contains(where: { $0.name.localizedCaseInsensitiveContains(trimmedSearchText) })
-        }
-    }
-}
-
-// MARK: - Collection Recipe Selector Sheet
-
-struct CollectionRecipeSelectorSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let collection: Collection
-    let dependencies: DependencyContainer
-    let onDismiss: () -> Void
-
-    @State private var recipes: [Recipe] = []
-    @State private var selectedRecipeIds: Set<UUID>
-    @State private var isLoading = true
-    @State private var searchText = ""
-    @State private var showingCopyConfirmation: Recipe?
-    @State private var isCopying = false
-    @State private var recipeOwnerCache: [UUID: User] = [:]  // Cache recipe owners by userId
-    @State private var showingPublicMembershipRepairConfirmation = false
-    @State private var pendingPublicMembershipRepairPlan = PublicCollectionMembershipRepairPlan(
-        privateOwnedRecipeCount: 0,
-        referencedRecipeCount: 0
-    )
-    @State private var pendingPublicMembershipConfirmationAction: PublicMembershipConfirmationAction?
-
-    private enum PublicMembershipConfirmationAction {
-        case saveSelections
-        case copyRecipe(Recipe)
-    }
-
-    init(collection: Collection, dependencies: DependencyContainer, onDismiss: @escaping () -> Void) {
-        self.collection = collection
-        self.dependencies = dependencies
-        self.onDismiss = onDismiss
-        self._selectedRecipeIds = State(initialValue: Set(collection.recipeIds))
-    }
-
-    // Separate owned recipes from references
-    var ownedRecipes: [Recipe] {
-        recipes.filter { recipe in
-            guard let currentUserId = CurrentUserSession.shared.userId,
-                  let ownerId = recipe.ownerId else {
-                return false
-            }
-            return ownerId == currentUserId
-        }
-    }
-
-    var referencedRecipes: [Recipe] {
-        recipes.filter { recipe in
-            guard let currentUserId = CurrentUserSession.shared.userId,
-                  let ownerId = recipe.ownerId else {
-                return false
-            }
-            return ownerId != currentUserId
-        }
-    }
-
-    var filteredOwnedRecipes: [Recipe] {
-        if searchText.isEmpty {
-            return ownedRecipes
-        } else {
-            let lowercased = searchText.lowercased()
-            return ownedRecipes.filter { recipe in
-                recipe.title.lowercased().contains(lowercased) ||
-                recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) })
-            }
-        }
-    }
-
-    var filteredReferencedRecipes: [Recipe] {
-        if searchText.isEmpty {
-            return referencedRecipes
-        } else {
-            let lowercased = searchText.lowercased()
-            return referencedRecipes.filter { recipe in
-                recipe.title.lowercased().contains(lowercased) ||
-                recipe.tags.contains(where: { $0.name.lowercased().contains(lowercased) })
-            }
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Loading recipes...")
-                } else if recipes.isEmpty {
-                    emptyState
-                } else {
-                    List {
-                        // Owned recipes section (selectable)
-                        if !filteredOwnedRecipes.isEmpty {
-                            Section {
-                                ForEach(filteredOwnedRecipes) { recipe in
-                                    Button {
-                                        toggleRecipe(recipe.id)
-                                    } label: {
-                                        recipeRow(recipe: recipe, isSelectable: true, dependencies: dependencies)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            } header: {
-                                Text("Your Recipes")
-                            }
-                        }
-
-                        // Referenced recipes section (with copy option)
-                        if !filteredReferencedRecipes.isEmpty {
-                            Section {
-                                ForEach(filteredReferencedRecipes) { recipe in
-                                    Button {
-                                        showingCopyConfirmation = recipe
-                                    } label: {
-                                        recipeRow(recipe: recipe, isSelectable: false, dependencies: dependencies)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            } header: {
-                                Text("Saved from Others")
-                            } footer: {
-                                Text("To add these to your collection, you'll need to add them to your recipes first")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .searchable(text: $searchText, prompt: "Search recipes")
-                }
-            }
-            .navigationTitle("Add Recipes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done", systemImage: "checkmark") {
-                        Task {
-                            await saveChanges()
-                        }
-                    }
-                    .disabled(isLoading)
-                }
-            }
-            .confirmationDialog(
-                showingCopyConfirmation?.title ?? "",
-                isPresented: Binding(
-                    get: { showingCopyConfirmation != nil },
-                    set: { if !$0 { showingCopyConfirmation = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Save Copy to Collection") {
-                    if let recipe = showingCopyConfirmation {
-                        Task {
-                            await copyAndAddRecipe(recipe)
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    showingCopyConfirmation = nil
-                }
-            } message: {
-                Text("This recipe is saved from another user. To add it to your collection, you need to save your own copy.")
-            }
-            .alert(
-                "Make Recipes Public?",
-                isPresented: $showingPublicMembershipRepairConfirmation
-            ) {
-                Button("Cancel", role: .cancel) {}
-                Button("Continue") {
-                    Task {
-                        await continueAfterPublicMembershipConfirmation()
-                    }
-                }
-            } message: {
-                Text(pendingPublicMembershipRepairPlan.confirmationMessage)
-            }
-            .task {
-                await loadRecipes()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func recipeRow(recipe: Recipe, isSelectable: Bool, dependencies: DependencyContainer) -> some View {
-        HStack(spacing: 12) {
-            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
-                .overlay(
-                    Group {
-                        if !isSelectable {
-                            // Reference badge
-                            Image(systemName: "bookmark.fill")
-                                .font(.caption)
-                                .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
-                                .padding(6)
-                                .background(Circle().fill(.ultraThinMaterial))
-                                .padding(6)
-                        }
-                    },
-                    alignment: .topLeading
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recipe.title)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-
-                if !recipe.tags.isEmpty {
-                    Text(recipe.tags.first!.name)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer()
-
-            if isSelectable {
-                if selectedRecipeIds.contains(recipe.id) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.cauldronOrange)
-                } else {
-                    Image(systemName: "circle")
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                // Show "Copy" indicator for references
-                Image(systemName: "doc.on.doc")
-                    .foregroundColor(.cauldronOrange)
-                    .font(.caption)
-            }
-        }
-    }
-
-    private func loadRecipes() async {
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            // Load owned recipes from local storage
-            recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
-                currentUserId: CurrentUserSession.shared.userId
-            )
-            AppLogger.general.info("✅ Loaded \(recipes.count) owned recipes for collection selector")
-        } catch {
-            AppLogger.general.error("❌ Failed to load recipes for selector: \(error.localizedDescription)")
-        }
-    }
-
-    private func saveChanges(confirmingPublicMembershipRepair: Bool = false) async {
-        do {
-            let recipeIds = orderedSelectedRecipeIds()
-            if !confirmingPublicMembershipRepair {
-                let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
-                    recipeIds: recipeIds,
-                    ownerId: collection.userId,
-                    visibility: collection.visibility
-                )
-                if repairPlan.requiresRepair {
-                    pendingPublicMembershipRepairPlan = repairPlan
-                    pendingPublicMembershipConfirmationAction = .saveSelections
-                    showingPublicMembershipRepairConfirmation = true
-                    return
-                }
-            }
-
-            let resolution = try await dependencies.publicCollectionMembershipResolver.resolveRecipeIdsForOwnedPublicCollection(
-                recipeIds: recipeIds,
-                ownerId: collection.userId,
-                visibility: collection.visibility
-            )
-            let updatedCollection = collection.updated(recipeIds: resolution.recipeIds)
-            try await dependencies.collectionRepository.update(updatedCollection)
-
-            dismiss()
-            onDismiss()
-            AppLogger.general.info("✅ Saved collection recipe membership")
-        } catch {
-            AppLogger.general.error("❌ Failed to save collection changes: \(error.localizedDescription)")
-        }
-    }
-
-    private func publicMembershipRepairPlanForCopyingReferencedRecipe() async throws -> PublicCollectionMembershipRepairPlan {
-        guard collection.visibility == .publicRecipe else {
-            return PublicCollectionMembershipRepairPlan(privateOwnedRecipeCount: 0, referencedRecipeCount: 0)
-        }
-
-        let repairPlan = try await dependencies.publicCollectionMembershipResolver.repairPlan(
-            recipeIds: collection.recipeIds,
-            ownerId: collection.userId,
-            visibility: collection.visibility
-        )
-        return PublicCollectionMembershipRepairPlan(
-            privateOwnedRecipeCount: repairPlan.privateOwnedRecipeCount,
-            referencedRecipeCount: repairPlan.referencedRecipeCount + 1
-        )
-    }
-
-    private func continueAfterPublicMembershipConfirmation() async {
-        let action = pendingPublicMembershipConfirmationAction
-        pendingPublicMembershipConfirmationAction = nil
-
-        switch action {
-        case .saveSelections:
-            await saveChanges(confirmingPublicMembershipRepair: true)
-        case .copyRecipe(let recipe):
-            await copyAndAddRecipe(recipe, confirmingPublicMembershipRepair: true)
-        case nil:
-            break
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 50))
-                .foregroundColor(.secondary)
-
-            Text("No Recipes Yet")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Create some recipes first to add them to collections")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding()
-    }
-
-    private func toggleRecipe(_ recipeId: UUID) {
-        if selectedRecipeIds.contains(recipeId) {
-            selectedRecipeIds.remove(recipeId)
-        } else {
-            selectedRecipeIds.insert(recipeId)
-        }
-    }
-
-    private func orderedSelectedRecipeIds() -> [UUID] {
-        var orderedIds: [UUID] = []
-        var seenIds = Set<UUID>()
-
-        for recipeId in collection.recipeIds where selectedRecipeIds.contains(recipeId) {
-            if seenIds.insert(recipeId).inserted {
-                orderedIds.append(recipeId)
-            }
-        }
-
-        for recipeId in recipes.map(\.id) where selectedRecipeIds.contains(recipeId) {
-            if seenIds.insert(recipeId).inserted {
-                orderedIds.append(recipeId)
-            }
-        }
-
-        for recipeId in selectedRecipeIds.sorted(by: { $0.uuidString < $1.uuidString }) {
-            if seenIds.insert(recipeId).inserted {
-                orderedIds.append(recipeId)
-            }
-        }
-
-        return orderedIds
-    }
-
-    private func copyAndAddRecipe(
-        _ recipe: Recipe,
-        confirmingPublicMembershipRepair: Bool = false
-    ) async {
-        guard CurrentUserSession.shared.userId != nil else {
-            AppLogger.general.error("Cannot copy recipe - no current user")
-            return
-        }
-
-        do {
-            if !confirmingPublicMembershipRepair {
-                let repairPlan = try await publicMembershipRepairPlanForCopyingReferencedRecipe()
-                if repairPlan.requiresRepair {
-                    pendingPublicMembershipRepairPlan = repairPlan
-                    pendingPublicMembershipConfirmationAction = .copyRecipe(recipe)
-                    showingCopyConfirmation = nil
-                    showingPublicMembershipRepairConfirmation = true
-                    return
-                }
-            }
-
-            isCopying = true
-            defer { isCopying = false }
-
-            // Fetch the recipe owner if not already cached
-            var recipeOwner: User?
-            if let ownerId = recipe.ownerId {
-                if let cachedOwner = recipeOwnerCache[ownerId] {
-                    recipeOwner = cachedOwner
-                } else {
-                    do {
-                        recipeOwner = try await dependencies.userCloudService.fetchUser(byUserId: ownerId)
-                        if let owner = recipeOwner {
-                            recipeOwnerCache[ownerId] = owner
-                        }
-                    } catch {
-                        AppLogger.general.warning("Failed to fetch recipe owner: \(error.localizedDescription)")
-                        // Continue without owner name - will be nil
-                    }
-                }
-            }
-
-            let materializedRecipe = try await dependencies.recipeSaveService.materializeRecipeForOwnedCollectionMembership(
-                recipe,
-                minimumVisibility: collection.visibility,
-                originalCreatorId: recipe.ownerId,
-                originalCreatorName: recipeOwner?.displayName
-            )
-
-            try await dependencies.collectionRepository.addRecipe(materializedRecipe.id, to: collection.id)
-
-            // Update selected recipes to include the new copy
-            selectedRecipeIds.insert(materializedRecipe.id)
-
-            // Reload recipes to show the new copy
-            await loadRecipes()
-
-            AppLogger.general.info("✅ Copied and added recipe to collection: \(recipe.title)")
-            showingCopyConfirmation = nil
-        } catch {
-            AppLogger.general.error("❌ Failed to copy and add recipe: \(error.localizedDescription)")
-            showingCopyConfirmation = nil
-        }
-    }
-}
-
-// MARK: - Conformance Fix Sheet
-
-struct ConformanceFixSheet: View {
-    let collection: Collection
-    let nonConformingRecipes: [Recipe]
-    let dependencies: DependencyContainer
-    let onDismiss: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var selectedRecipeIds: Set<UUID> = []
-    @State private var isUpdating = false
-    @State private var errorMessage: String?
-    @State private var showError = false
-
-    var targetVisibility: RecipeVisibility {
-        collection.visibility
-    }
-
-    // Separate owned recipes from references
-    var ownedRecipes: [Recipe] {
-        nonConformingRecipes.filter { recipe in
-            guard let currentUserId = CurrentUserSession.shared.userId,
-                  let ownerId = recipe.ownerId else {
-                return false
-            }
-            return ownerId == currentUserId
-        }
-    }
-
-    var referencedRecipes: [Recipe] {
-        nonConformingRecipes.filter { recipe in
-            guard let currentUserId = CurrentUserSession.shared.userId,
-                  let ownerId = recipe.ownerId else {
-                return false
-            }
-            return ownerId != currentUserId
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Header explanation
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                            .font(.title2)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Visibility Issue")
-                                .font(.title3)
-                                .fontWeight(.bold)
-
-                            Text("This \(collection.visibility.displayName.lowercased()) collection contains recipes that won't be visible to others")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding()
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(12)
-                }
-                .padding()
-
-                // Select All button (above the list)
-                if !ownedRecipes.isEmpty {
-                    HStack {
-                        Button {
-                            if selectedRecipeIds.count == ownedRecipes.count {
-                                selectedRecipeIds.removeAll()
-                            } else {
-                                selectedRecipeIds = Set(ownedRecipes.map(\.id))
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: selectedRecipeIds.count == ownedRecipes.count ? "checkmark.square.fill" : "square")
-                                    .foregroundColor(.cauldronOrange)
-                                Text(selectedRecipeIds.count == ownedRecipes.count ? "Deselect All" : "Select All")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                            }
-                        }
-                        Spacer()
-
-                        Text("\(selectedRecipeIds.count) selected")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-                }
-
-                // ScrollView with recipes
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        // Owned recipes section
-                        if !ownedRecipes.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("YOUR RECIPES")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                                    .padding(.top, 8)
-
-                                Text("Select recipes to update to \(targetVisibility.displayName)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                                    .padding(.bottom, 8)
-
-                                ForEach(ownedRecipes) { recipe in
-                                    Button {
-                                        toggleRecipe(recipe.id)
-                                    } label: {
-                                        recipeRow(recipe: recipe, selectable: true, dependencies: dependencies)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        // Referenced recipes section (non-selectable)
-                        if !referencedRecipes.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("REFERENCED RECIPES")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                                    .padding(.top, 16)
-
-                                Text("These are saved from others. You can't change their visibility.")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal)
-                                    .padding(.bottom, 8)
-
-                                ForEach(referencedRecipes) { recipe in
-                                    recipeRow(recipe: recipe, selectable: false, dependencies: dependencies)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Update button (bottom)
-                VStack(spacing: 12) {
-                    Button {
-                        Task {
-                            await updateSelectedRecipes()
-                        }
-                    } label: {
-                        HStack {
-                            if isUpdating {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            }
-                            Text(isUpdating ? "Updating..." : "Update \(selectedRecipeIds.count) Recipe\(selectedRecipeIds.count == 1 ? "" : "s")")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(selectedRecipeIds.isEmpty ? Color.gray : Color.cauldronOrange)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                    .disabled(selectedRecipeIds.isEmpty || isUpdating)
-                }
-                .padding()
-                .background(Color(uiColor: .systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 8, y: -4)
-            }
-            .navigationTitle("Recipe Visibility")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        dismiss()
-                    }
-                    .disabled(isUpdating)
-                }
-            }
-            .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func recipeRow(recipe: Recipe, selectable: Bool, dependencies: DependencyContainer) -> some View {
-        HStack(spacing: 12) {
-            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
-                .overlay(
-                    Group {
-                        if !selectable {
-                            // Reference badge
-                            Image(systemName: "bookmark.fill")
-                                .font(.caption)
-                                .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
-                                .padding(6)
-                                .background(Circle().fill(.ultraThinMaterial))
-                                .padding(6)
-                        }
-                    },
-                    alignment: .topLeading
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recipe.title)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-
-                HStack(spacing: 4) {
-                    Image(systemName: recipe.visibility.icon)
-                        .font(.caption)
-                    Text(recipe.visibility.displayName)
-                        .font(.caption)
-                }
-                .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if selectable {
-                if selectedRecipeIds.contains(recipe.id) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.cauldronOrange)
-                        .font(.title3)
-                } else {
-                    Image(systemName: "circle")
-                        .foregroundColor(.secondary)
-                        .font(.title3)
-                }
-            } else {
-                Image(systemName: "lock.fill")
-                    .foregroundColor(.secondary)
-                    .font(.subheadline)
-            }
-        }
-        .padding()
-        .background(Color(uiColor: .systemBackground))
-        .overlay(
-            Rectangle()
-                .fill(Color.secondary.opacity(0.2))
-                .frame(height: 1),
-            alignment: .bottom
-        )
-    }
-
-    private func toggleRecipe(_ recipeId: UUID) {
-        if selectedRecipeIds.contains(recipeId) {
-            selectedRecipeIds.remove(recipeId)
-        } else {
-            selectedRecipeIds.insert(recipeId)
-        }
-    }
-
-    private func updateSelectedRecipes() async {
-        isUpdating = true
-        defer { isUpdating = false }
-
-        var successCount = 0
-        var failureCount = 0
-
-        for recipeId in selectedRecipeIds {
-            guard let recipe = nonConformingRecipes.first(where: { $0.id == recipeId }) else {
-                continue
-            }
-
-            do {
-                // Create updated recipe with new visibility
-                let updatedRecipe = Recipe(
-                    id: recipe.id,
-                    title: recipe.title,
-                    ingredients: recipe.ingredients,
-                    steps: recipe.steps,
-                    yields: recipe.yields,
-                    totalMinutes: recipe.totalMinutes,
-                    tags: recipe.tags,
-                    nutrition: recipe.nutrition,
-                    sourceURL: recipe.sourceURL,
-                    sourceTitle: recipe.sourceTitle,
-                    notes: recipe.notes,
-                    imageURL: recipe.imageURL,
-                    isFavorite: recipe.isFavorite,
-                    visibility: targetVisibility,
-                    ownerId: recipe.ownerId,
-                    cloudRecordName: recipe.cloudRecordName,
-                    cloudImageRecordName: recipe.cloudImageRecordName,
-                    imageModifiedAt: recipe.imageModifiedAt,
-                    createdAt: recipe.createdAt,
-                    updatedAt: Date(),
-                    originalRecipeId: recipe.originalRecipeId,
-                    originalCreatorId: recipe.originalCreatorId,
-                    originalCreatorName: recipe.originalCreatorName,
-                    savedAt: recipe.savedAt,
-                    sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
-                    followsSourceUpdates: recipe.followsSourceUpdates,
-                    relatedRecipeIds: recipe.relatedRecipeIds,
-                    isPreview: recipe.isPreview
-                )
-
-                try await dependencies.recipeRepository.update(updatedRecipe)
-                successCount += 1
-                AppLogger.general.info("✅ Updated recipe visibility: \(recipe.title)")
-            } catch {
-                failureCount += 1
-                AppLogger.general.error("❌ Failed to update recipe visibility: \(error.localizedDescription)")
-            }
-        }
-
-        if failureCount > 0 {
-            errorMessage = "Updated \(successCount) recipes, but \(failureCount) failed"
-            showError = true
-        } else {
-            AppLogger.general.info("✅ Successfully updated \(successCount) recipe visibilities")
-            dismiss()
-            onDismiss()
         }
     }
 }

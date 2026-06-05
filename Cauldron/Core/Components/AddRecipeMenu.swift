@@ -51,7 +51,9 @@ struct AddRecipeMenu: View {
         } label: {
             Image(systemName: "plus")
                 .imageScale(.medium)
+                .accessibilityLabel("Add")
         }
+        .accessibilityHint("Create, import, or generate a recipe")
         .task {
             // Check AI availability on appear
             isAIAvailable = await dependencies.foundationModelsService.isAvailable

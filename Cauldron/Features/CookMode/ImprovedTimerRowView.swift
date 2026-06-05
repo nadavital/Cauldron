@@ -11,30 +11,36 @@ import SwiftUI
 struct ImprovedTimerRowView: View {
     let timer: ActiveTimer
     let timerManager: TimerManager
-    
+
     @State private var remainingSeconds: Int = 0
     @State private var updateTask: Task<Void, Never>?
+    /// Scales the large timer readout with Dynamic Type.
+    @ScaledMetric(relativeTo: .largeTitle) private var timerFontSize: CGFloat = 32
     
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(timer.spec.label)
                     .font(.headline)
-                
+
                 Text(formatTime(remainingSeconds))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.system(size: timerFontSize, weight: .bold, design: .rounded))
                     .foregroundColor(remainingSeconds <= 10 && timer.isRunning ? .red : .cauldronOrange)
                     .monospacedDigit()
-                
+
                 if !timer.isRunning, let pausedAt = timer.pausedAt {
                     Text("Paused at \(pausedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
-            
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(timer.spec.label)
+            .accessibilityValue(spokenRemaining)
+            .accessibilityAddTraits(.updatesFrequently)
+
             Spacer()
-            
+
             HStack(spacing: 12) {
                 Button {
                     if timer.isRunning {
@@ -51,7 +57,8 @@ struct ImprovedTimerRowView: View {
                         .clipShape(Circle())
                         .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 4)
                 }
-                
+                .accessibilityLabel(timer.isRunning ? "Pause \(timer.spec.label) timer" : "Resume \(timer.spec.label) timer")
+
                 Button {
                     timerManager.stopTimer(id: timer.id)
                 } label: {
@@ -62,6 +69,7 @@ struct ImprovedTimerRowView: View {
                         .foregroundColor(.secondary)
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Stop \(timer.spec.label) timer")
             }
         }
         .padding(16)
@@ -99,6 +107,16 @@ struct ImprovedTimerRowView: View {
         } else {
             return String(format: "%02d:%02d", mins, secs)
         }
+    }
+
+    /// Natural-language remaining time for VoiceOver, e.g. "2 minutes 30 seconds remaining, running".
+    private var spokenRemaining: String {
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.allowedUnits = remainingSeconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+        let duration = formatter.string(from: TimeInterval(max(0, remainingSeconds))) ?? "\(remainingSeconds) seconds"
+        let state = timer.isRunning ? "running" : "paused"
+        return "\(duration) remaining, \(state)"
     }
 }
 

@@ -57,8 +57,10 @@ extension View {
 
 extension Color {
     static let cauldronOrange = Color(red: 1.0, green: 0.6, blue: 0.2)
-    static let cauldronBackground = Color(.systemBackground)
-    static let cauldronSecondaryBackground = Color(.secondarySystemBackground)
+    /// Warm app canvas (alias of `appBackground`) — kept for existing call sites.
+    static let cauldronBackground = Color.appBackground
+    /// Warm card surface (alias of `appSurface`) — kept for existing call sites.
+    static let cauldronSecondaryBackground = Color.appSurface
 
     // MARK: - Profile Colors
 
@@ -179,11 +181,11 @@ extension View {
     func cardStyle() -> some View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
-            .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2)
+            .background(Color.appSurface)
+            .cornerRadius(Theme.Radius.large)
+            .shadow(Theme.Shadow.card)
     }
-    
+
     func prominentButton() -> some View {
         self
             .font(.headline)
@@ -191,6 +193,6 @@ extension View {
             .padding()
             .frame(maxWidth: .infinity)
             .background(Color.cauldronOrange)
-            .cornerRadius(12)
+            .cornerRadius(Theme.Radius.card)
     }
 }

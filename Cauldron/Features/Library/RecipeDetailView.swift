@@ -16,6 +16,7 @@ struct RecipeDetailView: View {
     @State var showingEditSheet = false
     @State var showSessionConflictAlert = false
     @State var scaleFactor: Double = 1.0
+    @State var unitSystem: UnitSystem = .original
     @State var localIsFavorite: Bool
     @State var showingToast = false
     @State var recipeWasDeleted = false
@@ -87,6 +88,11 @@ struct RecipeDetailView: View {
         scaledResult.recipe
     }
 
+    /// Ingredients after scaling, converted to the chosen measurement system.
+    var displayedIngredients: [Ingredient] {
+        UnitConverter.convert(scaledRecipe.ingredients, to: unitSystem)
+    }
+
     private var shouldApplyBackgroundExtensionEffect: Bool {
         horizontalSizeClass == .regular
     }
@@ -126,7 +132,7 @@ struct RecipeDetailView: View {
     }
 
     private var ingredientsSection: some View {
-        RecipeIngredientsSection(ingredients: scaledRecipe.ingredients)
+        RecipeIngredientsSection(ingredients: displayedIngredients)
     }
 
     private var stepsSection: some View {
@@ -428,6 +434,13 @@ struct RecipeDetailView: View {
                     Text("1x").tag(1.0)
                     Text("2x").tag(2.0)
                     Text("3x").tag(3.0)
+                }
+                .pickerStyle(.inline)
+
+                Picker("Units", selection: $unitSystem) {
+                    ForEach(UnitSystem.allCases) { system in
+                        Text(system.label).tag(system)
+                    }
                 }
                 .pickerStyle(.inline)
             } label: {

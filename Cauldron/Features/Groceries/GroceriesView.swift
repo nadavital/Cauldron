@@ -35,6 +35,7 @@ struct GroceriesView: View {
                     }
                 }
             }
+            .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("Groceries")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -114,28 +115,14 @@ struct GroceriesView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "cart")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-
-            Text("No Grocery Items")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Add items manually or from recipes")
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-
-            Button {
-                showingAddItem = true
-            } label: {
-                Label("Add First Item", systemImage: "plus.circle.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.cauldronOrange)
-        }
-        .padding(40)
+        EmptyStateView(
+            title: "No Grocery Items",
+            message: "Add items manually or from recipes.",
+            systemImage: "cart",
+            actionTitle: "Add First Item",
+            action: { showingAddItem = true }
+        )
+        .padding(Theme.Spacing.xxl)
     }
 
     // MARK: - Grouped View (by Recipe)
@@ -155,7 +142,7 @@ struct GroceriesView: View {
                         }
                     }
                 } header: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Theme.Spacing.sm) {
                         // Check/uncheck button on the left
                         Button {
                             Task {
@@ -200,6 +187,7 @@ struct GroceriesView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Ungrouped View
@@ -213,12 +201,14 @@ struct GroceriesView: View {
             }
             .onDelete(perform: deleteItems)
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Item Row
 
     private func itemRow(item: GroceryItemDisplay) -> some View {
         Button {
+            Haptics.light()
             Task {
                 await viewModel.toggleItem(id: item.id)
             }
@@ -227,7 +217,7 @@ struct GroceriesView: View {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
                     .foregroundColor(item.isChecked ? .cauldronOrange : .secondary)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text(item.name)
                         .strikethrough(item.isChecked)
                     if let quantity = item.quantity {

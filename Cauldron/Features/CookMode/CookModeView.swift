@@ -20,6 +20,26 @@ struct CookModeView: View {
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
     @State private var checkedIngredientIDs: Set<UUID> = []
+    @State private var scaleFactor: Double = 1.0
+    @State private var unitSystem: UnitSystem = .original
+
+    /// Ingredients adjusted for the current scale factor and unit system.
+    /// Ingredient ids are preserved by both transforms, so check-off state
+    /// survives scaling and conversion.
+    private var displayedIngredients: [Ingredient] {
+        let scaled = scaleFactor == 1.0
+            ? recipe.ingredients
+            : RecipeScaler.scale(recipe, by: scaleFactor).recipe.ingredients
+        return UnitConverter.convert(scaled, to: unitSystem)
+    }
+
+    private var scaleFactorLabel: String {
+        switch scaleFactor {
+        case 0.5: return "½×"
+        case 1.0: return "1×"
+        default: return "\(scaleFactor.formatted(.number.precision(.fractionLength(0...1))))×"
+        }
+    }
 
     init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -60,6 +80,21 @@ struct CookModeView: View {
                         )
                     } label: {
                         Label("View Recipe", systemImage: "book.fill")
+                    }
+
+                    // Scale servings live
+                    Picker("Scale Servings", selection: $scaleFactor) {
+                        Text("½×").tag(0.5)
+                        Text("1×").tag(1.0)
+                        Text("2×").tag(2.0)
+                        Text("3×").tag(3.0)
+                    }
+
+                    // Convert units
+                    Picker("Units", selection: $unitSystem) {
+                        ForEach(UnitSystem.allCases) { system in
+                            Text(system.label).tag(system)
+                        }
                     }
 
                     // View all timers
@@ -213,9 +248,9 @@ struct CookModeView: View {
         .overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [
-                    Color(uiColor: .systemBackground).opacity(0),
-                    Color(uiColor: .systemBackground).opacity(0.5),
-                    Color(uiColor: .systemBackground)
+                    Color.appBackground.opacity(0),
+                    Color.appBackground.opacity(0.5),
+                    Color.appBackground
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -335,21 +370,29 @@ struct CookModeView: View {
 
     private var ingredientChecklistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: Theme.Spacing.xs) {
                 Text("Ingredients")
                     .font(.headline)
+                if scaleFactor != 1.0 {
+                    Text(scaleFactorLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.cauldronOrange)
+                        .padding(.horizontal, Theme.Spacing.xs)
+                        .padding(.vertical, 2)
+                        .background(Color.cauldronOrange.opacity(0.15), in: Capsule())
+                }
                 Spacer()
-                Text("\(checkedIngredientIDs.count)/\(recipe.ingredients.count)")
+                Text("\(checkedIngredientIDs.count)/\(displayedIngredients.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if recipe.ingredients.isEmpty {
+            if displayedIngredients.isEmpty {
                 Text("No ingredients available")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(recipe.ingredients) { ingredient in
+                ForEach(displayedIngredients) { ingredient in
                     let isChecked = checkedIngredientIDs.contains(ingredient.id)
 
                     Button {

@@ -89,7 +89,7 @@ struct ContentView: View {
             // It uses the same background color as the system, creating a seamless transition
             // from the iOS launch screen
             if !isDataReady {
-                Color(uiColor: .systemBackground)
+                Color.appBackground
                     .ignoresSafeArea()
             }
             
@@ -441,7 +441,9 @@ struct ContentView: View {
             if let cloudUsers = try? await userCloudService.fetchUsers(byUserIds: Array(relatedUserIds)) {
                 for cloudUser in cloudUsers {
                     usersById[cloudUser.id] = cloudUser
-                    try? await sharingRepository.save(cloudUser)
+                    await bestEffort("Cache related user") {
+                        try await sharingRepository.save(cloudUser)
+                    }
                 }
             }
 

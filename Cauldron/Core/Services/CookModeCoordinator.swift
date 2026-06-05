@@ -21,7 +21,14 @@ class CookModeCoordinator {
     // MARK: - Published State
 
     /// Whether cook mode is currently active
-    var isActive: Bool = false
+    var isActive: Bool = false {
+        didSet {
+            guard isActive != oldValue else { return }
+            // Keep the screen awake while actively cooking so the recipe stays
+            // visible with hands full; restore normal behavior when finished.
+            UIApplication.shared.isIdleTimerDisabled = isActive
+        }
+    }
 
     /// Whether to show full screen cook mode
     var showFullScreen: Bool = false
@@ -124,9 +131,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("🔄 Step changed from Live Activity: \(newStep + 1)/\(self.totalSteps)")
     }
@@ -191,9 +196,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("→ Next step: \(self.currentStepIndex + 1)/\(self.totalSteps)")
     }
@@ -208,9 +211,7 @@ class CookModeCoordinator {
         // Update Live Activity
         Task { await updateLiveActivity() }
 
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
+        Haptics.light()
 
         AppLogger.general.info("← Previous step: \(self.currentStepIndex + 1)/\(self.totalSteps)")
     }

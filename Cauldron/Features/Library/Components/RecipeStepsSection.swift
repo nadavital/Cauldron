@@ -14,9 +14,7 @@ struct RecipeStepsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Instructions", systemImage: "list.number")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Instructions", systemImage: "list.number")
 
             ForEach(sortedSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 8) {
