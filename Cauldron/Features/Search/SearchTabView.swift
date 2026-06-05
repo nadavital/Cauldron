@@ -274,10 +274,9 @@ struct SearchTabView: View {
                                     Spacer()
                                 }
                                 .padding(Theme.Spacing.sm)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                                        .strokeBorder(category.color.opacity(0.25), lineWidth: 0.5)
+                                .glassEffect(
+                                    .regular.tint(category.color.opacity(0.35)),
+                                    in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                                 )
                             }
                             .buttonStyle(PressableScaleStyle())

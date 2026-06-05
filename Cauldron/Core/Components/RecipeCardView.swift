@@ -151,7 +151,7 @@ struct RecipeCardView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .glassEffect(.regular, in: Capsule())
                 }
 
                 Spacer()
@@ -162,7 +162,7 @@ struct RecipeCardView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(tier.color)
                         .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
+                        .glassEffect(.regular, in: Circle())
                 }
             }
             .padding(8)
@@ -183,7 +183,7 @@ struct RecipeCardView: View {
                         .font(.caption)
                         .foregroundStyle(.yellow)
                         .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
+                        .glassEffect(.regular, in: Circle())
                         .padding(8)
                 }
             }
