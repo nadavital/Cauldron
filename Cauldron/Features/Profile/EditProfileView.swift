@@ -106,7 +106,7 @@ struct ProfileEditView: View {
                                     .clipShape(Circle())
                             } else {
                                 Circle()
-                                    .fill(Color.gray.opacity(0.2))
+                                    .fill(Color.appSurface)
                                     .frame(width: 100, height: 100)
                                     .overlay(
                                         Image(systemName: "person.crop.circle")
@@ -134,8 +134,7 @@ struct ProfileEditView: View {
                         }
 
                         Text(displayName.isEmpty ? "Your Name" : displayName)
-                            .font(.title2)
-                            .fontWeight(.bold)
+                            .font(.system(.title2, design: .serif).weight(.bold))
 
                         Text("@\(username.isEmpty ? "username" : username)")
                             .font(.subheadline)
@@ -398,6 +397,7 @@ struct ProfileEditView: View {
                     .padding(.horizontal)
                 }
             }
+            .warmCanvas()
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
