@@ -408,7 +408,11 @@ struct CookTabView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Theme.Spacing.md) {
                         ForEach(collections.prefix(10)) { collection in
-                            NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)) {
+                            let collectionTransitionID = "collection-\(collection.id.uuidString)"
+                            NavigationLink {
+                                CollectionDetailView(collection: collection, dependencies: viewModel.dependencies)
+                                    .navigationTransition(.zoom(sourceID: collectionTransitionID, in: recipeTransition))
+                            } label: {
                                 CollectionCardView(
                                     collection: collection,
                                     recipeImages: viewModel.getRecipeImages(for: collection),
@@ -417,6 +421,7 @@ struct CookTabView: View {
                                 )
                             }
                             .buttonStyle(PressableScaleStyle())
+                            .matchedTransitionSource(id: collectionTransitionID, in: recipeTransition)
                         }
                     }
                     .padding(.horizontal, Theme.Spacing.md)

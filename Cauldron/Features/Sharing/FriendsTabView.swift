@@ -25,6 +25,7 @@ struct FriendsTabView: View {
     @State private var showingPeopleSearch = false
     @State private var showingInviteSheet = false
     @State private var collectionImageCache: [UUID: [URL?]] = [:]
+    @Namespace private var recipeTransition
 
     let dependencies: DependencyContainer
 
@@ -412,12 +413,16 @@ struct FriendsTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.recentlyAdded.prefix(10)) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )) {
+                        let transitionID = "friends-recent-\(sharedRecipe.recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
@@ -425,6 +430,7 @@ struct FriendsTabView: View {
                             )
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -454,12 +460,16 @@ struct FriendsTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.md) {
                     ForEach(recipes.prefix(10)) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )) {
+                        let transitionID = "friends-tag-\(tag)-\(sharedRecipe.recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
@@ -467,6 +477,7 @@ struct FriendsTabView: View {
                             )
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -496,12 +507,16 @@ struct FriendsTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.sharedRecipes.prefix(10)) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )) {
+                        let transitionID = "friends-all-\(sharedRecipe.recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.sharerTiers[sharedRecipe.sharedBy.id],
@@ -509,6 +524,7 @@ struct FriendsTabView: View {
                             )
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                     }
                 }
                 .padding(.horizontal, 16)

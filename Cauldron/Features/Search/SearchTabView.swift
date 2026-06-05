@@ -16,6 +16,7 @@ struct SearchTabView: View {
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
     @State private var showingProfileSheet = false
+    @Namespace private var recipeTransition
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -93,6 +94,7 @@ struct SearchTabView: View {
                 }
                 .navigationDestination(for: Recipe.self) { recipe in
                     RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                        .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
                 }
                 .navigationDestination(for: User.self) { user in
                     UserProfileView(user: user, dependencies: viewModel.dependencies)
@@ -320,6 +322,7 @@ struct SearchTabView: View {
                             SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: group.primaryRecipe.id, in: recipeTransition)
                     }
                 }
             }
