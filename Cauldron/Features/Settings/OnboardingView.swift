@@ -7,39 +7,18 @@
 
 import SwiftUI
 
-/// First-run profile setup, presented as a short guided multi-step flow
-/// (welcome → identity → avatar → referral) with a progress indicator and a
-/// live avatar preview, rather than one long scrolling form.
+/// First-run setup: a short two-step flow — a welcoming intro, then a single
+/// "create profile" screen (avatar + name + optional referral) — instead of a
+/// long scrolling form.
 struct OnboardingView: View {
     let dependencies: DependencyContainer
     let onComplete: () -> Void
 
-    // MARK: - Step model
-
     private enum Step: Int, CaseIterable {
-        case welcome, identity, avatar, referral
-
-        var title: String {
-            switch self {
-            case .welcome: return "Welcome to Cauldron"
-            case .identity: return "Who are you?"
-            case .avatar: return "Make it yours"
-            case .referral: return "Almost there"
-            }
-        }
-
-        var subtitle: String {
-            switch self {
-            case .welcome: return "Your recipes, beautifully organized — and shared with friends."
-            case .identity: return "Pick a username and a name others will see."
-            case .avatar: return "Choose an emoji or photo for your profile."
-            case .referral: return "Got a code from a friend? Add it to connect instantly."
-            }
-        }
+        case welcome, profile
     }
 
     @State private var step: Step = .welcome
-    @Namespace private var stepGlass
 
     // MARK: - Profile state
 
@@ -56,57 +35,20 @@ struct OnboardingView: View {
     @State private var referralCode = ""
     @State private var didAutoApplyReferralCode = false
 
-    private var hasPhoto: Bool { profileImage != nil }
-    private var hasEmoji: Bool { profileEmoji != nil }
-
-    /// Whether the current step's requirements are satisfied (gates Continue).
-    private var canAdvance: Bool {
-        switch step {
-        case .welcome, .avatar, .referral:
-            return true
-        case .identity:
-            return isValid
-        }
-    }
-
     private var isValid: Bool {
         username.count >= 3 && username.count <= 20 &&
         displayName.count >= 1 &&
         username.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
-    private var isLastStep: Bool { step == Step.allCases.last }
-
     // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            progressHeader
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-                    stepHeader
-
-                    switch step {
-                    case .welcome: welcomeStep
-                    case .identity: identityStep
-                    case .avatar: avatarStep
-                    case .referral: referralStep
-                    }
-
-                    if let error = errorMessage {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .padding(Theme.Spacing.sm)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.small))
-                    }
-                }
-                .padding(Theme.Spacing.lg)
+            switch step {
+            case .welcome: welcomeStep
+            case .profile: profileStep
             }
-
-            footer
         }
         .background(Color.appBackground.ignoresSafeArea())
         .sheet(isPresented: $showingAvatarCustomization) {
@@ -124,165 +66,160 @@ struct OnboardingView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openReferralInvite)) { notification in
             guard let code = notification.object as? String else { return }
             applyIncomingReferralCode(code)
-            // Jump to the referral step so the user sees it was applied.
-            withAnimation(Theme.Animation.spring) { step = .referral }
+            withAnimation(Theme.Animation.spring) { step = .profile }
         }
     }
 
-    // MARK: - Header / progress
-
-    private var progressHeader: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            ForEach(Step.allCases, id: \.rawValue) { s in
-                Capsule()
-                    .fill(s.rawValue <= step.rawValue ? Color.cauldronOrange : Color.appSeparator)
-                    .frame(height: 4)
-                    .animation(Theme.Animation.spring, value: step)
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.lg)
-        .padding(.top, Theme.Spacing.md)
-    }
-
-    private var stepHeader: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Text(step.title)
-                .font(.system(.largeTitle, design: .serif).weight(.bold))
-            Text(step.subtitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Steps
+    // MARK: - Welcome
 
     private var welcomeStep: some View {
-        VStack(spacing: Theme.Spacing.lg) {
+        VStack(spacing: 0) {
+            Spacer()
+
+            // Hero mark
             Image("BrandMarks/CauldronIcon")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 140, height: 140)
-                .shadow(color: .cauldronOrange.opacity(0.25), radius: 20, y: 8)
+                .frame(width: 132, height: 132)
+                .shadow(color: .cauldronOrange.opacity(0.25), radius: 24, y: 10)
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                onboardingHighlight("square.and.arrow.down", "Import from the web, YouTube, TikTok & more")
-                onboardingHighlight("flame.fill", "Cook hands-free with step timers")
-                onboardingHighlight("person.2.fill", "Share recipes with friends")
+            VStack(spacing: Theme.Spacing.xs) {
+                Text("Cauldron")
+                    .font(.system(size: 40, design: .serif).weight(.bold))
+                Text("Your recipes, beautifully organized\nand shared with friends.")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, Theme.Spacing.lg)
+
+            Spacer()
+
+            // Feature highlights
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                highlight("square.and.arrow.down", "Import", "From the web, YouTube, TikTok & more")
+                highlight("flame.fill", "Cook", "Hands-free, step-by-step with timers")
+                highlight("person.2.fill", "Share", "Swap recipes with friends")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.top, Theme.Spacing.md)
-    }
+            .padding(.horizontal, Theme.Spacing.xl)
 
-    private func onboardingHighlight(_ icon: String, _ text: String) -> some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: icon)
-                .font(.headline)
-                .foregroundStyle(Color.cauldronOrange)
-                .frame(width: 28)
-            Text(text)
-                .font(.subheadline)
             Spacer()
+            Spacer()
+
+            Button {
+                Haptics.light()
+                withAnimation(Theme.Animation.spring) { step = .profile }
+            } label: {
+                Text("Get Started")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.extraLarge)
+            .tint(.cauldronOrange)
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.bottom, Theme.Spacing.xl)
         }
     }
 
-    private var identityStep: some View {
-        VStack(spacing: Theme.Spacing.lg) {
-            avatarPreview
+    private func highlight(_ icon: String, _ title: String, _ subtitle: String) -> some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(Color.cauldronOrange)
+                .frame(width: 40, height: 40)
+                .background(Color.cauldronOrange.opacity(0.12), in: Circle())
 
-            fieldGroup(title: "Username", caption: "3–20 characters · letters, numbers, underscores") {
-                TextField("username", text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textCase(.lowercase)
-            }
-
-            fieldGroup(title: "Display Name", caption: "This is how others will see you") {
-                TextField("Your Name", text: $displayName)
-                    .textInputAutocapitalization(.words)
-            }
-        }
-    }
-
-    private var avatarStep: some View {
-        VStack(spacing: Theme.Spacing.lg) {
-            avatarPreview
-
-            HStack(spacing: Theme.Spacing.sm) {
-                avatarOptionButton(icon: "face.smiling", label: hasEmoji ? "Edit Emoji" : "Emoji", selected: hasEmoji && !hasPhoto) {
-                    showingAvatarCustomization = true
-                }
-                avatarOptionButton(icon: "photo.on.rectangle", label: "Photos", selected: hasPhoto) {
-                    imagePickerSourceType = .photoLibrary
-                    showingImagePicker = true
-                }
-                avatarOptionButton(icon: "camera", label: "Camera", selected: false) {
-                    imagePickerSourceType = .camera
-                    showingImagePicker = true
-                }
-            }
-
-            if hasPhoto {
-                Button(role: .destructive) {
-                    withAnimation(Theme.Animation.snappy) { profileImage = nil }
-                } label: {
-                    Label("Remove photo", systemImage: "xmark.circle.fill")
-                        .font(.subheadline)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
         }
     }
 
-    private var referralStep: some View {
-        VStack(spacing: Theme.Spacing.lg) {
-            avatarPreview
+    // MARK: - Create Profile
 
-            fieldGroup(title: "Referral Code", caption: "Optional — unlocks an exclusive icon and connects you instantly.") {
-                TextField("Enter friend's code", text: $referralCode)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
+    private var profileStep: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: Theme.Spacing.xl) {
+                    Text("Create your profile")
+                        .font(.system(.largeTitle, design: .serif).weight(.bold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, Theme.Spacing.lg)
+
+                    avatarPreview
+
+                    fieldGroup(title: "Username", caption: "3–20 characters · letters, numbers, underscores") {
+                        TextField("username", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textCase(.lowercase)
+                    }
+
+                    fieldGroup(title: "Display Name", caption: "How others will see you") {
+                        TextField("Your Name", text: $displayName)
+                            .textInputAutocapitalization(.words)
+                    }
+
+                    fieldGroup(title: "Referral Code", caption: didAutoApplyReferralCode ? "Applied from your invite link." : "Optional — connect with a friend instantly.") {
+                        TextField("Enter code", text: $referralCode)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    }
+
+                    if let error = errorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .padding(Theme.Spacing.sm)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.small))
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.lg)
+                .padding(.bottom, Theme.Spacing.lg)
             }
 
-            if didAutoApplyReferralCode {
-                Label("Invite code applied from your link.", systemImage: "checkmark.seal.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            footer
         }
     }
 
-    // MARK: - Shared step components
-
-    /// Live avatar + name preview shown across the profile-building steps.
     private var avatarPreview: some View {
         VStack(spacing: Theme.Spacing.sm) {
-            ZStack {
-                if let image = profileImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 96, height: 96)
-                        .clipShape(Circle())
-                } else {
-                    Circle()
-                        .fill((profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange).opacity(0.15))
-                        .frame(width: 96, height: 96)
-                        .overlay {
-                            if let emoji = profileEmoji {
-                                Text(emoji).font(.system(size: 44))
-                            } else {
-                                Text(initials)
-                                    .font(.system(.title, design: .serif).weight(.semibold))
-                                    .foregroundColor(profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange)
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let image = profileImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 104, height: 104)
+                            .clipShape(Circle())
+                    } else {
+                        Circle()
+                            .fill((profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange).opacity(0.15))
+                            .frame(width: 104, height: 104)
+                            .overlay {
+                                if let emoji = profileEmoji {
+                                    Text(emoji).font(.system(size: 48))
+                                } else {
+                                    Text(initials)
+                                        .font(.system(.largeTitle, design: .serif).weight(.semibold))
+                                        .foregroundColor(profileColor.flatMap { Color(hex: $0) } ?? .cauldronOrange)
+                                }
                             }
-                        }
+                    }
                 }
+                .animation(Theme.Animation.snappy, value: profileEmoji)
+                .animation(Theme.Animation.snappy, value: profileImage)
+
+                avatarMenu
             }
-            .animation(Theme.Animation.snappy, value: profileEmoji)
-            .animation(Theme.Animation.snappy, value: profileImage)
 
             Text(displayName.isEmpty ? "Your Name" : displayName)
                 .font(.system(.title3, design: .serif).weight(.bold))
@@ -291,6 +228,36 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var avatarMenu: some View {
+        Menu {
+            Button {
+                showingAvatarCustomization = true
+            } label: { Label("Choose Emoji", systemImage: "face.smiling") }
+            Button {
+                imagePickerSourceType = .photoLibrary
+                showingImagePicker = true
+            } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+            Button {
+                imagePickerSourceType = .camera
+                showingImagePicker = true
+            } label: { Label("Take Photo", systemImage: "camera") }
+            if profileImage != nil {
+                Divider()
+                Button(role: .destructive) {
+                    profileImage = nil
+                } label: { Label("Remove Photo", systemImage: "trash") }
+            }
+        } label: {
+            Image(systemName: "pencil")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(Color.cauldronOrange, in: Circle())
+                .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
+        }
+        .accessibilityLabel("Edit avatar")
     }
 
     private var initials: String {
@@ -312,81 +279,39 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func avatarOptionButton(icon: String, label: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(label)
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.sm)
-            .background(
-                selected ? Color.cauldronOrange.opacity(0.15) : Color.appSurface,
-                in: RoundedRectangle(cornerRadius: Theme.Radius.card)
-            )
-            .foregroundColor(selected ? .cauldronOrange : .primary)
-        }
-        .buttonStyle(PressableScaleStyle())
-    }
-
-    // MARK: - Footer
-
     private var footer: some View {
         HStack(spacing: Theme.Spacing.md) {
-            if step != .welcome {
-                Button {
-                    withAnimation(Theme.Animation.spring) { goBack() }
-                } label: {
-                    Text("Back")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-                .controlSize(.extraLarge)
+            Button {
+                withAnimation(Theme.Animation.spring) { step = .welcome }
+            } label: {
+                Text("Back")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.glass)
+            .controlSize(.extraLarge)
 
             Button {
-                advance()
+                Task { await createUser() }
             } label: {
-                HStack(spacing: Theme.Spacing.xs) {
+                Group {
                     if isCreating {
                         ProgressView().tint(.white)
                     } else {
-                        Text(isLastStep ? "Create Profile" : "Continue")
+                        Text("Create Profile")
                             .font(.headline)
-                        Image(systemName: isLastStep ? "checkmark" : "arrow.right")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
             .controlSize(.extraLarge)
-            .tint(canAdvance ? .cauldronOrange : .gray)
-            .disabled(!canAdvance || isCreating)
+            .tint(isValid ? .cauldronOrange : .gray)
+            .disabled(!isValid || isCreating)
         }
         .padding(Theme.Spacing.lg)
-    }
-
-    // MARK: - Navigation
-
-    private func goBack() {
-        guard let prev = Step(rawValue: step.rawValue - 1) else { return }
-        step = prev
-    }
-
-    private func advance() {
-        guard canAdvance else { return }
-        if isLastStep {
-            Task { await createUser() }
-        } else {
-            Haptics.light()
-            withAnimation(Theme.Animation.spring) {
-                step = Step(rawValue: step.rawValue + 1) ?? step
-            }
-        }
     }
 
     // MARK: - Actions (unchanged logic)
