@@ -15,6 +15,7 @@ struct TierRoadmapView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingImporter = false
     @State private var showingEditor = false
+    @State private var animatedProgress: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -78,6 +79,8 @@ struct TierRoadmapView: View {
                     Image(systemName: currentTier.icon)
                         .font(.system(size: 28))
                         .foregroundColor(currentTier.color)
+                        .scaleEffect(animatedProgress > 0 || currentTier.nextTier == nil ? 1.0 : 0.7)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1), value: animatedProgress)
                 }
 
                 // Tier info
@@ -108,7 +111,7 @@ struct TierRoadmapView: View {
                 let progress = Double(recipeCount - currentTier.requiredRecipes) / Double(nextTier.requiredRecipes - currentTier.requiredRecipes)
 
                 VStack(spacing: 8) {
-                    // Progress bar
+                    // Progress bar (animates from empty → current on appear)
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
@@ -117,10 +120,15 @@ struct TierRoadmapView: View {
 
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(currentTier.color)
-                                .frame(width: geo.size.width * max(0.02, progress), height: 8)
+                                .frame(width: geo.size.width * max(0.02, animatedProgress), height: 8)
                         }
                     }
                     .frame(height: 8)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.7, dampingFraction: 0.8).delay(0.15)) {
+                            animatedProgress = max(0.02, CGFloat(progress))
+                        }
+                    }
 
                     // Recipe count and next tier
                     HStack {
@@ -156,6 +164,7 @@ struct TierRoadmapView: View {
                     Image(systemName: "crown.fill")
                         .font(.caption)
                         .foregroundColor(.yellow)
+                        .symbolEffect(.pulse, options: .repeating)
                     Text("Max tier reached! Maximum search visibility boost active.")
                         .font(.caption)
                         .foregroundColor(.secondary)
