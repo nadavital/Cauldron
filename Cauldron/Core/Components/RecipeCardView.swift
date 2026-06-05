@@ -137,58 +137,62 @@ struct RecipeCardView: View {
 
     /// Overlay for shared recipes - shows creator info and tier badge
     private var sharedRecipeOverlay: some View {
-        VStack {
-            HStack(alignment: .top) {
-                // Creator info (top left)
-                if let creator = sharedBy {
-                    HStack(spacing: 6) {
-                        ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
+        GlassEffectContainer(spacing: 2) {
+            VStack {
+                HStack(alignment: .top) {
+                    // Creator info (top left)
+                    if let creator = sharedBy {
+                        HStack(spacing: 6) {
+                            ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
 
-                        Text(creator.displayName)
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
+                            Text(creator.displayName)
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .glassEffect(.regular, in: Capsule())
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .glassEffect(.regular, in: Capsule())
+
+                    Spacer()
+
+                    // Tier badge (top right)
+                    if let tier = creatorTier, tier != .apprentice {
+                        Image(systemName: tier.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(tier.color)
+                            .padding(6)
+                            .glassEffect(.regular, in: Circle())
+                    }
                 }
+                .padding(8)
 
                 Spacer()
-
-                // Tier badge (top right)
-                if let tier = creatorTier, tier != .apprentice {
-                    Image(systemName: tier.icon)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(tier.color)
-                        .padding(6)
-                        .glassEffect(.regular, in: Circle())
-                }
             }
-            .padding(8)
-
-            Spacer()
         }
     }
 
     /// Overlay for own recipes - shows favorite star
     private var ownRecipeOverlay: some View {
-        VStack {
-            HStack {
-                Spacer()
+        GlassEffectContainer(spacing: 2) {
+            VStack {
+                HStack {
+                    Spacer()
 
-                // Favorite indicator (top-right)
-                if recipe.isFavorite {
-                    Image(systemName: "star.fill")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                        .padding(6)
-                        .glassEffect(.regular, in: Circle())
-                        .padding(8)
+                    // Favorite indicator (top-right)
+                    if recipe.isFavorite {
+                        Image(systemName: "star.fill")
+                            .font(.caption)
+                            .foregroundStyle(.yellow)
+                            .padding(6)
+                            .glassEffect(.regular, in: Circle())
+                            .padding(8)
+                    }
                 }
-            }
 
-            Spacer()
+                Spacer()
+            }
         }
     }
 

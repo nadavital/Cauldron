@@ -314,29 +314,18 @@ struct FriendsTabView: View {
         Button {
             showingInviteSheet = true
         } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .stroke(
-                            Color.cauldronOrange.opacity(0.9),
-                            style: StrokeStyle(lineWidth: 2, dash: [6, 5])
-                        )
-                        .frame(width: 52, height: 52)
+            HStack(spacing: 12) {
+                Image(systemName: "person.badge.plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.cauldronOrange)
+                    .frame(width: 32, height: 32)
+                    .background(Color.cauldronOrange.opacity(0.12), in: Circle())
 
-                    Image(systemName: "person.badge.plus")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.cauldronOrange)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Invite Friends")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Text("Share your link and unlock referral rewards together.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Text("Invite friends & unlock rewards")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
 
                 Spacer()
 
@@ -344,7 +333,8 @@ struct FriendsTabView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 LinearGradient(

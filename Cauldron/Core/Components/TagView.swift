@@ -48,13 +48,14 @@ struct TagView: View {
         HStack(spacing: 6) {
             if let emoji = emoji {
                 Text(emoji)
-                    .font(.caption)
+                    .font(.caption2)
             }
             
             Text(displayName)
-                .font(.caption)
+                .font(.caption2)
                 .fontWeight(.medium)
-            
+                .lineLimit(1)
+
             if let onRemove = onRemove {
                 Button(action: onRemove) {
                     Image(systemName: "xmark")

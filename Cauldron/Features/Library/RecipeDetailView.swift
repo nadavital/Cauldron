@@ -248,14 +248,16 @@ struct RecipeDetailView: View {
                             .renderingMode(.template)
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 22, height: 22)
+                            .frame(width: 26, height: 26)
 
                         Text("Cook")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.headline)
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
                 }
                 .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
                 .tint(.cauldronOrange)
                 .padding(.trailing, 20)
                 .padding(.bottom, 16)
