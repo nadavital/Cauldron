@@ -250,36 +250,38 @@ struct SearchTabView: View {
                     Text(section.rawValue)
                         .font(.title3)
                         .fontWeight(.bold)
-                    
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
-                        ForEach(RecipeCategory.all(in: section)) { category in
-                            Button {
-                                navigationPath.append(Tag(name: category.tagValue))
-                            } label: {
-                                HStack(spacing: Theme.Spacing.sm) {
-                                    // Icon Container
-                                    ZStack {
-                                        Circle()
-                                            .fill(category.color.opacity(0.15))
-                                            .frame(width: 40, height: 40)
-                                        Text(category.emoji)
-                                            .font(.title3)
+
+                    GlassEffectContainer(spacing: 2) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
+                            ForEach(RecipeCategory.all(in: section)) { category in
+                                Button {
+                                    navigationPath.append(Tag(name: category.tagValue))
+                                } label: {
+                                    HStack(spacing: Theme.Spacing.sm) {
+                                        // Icon Container
+                                        ZStack {
+                                            Circle()
+                                                .fill(category.color.opacity(0.15))
+                                                .frame(width: 40, height: 40)
+                                            Text(category.emoji)
+                                                .font(.title3)
+                                        }
+
+                                        Text(category.displayName)
+                                            .font(.body)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+
+                                        Spacer()
                                     }
-
-                                    Text(category.displayName)
-                                        .font(.body)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.primary)
-
-                                    Spacer()
+                                    .padding(Theme.Spacing.sm)
+                                    .glassEffect(
+                                        .regular.tint(category.color.opacity(0.35)),
+                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                    )
                                 }
-                                .padding(Theme.Spacing.sm)
-                                .glassEffect(
-                                    .regular.tint(category.color.opacity(0.35)),
-                                    in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                                )
+                                .buttonStyle(PressableScaleStyle())
                             }
-                            .buttonStyle(PressableScaleStyle())
                         }
                     }
                 }

@@ -159,7 +159,7 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var compactRecipeContent: some View {
-        GlassEffectContainer(spacing: 20) {
+        GlassEffectContainer(spacing: 2) {
             VStack(alignment: .leading, spacing: 20) {
                 recipeHeaderSection
                 notesSection
@@ -176,7 +176,7 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var regularRecipeContent: some View {
-        GlassEffectContainer(spacing: 20) {
+        GlassEffectContainer(spacing: 2) {
             VStack(alignment: .leading, spacing: 20) {
                 recipeHeaderSection
                     .frame(maxWidth: .infinity, alignment: .leading)

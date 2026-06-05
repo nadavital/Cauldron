@@ -147,10 +147,12 @@ extension View {
         }
     }
 
-    /// Native Liquid Glass card surface. Apply to content cards (recipe
-    /// sections, feed headers). When several appear on one screen, wrap them in
-    /// a `GlassEffectContainer` so they render and clip correctly (a standalone
-    /// glass element in a scroll view can otherwise float above sibling content).
+    /// Native Liquid Glass card surface.
+    ///
+    /// IMPORTANT: wrap groups of glass cards in a `GlassEffectContainer` (with
+    /// `spacing` smaller than the gap between cards so they don't merge). The
+    /// container is what keeps the glass clipped to the scroll view — a bare
+    /// `glassEffect` in a scroll view composites over the nav/tab bars.
     func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
         glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }

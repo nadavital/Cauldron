@@ -268,7 +268,7 @@ struct FriendsTabView: View {
         ScrollView {
             LazyVStack(spacing: Theme.Spacing.md) {
                 // Friends section
-                GlassEffectContainer {
+                GlassEffectContainer(spacing: 2) {
                     VStack(spacing: 0) {
                         SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
