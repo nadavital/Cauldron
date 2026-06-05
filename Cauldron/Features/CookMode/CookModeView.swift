@@ -22,7 +22,6 @@ struct CookModeView: View {
     @State private var checkedIngredientIDs: Set<UUID> = []
     @State private var scaleFactor: Double = 1.0
     @State private var unitSystem: UnitSystem = .original
-    @State private var showCompletionCelebration = false
 
     /// Ingredients adjusted for the current scale factor and unit system.
     /// Ingredient ids are preserved by both transforms, so check-off state
@@ -59,11 +58,6 @@ struct CookModeView: View {
                 regularWidthContent
             } else {
                 compactContent
-            }
-        }
-        .overlay {
-            if showCompletionCelebration {
-                cookCompleteCelebration
             }
         }
         .navigationTitle(recipe.title)
@@ -521,57 +515,23 @@ struct CookModeView: View {
     }
 
     /// Celebratory overlay shown when the cook finishes the last step.
-    private var cookCompleteCelebration: some View {
-        ZStack {
-            Color.black.opacity(0.35).ignoresSafeArea()
-
-            VStack(spacing: Theme.Spacing.md) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 72))
-                    .foregroundStyle(Color.cauldronOrange)
-                    .symbolEffect(.bounce)
-
-                Text("Nicely done!")
-                    .font(.system(.title, design: .serif).weight(.bold))
-
-                Text("You finished \(recipe.title).")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(Theme.Spacing.xl)
-            .frame(maxWidth: 320)
-            .glassCard(cornerRadius: Theme.Radius.large)
-            .padding(Theme.Spacing.xl)
-            .transition(.scale.combined(with: .opacity))
-        }
-        .onAppear {
-            // Let the moment land, then close the session.
-            Task {
-                try? await Task.sleep(nanoseconds: 1_600_000_000)
-                coordinator.endSession()
-            }
-        }
-    }
-
     private var navigationControls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             Button {
                 coordinator.previousStep()
             } label: {
                 Label("Back", systemImage: "chevron.left")
+                    .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(coordinator.isFirstStep ? Color.cauldronSecondaryBackground.opacity(0.5) : Color.cauldronSecondaryBackground)
-                    .foregroundColor(coordinator.isFirstStep ? .secondary : .primary)
-                    .cornerRadius(12)
             }
+            .buttonStyle(.glass)
+            .controlSize(.extraLarge)
             .disabled(coordinator.isFirstStep)
 
             Button {
                 if coordinator.isLastStep {
                     Haptics.success()
-                    withAnimation(Theme.Animation.spring) { showCompletionCelebration = true }
+                    coordinator.endSession()
                 } else {
                     coordinator.nextStep()
                 }
@@ -582,15 +542,12 @@ struct CookModeView: View {
                     Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.cauldronOrange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 4, x: 0, y: 2)
             }
+            .buttonStyle(.glassProminent)
+            .controlSize(.extraLarge)
+            .tint(.cauldronOrange)
         }
         .padding()
-        .background(Color.cauldronBackground)
     }
 }
 

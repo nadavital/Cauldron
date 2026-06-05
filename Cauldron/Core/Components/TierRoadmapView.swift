@@ -15,31 +15,35 @@ struct TierRoadmapView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingImporter = false
     @State private var showingEditor = false
+    @State private var showingAIGenerator = false
+    @State private var isAIAvailable = false
     @State private var animatedProgress: CGFloat = 0
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    // Explainer
-                    Text("The more recipes you save, the higher your tier and search visibility boost.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                GlassEffectContainer(spacing: 2) {
+                    VStack(spacing: 16) {
+                        // Explainer
+                        Text("The more recipes you save, the higher your tier and search visibility boost.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
 
-                    // Combined current + next tier section
-                    combinedProgressSection
+                        // Combined current + next tier section
+                        combinedProgressSection
 
-                    // Add recipe CTA
-                    addRecipeCTA
+                        // Add recipe CTA
+                        addRecipeCTA
 
-                    // All tiers overview
-                    allTiersSection
+                        // All tiers overview
+                        allTiersSection
+                    }
                 }
                 .padding()
             }
-            .background(Color.cauldronBackground.ignoresSafeArea())
+            .warmCanvas()
             .navigationTitle("Tier Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -54,6 +58,12 @@ struct TierRoadmapView: View {
             }
             .sheet(isPresented: $showingEditor) {
                 RecipeEditorView(dependencies: dependencies)
+            }
+            .sheet(isPresented: $showingAIGenerator) {
+                AIRecipeGeneratorView(dependencies: dependencies)
+            }
+            .task {
+                isAIAvailable = await dependencies.foundationModelsService.isAvailable
             }
         }
     }
@@ -174,8 +184,7 @@ struct TierRoadmapView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 12)
     }
 
     // MARK: - Add Recipe CTA
@@ -191,9 +200,21 @@ struct TierRoadmapView: View {
                 Spacer()
             }
 
-            Text("Import from links or create your own to level up faster")
+            Text("Import from links, generate with AI, or create your own to level up faster")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            if isAIAvailable {
+                Button {
+                    showingAIGenerator = true
+                } label: {
+                    Label("Generate with AI", systemImage: "apple.intelligence")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cauldronOrange)
+            }
 
             HStack(spacing: 10) {
                 Button {
@@ -218,8 +239,7 @@ struct TierRoadmapView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 12)
     }
 
     // MARK: - All Tiers Section
@@ -281,12 +301,14 @@ struct TierRoadmapView: View {
                 .font(.caption)
                 .foregroundColor(tier.searchBoost > 1.0 && isUnlocked ? .green : .secondary)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isCurrentTier ? tier.color.opacity(0.1) : Color.clear)
-        )
+        .if(isCurrentTier) { row in
+            row.glassEffect(
+                .regular.tint(tier.color.opacity(0.35)),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
     }
 }
 

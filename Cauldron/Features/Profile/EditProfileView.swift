@@ -86,8 +86,10 @@ struct ProfileEditView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 32) {
-                    // Profile Preview (matching onboarding)
+                    // Profile Preview with an inline edit menu on the avatar
                     VStack(spacing: 16) {
+                        ZStack(alignment: .bottomTrailing) {
+                        Group {
                         // Avatar Display
                         if selectedAvatarType == .photo {
                             if let profileImage = profileImage {
@@ -131,6 +133,51 @@ struct ProfileEditView: View {
                                         }
                                     }
                                 )
+                        }
+
+                        }
+
+                        // Inline avatar edit menu
+                        Menu {
+                            Button {
+                                selectedAvatarType = .emoji
+                                profileImage = nil
+                                showingAvatarPicker = true
+                            } label: {
+                                Label("Choose Emoji", systemImage: "face.smiling")
+                            }
+                            Button {
+                                selectedAvatarType = .photo
+                                imagePickerSourceType = .photoLibrary
+                                showingImagePicker = true
+                            } label: {
+                                Label("Photo Library", systemImage: "photo.on.rectangle")
+                            }
+                            Button {
+                                selectedAvatarType = .photo
+                                imagePickerSourceType = .camera
+                                showingImagePicker = true
+                            } label: {
+                                Label("Take Photo", systemImage: "camera")
+                            }
+                            if profileImage != nil || (selectedAvatarType == .photo && currentUser.profileImageURL != nil) {
+                                Divider()
+                                Button(role: .destructive) {
+                                    profileImage = nil
+                                    selectedAvatarType = .emoji
+                                } label: {
+                                    Label("Remove Photo", systemImage: "trash")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Color.cauldronOrange, in: Circle())
+                                .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
+                        }
+                        .accessibilityLabel("Edit avatar")
                         }
 
                         Text(displayName.isEmpty ? "Your Name" : displayName)
@@ -178,155 +225,6 @@ struct ProfileEditView: View {
                             Text("This is how others will see you")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                        }
-
-                        // Avatar selection - vertical stack for better readability
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Profile Avatar")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-
-                            // Emoji Avatar Button
-                            Button {
-                                selectedAvatarType = .emoji
-                                profileImage = nil
-                                showingAvatarPicker = true
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "face.smiling")
-                                        .font(.title3)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(profileEmoji != nil ? "Edit Emoji" : "Emoji Avatar")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Choose an emoji and color")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    if selectedAvatarType == .emoji {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.cauldronOrange)
-                                    }
-                                }
-                                .padding()
-                                .background(selectedAvatarType == .emoji ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
-                                .foregroundColor(selectedAvatarType == .emoji ? .cauldronOrange : .primary)
-                                .cornerRadius(12)
-                            }
-                            .buttonStyle(.plain)
-
-                            // Photo Library Button
-                            Button {
-                                selectedAvatarType = .photo
-                                imagePickerSourceType = .photoLibrary
-                                showingImagePicker = true
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "photo.on.rectangle")
-                                        .font(.title3)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Photo Library")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Choose from your photos")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    if selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.cauldronOrange)
-                                    }
-                                }
-                                .padding()
-                                .background(selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) ? Color.cauldronOrange.opacity(0.15) : Color.cauldronSecondaryBackground)
-                                .foregroundColor(selectedAvatarType == .photo && (profileImage != nil || currentUser.profileImageURL != nil) ? .cauldronOrange : .primary)
-                                .cornerRadius(12)
-                            }
-                            .buttonStyle(.plain)
-
-                            // Camera Button
-                            Button {
-                                selectedAvatarType = .photo
-                                imagePickerSourceType = .camera
-                                showingImagePicker = true
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "camera")
-                                        .font(.title3)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Take Photo")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Use your camera")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                }
-                                .padding()
-                                .background(Color.cauldronSecondaryBackground)
-                                .foregroundColor(.primary)
-                                .cornerRadius(12)
-                            }
-                            .buttonStyle(.plain)
-
-                            // Show selected photo preview with remove option
-                            if let image = profileImage {
-                                HStack(spacing: 12) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 44, height: 44)
-                                        .clipShape(Circle())
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Photo selected")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Tap × to remove")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Spacer()
-
-                                    Button {
-                                        profileImage = nil
-                                        selectedAvatarType = .emoji
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.title2)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .padding(12)
-                                .background(Color.cauldronOrange.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-
-                            // Show selected emoji preview
-                            if let emoji = profileEmoji, selectedAvatarType == .emoji {
-                                HStack(spacing: 12) {
-                                    Text(emoji)
-                                        .font(.system(size: 32))
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Emoji avatar selected")
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                        Text("Tap Edit Emoji to change")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-
-                                    Spacer()
-                                }
-                                .padding(12)
-                                .background(Color.cauldronOrange.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
                         }
 
                         // App Icon Section
