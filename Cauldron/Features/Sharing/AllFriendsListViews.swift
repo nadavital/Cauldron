@@ -30,7 +30,7 @@ struct AllFriendsRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
@@ -120,7 +120,7 @@ struct AllFriendsCollectionsListView: View {
             .padding(.vertical, 8)
         }
         .navigationTitle("Friends' Collections")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
     }
 
     private var gridColumns: [GridItem] {

@@ -135,9 +135,26 @@ extension View {
 
     /// Replace a scroll/list's default system canvas with the warm app
     /// background, so cards (`appSurface`) sit on the editorial paper tone.
+    ///
+    /// The warm color sits *behind* the scroll view as a ZStack sibling rather
+    /// than as a `.background` on the scroll itself — applying an
+    /// `ignoresSafeArea` background directly to a scroll view shrinks its safe
+    /// area and stops large navigation titles from collapsing to inline on scroll.
     func warmCanvas() -> some View {
-        scrollContentBackground(.hidden)
-            .background(Color.appBackground.ignoresSafeArea())
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            scrollContentBackground(.hidden)
+        }
+    }
+
+    /// Native Liquid Glass card surface.
+    ///
+    /// IMPORTANT: wrap groups of glass cards in a `GlassEffectContainer` (with
+    /// `spacing` smaller than the gap between cards so they don't merge). The
+    /// container is what keeps the glass clipped to the scroll view — a bare
+    /// `glassEffect` in a scroll view composites over the nav/tab bars.
+    func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
+        glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 

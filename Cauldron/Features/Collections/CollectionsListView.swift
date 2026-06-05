@@ -12,6 +12,7 @@ struct CollectionsListView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
+    @Namespace private var cardTransition
 
     init(dependencies: DependencyContainer) {
         _viewModel = State(initialValue: CollectionsListViewModel(dependencies: dependencies))
@@ -48,7 +49,7 @@ struct CollectionsListView: View {
         }
         .warmCanvas()
         .navigationTitle("Collections")
-        .navigationBarTitleDisplayMode(.large)
+        .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(text: $viewModel.searchText, prompt: "Search collections")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -119,7 +120,11 @@ struct CollectionsListView: View {
 
                 LazyVGrid(columns: gridColumns, spacing: Theme.Spacing.sm) {
                     ForEach(collections) { collection in
-                        NavigationLink(destination: CollectionDetailView(collection: collection, dependencies: dependencies)) {
+                        let transitionID = "collection-\(collection.id.uuidString)"
+                        NavigationLink {
+                            CollectionDetailView(collection: collection, dependencies: dependencies)
+                                .navigationTransition(.zoom(sourceID: transitionID, in: cardTransition))
+                        } label: {
                             CollectionCardView(
                                 collection: collection,
                                 recipeImages: viewModel.recipeImages(for: collection),
@@ -129,6 +134,7 @@ struct CollectionsListView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .matchedTransitionSource(id: transitionID, in: cardTransition)
                         .contextMenu {
                             Button(role: .destructive) {
                                 Task {

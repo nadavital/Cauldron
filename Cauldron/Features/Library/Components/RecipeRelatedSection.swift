@@ -31,7 +31,7 @@ struct RecipeRelatedSection: View {
             }
         }
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 }
 

@@ -96,7 +96,8 @@ struct SectionHeader: View {
             Spacer()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 }
 
@@ -105,94 +106,91 @@ struct SectionHeader: View {
 struct ConnectionsInlineView: View {
     @State private var viewModel: ConnectionsViewModel
     let dependencies: DependencyContainer
+    var onAddFriend: (() -> Void)?
 
-    init(dependencies: DependencyContainer) {
+    init(dependencies: DependencyContainer, onAddFriend: (() -> Void)? = nil) {
         self.dependencies = dependencies
+        self.onAddFriend = onAddFriend
         _viewModel = State(initialValue: ConnectionsViewModel(dependencies: dependencies))
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            // Pending requests (most important - shown first)
-            if !viewModel.receivedRequests.isEmpty {
-                ForEach(viewModel.receivedRequests.prefix(3), id: \.id) { connection in
-                    if let user = viewModel.usersMap[connection.fromUserId] {
-                        ConnectionRequestCard(
-                            user: user,
-                            connection: connection,
-                            dependencies: dependencies,
-                            onAccept: {
-                                await viewModel.acceptRequest(connection)
-                            },
-                            onReject: {
-                                await viewModel.rejectRequest(connection)
-                            }
+    /// Dashed "+" tile that opens the add-friends flow, shown at the start of
+    /// the friends row (replaces the toolbar "+" button).
+    private var addFriendTile: some View {
+        Button {
+            onAddFriend?()
+        } label: {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Circle()
+                        .strokeBorder(
+                            Color.cauldronOrange.opacity(0.8),
+                            style: StrokeStyle(lineWidth: 2, dash: [5, 4])
                         )
-                    }
-                }
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Image(systemName: "plus")
+                                .font(.title3.weight(.semibold))
+                                .foregroundColor(.cauldronOrange)
+                        )
 
-                if viewModel.receivedRequests.count > 3 {
-                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
-                        Text("View \(viewModel.receivedRequests.count - 3) more requests")
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 16)
+                    // Pending-request count badge
+                    if !viewModel.receivedRequests.isEmpty {
+                        Text("\(viewModel.receivedRequests.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(5)
+                            .background(Color.red, in: Circle())
+                            .offset(x: 4, y: -4)
                     }
                 }
+                Text(viewModel.receivedRequests.isEmpty ? "Add" : "Requests")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(PressableScaleStyle())
+        .accessibilityLabel(viewModel.receivedRequests.isEmpty ? "Add friends" : "\(viewModel.receivedRequests.count) friend requests and add friends")
+    }
+
+    private var hasAnyConnectionsActivity: Bool {
+        !viewModel.connections.isEmpty || !viewModel.receivedRequests.isEmpty || !viewModel.sentRequests.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            // Top row: See All (right)
+            if !viewModel.connections.isEmpty {
+                HStack {
+                    Spacer()
+                    NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
+                        Text("See All")
+                            .font(.subheadline)
+                            .foregroundColor(.cauldronOrange)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
             }
 
-            // Friends display
-            if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
-                // Empty state
-                VStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: "person.2.circle")
-                        .font(.system(size: 40))
-                        .foregroundColor(.gray.opacity(0.5))
-
-                    Text("No friends yet")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    // Removed redundant link to SearchTabView
-                    Text("Find people to add")
-                        .font(.caption)
-                        .foregroundColor(.cauldronOrange)
-                        .onTapGesture {
-                            // Ideally switch tab, but for now just show text
-                            // Or use a notification to switch tab
-                            NotificationCenter.default.post(name: NSNotification.Name("SwitchToSearchTab"), object: nil)
-                        }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
+            // Content
+            if !hasAnyConnectionsActivity {
+                emptyConnectionsState
             } else {
-                // Horizontal scrolling friends
-                if !viewModel.connections.isEmpty {
-                    HStack {
-                        Spacer()
-
-                        NavigationLink(destination: ConnectionsView(dependencies: dependencies)) {
-                            Text("See All")
-                                .font(.subheadline)
-                                .foregroundColor(.cauldronOrange)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Spacing.md) {
+                        if onAddFriend != nil {
+                            addFriendTile
+                        }
+                        ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
+                            if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
+                               let user = viewModel.usersMap[otherUserId] {
+                                ConnectionAvatarCard(user: user, dependencies: dependencies)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Theme.Spacing.md) {
-                            ForEach(viewModel.connections.prefix(10), id: \.id) { connection in
-                                if let otherUserId = connection.otherUserId(currentUserId: viewModel.currentUserId),
-                                   let user = viewModel.usersMap[otherUserId] {
-                                    ConnectionAvatarCard(user: user, dependencies: dependencies)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                    }
+                    .padding(.vertical, 8)
                 }
             }
         }
@@ -205,4 +203,30 @@ struct ConnectionsInlineView: View {
             }
         }
     }
+
+    private var emptyConnectionsState: some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "person.2.circle")
+                .font(.system(size: 36))
+                .foregroundColor(.gray.opacity(0.5))
+
+            Text("No friends yet")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            Text("Find people to add")
+                .font(.caption)
+                .foregroundColor(.cauldronOrange)
+                .onTapGesture {
+                    if let onAddFriend {
+                        onAddFriend()
+                    } else {
+                        NotificationCenter.default.post(name: NSNotification.Name("SwitchToSearchTab"), object: nil)
+                    }
+                }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
 }

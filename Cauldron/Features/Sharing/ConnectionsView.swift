@@ -150,7 +150,7 @@ struct ConnectionRequestCard: View {
             NavigationLink {
                 UserProfileView(user: user, dependencies: dependencies)
             } label: {
-                ProfileAvatar(user: user, size: 48, dependencies: dependencies)
+                ProfileAvatar(user: user, size: 40, dependencies: dependencies)
             }
             .buttonStyle(.plain)
 
@@ -207,12 +207,11 @@ struct ConnectionRequestCard: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.cauldronOrange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 

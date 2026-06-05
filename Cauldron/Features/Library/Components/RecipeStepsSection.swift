@@ -37,7 +37,7 @@ struct RecipeStepsSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private var groupedSteps: [String: [CookStep]] {

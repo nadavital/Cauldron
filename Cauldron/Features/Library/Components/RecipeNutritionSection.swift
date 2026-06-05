@@ -30,7 +30,7 @@ struct RecipeNutritionSection: View {
             }
         }
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 }
 

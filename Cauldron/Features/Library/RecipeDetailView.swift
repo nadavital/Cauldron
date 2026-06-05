@@ -159,13 +159,15 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var compactRecipeContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            recipeHeaderSection
-            notesSection
-            ingredientsSection
-            stepsSection
-            nutritionSection
-            relatedSection
+        GlassEffectContainer(spacing: 2) {
+            VStack(alignment: .leading, spacing: 20) {
+                recipeHeaderSection
+                notesSection
+                ingredientsSection
+                stepsSection
+                nutritionSection
+                relatedSection
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, hasHeroImage ? 0 : 20)
@@ -174,23 +176,25 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var regularRecipeContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            recipeHeaderSection
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 20) {
-                    ingredientsSection
-                    notesSection
-                }
-                .frame(maxWidth: 430, alignment: .leading)
-
-                stepsSection
+        GlassEffectContainer(spacing: 2) {
+            VStack(alignment: .leading, spacing: 20) {
+                recipeHeaderSection
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            nutritionSection
-            relatedSection
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        ingredientsSection
+                        notesSection
+                    }
+                    .frame(maxWidth: 430, alignment: .leading)
+
+                    stepsSection
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                nutritionSection
+                relatedSection
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, hasHeroImage ? 0 : 20)
@@ -244,21 +248,22 @@ struct RecipeDetailView: View {
                             .renderingMode(.template)
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 24, height: 24)
+                            .frame(width: 26, height: 26)
 
                         Text("Cook")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.headline)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .glassEffect(.regular.tint(.orange).interactive(), in: Capsule())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
                 }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(.cauldronOrange)
                 .padding(.trailing, 20)
                 .padding(.bottom, 16)
             }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {

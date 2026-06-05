@@ -16,6 +16,7 @@ struct SearchTabView: View {
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
     @State private var showingProfileSheet = false
+    @Namespace private var recipeTransition
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -87,12 +88,14 @@ struct SearchTabView: View {
         NavigationStack(path: $navigationPath) {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .refreshable {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
                 .navigationDestination(for: Recipe.self) { recipe in
                     RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                        .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
                 }
                 .navigationDestination(for: User.self) { user in
                     UserProfileView(user: user, dependencies: viewModel.dependencies)
@@ -113,6 +116,7 @@ struct SearchTabView: View {
         NavigationSplitView {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
                 .refreshable {
@@ -188,9 +192,8 @@ struct SearchTabView: View {
                 }
                 .padding()
             }
-            .scrollContentBackground(.hidden)
         }
-        .background(Color.appBackground.ignoresSafeArea())
+        .warmCanvas()
     }
 
     private var splitDetailPlaceholder: some View {
@@ -210,7 +213,7 @@ struct SearchTabView: View {
 
     @ToolbarContentBuilder
     private var searchToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .navigationBarTrailing) {
             if let user = currentUserSession.currentUser {
                 Button {
                     showingProfileSheet = true
@@ -247,34 +250,38 @@ struct SearchTabView: View {
                     Text(section.rawValue)
                         .font(.title3)
                         .fontWeight(.bold)
-                    
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
-                        ForEach(RecipeCategory.all(in: section)) { category in
-                            Button {
-                                navigationPath.append(Tag(name: category.tagValue))
-                            } label: {
-                                HStack(spacing: Theme.Spacing.sm) {
-                                    // Icon Container
-                                    ZStack {
-                                        Circle()
-                                            .fill(category.color.opacity(0.15))
-                                            .frame(width: 40, height: 40)
-                                        Text(category.emoji)
-                                            .font(.title3)
+
+                    GlassEffectContainer(spacing: 2) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
+                            ForEach(RecipeCategory.all(in: section)) { category in
+                                Button {
+                                    navigationPath.append(Tag(name: category.tagValue))
+                                } label: {
+                                    HStack(spacing: Theme.Spacing.sm) {
+                                        // Icon Container
+                                        ZStack {
+                                            Circle()
+                                                .fill(category.color.opacity(0.15))
+                                                .frame(width: 40, height: 40)
+                                            Text(category.emoji)
+                                                .font(.title3)
+                                        }
+
+                                        Text(category.displayName)
+                                            .font(.body)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+
+                                        Spacer()
                                     }
-
-                                    Text(category.displayName)
-                                        .font(.body)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.primary)
-
-                                    Spacer()
+                                    .padding(Theme.Spacing.sm)
+                                    .glassEffect(
+                                        .regular.tint(category.color.opacity(0.35)).interactive(),
+                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                    )
                                 }
-                                .padding(8)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(12)
+                                .buttonStyle(PressableScaleStyle())
                             }
-                            .buttonStyle(PressableScaleStyle())
                         }
                     }
                 }
@@ -317,6 +324,7 @@ struct SearchTabView: View {
                             SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: group.primaryRecipe.id, in: recipeTransition)
                     }
                 }
             }
@@ -379,23 +387,26 @@ struct SearchTabView: View {
         .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
-        .background(
-            (isActive ? Color.cauldronOrange.opacity(0.15) : Color.appSurface),
-            in: Capsule()
-        )
+        .background {
+            if isActive {
+                Capsule().fill(Color.cauldronOrange.opacity(0.15))
+            } else {
+                Capsule().fill(.ultraThinMaterial)
+            }
+        }
     }
     
     private var peopleSearchView: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if searchText.isEmpty {
-                // Show friends list if available, otherwise show empty state
-                if !viewModel.friends.isEmpty {
-                    Text("Your Friends")
+                // Recommendations only (no friends list)
+                if !viewModel.recommendedUsers.isEmpty {
+                    Text("Suggested for You")
                         .font(.headline)
                         .foregroundColor(.secondary)
                         .padding(.top, 8)
-                    
-                    ForEach(viewModel.friends) { user in
+
+                    ForEach(viewModel.recommendedUsers) { user in
                         Button {
                             navigationPath.append(user)
                         } label: {
@@ -406,36 +417,16 @@ struct SearchTabView: View {
                         }
                         .buttonStyle(PressableScaleStyle())
                     }
-                    
-                    // Recommended Users (Friends of Friends)
-                    if !viewModel.recommendedUsers.isEmpty {
-                        Text("Suggested for You")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 24)
-                        
-                        ForEach(viewModel.recommendedUsers) { user in
-                            Button {
-                                navigationPath.append(user)
-                            } label: {
-                                UserSearchRowView(
-                                    user: user,
-                                    viewModel: viewModel
-                                )
-                            }
-                            .buttonStyle(PressableScaleStyle())
-                        }
-                    }
                 } else {
                     VStack(spacing: Theme.Spacing.md) {
                         Image(systemName: "person.2")
                             .font(.system(size: 48))
                             .foregroundColor(.secondary)
-                        
+
                         Text("Search for People")
                             .font(.headline)
                             .foregroundColor(.secondary)
-                            
+
                         Text("Find friends to share recipes with")
                             .font(.subheadline)
                             .foregroundColor(.secondary)

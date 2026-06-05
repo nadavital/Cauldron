@@ -130,15 +130,22 @@ struct CollectionCardView: View {
     let recipeImageSources: [CollectionRecipeImageSource]
     let preferredWidth: CGFloat?
     let dependencies: DependencyContainer?
+    /// Optional owner shown as a creator tag over the cover (for friends' collections).
+    let owner: User?
     @State private var customCoverImage: UIImage?
     @State private var loadedCoverKey: String?
     @State private var isLoadingImage = false
+    /// Owner-tag text adapts to the cover's top luminance (white over dark
+    /// covers, black over light ones). Defaults to white for gradient/collage
+    /// covers, which read well with white text.
+    @State private var overlayPrefersDarkText = false
 
     init(
         collection: Collection,
         recipeImages: [URL?],
         recipeImageSources: [CollectionRecipeImageSource]? = nil,
         preferredWidth: CGFloat? = 200,
+        owner: User? = nil,
         dependencies: DependencyContainer? = nil
     ) {
         self.collection = collection
@@ -147,6 +154,7 @@ struct CollectionCardView: View {
             CollectionRecipeImageSource(imageURL: $0)
         }
         self.preferredWidth = preferredWidth
+        self.owner = owner
         self.dependencies = dependencies
     }
 
@@ -172,6 +180,24 @@ struct CollectionCardView: View {
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(collectionColor.opacity(0.2), lineWidth: 1)
                 )
+                .overlay(alignment: .topLeading) {
+                    if let owner, let dependencies {
+                        GlassEffectContainer(spacing: 2) {
+                            HStack(spacing: 6) {
+                                ProfileAvatar(user: owner, size: 22, dependencies: dependencies)
+                                Text(owner.displayName)
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .lineLimit(1)
+                                    .foregroundStyle(overlayPrefersDarkText ? .black : .white)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .glassEffect(.clear, in: Capsule())
+                        }
+                        .padding(8)
+                    }
+                }
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -261,6 +287,9 @@ struct CollectionCardView: View {
                 customCoverImage = image
             }
             loadedCoverKey = customCoverTaskID
+            if let luminance = image.topRegionLuminance() {
+                overlayPrefersDarkText = luminance > 0.6
+            }
         } else {
             customCoverImage = nil
             loadedCoverKey = nil

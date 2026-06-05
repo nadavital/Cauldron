@@ -402,6 +402,8 @@ struct CookModeView: View {
                             Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(isChecked ? Color.cauldronOrange : .secondary)
                                 .font(.body)
+                                .contentTransition(.symbolEffect(.replace))
+                                .symbolEffect(.bounce, value: isChecked)
 
                             Text(ingredient.displayString)
                                 .font(.subheadline)
