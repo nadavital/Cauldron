@@ -263,13 +263,9 @@ struct FriendsTabView: View {
             LazyVStack(spacing: Theme.Spacing.md) {
                 // Friends section
                 GlassEffectContainer(spacing: 2) {
-                    VStack(spacing: 0) {
-                        SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
-
-                        ConnectionsInlineView(dependencies: dependencies, onAddFriend: { showingPeopleSearch = true })
-                            .padding(.bottom, 8)
-                    }
-                    .glassCard(cornerRadius: 16)
+                    ConnectionsInlineView(dependencies: dependencies, onAddFriend: { showingPeopleSearch = true })
+                        .padding(.bottom, 4)
+                        .glassCard(cornerRadius: 16)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
