@@ -648,7 +648,7 @@ struct TagRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("All Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
@@ -713,7 +713,7 @@ struct TagFriendRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("From Friends")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
@@ -784,7 +784,7 @@ struct TagPublicRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("Community Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in

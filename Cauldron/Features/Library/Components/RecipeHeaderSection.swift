@@ -138,7 +138,7 @@ struct RecipeHeaderSection: View {
             }
         }
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     @ViewBuilder

@@ -40,7 +40,7 @@ struct RecipeNotesSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private func makeLinksClickable(_ text: String) -> AttributedString? {

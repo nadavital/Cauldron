@@ -270,9 +270,12 @@ struct SearchTabView: View {
 
                                     Spacer()
                                 }
-                                .padding(8)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(12)
+                                .padding(Theme.Spacing.sm)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                        .strokeBorder(category.color.opacity(0.25), lineWidth: 0.5)
+                                )
                             }
                             .buttonStyle(PressableScaleStyle())
                         }
@@ -379,10 +382,13 @@ struct SearchTabView: View {
         .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
-        .background(
-            (isActive ? Color.cauldronOrange.opacity(0.15) : Color.appSurface),
-            in: Capsule()
-        )
+        .background {
+            if isActive {
+                Capsule().fill(Color.cauldronOrange.opacity(0.15))
+            } else {
+                Capsule().fill(.ultraThinMaterial)
+            }
+        }
     }
     
     private var peopleSearchView: some View {

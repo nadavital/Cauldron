@@ -139,6 +139,19 @@ extension View {
         scrollContentBackground(.hidden)
             .background(Color.appBackground.ignoresSafeArea())
     }
+
+    /// Frosted glass card surface (translucent material + hairline stroke).
+    /// Use for content cards that should feel light and layered over the warm
+    /// canvas — recipe sections, feed headers, etc.
+    func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
+        self
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.appSeparator.opacity(0.6), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+    }
 }
 
 /// Button style that scales and dims slightly while pressed.

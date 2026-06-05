@@ -259,6 +259,7 @@ struct RecipeDetailView: View {
                 .padding(.bottom, 16)
             }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {

@@ -271,8 +271,7 @@ struct FriendsTabView: View {
                     ConnectionsInlineView(dependencies: dependencies)
                         .padding(.bottom, 8)
                 }
-                .background(Color.cauldronSecondaryBackground)
-                .cornerRadius(16)
+                .glassCard(cornerRadius: 16)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 

@@ -31,7 +31,7 @@ struct RecipeIngredientsSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private var groupedIngredients: [String: [Ingredient]] {
