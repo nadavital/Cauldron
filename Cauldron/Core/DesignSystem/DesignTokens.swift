@@ -135,22 +135,24 @@ extension View {
 
     /// Replace a scroll/list's default system canvas with the warm app
     /// background, so cards (`appSurface`) sit on the editorial paper tone.
+    ///
+    /// The warm color sits *behind* the scroll view as a ZStack sibling rather
+    /// than as a `.background` on the scroll itself — applying an
+    /// `ignoresSafeArea` background directly to a scroll view shrinks its safe
+    /// area and stops large navigation titles from collapsing to inline on scroll.
     func warmCanvas() -> some View {
-        scrollContentBackground(.hidden)
-            .background(Color.appBackground.ignoresSafeArea())
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            scrollContentBackground(.hidden)
+        }
     }
 
-    /// Frosted glass card surface (translucent material + hairline stroke).
-    /// Use for content cards that should feel light and layered over the warm
-    /// canvas — recipe sections, feed headers, etc.
+    /// Native Liquid Glass card surface. Use for content cards that should feel
+    /// light and layered over the warm canvas — recipe sections, feed headers,
+    /// etc. For several glass cards on one screen, wrap them in a
+    /// `GlassEffectContainer` so they blend and render efficiently.
     func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
-        self
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.appSeparator.opacity(0.6), lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
+        glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 

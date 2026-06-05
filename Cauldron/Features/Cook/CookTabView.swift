@@ -117,8 +117,7 @@ struct CookTabView: View {
                 }
                 .padding(.vertical)
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.appBackground.ignoresSafeArea())
+            .warmCanvas()
             .navigationTitle("Cook")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -295,18 +294,21 @@ struct CookTabView: View {
 
     /// Standard horizontal carousel of the user's own recipe cards, with context menu + preview.
     /// Cards zoom into the detail screen for a continuous, delightful transition.
-    private func recipeCarousel(_ recipes: [Recipe], limit: Int = 10) -> some View {
+    /// `section` keeps the zoom source id unique when the same recipe appears in
+    /// more than one section, so the animation always originates from the tapped card.
+    private func recipeCarousel(_ recipes: [Recipe], section: String, limit: Int = 10) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.md) {
                 ForEach(recipes.prefix(limit)) { recipe in
+                    let transitionID = "\(section)-\(recipe.id.uuidString)"
                     NavigationLink {
                         RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
-                            .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
                     } label: {
                         RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                     }
                     .buttonStyle(PressableScaleStyle())
-                    .matchedTransitionSource(id: recipe.id, in: recipeTransition)
+                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
                     .contextMenu {
                         recipeContextMenu(for: recipe)
                     } preview: {
@@ -330,7 +332,7 @@ struct CookTabView: View {
                 systemImage: "clock.badge.plus",
                 seeAll: AnyView(AllRecipesListView(recipes: viewModel.recentlyAddedRecipes, dependencies: viewModel.dependencies))
             )
-            recipeCarousel(viewModel.recentlyAddedRecipes)
+            recipeCarousel(viewModel.recentlyAddedRecipes, section: "recentlyAdded")
         }
     }
 
@@ -341,7 +343,7 @@ struct CookTabView: View {
                 systemImage: "clock.arrow.circlepath",
                 seeAll: AnyView(RecentlyCookedListView(recipes: viewModel.recentlyCookedRecipes, dependencies: viewModel.dependencies))
             )
-            recipeCarousel(viewModel.recentlyCookedRecipes)
+            recipeCarousel(viewModel.recentlyCookedRecipes, section: "recentlyCooked")
         }
     }
 
@@ -353,7 +355,7 @@ struct CookTabView: View {
                 iconColor: .yellow,
                 seeAll: AnyView(FavoritesListView(recipes: viewModel.favoriteRecipes, dependencies: viewModel.dependencies))
             )
-            recipeCarousel(viewModel.favoriteRecipes)
+            recipeCarousel(viewModel.favoriteRecipes, section: "favorites")
         }
     }
 
@@ -427,21 +429,21 @@ struct CookTabView: View {
     private var quickRecipesSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             cookSectionHeader("Quick & Easy", systemImage: "timer")
-            recipeCarousel(viewModel.quickRecipes)
+            recipeCarousel(viewModel.quickRecipes, section: "quick")
         }
     }
 
     private var onRotationSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             cookSectionHeader("On Rotation", systemImage: "arrow.triangle.2.circlepath")
-            recipeCarousel(viewModel.onRotationRecipes)
+            recipeCarousel(viewModel.onRotationRecipes, section: "onRotation")
         }
     }
 
     private var forgottenFavoritesSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             cookSectionHeader("Rediscover Favorites", systemImage: "sparkles")
-            recipeCarousel(viewModel.forgottenFavorites)
+            recipeCarousel(viewModel.forgottenFavorites, section: "rediscover")
         }
     }
 
@@ -456,7 +458,7 @@ struct CookTabView: View {
             if viewModel.allRecipes.isEmpty {
                 emptyState
             } else {
-                recipeCarousel(viewModel.allRecipes)
+                recipeCarousel(viewModel.allRecipes, section: "allRecipes")
             }
         }
     }
@@ -468,7 +470,7 @@ struct CookTabView: View {
                 systemImage: "tag.fill",
                 seeAll: AnyView(ExploreTagView(tag: Tag(name: tag), dependencies: viewModel.dependencies))
             )
-            recipeCarousel(recipes, limit: recipes.count)
+            recipeCarousel(recipes, section: "tag-\(tag)", limit: recipes.count)
         }
     }
     
