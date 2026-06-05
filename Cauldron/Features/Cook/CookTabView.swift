@@ -119,6 +119,7 @@ struct CookTabView: View {
             }
             .warmCanvas()
             .navigationTitle("Cook")
+            .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if let user = currentUserSession.currentUser {

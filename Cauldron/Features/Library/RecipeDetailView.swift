@@ -159,13 +159,15 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var compactRecipeContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            recipeHeaderSection
-            notesSection
-            ingredientsSection
-            stepsSection
-            nutritionSection
-            relatedSection
+        GlassEffectContainer(spacing: 20) {
+            VStack(alignment: .leading, spacing: 20) {
+                recipeHeaderSection
+                notesSection
+                ingredientsSection
+                stepsSection
+                nutritionSection
+                relatedSection
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, hasHeroImage ? 0 : 20)
@@ -174,23 +176,25 @@ struct RecipeDetailView: View {
 
     @ViewBuilder
     private var regularRecipeContent: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            recipeHeaderSection
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 20) {
-                    ingredientsSection
-                    notesSection
-                }
-                .frame(maxWidth: 430, alignment: .leading)
-
-                stepsSection
+        GlassEffectContainer(spacing: 20) {
+            VStack(alignment: .leading, spacing: 20) {
+                recipeHeaderSection
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            nutritionSection
-            relatedSection
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        ingredientsSection
+                        notesSection
+                    }
+                    .frame(maxWidth: 430, alignment: .leading)
+
+                    stepsSection
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                nutritionSection
+                relatedSection
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, hasHeroImage ? 0 : 20)

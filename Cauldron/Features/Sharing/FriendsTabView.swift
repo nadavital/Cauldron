@@ -94,6 +94,7 @@ struct FriendsTabView: View {
         NavigationStack(path: $navigationPath) {
             combinedFeedSection
                 .navigationTitle("Friends")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { friendsToolbar }
                 .refreshable {
                     await refreshFriendsContent()
@@ -137,6 +138,7 @@ struct FriendsTabView: View {
                 }
             }
             .navigationTitle("Friends")
+                .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if let user = userSession.currentUser {
@@ -177,6 +179,7 @@ struct FriendsTabView: View {
                 .frame(maxWidth: 980, alignment: .top)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .navigationTitle("Friends")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { friendsToolbar }
                 .refreshable {
                     await refreshFriendsContent()
@@ -266,13 +269,15 @@ struct FriendsTabView: View {
         ScrollView {
             LazyVStack(spacing: Theme.Spacing.md) {
                 // Friends section
-                VStack(spacing: 0) {
-                    SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
+                GlassEffectContainer {
+                    VStack(spacing: 0) {
+                        SectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
-                    ConnectionsInlineView(dependencies: dependencies)
-                        .padding(.bottom, 8)
+                        ConnectionsInlineView(dependencies: dependencies)
+                            .padding(.bottom, 8)
+                    }
+                    .glassCard(cornerRadius: 16)
                 }
-                .glassCard(cornerRadius: 16)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
 

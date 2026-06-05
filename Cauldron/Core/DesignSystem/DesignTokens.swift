@@ -147,21 +147,12 @@ extension View {
         }
     }
 
-    /// Frosted material card surface for *scrolling content* (recipe sections,
-    /// feed headers, etc.).
-    ///
-    /// NOTE: This intentionally uses `.regularMaterial`, not `.glassEffect`.
-    /// Liquid Glass is the floating chrome material — it blurs and sits *above*
-    /// content, so on a scrolling content card it visually floats over the rows
-    /// beneath it. Reserve `.glassEffect` / `.buttonStyle(.glass)` for chrome
-    /// and controls; use material for content surfaces.
+    /// Native Liquid Glass card surface. Apply to content cards (recipe
+    /// sections, feed headers). When several appear on one screen, wrap them in
+    /// a `GlassEffectContainer` so they render and clip correctly (a standalone
+    /// glass element in a scroll view can otherwise float above sibling content).
     func glassCard(cornerRadius: CGFloat = Theme.Radius.large) -> some View {
-        self
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.appSeparator.opacity(0.5), lineWidth: 0.5)
-            )
+        glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 

@@ -88,6 +88,7 @@ struct SearchTabView: View {
         NavigationStack(path: $navigationPath) {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .refreshable {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)
@@ -115,6 +116,7 @@ struct SearchTabView: View {
         NavigationSplitView {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
                 .refreshable {

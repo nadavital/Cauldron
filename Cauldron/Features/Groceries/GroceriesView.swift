@@ -37,6 +37,7 @@ struct GroceriesView: View {
             }
             .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("Groceries")
+            .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if let user = currentUserSession.currentUser {

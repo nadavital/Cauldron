@@ -49,7 +49,7 @@ struct CollectionsListView: View {
         }
         .warmCanvas()
         .navigationTitle("Collections")
-        .navigationBarTitleDisplayMode(.large)
+        .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(text: $viewModel.searchText, prompt: "Search collections")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
