@@ -46,6 +46,7 @@ struct CollectionsListView: View {
             }
             .padding(.vertical)
         }
+        .warmCanvas()
         .navigationTitle("Collections")
         .navigationBarTitleDisplayMode(.large)
         .searchable(text: $viewModel.searchText, prompt: "Search collections")
@@ -112,7 +113,7 @@ struct CollectionsListView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+                        .background(Color.appSurface, in: Capsule())
                 }
                 .padding(.horizontal)
 

@@ -204,7 +204,7 @@ struct AppIconPickerView: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 18))
                                     .foregroundColor(.cauldronOrange)
-                                    .background(Circle().fill(Color(.systemBackground)))
+                                    .background(Circle().fill(Color.appSurface))
                             }
                         }
                         .frame(width: 72, height: 72)

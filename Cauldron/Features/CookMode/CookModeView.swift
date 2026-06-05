@@ -248,9 +248,9 @@ struct CookModeView: View {
         .overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [
-                    Color(uiColor: .systemBackground).opacity(0),
-                    Color(uiColor: .systemBackground).opacity(0.5),
-                    Color(uiColor: .systemBackground)
+                    Color.appBackground.opacity(0),
+                    Color.appBackground.opacity(0.5),
+                    Color.appBackground
                 ],
                 startPoint: .top,
                 endPoint: .bottom

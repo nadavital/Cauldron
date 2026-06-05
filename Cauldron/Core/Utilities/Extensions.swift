@@ -57,8 +57,10 @@ extension View {
 
 extension Color {
     static let cauldronOrange = Color(red: 1.0, green: 0.6, blue: 0.2)
-    static let cauldronBackground = Color(.systemBackground)
-    static let cauldronSecondaryBackground = Color(.secondarySystemBackground)
+    /// Warm app canvas (alias of `appBackground`) — kept for existing call sites.
+    static let cauldronBackground = Color.appBackground
+    /// Warm card surface (alias of `appSurface`) — kept for existing call sites.
+    static let cauldronSecondaryBackground = Color.appSurface
 
     // MARK: - Profile Colors
 

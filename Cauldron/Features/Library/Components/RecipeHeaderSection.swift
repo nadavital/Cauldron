@@ -151,7 +151,7 @@ struct RecipeHeaderSection: View {
                     .font(.title3.weight(.semibold))
                     .frame(width: 36, height: 36)
                     .foregroundStyle(localIsFavorite ? .yellow : .secondary)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    .background(Color.appSurface, in: Circle())
             }
             .accessibilityLabel(localIsFavorite ? "Remove Favorite" : "Favorite")
         } else if hasOwnedCopy {
@@ -212,7 +212,7 @@ struct RecipeHeaderSection: View {
         .foregroundColor(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        .background(Color.appSurface, in: Capsule())
     }
 
     private func sourceNavigationPill(user: User, text: String) -> some View {
@@ -237,7 +237,7 @@ struct RecipeHeaderSection: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .background(Color.appSurface, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

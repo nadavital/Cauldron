@@ -35,6 +35,7 @@ struct GroceriesView: View {
                     }
                 }
             }
+            .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("Groceries")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -186,6 +187,7 @@ struct GroceriesView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Ungrouped View
@@ -199,6 +201,7 @@ struct GroceriesView: View {
             }
             .onDelete(perform: deleteItems)
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Item Row

@@ -132,6 +132,13 @@ extension View {
     func pressable() -> some View {
         buttonStyle(PressableScaleStyle())
     }
+
+    /// Replace a scroll/list's default system canvas with the warm app
+    /// background, so cards (`appSurface`) sit on the editorial paper tone.
+    func warmCanvas() -> some View {
+        scrollContentBackground(.hidden)
+            .background(Color.appBackground.ignoresSafeArea())
+    }
 }
 
 /// Button style that scales and dims slightly while pressed.

@@ -99,7 +99,7 @@ struct CollectionFormView: View {
                             .padding(.vertical, 10)
                             .background(
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .fill(Color.appSurface)
                             )
 
                         symbolSelectionRow
@@ -342,7 +342,7 @@ struct CollectionFormView: View {
                             colors: [
                                 selectedColor.opacity(0.26),
                                 selectedColor.opacity(0.10),
-                                Color(.secondarySystemGroupedBackground)
+                                Color.appSurface
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -366,7 +366,7 @@ struct CollectionFormView: View {
                     .font(.title2)
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, selectedColor)
-                    .background(Circle().fill(Color(.systemBackground)))
+                    .background(Circle().fill(Color.appSurface))
                     .padding(10)
             }
         }

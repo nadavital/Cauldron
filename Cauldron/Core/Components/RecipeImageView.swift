@@ -133,29 +133,7 @@ struct RecipeImageView: View {
     }
 
     private var placeholderView: some View {
-        ZStack {
-            // Adaptive gradient background
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            VStack(spacing: 8) {
-                Image(systemName: "fork.knife")
-                    .font(.system(size: size.iconSize))
-                    .foregroundStyle(Color.cauldronOrange.opacity(0.3))
-
-                if showPlaceholderText {
-                    Text("No Image")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
+        RecipeImagePlaceholder(iconSize: size.iconSize, showText: showPlaceholderText)
     }
 
     private func loadImage() async {
@@ -376,9 +354,9 @@ struct HeroRecipeImageView: View {
                         // Bottom gradient for smooth transition to content
                         LinearGradient(
                             colors: [
-                                Color(uiColor: .systemBackground).opacity(0),
-                                Color(uiColor: .systemBackground).opacity(0.5),
-                                Color(uiColor: .systemBackground)
+                                Color.appBackground.opacity(0),
+                                Color.appBackground.opacity(0.5),
+                                Color.appBackground
                             ],
                             startPoint: .top,
                             endPoint: .bottom
@@ -408,24 +386,9 @@ struct HeroRecipeImageView: View {
     }
 
     private var placeholderView: some View {
-        ZStack {
-            // Adaptive gradient background
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Image(systemName: "fork.knife")
-                .font(.system(size: 48))
-                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
-        }
-        .frame(height: heroHeight)
-        .frame(maxWidth: .infinity)
-        .background(Color.cauldronOrange.opacity(0.05))
+        RecipeImagePlaceholder(iconSize: 64, showText: false)
+            .frame(height: heroHeight)
+            .frame(maxWidth: .infinity)
     }
 
     private func loadImage() async {

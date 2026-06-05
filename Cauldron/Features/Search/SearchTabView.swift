@@ -188,7 +188,9 @@ struct SearchTabView: View {
                 }
                 .padding()
             }
+            .scrollContentBackground(.hidden)
         }
+        .background(Color.appBackground.ignoresSafeArea())
     }
 
     private var splitDetailPlaceholder: some View {
@@ -378,7 +380,7 @@ struct SearchTabView: View {
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
         .background(
-            (isActive ? Color.cauldronOrange.opacity(0.15) : Color(.secondarySystemBackground)),
+            (isActive ? Color.cauldronOrange.opacity(0.15) : Color.appSurface),
             in: Capsule()
         )
     }

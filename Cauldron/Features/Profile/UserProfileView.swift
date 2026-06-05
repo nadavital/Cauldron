@@ -73,6 +73,7 @@ struct UserProfileView: View {
             }
             .padding()
         }
+        .warmCanvas()
         .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
@@ -273,7 +274,7 @@ struct UserProfileView: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.caption)
                                     .foregroundColor(.cauldronOrange)
-                                    .background(Circle().fill(Color(.systemBackground)).padding(1))
+                                    .background(Circle().fill(Color.appSurface).padding(1))
                                     .offset(x: 4, y: 4)
                             }
                         }

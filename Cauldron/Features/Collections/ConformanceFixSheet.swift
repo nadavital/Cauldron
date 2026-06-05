@@ -177,7 +177,7 @@ struct ConformanceFixSheet: View {
                     .disabled(selectedRecipeIds.isEmpty || isUpdating)
                 }
                 .padding()
-                .background(Color(uiColor: .systemBackground))
+                .background(Color.appBackground)
                 .shadow(color: Color.black.opacity(0.05), radius: 8, y: -4)
             }
             .navigationTitle("Recipe Visibility")
@@ -253,7 +253,7 @@ struct ConformanceFixSheet: View {
             }
         }
         .padding()
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.appBackground)
         .overlay(
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))

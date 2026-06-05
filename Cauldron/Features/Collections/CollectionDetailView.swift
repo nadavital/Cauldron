@@ -619,7 +619,7 @@ struct CollectionDetailView: View {
             .shadow(color: Color.black.opacity(0.07), radius: 14, y: 6)
             .background {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .fill(Color.appSurface)
             }
 
             if collectionCoverPageCount > 1 {
@@ -909,7 +909,7 @@ struct CollectionDetailView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+                .background(Color.appSurface, in: Capsule())
             }
             .buttonStyle(PressableScaleStyle())
         }
@@ -1037,7 +1037,7 @@ struct CollectionDetailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .background(Color.appSurface, in: Capsule())
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableScaleStyle())
