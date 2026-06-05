@@ -190,9 +190,8 @@ struct SearchTabView: View {
                 }
                 .padding()
             }
-            .scrollContentBackground(.hidden)
         }
-        .background(Color.appBackground.ignoresSafeArea())
+        .warmCanvas()
     }
 
     private var splitDetailPlaceholder: some View {

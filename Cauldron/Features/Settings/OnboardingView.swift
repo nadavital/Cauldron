@@ -288,11 +288,9 @@ struct OnboardingView: View {
                                     .fontWeight(.semibold)
                             }
                         }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 14)
-                        .glassEffect(.regular.tint(isValid ? .orange : .gray).interactive(), in: Capsule())
                     }
+                    .buttonStyle(.glassProminent)
+                    .tint(isValid ? .cauldronOrange : .gray)
                     .disabled(!isValid || isCreating)
                     .padding(.bottom, 32)
                 }
