@@ -276,7 +276,7 @@ struct SearchTabView: View {
                                     }
                                     .padding(Theme.Spacing.sm)
                                     .glassEffect(
-                                        .regular.tint(category.color.opacity(0.35)),
+                                        .regular.tint(category.color.opacity(0.35)).interactive(),
                                         in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                                     )
                                 }
@@ -399,14 +399,14 @@ struct SearchTabView: View {
     private var peopleSearchView: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if searchText.isEmpty {
-                // Show friends list if available, otherwise show empty state
-                if !viewModel.friends.isEmpty {
-                    Text("Your Friends")
+                // Recommendations only (no friends list)
+                if !viewModel.recommendedUsers.isEmpty {
+                    Text("Suggested for You")
                         .font(.headline)
                         .foregroundColor(.secondary)
                         .padding(.top, 8)
-                    
-                    ForEach(viewModel.friends) { user in
+
+                    ForEach(viewModel.recommendedUsers) { user in
                         Button {
                             navigationPath.append(user)
                         } label: {
@@ -417,36 +417,16 @@ struct SearchTabView: View {
                         }
                         .buttonStyle(PressableScaleStyle())
                     }
-                    
-                    // Recommended Users (Friends of Friends)
-                    if !viewModel.recommendedUsers.isEmpty {
-                        Text("Suggested for You")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 24)
-                        
-                        ForEach(viewModel.recommendedUsers) { user in
-                            Button {
-                                navigationPath.append(user)
-                            } label: {
-                                UserSearchRowView(
-                                    user: user,
-                                    viewModel: viewModel
-                                )
-                            }
-                            .buttonStyle(PressableScaleStyle())
-                        }
-                    }
                 } else {
                     VStack(spacing: Theme.Spacing.md) {
                         Image(systemName: "person.2")
                             .font(.system(size: 48))
                             .foregroundColor(.secondary)
-                        
+
                         Text("Search for People")
                             .font(.headline)
                             .foregroundColor(.secondary)
-                            
+
                         Text("Find friends to share recipes with")
                             .font(.subheadline)
                             .foregroundColor(.secondary)

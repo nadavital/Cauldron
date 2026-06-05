@@ -137,10 +137,38 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         ExternalShareURLClassifier.isExternalShareURL(url)
     }
 
+    /// Render navigation titles in the system serif (New York), matching the
+    /// app's serif section headers, while keeping the default (Liquid Glass)
+    /// nav-bar background.
+    static func configureNavigationBarAppearance() {
+        func serifFont(_ textStyle: UIFont.TextStyle) -> UIFont {
+            let base = UIFont.preferredFont(forTextStyle: textStyle)
+            var descriptor = base.fontDescriptor
+            if let serif = descriptor.withDesign(.serif) { descriptor = serif }
+            if let bold = descriptor.withSymbolicTraits(descriptor.symbolicTraits.union(.traitBold)) {
+                descriptor = bold
+            }
+            return UIFont(descriptor: descriptor, size: base.pointSize)
+        }
+
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.largeTitleTextAttributes = [.font: serifFont(.largeTitle)]
+        appearance.titleTextAttributes = [.font: serifFont(.headline)]
+
+        let navBar = UINavigationBar.appearance()
+        navBar.standardAppearance = appearance
+        navBar.scrollEdgeAppearance = appearance
+        navBar.compactAppearance = appearance
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // Match navigation titles to the app's serif section headers.
+        Self.configureNavigationBarAppearance()
+
         if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isSimulatorQAMode {
             return true
         }
