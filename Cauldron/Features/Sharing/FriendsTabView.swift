@@ -480,7 +480,8 @@ struct FriendsTabView: View {
 
                 NavigationLink(destination: AllFriendsCollectionsListView(
                     collections: viewModel.sharedCollections,
-                    dependencies: dependencies
+                    dependencies: dependencies,
+                    ownerProvider: { viewModel.owner(for: $0) }
                 )) {
                     Text("See All")
                         .font(.subheadline)
