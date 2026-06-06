@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 import FoundationModels
 
 /// View for generating recipes using Apple Intelligence
@@ -15,16 +16,29 @@ struct AIRecipeGeneratorView: View {
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
     @State private var showCategories = false
+    @State private var placeholderIndex = 0
 
-    /// Tap-to-fill starter ideas to avoid the blank-prompt problem.
-    private let starterPrompts = [
-        "Quick weeknight dinner",
-        "Use up leftover chicken",
-        "Cozy soup for a cold night",
-        "High-protein lunch",
-        "Easy 5-ingredient dessert",
-        "One-pot vegetarian meal"
+    /// Evocative examples that gently cycle through the empty prompt field.
+    private let cravingExamples = [
+        "cozy ramen for a rainy night",
+        "a showstopper dinner-party dessert",
+        "a high-protein lunch in 20 minutes",
+        "something spicy and comforting",
+        "a bright, colorful summer salad",
+        "a cozy one-pot meal for tonight"
     ]
+
+    /// Open-ended seeds for the "Surprise me" one-tap.
+    private let surprisePrompts = [
+        "a surprising dinner using everyday pantry staples",
+        "an adventurous dish from a cuisine I rarely cook",
+        "a nostalgic comfort food, reinvented",
+        "an impressive dessert that's secretly easy",
+        "a vibrant, colorful plate full of veggies",
+        "a cozy weeknight dinner with a clever twist"
+    ]
+
+    private let placeholderTimer = Timer.publish(every: 3.5, on: .main, in: .common).autoconnect()
 
     private var isBusyOrDone: Bool {
         viewModel.isGenerating || viewModel.generatedRecipe != nil
@@ -87,7 +101,7 @@ struct AIRecipeGeneratorView: View {
             .animation(.spring(), value: viewModel.selectedTimes.count)
             .animation(.spring(), value: viewModel.selectedTypes.count)
             .animation(.spring(), value: viewModel.prompt)
-            .navigationTitle("Generate Recipe")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -107,9 +121,19 @@ struct AIRecipeGeneratorView: View {
 
     // MARK: - Idle input
 
-    /// The "describe a dish" prompt card (primary path), with tap-to-fill ideas.
+    /// The "describe a dish" prompt card (primary path) — warm hero, a gently
+    /// rotating placeholder for ambient inspiration, and a "Surprise me" shortcut.
     private var promptCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            // Warm hero — doubles as the screen's title (nav title is intentionally blank).
+            HStack(spacing: Theme.Spacing.sm) {
+                aiIcon(size: 44)
+                Text("What are you craving?")
+                    .font(.system(.title2, design: .serif).weight(.bold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $viewModel.prompt)
                     .scrollContentBackground(.hidden)
@@ -119,39 +143,51 @@ struct AIRecipeGeneratorView: View {
                     .focused($isPromptFocused)
 
                 if viewModel.prompt.isEmpty {
-                    Text(viewModel.hasSelectedCategories ? "e.g. no peanuts, extra spicy, low sodium…" : "What would you like to cook?")
-                        .foregroundColor(.secondary.opacity(0.6))
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.vertical, Theme.Spacing.lg)
-                        .allowsHitTesting(false)
+                    Group {
+                        if viewModel.hasSelectedCategories {
+                            Text("Add anything else… e.g. no peanuts, extra spicy")
+                        } else {
+                            // Cycles through evocative examples so it never feels static.
+                            Text("Try “\(cravingExamples[placeholderIndex])”")
+                                .id(placeholderIndex)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                                    removal: .move(edge: .top).combined(with: .opacity)
+                                ))
+                        }
+                    }
+                    .font(.body)
+                    .foregroundColor(.secondary.opacity(0.6))
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.lg)
+                    .allowsHitTesting(false)
                 }
             }
 
-            // Starter ideas (only before the user has typed anything)
+            // One-tap magic: fill a creative prompt and start cooking immediately.
             if viewModel.prompt.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        ForEach(starterPrompts, id: \.self) { idea in
-                            Button {
-                                Haptics.light()
-                                viewModel.prompt = idea
-                            } label: {
-                                Text(idea)
-                                    .font(.subheadline)
-                                    .foregroundStyle(Color.cauldronOrange)
-                                    .padding(.horizontal, Theme.Spacing.sm)
-                                    .padding(.vertical, Theme.Spacing.xs)
-                                    .background(Color.cauldronOrange.opacity(0.12), in: Capsule())
-                            }
-                            .buttonStyle(PressableScaleStyle())
-                        }
-                    }
-                    .padding(.vertical, 2)
+                Button {
+                    Haptics.light()
+                    let pick = surprisePrompts.randomElement() ?? cravingExamples[placeholderIndex]
+                    viewModel.prompt = pick
+                    isPromptFocused = false
+                    viewModel.generateRecipe()
+                } label: {
+                    Label("Surprise me", systemImage: "wand.and.stars")
+                        .font(.subheadline.weight(.semibold))
                 }
+                .buttonStyle(.glass)
+                .tint(.cauldronOrange)
             }
         }
         .padding(Theme.Spacing.lg)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
+        .onReceive(placeholderTimer) { _ in
+            guard viewModel.prompt.isEmpty, !viewModel.hasSelectedCategories else { return }
+            withAnimation(.easeInOut(duration: 0.5)) {
+                placeholderIndex = (placeholderIndex + 1) % cravingExamples.count
+            }
+        }
     }
 
     /// Categories tucked behind a disclosure so the prompt stays the hero.
