@@ -798,45 +798,28 @@ struct CollectionDetailView: View {
     }
 
     private var editCollectionButton: some View {
-        Button(action: {
+        Button {
             activeSheet = .edit
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: "pencil")
-                    .font(.subheadline)
-                Text("Edit Collection")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(Color.appSurface, in: Capsule())
-            .contentShape(Rectangle())
+        } label: {
+            Label("Edit Collection", systemImage: "pencil")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(PressableScaleStyle())
+        .buttonStyle(.glass)
+        .controlSize(.large)
     }
 
     private var addRecipesButton: some View {
-        Button(action: {
+        Button {
             activeSheet = .addRecipes
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.subheadline)
-                Text("Add Recipes")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
-            .foregroundColor(.cauldronOrange)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(Color.cauldronOrange.opacity(0.1), in: Capsule())
-            .contentShape(Rectangle())
+        } label: {
+            Label("Add Recipes", systemImage: "plus.circle.fill")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(PressableScaleStyle())
+        .buttonStyle(.glassProminent)
+        .controlSize(.large)
+        .tint(.cauldronOrange)
     }
 
     // MARK: - Helpers
