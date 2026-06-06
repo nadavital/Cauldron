@@ -54,6 +54,17 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    /// Treat the AI generator UI as available even where Apple Intelligence
+    /// isn't (e.g. the simulator), so the input layout can be reviewed.
+    /// Generation itself still requires real on-device support.
+    nonisolated static var forceAIGeneratorUI: Bool {
+        #if DEBUG
+        arguments.contains("--cauldron-ai-preview")
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var canUseCloudKit: Bool {
         !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }
