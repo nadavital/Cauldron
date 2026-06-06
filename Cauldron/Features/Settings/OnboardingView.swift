@@ -34,6 +34,7 @@ struct OnboardingView: View {
     @State private var imagePickerSourceType: UIImagePickerController.SourceType = .photoLibrary
     @State private var referralCode = ""
     @State private var didAutoApplyReferralCode = false
+    @State private var showReferralField = false
 
     private var isValid: Bool {
         username.count >= 3 && username.count <= 20 &&
@@ -167,10 +168,22 @@ struct OnboardingView: View {
                             .textInputAutocapitalization(.words)
                     }
 
-                    fieldGroup(title: "Referral Code", caption: didAutoApplyReferralCode ? "Applied from your invite link." : "Optional — connect with a friend instantly.") {
-                        TextField("Enter code", text: $referralCode)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
+                    if showReferralField || didAutoApplyReferralCode {
+                        fieldGroup(title: "Referral Code", caption: didAutoApplyReferralCode ? "Applied from your invite link." : "Connect with a friend instantly.") {
+                            TextField("Enter code", text: $referralCode)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    } else {
+                        Button {
+                            withAnimation(Theme.Animation.snappy) { showReferralField = true }
+                        } label: {
+                            Label("Add referral code", systemImage: "gift")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.cauldronOrange)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     if let error = errorMessage {
