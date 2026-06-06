@@ -37,12 +37,12 @@ struct AIRecipeGeneratorView: View {
                                 .shadow(color: Color.black.opacity(0.05), radius: 15, x: 0, y: 5)
 
                             if let partial = viewModel.partialRecipe {
-                                recipePreviewSection(partial: partial)
+                                AIRecipePreview(partial: partial)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
 
                             if let error = viewModel.errorMessage {
-                                errorSection(error: error)
+                                AIErrorCard(error: error)
                                     .transition(.scale.combined(with: .opacity))
                             }
                         }
@@ -548,155 +548,6 @@ struct AIRecipeGeneratorView: View {
         .padding(.bottom, 32)
     }
 
-    private func recipePreviewSection(partial: GeneratedRecipe.PartiallyGenerated) -> some View {
-        VStack(alignment: .leading, spacing: 24) {
-            // Title and Metadata Card
-            if let title = partial.title {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(title)
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    // Time & Servings metadata
-                    HStack(spacing: 20) {
-                        if let minutes = partial.totalMinutes {
-                            HStack(spacing: 6) {
-                                Image(systemName: "clock")
-                                    .foregroundColor(.cauldronOrange)
-                                Text("\(minutes) min")
-                            }
-                        }
-
-                        if let yields = partial.yields, !yields.isEmpty {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.2")
-                                    .foregroundColor(.cauldronOrange)
-                                Text(yields)
-                            }
-                        }
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            // Ingredients Card
-            if let ingredients = partial.ingredients, !ingredients.isEmpty {
-                VStack(alignment: .leading, spacing: 16) {
-                    Label("Ingredients", systemImage: "basket")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(ingredients.enumerated()), id: \.offset) { index, ingredient in
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 6))
-                                    .foregroundColor(.cauldronOrange)
-                                    .padding(.top, 8)
-
-                                Text(formatIngredient(ingredient))
-                                    .font(.body)
-                                    .lineLimit(nil)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(.vertical, 4)
-                            .transition(.opacity.combined(with: .move(edge: .leading)))
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
-            }
-
-            // Instructions Card
-            if let steps = partial.steps, !steps.isEmpty {
-                VStack(alignment: .leading, spacing: 16) {
-                    Label("Instructions", systemImage: "list.number")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.primary)
-
-                    VStack(alignment: .leading, spacing: 20) {
-                        ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                            HStack(alignment: .top, spacing: 16) {
-                                Text("\(index + 1)")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(
-                                        Circle()
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [.cauldronOrange, .orange],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
-                                    )
-                                    .shadow(color: .orange.opacity(0.3), radius: 4, x: 0, y: 2)
-
-                                Text(step.text?.decodingHTMLEntities ?? "")
-                                    .font(.body)
-                                    .lineSpacing(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
-            }
-        }
-    }
-
-    private func errorSection(error: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.title3)
-                .foregroundColor(.red)
-                .symbolEffect(.pulse)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Generation Failed")
-                    .font(.headline)
-                    .foregroundColor(.red)
-                
-                Text(error)
-                    .font(.subheadline)
-                    .foregroundColor(.red.opacity(0.8))
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-        .background(Color.red.opacity(0.08))
-        .background(.ultraThinMaterial)
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.red.opacity(0.2), lineWidth: 1)
-        )
-    }
-
     // Helper function to append tags to prompt
     private func appendToPrompt(_ tag: String) {
         if viewModel.prompt.isEmpty {
@@ -708,31 +559,6 @@ struct AIRecipeGeneratorView: View {
         }
     }
 
-    // Helper function to format ingredient for display (matching RecipeDetailView style)
-    private func formatIngredient(_ ingredient: GeneratedIngredient.PartiallyGenerated) -> String {
-        var parts: [String] = []
-
-        // Add quantity and unit if available
-        if let value = ingredient.quantityValue,
-           let unit = ingredient.quantityUnit {
-            let formattedValue = value.truncatingRemainder(dividingBy: 1) == 0
-                ? String(format: "%.0f", value)
-                : String(format: "%.1f", value)
-            parts.append("\(formattedValue) \(unit)")
-        }
-
-        // Add name
-        if let name = ingredient.name {
-            parts.append(name)
-        }
-
-        // Add note if available
-        if let note = ingredient.note {
-            parts.append("(\(note))")
-        }
-
-        return parts.joined(separator: " ")
-    }
 }
 
 // MARK: - Recipe Tag Section
