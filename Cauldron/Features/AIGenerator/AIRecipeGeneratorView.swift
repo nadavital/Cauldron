@@ -14,6 +14,17 @@ struct AIRecipeGeneratorView: View {
     @State private var viewModel: AIRecipeGeneratorViewModel
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
+    @State private var showCategories = false
+
+    /// Tap-to-fill starter ideas to avoid the blank-prompt problem.
+    private let starterPrompts = [
+        "Quick weeknight dinner",
+        "Use up leftover chicken",
+        "Cozy soup for a cold night",
+        "High-protein lunch",
+        "Easy 5-ingredient dessert",
+        "One-pot vegetarian meal"
+    ]
 
     private var isBusyOrDone: Bool {
         viewModel.isGenerating || viewModel.generatedRecipe != nil
@@ -40,7 +51,7 @@ struct AIRecipeGeneratorView: View {
                                     generationStatusStrip
                                 } else {
                                     promptCard
-                                    categoriesCard
+                                    categoriesSection
                                 }
 
                                 if let partial = viewModel.partialRecipe {
@@ -85,26 +96,6 @@ struct AIRecipeGeneratorView: View {
                         dismiss()
                     }
                 }
-
-                if viewModel.generatedRecipe != nil {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save", systemImage: "checkmark") {
-                            // Prevent race condition by setting isSaving immediately
-                            guard !viewModel.isSaving else { return }
-                            viewModel.isSaving = true
-
-                            Task {
-                                if await viewModel.saveRecipe() {
-                                    // Dismiss immediately - CloudKit sync happens in background
-                                    dismiss()
-                                } else {
-                                    viewModel.isSaving = false
-                                }
-                            }
-                        }
-                        .disabled(viewModel.isSaving)
-                    }
-                }
             }
             .task {
                 isAvailable = await viewModel.checkAvailability() || RuntimeEnvironment.forceAIGeneratorUI
@@ -116,25 +107,13 @@ struct AIRecipeGeneratorView: View {
 
     // MARK: - Idle input
 
-    /// The "describe a dish" prompt card (primary path).
+    /// The "describe a dish" prompt card (primary path), with tap-to-fill ideas.
     private var promptCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            HStack(spacing: Theme.Spacing.sm) {
-                aiIcon(size: 40)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Generate with AI")
-                        .font(.system(.title3, design: .serif).weight(.semibold))
-                    Text("Describe a dish, or pick categories below.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $viewModel.prompt)
                     .scrollContentBackground(.hidden)
-                    .frame(minHeight: 110)
+                    .frame(minHeight: 96)
                     .padding(Theme.Spacing.sm)
                     .background(Color.appSurface.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                     .focused($isPromptFocused)
@@ -147,21 +126,73 @@ struct AIRecipeGeneratorView: View {
                         .allowsHitTesting(false)
                 }
             }
+
+            // Starter ideas (only before the user has typed anything)
+            if viewModel.prompt.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        ForEach(starterPrompts, id: \.self) { idea in
+                            Button {
+                                Haptics.light()
+                                viewModel.prompt = idea
+                            } label: {
+                                Text(idea)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.cauldronOrange)
+                                    .padding(.horizontal, Theme.Spacing.sm)
+                                    .padding(.vertical, Theme.Spacing.xs)
+                                    .background(Color.cauldronOrange.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(PressableScaleStyle())
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
         }
         .padding(Theme.Spacing.lg)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
     }
 
-    /// Category selection card (cuisine / diet / time / meal), with chosen tags
-    /// surfaced as removable chips at the top.
-    private var categoriesCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            selectedTagsSummary
+    /// Categories tucked behind a disclosure so the prompt stays the hero.
+    private var categoriesSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Button {
+                withAnimation(Theme.Animation.snappy) { showCategories.toggle() }
+            } label: {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Label("Refine with categories", systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if !viewModel.allSelectedCategories.isEmpty {
+                        Text("\(viewModel.allSelectedCategories.count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 20, minHeight: 20)
+                            .background(Color.cauldronOrange, in: Circle())
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(showCategories ? 180 : 0))
+                }
+                .padding(.horizontal, Theme.Spacing.lg)
+            }
+            .buttonStyle(.plain)
 
-            CategorySelectionRow(title: "Cuisine", icon: "map", options: RecipeCategory.all(in: .cuisine), selected: $viewModel.selectedCuisines)
-            CategorySelectionRow(title: "Diet", icon: "leaf", options: RecipeCategory.all(in: .dietary), selected: $viewModel.selectedDiets)
-            CategorySelectionRow(title: "Time", icon: "clock", options: RecipeCategory.all(in: .other), selected: $viewModel.selectedTimes)
-            CategorySelectionRow(title: "Meal", icon: "fork.knife", options: RecipeCategory.all(in: .mealType), selected: $viewModel.selectedTypes)
+            // Chosen categories stay visible even when collapsed.
+            if !showCategories {
+                selectedTagsSummary
+            }
+
+            if showCategories {
+                selectedTagsSummary
+                CategorySelectionRow(title: "Cuisine", icon: "map", options: RecipeCategory.all(in: .cuisine), selected: $viewModel.selectedCuisines)
+                CategorySelectionRow(title: "Diet", icon: "leaf", options: RecipeCategory.all(in: .dietary), selected: $viewModel.selectedDiets)
+                CategorySelectionRow(title: "Time", icon: "clock", options: RecipeCategory.all(in: .other), selected: $viewModel.selectedTimes)
+                CategorySelectionRow(title: "Meal", icon: "fork.knife", options: RecipeCategory.all(in: .mealType), selected: $viewModel.selectedTypes)
+            }
         }
         .padding(.vertical, Theme.Spacing.lg)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
@@ -255,12 +286,21 @@ struct AIRecipeGeneratorView: View {
         }
     }
 
+    /// Single primary action that morphs Generate → generating → Save.
     private var floatingActionButton: some View {
         Button {
             if viewModel.isGenerating {
-                // Do nothing when generating
+                // No-op while generating.
             } else if viewModel.generatedRecipe != nil {
-                viewModel.regenerate()
+                guard !viewModel.isSaving else { return }
+                viewModel.isSaving = true
+                Task {
+                    if await viewModel.saveRecipe() {
+                        dismiss()
+                    } else {
+                        viewModel.isSaving = false
+                    }
+                }
             } else {
                 viewModel.generateRecipe()
                 isPromptFocused = false
@@ -271,12 +311,16 @@ struct AIRecipeGeneratorView: View {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .tint(.white)
-                    Text("Generating Magic...")
+                    Text("Cooking up your recipe…")
                         .font(.headline)
                 } else if viewModel.generatedRecipe != nil {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.headline)
-                    Text("Regenerate")
+                    if viewModel.isSaving {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.headline)
+                    }
+                    Text("Save Recipe")
                         .font(.headline)
                 } else {
                     Image(systemName: "wand.and.stars")
@@ -291,6 +335,7 @@ struct AIRecipeGeneratorView: View {
         .buttonStyle(.glassProminent)
         .controlSize(.extraLarge)
         .tint(.cauldronOrange)
+        .disabled(viewModel.isGenerating || viewModel.isSaving)
         .padding(.bottom, Theme.Spacing.xl)
     }
 
