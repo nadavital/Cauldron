@@ -517,36 +517,38 @@ struct CookModeView: View {
 
     /// Celebratory overlay shown when the cook finishes the last step.
     private var navigationControls: some View {
-        HStack(spacing: 12) {
-            Button {
-                coordinator.previousStep()
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.extraLarge)
-            .disabled(coordinator.isFirstStep)
-
-            Button {
-                if coordinator.isLastStep {
-                    Haptics.success()
-                    coordinator.endSession()
-                } else {
-                    coordinator.nextStep()
-                }
-            } label: {
-                HStack {
-                    Text(coordinator.isLastStep ? "Done" : "Next")
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    coordinator.previousStep()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
                         .fontWeight(.semibold)
-                    Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                        .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.glass)
+                .controlSize(.extraLarge)
+                .disabled(coordinator.isFirstStep)
+
+                Button {
+                    if coordinator.isLastStep {
+                        Haptics.success()
+                        coordinator.endSession()
+                    } else {
+                        coordinator.nextStep()
+                    }
+                } label: {
+                    HStack {
+                        Text(coordinator.isLastStep ? "Done" : "Next")
+                            .fontWeight(.semibold)
+                        Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(.cauldronOrange)
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.extraLarge)
-            .tint(.cauldronOrange)
         }
         .padding()
     }

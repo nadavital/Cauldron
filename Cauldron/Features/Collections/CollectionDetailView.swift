@@ -618,9 +618,11 @@ struct CollectionDetailView: View {
             }
 
             if isOwned {
-                HStack(spacing: 10) {
-                    editCollectionButton
-                    addRecipesButton
+                GlassEffectContainer(spacing: 12) {
+                    HStack(spacing: 12) {
+                        editCollectionButton
+                        addRecipesButton
+                    }
                 }
                 .padding(.top, 2)
             }
