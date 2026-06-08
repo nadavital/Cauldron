@@ -80,7 +80,7 @@ struct TierProgressView: View {
             }
             .padding(12)
             .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
+            .cornerRadius(Theme.Radius.card)
         }
         .buttonStyle(.plain)
         .disabled(showViewAllTiers == nil)

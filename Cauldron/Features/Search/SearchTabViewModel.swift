@@ -12,6 +12,53 @@ import os
 
 
 
+/// Cooking-time filter for recipe search.
+enum RecipeTimeFilter: String, CaseIterable, Identifiable {
+    case any, under15, under30, under60, over60
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .any: return "Any time"
+        case .under15: return "Under 15 min"
+        case .under30: return "Under 30 min"
+        case .under60: return "Under 60 min"
+        case .over60: return "60 min+"
+        }
+    }
+
+    /// Whether a recipe with the given total minutes passes this filter.
+    /// Recipes without a known time only pass `.any`.
+    func matches(minutes: Int?) -> Bool {
+        guard self != .any else { return true }
+        guard let minutes else { return false }
+        switch self {
+        case .any: return true
+        case .under15: return minutes < 15
+        case .under30: return minutes < 30
+        case .under60: return minutes < 60
+        case .over60: return minutes >= 60
+        }
+    }
+}
+
+/// Sort order for recipe search results.
+enum RecipeSortOrder: String, CaseIterable, Identifiable {
+    case relevance, quickest, alphabetical, newest
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .relevance: return "Relevance"
+        case .quickest: return "Quickest"
+        case .alphabetical: return "A–Z"
+        case .newest: return "Newest"
+        }
+    }
+}
+
 @MainActor
 @Observable final class SearchTabViewModel {
     var allRecipes: [Recipe] = [] // User's own recipes
@@ -19,7 +66,7 @@ import os
     var recipesByTag: [String: [Recipe]] = [:]
     var recipeSearchResults: [SearchRecipeGroup] = []
     var peopleSearchResults: [User] = []
-    var friends: [User] = []
+    var friends: [User] = [] // Used for friend-saver social proof in recipe search ranking
     var isLoading = false
     var isLoadingPeople = false
     var connections: [Connection] = [] // Derived from connectionManager
@@ -27,6 +74,41 @@ import os
     var popularTags: [String] = []
     var selectedCategories: Set<RecipeCategory> = []
     var ownerTiers: [UUID: UserTier] = [:] // Cached owner tiers for search boost
+    var timeFilter: RecipeTimeFilter = .any
+    var sortOrder: RecipeSortOrder = .relevance
+
+    /// Search results after applying the time filter and chosen sort order.
+    /// Category/text filtering already happens upstream in the grouping service.
+    var displayedRecipeResults: [SearchRecipeGroup] {
+        let filtered = timeFilter == .any
+            ? recipeSearchResults
+            : recipeSearchResults.filter { timeFilter.matches(minutes: $0.primaryRecipe.totalMinutes) }
+
+        switch sortOrder {
+        case .relevance:
+            return filtered
+        case .quickest:
+            return filtered.sorted {
+                ($0.primaryRecipe.totalMinutes ?? .max) < ($1.primaryRecipe.totalMinutes ?? .max)
+            }
+        case .alphabetical:
+            return filtered.sorted {
+                $0.primaryRecipe.title.localizedCaseInsensitiveCompare($1.primaryRecipe.title) == .orderedAscending
+            }
+        case .newest:
+            return filtered.sorted { $0.primaryRecipe.createdAt > $1.primaryRecipe.createdAt }
+        }
+    }
+
+    /// Whether any non-default filter/sort is active (for showing a clear control).
+    var hasActiveRefinements: Bool {
+        timeFilter != .any || sortOrder != .relevance
+    }
+
+    func clearRefinements() {
+        timeFilter = .any
+        sortOrder = .relevance
+    }
 
     let dependencies: DependencyContainer
     private var recipeSearchText: String = ""
@@ -158,7 +240,7 @@ import os
         // Update local connections array from manager
         connections = dependencies.connectionManager.connections.values.map { $0.connection }
 
-        // Load friends details
+        // Load friends details (used for friend-saver social proof in search ranking)
         await loadFriends()
     }
 
@@ -166,19 +248,19 @@ import os
         let friendIds = connections
             .filter { $0.isAccepted }
             .compactMap { $0.otherUserId(currentUserId: currentUserId) }
-            
+
         guard !friendIds.isEmpty else {
             friends = []
             return
         }
-        
+
         do {
             friends = try await dependencies.sharingService.getUsers(byIds: friendIds)
         } catch {
             AppLogger.general.error("Failed to load friends: \(error.localizedDescription)")
         }
     }
-    
+
     var recommendedUsers: [User] = []
     
     func loadRecommendations() async {

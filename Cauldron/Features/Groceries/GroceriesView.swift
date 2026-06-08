@@ -35,18 +35,10 @@ struct GroceriesView: View {
                     }
                 }
             }
+            .background(Color.appBackground.ignoresSafeArea())
             .navigationTitle("Groceries")
+            .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if let user = currentUserSession.currentUser {
-                        Button {
-                            showingProfileSheet = true
-                        } label: {
-                            ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
-                        }
-                    }
-                }
-
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Picker("Sort By", selection: $viewMode) {
@@ -82,6 +74,16 @@ struct GroceriesView: View {
                         Image(systemName: "plus")
                     }
                 }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let user = currentUserSession.currentUser {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
+                        }
+                    }
+                }
             }
             .sheet(isPresented: $showingProfileSheet) {
                 NavigationStack {
@@ -114,28 +116,14 @@ struct GroceriesView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "cart")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-
-            Text("No Grocery Items")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Add items manually or from recipes")
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-
-            Button {
-                showingAddItem = true
-            } label: {
-                Label("Add First Item", systemImage: "plus.circle.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.cauldronOrange)
-        }
-        .padding(40)
+        EmptyStateView(
+            title: "No Grocery Items",
+            message: "Add items manually or from recipes.",
+            systemImage: "cart",
+            actionTitle: "Add First Item",
+            action: { showingAddItem = true }
+        )
+        .padding(Theme.Spacing.xxl)
     }
 
     // MARK: - Grouped View (by Recipe)
@@ -155,7 +143,7 @@ struct GroceriesView: View {
                         }
                     }
                 } header: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Theme.Spacing.sm) {
                         // Check/uncheck button on the left
                         Button {
                             Task {
@@ -200,6 +188,7 @@ struct GroceriesView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Ungrouped View
@@ -213,12 +202,14 @@ struct GroceriesView: View {
             }
             .onDelete(perform: deleteItems)
         }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Item Row
 
     private func itemRow(item: GroceryItemDisplay) -> some View {
         Button {
+            Haptics.light()
             Task {
                 await viewModel.toggleItem(id: item.id)
             }
@@ -226,8 +217,10 @@ struct GroceriesView: View {
             HStack {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
                     .foregroundColor(item.isChecked ? .cauldronOrange : .secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: item.isChecked)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text(item.name)
                         .strikethrough(item.isChecked)
                     if let quantity = item.quantity {

@@ -14,9 +14,7 @@ struct RecipeStepsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Instructions", systemImage: "list.number")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Instructions", systemImage: "list.number")
 
             ForEach(sortedSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 8) {
@@ -39,7 +37,7 @@ struct RecipeStepsSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private var groupedSteps: [String: [CookStep]] {
@@ -102,7 +100,7 @@ private struct StepRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(isHighlighted ? Color.cauldronOrange.opacity(0.15) : Color.clear)
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
         .id("step-\(step.index)")
     }
 }

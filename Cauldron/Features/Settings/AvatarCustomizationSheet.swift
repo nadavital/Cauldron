@@ -36,6 +36,7 @@ struct AvatarCustomizationSheet: View {
                 }
                 .padding()
             }
+            .warmCanvas()
             .navigationTitle("Customize Avatar")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -76,7 +77,7 @@ struct AvatarCustomizationSheet: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
     }
 
     private var emojiSection: some View {
@@ -94,7 +95,7 @@ struct AvatarCustomizationSheet: View {
                             .font(.title2)
                             .frame(width: 44, height: 44)
                             .background(selectedEmoji == emoji ? Color.cauldronOrange.opacity(0.2) : Color.cauldronSecondaryBackground)
-                            .cornerRadius(8)
+                            .cornerRadius(Theme.Radius.small)
                     }
                     .buttonStyle(.plain)
                 }

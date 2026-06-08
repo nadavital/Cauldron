@@ -44,7 +44,9 @@ actor SharingService {
 
             // Cache users locally for offline access
             for user in cloudUsers {
-                try? await sharingRepository.save(user)
+                await bestEffort("Cache user for offline access", logger: logger) {
+                    try await sharingRepository.save(user)
+                }
             }
 
             logger.info("Fetched \(cloudUsers.count) users from CloudKit")
@@ -83,7 +85,9 @@ actor SharingService {
             
             // Cache fetched users
             for user in users {
-                try? await sharingRepository.save(user)
+                await bestEffort("Cache fetched user", logger: logger) {
+                    try await sharingRepository.save(user)
+                }
             }
             
             return users

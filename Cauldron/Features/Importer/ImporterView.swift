@@ -250,7 +250,7 @@ struct ImporterView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
                         .padding(12)
-                        .background(Color.cauldronBackground)
+                        .background(Color.appSurface)
                         .cornerRadius(10)
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
@@ -305,7 +305,7 @@ struct ImporterView: View {
                 TextEditor(text: $viewModel.textInput)
                     .frame(minHeight: 220)
                     .padding(12)
-                    .background(Color.cauldronBackground)
+                    .background(Color.appSurface)
                     .cornerRadius(10)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
@@ -360,7 +360,7 @@ struct ImporterView: View {
                 .padding(.vertical, 14)
                 .background(Color.cauldronOrange.opacity(0.12))
                 .foregroundColor(.cauldronOrange)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
             }
 
             Text("When you tap Import Recipe, Cauldron reads the image and tries to build a complete recipe.")
@@ -398,7 +398,7 @@ struct ImporterView: View {
         }
         .padding(16)
         .background(Color.red.opacity(0.1))
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
     }
 
     private func pasteURLFromClipboard() {

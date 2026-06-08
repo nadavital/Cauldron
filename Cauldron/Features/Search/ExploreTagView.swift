@@ -294,7 +294,7 @@ private struct ExploreTagRecipeCardPlaceholder: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Theme.Radius.large)
                 .fill(placeholderFill)
                 .frame(width: cardWidth, height: cardHeight)
 
@@ -529,7 +529,9 @@ final class ExploreTagViewModel {
         for owner in cloudOwners {
             ownersMap[owner.id] = owner
             ownerCache[owner.id] = owner
-            try? await dependencies.sharingRepository.save(owner)
+            await bestEffort("Cache recipe owner") {
+                try await dependencies.sharingRepository.save(owner)
+            }
         }
 
         return ownersMap
@@ -656,7 +658,7 @@ struct TagRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("All Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
@@ -721,7 +723,7 @@ struct TagFriendRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("From Friends")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in
@@ -792,7 +794,7 @@ struct TagPublicRecipesListView: View {
     var body: some View {
         contentView
         .navigationTitle("Community Recipes")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 RecipeLayoutToolbarButton(resolvedMode: resolvedRecipeLayoutMode) { mode in

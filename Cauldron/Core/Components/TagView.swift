@@ -48,13 +48,14 @@ struct TagView: View {
         HStack(spacing: 6) {
             if let emoji = emoji {
                 Text(emoji)
-                    .font(.caption)
+                    .font(.caption2)
             }
             
             Text(displayName)
-                .font(.caption)
+                .font(.caption2)
                 .fontWeight(.medium)
-            
+                .lineLimit(1)
+
             if let onRemove = onRemove {
                 Button(action: onRemove) {
                     Image(systemName: "xmark")
@@ -64,17 +65,27 @@ struct TagView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(displayName) tag")
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(color.opacity(isSelected ? 0.25 : 0.15))
         .foregroundColor(color)
-        .cornerRadius(20)
+        .cornerRadius(Theme.Radius.xLarge)
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: Theme.Radius.xLarge)
                 .stroke(color, lineWidth: isSelected ? 1.5 : 0)
         )
+        // Collapse into a single labeled element only for display-only tags.
+        // When a remove button is present we keep children accessible so the
+        // remove action stays reachable by VoiceOver.
+        .if(onRemove == nil) { view in
+            view
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(displayName)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        }
     }
 }
 

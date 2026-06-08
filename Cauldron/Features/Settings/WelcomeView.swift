@@ -23,7 +23,7 @@ struct WelcomeView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 72, height: 72)
-                        .cornerRadius(16)
+                        .cornerRadius(Theme.Radius.large)
 
                     VStack(spacing: 8) {
                         Text("Welcome to Cauldron")
@@ -45,7 +45,7 @@ struct WelcomeView: View {
                         )
                         FeatureRow(
                             symbol: "timer",
-                            color: .orange,
+                            color: .cauldronOrange,
                             title: "Cook Mode",
                             detail: "Hands-free cooking with step-by-step instructions and built-in timers."
                         )

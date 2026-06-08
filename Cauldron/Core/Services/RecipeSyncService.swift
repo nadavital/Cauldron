@@ -712,7 +712,9 @@ actor RecipeSyncService {
                     cloudImageRecordName: recipe.cloudImageRecordName ?? recipe.id.uuidString,
                     imageModifiedAt: modificationDate
                 )
-                try? await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                await bestEffort("Persist downloaded image metadata for recipe \(recipe.id)", logger: logger) {
+                    try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                }
 
                 // Notify views that recipe image was downloaded (so they can refresh and show the image)
                 await MainActor.run {

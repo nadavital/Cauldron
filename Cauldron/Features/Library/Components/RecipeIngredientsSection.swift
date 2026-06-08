@@ -12,9 +12,7 @@ struct RecipeIngredientsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Ingredients", systemImage: "basket")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Ingredients", systemImage: "basket")
 
             ForEach(sortedSections, id: \.self) { section in
                 VStack(alignment: .leading, spacing: 8) {
@@ -33,7 +31,7 @@ struct RecipeIngredientsSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private var groupedIngredients: [String: [Ingredient]] {

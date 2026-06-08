@@ -15,30 +15,28 @@ struct TierRoadmapView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingImporter = false
     @State private var showingEditor = false
+    @State private var showingAIGenerator = false
+    @State private var isAIAvailable = false
+    @State private var animatedProgress: CGFloat = 0
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    // Explainer
-                    Text("The more recipes you save, the higher your tier and search visibility boost.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                GlassEffectContainer(spacing: 2) {
+                    VStack(spacing: 16) {
+                        // Combined current + next tier section
+                        combinedProgressSection
 
-                    // Combined current + next tier section
-                    combinedProgressSection
+                        // Add recipe CTA
+                        addRecipeCTA
 
-                    // Add recipe CTA
-                    addRecipeCTA
-
-                    // All tiers overview
-                    allTiersSection
+                        // All tiers overview
+                        allTiersSection
+                    }
                 }
                 .padding()
             }
-            .background(Color.cauldronBackground.ignoresSafeArea())
+            .warmCanvas()
             .navigationTitle("Tier Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -53,6 +51,12 @@ struct TierRoadmapView: View {
             }
             .sheet(isPresented: $showingEditor) {
                 RecipeEditorView(dependencies: dependencies)
+            }
+            .sheet(isPresented: $showingAIGenerator) {
+                AIRecipeGeneratorView(dependencies: dependencies)
+            }
+            .task {
+                isAIAvailable = await dependencies.foundationModelsService.isAvailable
             }
         }
     }
@@ -78,6 +82,8 @@ struct TierRoadmapView: View {
                     Image(systemName: currentTier.icon)
                         .font(.system(size: 28))
                         .foregroundColor(currentTier.color)
+                        .scaleEffect(animatedProgress > 0 || currentTier.nextTier == nil ? 1.0 : 0.7)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1), value: animatedProgress)
                 }
 
                 // Tier info
@@ -108,7 +114,7 @@ struct TierRoadmapView: View {
                 let progress = Double(recipeCount - currentTier.requiredRecipes) / Double(nextTier.requiredRecipes - currentTier.requiredRecipes)
 
                 VStack(spacing: 8) {
-                    // Progress bar
+                    // Progress bar (animates from empty → current on appear)
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
@@ -117,21 +123,26 @@ struct TierRoadmapView: View {
 
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(currentTier.color)
-                                .frame(width: geo.size.width * max(0.02, progress), height: 8)
+                                .frame(width: geo.size.width * max(0.02, animatedProgress), height: 8)
                         }
                     }
                     .frame(height: 8)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.7, dampingFraction: 0.8).delay(0.15)) {
+                            animatedProgress = max(0.02, CGFloat(progress))
+                        }
+                    }
 
                     // Recipe count and next tier
                     HStack {
-                        Text("\(recipeCount)/\(nextTier.requiredRecipes) recipes")
+                        Text("\(recipeCount)/\(nextTier.requiredRecipes)")
                             .font(.caption)
                             .foregroundColor(.secondary)
 
                         Spacer()
 
                         HStack(spacing: 4) {
-                            Text("Next:")
+                            Text("\(recipesNeeded) to")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Image(systemName: nextTier.icon)
@@ -143,12 +154,6 @@ struct TierRoadmapView: View {
                                 .foregroundColor(nextTier.color)
                         }
                     }
-
-                    // Recipes needed hint
-                    Text("\(recipesNeeded) more \(recipesNeeded == 1 ? "recipe" : "recipes") to unlock +\(Int((nextTier.searchBoost - currentTier.searchBoost) * 100))% boost")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 // Max tier reached
@@ -156,6 +161,7 @@ struct TierRoadmapView: View {
                     Image(systemName: "crown.fill")
                         .font(.caption)
                         .foregroundColor(.yellow)
+                        .symbolEffect(.pulse, options: .repeating)
                     Text("Max tier reached! Maximum search visibility boost active.")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -165,8 +171,7 @@ struct TierRoadmapView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 12)
     }
 
     // MARK: - Add Recipe CTA
@@ -182,9 +187,17 @@ struct TierRoadmapView: View {
                 Spacer()
             }
 
-            Text("Import from links or create your own to level up faster")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if isAIAvailable {
+                Button {
+                    showingAIGenerator = true
+                } label: {
+                    Label("Generate with AI", systemImage: "apple.intelligence")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cauldronOrange)
+            }
 
             HStack(spacing: 10) {
                 Button {
@@ -209,8 +222,7 @@ struct TierRoadmapView: View {
             }
         }
         .padding()
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 12)
     }
 
     // MARK: - All Tiers Section
@@ -272,12 +284,14 @@ struct TierRoadmapView: View {
                 .font(.caption)
                 .foregroundColor(tier.searchBoost > 1.0 && isUnlocked ? .green : .secondary)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isCurrentTier ? tier.color.opacity(0.1) : Color.clear)
-        )
+        .if(isCurrentTier) { row in
+            row.glassEffect(
+                .regular.tint(tier.color.opacity(0.35)),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+        }
     }
 }
 

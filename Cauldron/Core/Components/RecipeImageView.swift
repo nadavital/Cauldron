@@ -6,6 +6,50 @@
 //
 
 import SwiftUI
+import CoreImage
+
+/// Shared CoreImage context for cheap luminance sampling (creating one per call
+/// is expensive).
+private enum RecipeLuminance {
+    static let context = CIContext(options: [.workingColorSpace: NSNull()])
+}
+
+extension UIImage {
+    /// Average perceived luminance (0 = dark, 1 = light) of the image's top
+    /// region — where overlay chips sit — so callers can pick legible
+    /// white/black foreground colors. Returns nil if it can't be sampled.
+    func topRegionLuminance() -> Double? {
+        guard let cg = cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cg)
+        let extent = ciImage.extent
+        guard extent.height > 0 else { return nil }
+        // Top 35% (CIImage origin is bottom-left, so the top is the high-y band).
+        let topExtent = CGRect(
+            x: extent.minX,
+            y: extent.maxY - extent.height * 0.35,
+            width: extent.width,
+            height: extent.height * 0.35
+        )
+        guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
+            kCIInputImageKey: ciImage,
+            kCIInputExtentKey: CIVector(cgRect: topExtent)
+        ]), let output = filter.outputImage else { return nil }
+
+        var bitmap = [UInt8](repeating: 0, count: 4)
+        RecipeLuminance.context.render(
+            output,
+            toBitmap: &bitmap,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        let r = Double(bitmap[0]) / 255.0
+        let g = Double(bitmap[1]) / 255.0
+        let b = Double(bitmap[2]) / 255.0
+        return 0.299 * r + 0.587 * g + 0.114 * b
+    }
+}
 
 private enum RecipeImageLoadingPipeline {
     static func initialCachedImage(recipeId: UUID?, variant: String) -> UIImage? {
@@ -67,6 +111,9 @@ struct RecipeImageView: View {
     let recipeImageService: RecipeImageService
     let recipeId: UUID?
     let ownerId: UUID?
+    /// Optional: reports the loaded image's average luminance (0 = dark, 1 =
+    /// light) so overlays can pick legible (white/black) foreground colors.
+    var onLuminance: ((Double) -> Void)? = nil
 
     @Environment(\.displayScale) private var displayScale
     @State private var loadedImage: UIImage?
@@ -92,7 +139,8 @@ struct RecipeImageView: View {
         showPlaceholderText: Bool = false,
         recipeImageService: RecipeImageService,
         recipeId: UUID? = nil,
-        ownerId: UUID? = nil
+        ownerId: UUID? = nil,
+        onLuminance: ((Double) -> Void)? = nil
     ) {
         self.imageURL = imageURL
         self.size = size
@@ -100,6 +148,7 @@ struct RecipeImageView: View {
         self.recipeImageService = recipeImageService
         self.recipeId = recipeId
         self.ownerId = ownerId
+        self.onLuminance = onLuminance
 
         // Initialize with cache to avoid placeholder flicker on back-navigation.
         if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId, variant: cacheVariant) {
@@ -133,29 +182,7 @@ struct RecipeImageView: View {
     }
 
     private var placeholderView: some View {
-        ZStack {
-            // Adaptive gradient background
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            VStack(spacing: 8) {
-                Image(systemName: "fork.knife")
-                    .font(.system(size: size.iconSize))
-                    .foregroundStyle(Color.cauldronOrange.opacity(0.3))
-
-                if showPlaceholderText {
-                    Text("No Image")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
+        RecipeImagePlaceholder(iconSize: size.iconSize, showText: showPlaceholderText)
     }
 
     private func loadImage() async {
@@ -174,6 +201,9 @@ struct RecipeImageView: View {
                 loadedImage: &loadedImage,
                 imageOpacity: &imageOpacity
             )
+            if let onLuminance, let luminance = image.topRegionLuminance() {
+                onLuminance(luminance)
+            }
         case .failure:
             break
         }
@@ -304,8 +334,8 @@ extension RecipeImageView {
     }
 
     /// Create a card-sized image view from a Recipe object (with CloudKit fallback)
-    init(recipe: Recipe, recipeImageService: RecipeImageService) {
-        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+    init(recipe: Recipe, recipeImageService: RecipeImageService, onLuminance: ((Double) -> Void)? = nil) {
+        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, onLuminance: onLuminance)
     }
 
     /// Create a thumbnail-sized image view from a Recipe object (with CloudKit fallback)
@@ -376,9 +406,9 @@ struct HeroRecipeImageView: View {
                         // Bottom gradient for smooth transition to content
                         LinearGradient(
                             colors: [
-                                Color(uiColor: .systemBackground).opacity(0),
-                                Color(uiColor: .systemBackground).opacity(0.5),
-                                Color(uiColor: .systemBackground)
+                                Color.appBackground.opacity(0),
+                                Color.appBackground.opacity(0.5),
+                                Color.appBackground
                             ],
                             startPoint: .top,
                             endPoint: .bottom
@@ -408,24 +438,9 @@ struct HeroRecipeImageView: View {
     }
 
     private var placeholderView: some View {
-        ZStack {
-            // Adaptive gradient background
-            LinearGradient(
-                colors: [
-                    Color.cauldronOrange.opacity(0.08),
-                    Color.cauldronOrange.opacity(0.02)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            Image(systemName: "fork.knife")
-                .font(.system(size: 48))
-                .foregroundStyle(Color.cauldronOrange.opacity(0.3))
-        }
-        .frame(height: heroHeight)
-        .frame(maxWidth: .infinity)
-        .background(Color.cauldronOrange.opacity(0.05))
+        RecipeImagePlaceholder(iconSize: 64, showText: false)
+            .frame(height: heroHeight)
+            .frame(maxWidth: .infinity)
     }
 
     private func loadImage() async {

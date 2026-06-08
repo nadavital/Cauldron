@@ -72,7 +72,7 @@ struct RecipeImportPreviewView: View {
                         }
                         .padding()
                         .background(Color.cauldronSecondaryBackground)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                         .padding(.horizontal)
                     
                     // Recipe details
@@ -115,7 +115,7 @@ struct RecipeImportPreviewView: View {
                                             .padding(.vertical, 5)
                                             .background(Color.cauldronOrange.opacity(0.15))
                                             .foregroundColor(.cauldronOrange)
-                                            .cornerRadius(8)
+                                            .cornerRadius(Theme.Radius.small)
                                     }
                                 }
                             }
@@ -233,6 +233,7 @@ struct RecipeImportPreviewView: View {
                     .padding(.vertical)
                 }
             }
+            .warmCanvas()
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -319,7 +320,7 @@ struct RecipeImportPreviewView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.cauldronOrange.opacity(0.1))
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
     }
     
     
@@ -344,6 +345,8 @@ struct RecipeImportPreviewView: View {
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
             NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
+
+            Haptics.success()
 
             // Call the callback to notify parent view
             onSave()

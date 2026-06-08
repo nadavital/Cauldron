@@ -12,9 +12,7 @@ struct RecipeNutritionSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Nutrition", systemImage: "chart.bar.fill")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Nutrition", systemImage: "chart.bar.fill")
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 if let calories = nutrition.calories {
@@ -32,7 +30,7 @@ struct RecipeNutritionSection: View {
             }
         }
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 }
 
@@ -51,7 +49,7 @@ private struct NutritionItem: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.cauldronOrange.opacity(0.1))
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
     }
 }
 

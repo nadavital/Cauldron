@@ -12,6 +12,7 @@ struct CollectionsListView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: CollectionsListViewModel
     @State private var showingCreateSheet = false
+    @Namespace private var cardTransition
 
     init(dependencies: DependencyContainer) {
         _viewModel = State(initialValue: CollectionsListViewModel(dependencies: dependencies))
@@ -19,7 +20,7 @@ struct CollectionsListView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: Theme.Spacing.md) {
                 collectionSection(
                     title: "My Collections",
                     collections: viewModel.filteredOwnedCollections,
@@ -34,40 +35,21 @@ struct CollectionsListView: View {
 
                 // Empty State
                 if !viewModel.hasVisibleCollections {
-                    VStack(spacing: 16) {
-                        Spacer()
-                            .frame(height: 60)
-
-                        Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 60))
-                            .foregroundColor(.secondary)
-
-                        Text("No Collections Yet")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-
-                        Text("Create a collection to organize your recipes")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        Button {
-                            showingCreateSheet = true
-                        } label: {
-                            Label("Create Collection", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.cauldronOrange)
-                        .padding(.top, 8)
-                    }
+                    EmptyStateView(
+                        title: "No Collections Yet",
+                        message: "Create a collection to organize your recipes.",
+                        systemImage: "folder.badge.plus",
+                        actionTitle: "Create Collection",
+                        action: { showingCreateSheet = true }
+                    )
                     .padding()
                 }
             }
             .padding(.vertical)
         }
+        .warmCanvas()
         .navigationTitle("Collections")
-        .navigationBarTitleDisplayMode(.large)
+        .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(text: $viewModel.searchText, prompt: "Search collections")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -109,11 +91,11 @@ struct CollectionsListView: View {
 
     private var gridColumns: [GridItem] {
         if horizontalSizeClass == .regular {
-            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: 12)]
+            return [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: Theme.Spacing.sm)]
         }
         return [
-            GridItem(.flexible(minimum: 150), spacing: 12),
-            GridItem(.flexible(minimum: 150), spacing: 12)
+            GridItem(.flexible(minimum: 150), spacing: Theme.Spacing.sm),
+            GridItem(.flexible(minimum: 150), spacing: Theme.Spacing.sm)
         ]
     }
 
@@ -124,7 +106,7 @@ struct CollectionsListView: View {
         isSavedSection: Bool
     ) -> some View {
         if !collections.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack {
                     Text(title)
                         .font(.headline)
@@ -137,19 +119,23 @@ struct CollectionsListView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+                        .background(Color.appSurface, in: Capsule())
                 }
                 .padding(.horizontal)
 
-                LazyVGrid(columns: gridColumns, spacing: 12) {
+                LazyVGrid(columns: gridColumns, spacing: Theme.Spacing.sm) {
                     ForEach(collections) { collection in
-                        NavigationLink(destination: CollectionDetailView(
-                            collection: collection,
-                            dependencies: dependencies,
-                            initialRecipeImages: viewModel.recipeImages(for: collection),
-                            initialRecipeImageSources: viewModel.recipeImageSources(for: collection),
-                            initialRelation: isSavedSection ? .saved(referenceId: nil) : .owned
-                        )) {
+                        let transitionID = "collection-\(collection.id.uuidString)"
+                        NavigationLink {
+                            CollectionDetailView(
+                                collection: collection,
+                                dependencies: dependencies,
+                                initialRecipeImages: viewModel.recipeImages(for: collection),
+                                initialRecipeImageSources: viewModel.recipeImageSources(for: collection),
+                                initialRelation: isSavedSection ? .saved(referenceId: nil) : .owned
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: cardTransition))
+                        } label: {
                             CollectionCardView(
                                 collection: collection,
                                 recipeImages: viewModel.recipeImages(for: collection),
@@ -159,6 +145,7 @@ struct CollectionsListView: View {
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .matchedTransitionSource(id: transitionID, in: cardTransition)
                         .contextMenu {
                             Button(role: .destructive) {
                                 Task {

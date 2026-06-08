@@ -109,7 +109,7 @@ struct ProfileSheet: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(Color.cauldronOrange.opacity(0.1))
-                            .cornerRadius(12)
+                            .cornerRadius(Theme.Radius.card)
                         }
                     }
                 }
@@ -132,7 +132,7 @@ struct ProfileSheet: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(tier.color.opacity(0.15))
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
     }
 
     // MARK: - Referral Section
@@ -183,7 +183,7 @@ struct ProfileSheet: View {
                             .padding(.horizontal, 20)
                             .padding(.vertical, 12)
                             .background(Color.cauldronOrange.opacity(0.1))
-                            .cornerRadius(12)
+                            .cornerRadius(Theme.Radius.card)
                         }
                         .buttonStyle(.plain)
 
@@ -211,7 +211,7 @@ struct ProfileSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(Color.cauldronOrange)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                     }
                     .buttonStyle(.plain)
 
@@ -220,7 +220,7 @@ struct ProfileSheet: View {
         }
         .padding()
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .cornerRadius(Theme.Radius.large)
     }
 
     // MARK: - Progress Ring
@@ -358,7 +358,7 @@ struct ProfileSheet: View {
                 }
                 .padding()
                 .background(Color.cauldronSecondaryBackground)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
             }
             .buttonStyle(.plain)
         }
@@ -387,7 +387,7 @@ struct ProfileSheet: View {
             }
             .padding(.vertical, 12)
             .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(12)
+            .cornerRadius(Theme.Radius.card)
         }
     }
 
@@ -426,7 +426,7 @@ struct ProfileSheet: View {
                     }
                     .padding()
                     .background(Color.cauldronSecondaryBackground)
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .buttonStyle(.plain)
             }
@@ -446,7 +446,7 @@ struct ProfileSheet: View {
                 }
                 .padding()
                 .background(Color.cauldronSecondaryBackground)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
             }
             .buttonStyle(.plain)
         }

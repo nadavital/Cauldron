@@ -11,30 +11,37 @@ import SwiftUI
 struct ImprovedTimerRowView: View {
     let timer: ActiveTimer
     let timerManager: TimerManager
-    
+
     @State private var remainingSeconds: Int = 0
     @State private var updateTask: Task<Void, Never>?
+    @State private var didComplete = false
+    /// Scales the large timer readout with Dynamic Type.
+    @ScaledMetric(relativeTo: .largeTitle) private var timerFontSize: CGFloat = 32
     
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(timer.spec.label)
                     .font(.headline)
-                
+
                 Text(formatTime(remainingSeconds))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.system(size: timerFontSize, weight: .bold, design: .rounded))
                     .foregroundColor(remainingSeconds <= 10 && timer.isRunning ? .red : .cauldronOrange)
                     .monospacedDigit()
-                
+
                 if !timer.isRunning, let pausedAt = timer.pausedAt {
                     Text("Paused at \(pausedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
-            
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(timer.spec.label)
+            .accessibilityValue(spokenRemaining)
+            .accessibilityAddTraits(.updatesFrequently)
+
             Spacer()
-            
+
             HStack(spacing: 12) {
                 Button {
                     if timer.isRunning {
@@ -51,7 +58,8 @@ struct ImprovedTimerRowView: View {
                         .clipShape(Circle())
                         .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 4)
                 }
-                
+                .accessibilityLabel(timer.isRunning ? "Pause \(timer.spec.label) timer" : "Resume \(timer.spec.label) timer")
+
                 Button {
                     timerManager.stopTimer(id: timer.id)
                 } label: {
@@ -62,12 +70,28 @@ struct ImprovedTimerRowView: View {
                         .foregroundColor(.secondary)
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Stop \(timer.spec.label) timer")
             }
         }
         .padding(16)
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .background(didComplete ? Color.cauldronOrange.opacity(0.18) : Color.cauldronSecondaryBackground)
+        .cornerRadius(Theme.Radius.large)
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.large)
+                .stroke(Color.cauldronOrange.opacity(didComplete ? 0.6 : 0), lineWidth: 2)
+        )
+        .scaleEffect(didComplete ? 1.03 : 1.0)
         .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .animation(Theme.Animation.spring, value: didComplete)
+        .onChange(of: remainingSeconds) { _, newValue in
+            // Celebrate the moment a running timer hits zero.
+            if newValue <= 0 && !didComplete {
+                didComplete = true
+                Haptics.success()
+            } else if newValue > 0 && didComplete {
+                didComplete = false
+            }
+        }
         .onAppear {
             startUpdating()
         }
@@ -99,6 +123,16 @@ struct ImprovedTimerRowView: View {
         } else {
             return String(format: "%02d:%02d", mins, secs)
         }
+    }
+
+    /// Natural-language remaining time for VoiceOver, e.g. "2 minutes 30 seconds remaining, running".
+    private var spokenRemaining: String {
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.allowedUnits = remainingSeconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
+        let duration = formatter.string(from: TimeInterval(max(0, remainingSeconds))) ?? "\(remainingSeconds) seconds"
+        let state = timer.isRunning ? "running" : "paused"
+        return "\(duration) remaining, \(state)"
     }
 }
 
@@ -142,7 +176,7 @@ struct QuickTimerButton: View {
                 .padding(.vertical, 8)
                 .background(Color.cauldronOrange.opacity(0.15))
                 .foregroundColor(.cauldronOrange)
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
         }
         .sheet(isPresented: $showingCustomTimer) {
             NavigationStack {

@@ -20,6 +20,26 @@ struct CookModeView: View {
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
     @State private var checkedIngredientIDs: Set<UUID> = []
+    @State private var scaleFactor: Double = 1.0
+    @State private var unitSystem: UnitSystem = .original
+
+    /// Ingredients adjusted for the current scale factor and unit system.
+    /// Ingredient ids are preserved by both transforms, so check-off state
+    /// survives scaling and conversion.
+    private var displayedIngredients: [Ingredient] {
+        let scaled = scaleFactor == 1.0
+            ? recipe.ingredients
+            : RecipeScaler.scale(recipe, by: scaleFactor).recipe.ingredients
+        return UnitConverter.convert(scaled, to: unitSystem)
+    }
+
+    private var scaleFactorLabel: String {
+        switch scaleFactor {
+        case 0.5: return "½×"
+        case 1.0: return "1×"
+        default: return "\(scaleFactor.formatted(.number.precision(.fractionLength(0...1))))×"
+        }
+    }
 
     init(recipe: Recipe, coordinator: CookModeCoordinator, dependencies: DependencyContainer) {
         self.recipe = recipe
@@ -40,6 +60,7 @@ struct CookModeView: View {
                 compactContent
             }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -60,6 +81,21 @@ struct CookModeView: View {
                         )
                     } label: {
                         Label("View Recipe", systemImage: "book.fill")
+                    }
+
+                    // Scale servings live
+                    Picker("Scale Servings", selection: $scaleFactor) {
+                        Text("½×").tag(0.5)
+                        Text("1×").tag(1.0)
+                        Text("2×").tag(2.0)
+                        Text("3×").tag(3.0)
+                    }
+
+                    // Convert units
+                    Picker("Units", selection: $unitSystem) {
+                        ForEach(UnitSystem.allCases) { system in
+                            Text(system.label).tag(system)
+                        }
                     }
 
                     // View all timers
@@ -213,9 +249,9 @@ struct CookModeView: View {
         .overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [
-                    Color(uiColor: .systemBackground).opacity(0),
-                    Color(uiColor: .systemBackground).opacity(0.5),
-                    Color(uiColor: .systemBackground)
+                    Color.appBackground.opacity(0),
+                    Color.appBackground.opacity(0.5),
+                    Color.appBackground
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -238,7 +274,7 @@ struct CookModeView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
                     .background(Color.cauldronSecondaryBackground)
-                    .cornerRadius(16)
+                    .cornerRadius(Theme.Radius.large)
                     .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
             }
         }
@@ -305,7 +341,7 @@ struct CookModeView: View {
                                     }
                                     .padding(16)
                                     .background(Color.cauldronSecondaryBackground)
-                                    .cornerRadius(16)
+                                    .cornerRadius(Theme.Radius.large)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -335,21 +371,29 @@ struct CookModeView: View {
 
     private var ingredientChecklistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: Theme.Spacing.xs) {
                 Text("Ingredients")
                     .font(.headline)
+                if scaleFactor != 1.0 {
+                    Text(scaleFactorLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.cauldronOrange)
+                        .padding(.horizontal, Theme.Spacing.xs)
+                        .padding(.vertical, 2)
+                        .background(Color.cauldronOrange.opacity(0.15), in: Capsule())
+                }
                 Spacer()
-                Text("\(checkedIngredientIDs.count)/\(recipe.ingredients.count)")
+                Text("\(checkedIngredientIDs.count)/\(displayedIngredients.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if recipe.ingredients.isEmpty {
+            if displayedIngredients.isEmpty {
                 Text("No ingredients available")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(recipe.ingredients) { ingredient in
+                ForEach(displayedIngredients) { ingredient in
                     let isChecked = checkedIngredientIDs.contains(ingredient.id)
 
                     Button {
@@ -359,6 +403,8 @@ struct CookModeView: View {
                             Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(isChecked ? Color.cauldronOrange : .secondary)
                                 .font(.body)
+                                .contentTransition(.symbolEffect(.replace))
+                                .symbolEffect(.bounce, value: isChecked)
 
                             Text(ingredient.displayString)
                                 .font(.subheadline)
@@ -469,42 +515,42 @@ struct CookModeView: View {
         }
     }
 
+    /// Celebratory overlay shown when the cook finishes the last step.
     private var navigationControls: some View {
-        HStack(spacing: 16) {
-            Button {
-                coordinator.previousStep()
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(coordinator.isFirstStep ? Color.cauldronSecondaryBackground.opacity(0.5) : Color.cauldronSecondaryBackground)
-                    .foregroundColor(coordinator.isFirstStep ? .secondary : .primary)
-                    .cornerRadius(12)
-            }
-            .disabled(coordinator.isFirstStep)
-
-            Button {
-                if coordinator.isLastStep {
-                    coordinator.endSession()
-                } else {
-                    coordinator.nextStep()
-                }
-            } label: {
-                HStack {
-                    Text(coordinator.isLastStep ? "Done" : "Next")
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    coordinator.previousStep()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
                         .fontWeight(.semibold)
-                    Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                        .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.cauldronOrange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 4, x: 0, y: 2)
+                .buttonStyle(.glass)
+                .controlSize(.extraLarge)
+                .disabled(coordinator.isFirstStep)
+
+                Button {
+                    if coordinator.isLastStep {
+                        Haptics.success()
+                        coordinator.endSession()
+                    } else {
+                        coordinator.nextStep()
+                    }
+                } label: {
+                    HStack {
+                        Text(coordinator.isLastStep ? "Done" : "Next")
+                            .fontWeight(.semibold)
+                        Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(.cauldronOrange)
             }
         }
         .padding()
-        .background(Color.cauldronBackground)
     }
 }
 

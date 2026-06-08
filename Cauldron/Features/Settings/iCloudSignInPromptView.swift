@@ -52,7 +52,7 @@ struct iCloudSignInPromptView: View {
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.cauldronOrange.opacity(0.1))
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                         .padding(.horizontal)
                         .padding(.top, 8)
                     }
@@ -82,7 +82,7 @@ struct iCloudSignInPromptView: View {
                         .padding()
                         .background(Color.cauldronOrange)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                     }
                     .disabled(isRetrying)
                 }

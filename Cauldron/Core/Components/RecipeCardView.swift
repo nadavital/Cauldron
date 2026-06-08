@@ -27,6 +27,9 @@ import SwiftUI
 /// ```
 struct RecipeCardView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Whether the top of the image is light (→ use dark overlay text). Updated
+    /// from the loaded image's luminance so over-image labels stay legible.
+    @State private var overlayPrefersDarkText = false
 
     let recipe: Recipe
     let dependencies: DependencyContainer
@@ -81,11 +84,13 @@ struct RecipeCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             // Image with contextual overlays
             ZStack {
-                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
-                    .frame(width: cardWidth, height: cardHeight)
+                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService) { luminance in
+                    overlayPrefersDarkText = luminance > 0.6
+                }
+                .frame(width: cardWidth, height: cardHeight)
 
                 if isSharedRecipe {
                     // Shared recipe: show creator overlay
@@ -99,7 +104,7 @@ struct RecipeCardView: View {
 
             // Title - single line for clean look
             Text(recipe.title)
-                .font(.headline)
+                .font(Theme.Typography.cardTitle)
                 .lineLimit(1)
                 .frame(width: cardWidth, height: 20, alignment: .leading)
 
@@ -107,64 +112,93 @@ struct RecipeCardView: View {
             metadataRow
         }
         .frame(width: cardWidth)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Composed VoiceOver description: title, optional creator, time, favorite.
+    private var accessibilityLabel: String {
+        var parts: [String] = [recipe.title]
+        if let creator = sharedBy {
+            parts.append("shared by \(creator.displayName)")
+        }
+        if let time = recipe.displayTime {
+            parts.append(time)
+        }
+        if let tier = creatorTier, tier != .apprentice {
+            parts.append("\(tier.displayName) tier")
+        }
+        if !isSharedRecipe, recipe.isFavorite {
+            parts.append("favorite")
+        }
+        if let firstTag = recipe.tags.first {
+            parts.append(firstTag.name)
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: - Overlay Views
 
     /// Overlay for shared recipes - shows creator info and tier badge
     private var sharedRecipeOverlay: some View {
-        VStack {
-            HStack(alignment: .top) {
-                // Creator info (top left)
-                if let creator = sharedBy {
-                    HStack(spacing: 6) {
-                        ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
+        GlassEffectContainer(spacing: 2) {
+            VStack {
+                HStack(alignment: .top) {
+                    // Creator info (top left)
+                    if let creator = sharedBy {
+                        HStack(spacing: 6) {
+                            ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
 
-                        Text(creator.displayName)
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
+                            Text(creator.displayName)
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                                .foregroundStyle(overlayPrefersDarkText ? .black : .white)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .glassEffect(.clear, in: Capsule())
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
+
+                    Spacer()
+
+                    // Tier badge (top right)
+                    if let tier = creatorTier, tier != .apprentice {
+                        Image(systemName: tier.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(tier.color)
+                            .padding(6)
+                            .glassEffect(.clear, in: Circle())
+                    }
                 }
+                .padding(8)
 
                 Spacer()
-
-                // Tier badge (top right)
-                if let tier = creatorTier, tier != .apprentice {
-                    Image(systemName: tier.icon)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(tier.color)
-                        .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
-                }
             }
-            .padding(8)
-
-            Spacer()
         }
     }
 
     /// Overlay for own recipes - shows favorite star
     private var ownRecipeOverlay: some View {
-        VStack {
-            HStack {
-                Spacer()
+        GlassEffectContainer(spacing: 2) {
+            VStack {
+                HStack {
+                    Spacer()
 
-                // Favorite indicator (top-right)
-                if recipe.isFavorite {
-                    Image(systemName: "star.fill")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                        .padding(6)
-                        .background(Circle().fill(.ultraThinMaterial))
-                        .padding(8)
+                    // Favorite indicator (top-right)
+                    if recipe.isFavorite {
+                        Image(systemName: "star.fill")
+                            .font(.caption)
+                            .foregroundStyle(.yellow)
+                            .padding(6)
+                            .glassEffect(.clear, in: Circle())
+                            .padding(8)
+                    }
                 }
-            }
 
-            Spacer()
+                Spacer()
+            }
         }
     }
 

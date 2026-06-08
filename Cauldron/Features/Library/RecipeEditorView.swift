@@ -57,6 +57,7 @@ struct RecipeEditorView: View {
 
                         Task {
                             if await viewModel.save() {
+                                Haptics.success()
                                 dismiss()
                                 // Call callback if provided (used during import flow)
                                 onSaveAndDismiss?()
@@ -155,7 +156,7 @@ struct RecipeEditorView: View {
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
                     .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
                     .clipped()
                 
                 // Change/Remove image button
@@ -180,8 +181,8 @@ struct RecipeEditorView: View {
                 Button {
                     showingImageOptions = true
                 } label: {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.1))
+                    RoundedRectangle(cornerRadius: Theme.Radius.card)
+                        .fill(Color.appSurface)
                         .frame(height: 200)
                         .overlay {
                             VStack(spacing: 12) {
@@ -406,7 +407,7 @@ struct RecipeEditorView: View {
                 }
                 .padding(12)
                 .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.vertical, 4)
                 .overlay(alignment: .topLeading) {
                 }
@@ -517,7 +518,7 @@ struct RecipeEditorView: View {
                 }
                 .padding(12)
                 .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.vertical, 4)
             }
             
@@ -770,10 +771,10 @@ struct StepEditorRow: View {
             TextEditor(text: $step.text)
                 .frame(minHeight: 80)
                 .padding(8)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
+                .background(Color.appSurface)
+                .cornerRadius(Theme.Radius.small)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Theme.Radius.small)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
             
@@ -858,8 +859,8 @@ struct TimerEditorRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(.systemGray6))
-        .cornerRadius(8)
+        .background(Color.appSurface)
+        .cornerRadius(Theme.Radius.small)
         .onAppear {
             // Initialize display value based on seconds
             if timer.seconds >= 3600 && timer.seconds % 3600 == 0 {

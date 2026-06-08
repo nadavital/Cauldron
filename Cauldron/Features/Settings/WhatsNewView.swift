@@ -23,7 +23,7 @@ struct WhatsNewView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 72, height: 72)
-                        .cornerRadius(16)
+                        .cornerRadius(Theme.Radius.large)
 
                     VStack(spacing: 8) {
                         Text("What's New")
@@ -51,7 +51,7 @@ struct WhatsNewView: View {
                         )
                         FeatureRow(
                             symbol: "list.bullet.rectangle",
-                            color: .orange,
+                            color: .cauldronOrange,
                             title: "Cleaner Recipe Details",
                             detail: "Related recipes, saved recipes, and preview recipes now behave more consistently across your library."
                         )

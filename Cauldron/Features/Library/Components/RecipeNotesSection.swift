@@ -16,9 +16,7 @@ struct RecipeNotesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Notes", systemImage: "note.text")
-                .font(.title2)
-                .fontWeight(.bold)
+            SectionHeaderLabel(title: "Notes", systemImage: "note.text")
 
             // Detect and make URLs clickable
             if let attributedString = makeLinksClickable(notes) {
@@ -42,7 +40,7 @@ struct RecipeNotesSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     private func makeLinksClickable(_ text: String) -> AttributedString? {

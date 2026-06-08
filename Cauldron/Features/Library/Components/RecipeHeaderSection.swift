@@ -131,27 +131,30 @@ struct RecipeHeaderSection: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(warning.color.opacity(0.1))
-                        .cornerRadius(8)
+                        .cornerRadius(Theme.Radius.small)
                     }
                 }
                 .padding(.top, 4)
             }
         }
         .padding()
-        .cardStyle()
+        .glassCard()
     }
 
     @ViewBuilder
     private var primaryHeaderAction: some View {
         if recipe.isOwnedByCurrentUser() {
             Button {
+                // Haptic reflects the state we're moving to.
+                if localIsFavorite { Haptics.light() } else { Haptics.success() }
                 onToggleFavorite()
             } label: {
                 Image(systemName: localIsFavorite ? "star.fill" : "star")
                     .font(.title3.weight(.semibold))
                     .frame(width: 36, height: 36)
                     .foregroundStyle(localIsFavorite ? .yellow : .secondary)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    .glassEffect(.regular, in: Circle())
+                    .symbolEffect(.bounce, value: localIsFavorite)
             }
             .accessibilityLabel(localIsFavorite ? "Remove Favorite" : "Favorite")
         } else if hasOwnedCopy {
@@ -212,7 +215,7 @@ struct RecipeHeaderSection: View {
         .foregroundColor(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func sourceNavigationPill(user: User, text: String) -> some View {
@@ -237,7 +240,7 @@ struct RecipeHeaderSection: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .glassEffect(.regular, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -71,8 +71,8 @@ struct ContentView: View {
                                 await userSession.initialize(dependencies: dependencies)
                             }
                         )
-                    } else if userSession.needsOnboarding {
-                        // Show onboarding for new users
+                    } else if userSession.needsOnboarding || RuntimeEnvironment.shouldForceOnboarding {
+                        // Show onboarding for new users (or when previewing via launch flag)
                         OnboardingView(dependencies: dependencies) {
                             // Onboarding completed, will trigger view update
                         }
@@ -96,7 +96,7 @@ struct ContentView: View {
             // It uses the same background color as the system, creating a seamless transition
             // from the iOS launch screen
             if !isDataReady {
-                Color(uiColor: .systemBackground)
+                Color.appBackground
                     .ignoresSafeArea()
             }
             
@@ -532,7 +532,9 @@ struct ContentView: View {
 
                 for cloudUser in cloudUsers {
                     usersById[cloudUser.id] = cloudUser
-                    try? await sharingRepository.save(cloudUser)
+                    await bestEffort("Cache related user") {
+                        try await sharingRepository.save(cloudUser)
+                    }
                 }
             }
 

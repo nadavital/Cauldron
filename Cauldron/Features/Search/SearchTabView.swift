@@ -16,6 +16,7 @@ struct SearchTabView: View {
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
     @State private var showingProfileSheet = false
+    @Namespace private var recipeTransition
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -87,12 +88,14 @@ struct SearchTabView: View {
         NavigationStack(path: $navigationPath) {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .refreshable {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
                 .navigationDestination(for: Recipe.self) { recipe in
                     RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                        .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
                 }
                 .navigationDestination(for: User.self) { user in
                     UserProfileView(user: user, dependencies: viewModel.dependencies)
@@ -113,6 +116,7 @@ struct SearchTabView: View {
         NavigationSplitView {
             searchContent
                 .navigationTitle("Search")
+                .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
                 .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
                 .refreshable {
@@ -148,7 +152,7 @@ struct SearchTabView: View {
     private var searchContent: some View {
         VStack(spacing: 0) {
             #if targetEnvironment(macCatalyst)
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                 TextField(
@@ -172,7 +176,7 @@ struct SearchTabView: View {
 
             // Content based on search mode
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     if searchMode == .recipes {
                         if searchText.isEmpty && viewModel.selectedCategories.isEmpty {
                             // Show categories when not searching and no filters
@@ -189,10 +193,11 @@ struct SearchTabView: View {
                 .padding()
             }
         }
+        .warmCanvas()
     }
 
     private var splitDetailPlaceholder: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Theme.Spacing.md) {
             Image(systemName: searchMode == .recipes ? "fork.knife" : "person.2")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
@@ -208,7 +213,7 @@ struct SearchTabView: View {
 
     @ToolbarContentBuilder
     private var searchToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .navigationBarTrailing) {
             if let user = currentUserSession.currentUser {
                 Button {
                     showingProfileSheet = true
@@ -220,7 +225,7 @@ struct SearchTabView: View {
     }
     
     private var categoriesView: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             // Active Filters (if any)
             if !viewModel.selectedCategories.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -233,7 +238,7 @@ struct SearchTabView: View {
                                     viewModel.toggleCategory(category)
                                 })
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(PressableScaleStyle())
                         }
                     }
                 }
@@ -241,38 +246,42 @@ struct SearchTabView: View {
             
             // Categories Grid
             ForEach(RecipeCategory.Section.allCases, id: \.self) { section in
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     Text(section.rawValue)
                         .font(.title3)
                         .fontWeight(.bold)
-                    
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                        ForEach(RecipeCategory.all(in: section)) { category in
-                            Button {
-                                navigationPath.append(Tag(name: category.tagValue))
-                            } label: {
-                                HStack(spacing: 12) {
-                                    // Icon Container
-                                    ZStack {
-                                        Circle()
-                                            .fill(category.color.opacity(0.15))
-                                            .frame(width: 40, height: 40)
-                                        Text(category.emoji)
-                                            .font(.title3)
+
+                    GlassEffectContainer(spacing: 2) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
+                            ForEach(RecipeCategory.all(in: section)) { category in
+                                Button {
+                                    navigationPath.append(Tag(name: category.tagValue))
+                                } label: {
+                                    HStack(spacing: Theme.Spacing.sm) {
+                                        // Icon Container
+                                        ZStack {
+                                            Circle()
+                                                .fill(category.color.opacity(0.15))
+                                                .frame(width: 40, height: 40)
+                                            Text(category.emoji)
+                                                .font(.title3)
+                                        }
+
+                                        Text(category.displayName)
+                                            .font(.body)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.primary)
+
+                                        Spacer()
                                     }
-
-                                    Text(category.displayName)
-                                        .font(.body)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.primary)
-
-                                    Spacer()
+                                    .padding(Theme.Spacing.sm)
+                                    .glassEffect(
+                                        .regular.tint(category.color.opacity(0.35)).interactive(),
+                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                    )
                                 }
-                                .padding(8)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .cornerRadius(12)
+                                .buttonStyle(PressableScaleStyle())
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -281,66 +290,122 @@ struct SearchTabView: View {
     }
     
     private var recipeSearchResultsView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if viewModel.recipeSearchResults.isEmpty && viewModel.isLoading {
-                HStack {
-                    Spacer()
-                    ProgressView("Searching...")
-                    Spacer()
-                }
-                .padding(.vertical, 40)
-            } else if viewModel.recipeSearchResults.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary)
-                    Text("No recipes found")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("Try searching for different keywords")
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            let results = viewModel.displayedRecipeResults
+
+            if viewModel.recipeSearchResults.isEmpty {
+                EmptyStateView(
+                    title: "No Recipes Found",
+                    message: "Try searching for different keywords.",
+                    systemImage: "magnifyingglass"
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Spacing.xxl)
+            } else {
+                refinementBar
+
+                if results.isEmpty {
+                    EmptyStateView(
+                        title: "No Matches",
+                        message: "No recipes match the current filters.",
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.xl)
+                } else {
+                    Text("\(results.count) recipe\(results.count == 1 ? "" : "s")")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 40)
-            } else {
-                Text("\(viewModel.recipeSearchResults.count) recipes found")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
 
-                if viewModel.isLoading {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Refreshing")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    ForEach(results) { group in
+                        Button {
+                            navigationPath.append(group.primaryRecipe)
+                        } label: {
+                            SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
+                        }
+                        .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: group.primaryRecipe.id, in: recipeTransition)
                     }
-                }
-
-                ForEach(viewModel.recipeSearchResults) { group in
-                    Button {
-                        navigationPath.append(group.primaryRecipe)
-                    } label: {
-                        SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
     }
+
+    /// Time filter + sort controls shown above recipe results.
+    private var refinementBar: some View {
+        GlassEffectContainer(spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
+            Menu {
+                Picker("Time", selection: $viewModel.timeFilter) {
+                    ForEach(RecipeTimeFilter.allCases) { filter in
+                        Text(filter.label).tag(filter)
+                    }
+                }
+            } label: {
+                refinementChip(
+                    title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
+                    systemImage: "clock",
+                    isActive: viewModel.timeFilter != .any
+                )
+            }
+
+            Menu {
+                Picker("Sort", selection: $viewModel.sortOrder) {
+                    ForEach(RecipeSortOrder.allCases) { order in
+                        Text(order.label).tag(order)
+                    }
+                }
+            } label: {
+                refinementChip(
+                    title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
+                    systemImage: "arrow.up.arrow.down",
+                    isActive: viewModel.sortOrder != .relevance
+                )
+            }
+
+            if viewModel.hasActiveRefinements {
+                Button {
+                    withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Clear filters")
+            }
+
+            Spacer()
+            }
+        }
+    }
+
+    private func refinementChip(title: String, systemImage: String, isActive: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.xxs) {
+            Image(systemName: systemImage)
+            Text(title)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.semibold))
+        }
+        .font(.subheadline)
+        .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
+        .glassEffect(
+            isActive ? .regular.tint(Color.cauldronOrange.opacity(0.25)) : .regular,
+            in: Capsule()
+        )
+    }
     
     private var peopleSearchView: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if searchText.isEmpty {
-                // Show friends list if available, otherwise show empty state
-                if !viewModel.friends.isEmpty {
-                    Text("Your Friends")
+                // Recommendations only (no friends list)
+                if !viewModel.recommendedUsers.isEmpty {
+                    Text("Suggested for You")
                         .font(.headline)
                         .foregroundColor(.secondary)
                         .padding(.top, 8)
-                    
-                    ForEach(viewModel.friends) { user in
+
+                    ForEach(viewModel.recommendedUsers) { user in
                         Button {
                             navigationPath.append(user)
                         } label: {
@@ -349,38 +414,18 @@ struct SearchTabView: View {
                                 viewModel: viewModel
                             )
                         }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    // Recommended Users (Friends of Friends)
-                    if !viewModel.recommendedUsers.isEmpty {
-                        Text("Suggested for You")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 24)
-                        
-                        ForEach(viewModel.recommendedUsers) { user in
-                            Button {
-                                navigationPath.append(user)
-                            } label: {
-                                UserSearchRowView(
-                                    user: user,
-                                    viewModel: viewModel
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        .buttonStyle(PressableScaleStyle())
                     }
                 } else {
-                    VStack(spacing: 16) {
+                    VStack(spacing: Theme.Spacing.md) {
                         Image(systemName: "person.2")
                             .font(.system(size: 48))
                             .foregroundColor(.secondary)
-                        
+
                         Text("Search for People")
                             .font(.headline)
                             .foregroundColor(.secondary)
-                            
+
                         Text("Find friends to share recipes with")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -393,7 +438,7 @@ struct SearchTabView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
             } else if viewModel.peopleSearchResults.isEmpty {
-                VStack(spacing: 16) {
+                VStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "person.2.slash")
                         .font(.system(size: 48))
                         .foregroundColor(.secondary)
@@ -430,28 +475,20 @@ struct SearchTabView: View {
                             viewModel: viewModel
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableScaleStyle())
                 }
             }
         }
     }
     
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
-            
-            Text("No Recipes Yet")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Add recipes to see them organized by category")
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
+        EmptyStateView(
+            title: "No Recipes Yet",
+            message: "Add recipes to see them organized by category.",
+            systemImage: "book.closed"
+        )
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, Theme.Spacing.xxl)
     }
 }
 
@@ -467,10 +504,10 @@ struct UserSearchRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.Spacing.sm) {
             ProfileAvatar(user: user, size: 50, dependencies: viewModel.dependencies)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(user.displayName)
                     .font(.headline)
 
@@ -538,16 +575,16 @@ struct UserSearchRowView: View {
                     await retryFailedOperation()
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.cauldronOrange)
                     Text("Retry")
                         .font(.caption)
                 }
             }
 
         case .pendingIncoming:
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Spacing.xs) {
                 Button {
                     Task {
                         await acceptConnectionRequest()
@@ -607,10 +644,10 @@ struct UserRowView: View {
     let user: User
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.Spacing.sm) {
             ProfileAvatar(user: user, size: 50)
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(user.displayName)
                     .font(.headline)
                 
@@ -630,12 +667,12 @@ struct SearchRecipeGroupRow: View {
     let dependencies: DependencyContainer
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             RecipeRowView(recipe: group.primaryRecipe, dependencies: dependencies)
             
             // Social Context / Save Count Footer
             if !group.friendSavers.isEmpty {
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "person.2.fill")
                         .font(.caption)
                     
@@ -650,7 +687,7 @@ struct SearchRecipeGroupRow: View {
                 .foregroundColor(.secondary)
                 .padding(.leading, 80) // Align to text content of row (approx image width + spacing)
             } else if group.saveCount > 1 {
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "bookmark.fill")
                         .font(.caption)
                     Text("\(group.saveCount) saves")

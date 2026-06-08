@@ -29,8 +29,7 @@ struct DeleteAccountView: View {
 
                 // Title
                 Text("Delete Account")
-                    .font(.title)
-                    .fontWeight(.bold)
+                    .font(.system(.title, design: .serif).weight(.bold))
 
                 // Warning text
                 VStack(spacing: 16) {
@@ -52,8 +51,7 @@ struct DeleteAccountView: View {
                     .foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(12)
+                    .background(Color.appSurface, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                 }
                 .padding(.horizontal)
 
@@ -80,6 +78,7 @@ struct DeleteAccountView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
+            .warmCanvas()
             .navigationTitle("Delete Account")
             .navigationBarTitleDisplayMode(.inline)
             .alert("Delete Account?", isPresented: $showingDeleteConfirmation) {

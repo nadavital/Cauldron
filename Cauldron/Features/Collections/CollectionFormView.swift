@@ -99,7 +99,7 @@ struct CollectionFormView: View {
                             .padding(.vertical, 10)
                             .background(
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color(.secondarySystemGroupedBackground))
+                                    .fill(Color.appSurface)
                             )
 
                         symbolSelectionRow
@@ -143,8 +143,8 @@ struct CollectionFormView: View {
                                 if recipe.imageURL != nil {
                                     RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
                                 } else {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.gray.opacity(0.2))
+                                    RoundedRectangle(cornerRadius: Theme.Radius.small)
+                                        .fill(Color.appSurface)
                                         .frame(width: 60, height: 60)
                                         .overlay(
                                             Image(systemName: "photo")
@@ -342,7 +342,7 @@ struct CollectionFormView: View {
                             colors: [
                                 selectedColor.opacity(0.26),
                                 selectedColor.opacity(0.10),
-                                Color(.secondarySystemGroupedBackground)
+                                Color.appSurface
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -366,7 +366,7 @@ struct CollectionFormView: View {
                     .font(.title2)
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, selectedColor)
-                    .background(Circle().fill(Color(.systemBackground)))
+                    .background(Circle().fill(Color.appSurface))
                     .padding(10)
             }
         }

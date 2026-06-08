@@ -21,8 +21,11 @@ struct PeopleSearchSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    // Search results or suggestions
+                    // Search results or (requests + suggestions)
                     if viewModel.searchText.isEmpty {
+                        if !resolvableRequests.isEmpty {
+                            requestsSection
+                        }
                         suggestionsSection
                     } else {
                         searchResultsSection
@@ -50,6 +53,40 @@ struct PeopleSearchSheet: View {
                 Button("OK") { }
             } message: {
                 Text(viewModel.alertMessage)
+            }
+        }
+    }
+
+    // MARK: - Requests Section
+
+    /// Pending received requests whose sender we've already resolved to a User
+    /// (so we never render a section header with no rows).
+    private var resolvableRequests: [(connection: Connection, user: User)] {
+        viewModel.receivedRequests.compactMap { connection in
+            viewModel.usersMap[connection.fromUserId].map { (connection, $0) }
+        }
+    }
+
+    private var requestsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .foregroundColor(.cauldronOrange)
+                Text("Friend Requests")
+                    .font(.headline)
+                Spacer()
+            }
+
+            ForEach(resolvableRequests, id: \.connection.id) { item in
+                PeopleSearchUserRow(
+                    user: item.user,
+                    dependencies: dependencies,
+                    connectionState: .pendingIncoming,
+                    onConnect: {},
+                    onAccept: { await viewModel.acceptRequest(from: item.user) },
+                    onReject: { await viewModel.rejectRequest(from: item.user) },
+                    onRetry: {}
+                )
             }
         }
     }
@@ -234,7 +271,7 @@ struct PeopleSearchUserRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
 
         case .pendingIncoming:
             HStack(spacing: 8) {
@@ -284,7 +321,7 @@ struct PeopleSearchUserRow: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.cauldronOrange)
                     Text("Retry")
                         .font(.caption)
                 }
@@ -374,12 +411,24 @@ final class PeopleSearchViewModel {
             userIds.insert(connection.toUserId)
         }
 
-        for userId in userIds {
-            if usersMap[userId] == nil {
-                if let user = try? await dependencies.userCloudService.fetchUser(byUserId: userId) {
-                    usersMap[userId] = user
-                }
+        // Resolve users local-first (works offline), then cloud.
+        for userId in userIds where usersMap[userId] == nil {
+            if let cached = try? await dependencies.sharingRepository.fetchUser(id: userId) {
+                usersMap[userId] = cached
+            } else if let user = try? await dependencies.userCloudService.fetchUser(byUserId: userId) {
+                usersMap[userId] = user
             }
+        }
+
+        // Final fallback: build a minimal user from the request's embedded
+        // sender info so a pending request always renders (badge ↔ row stay in
+        // sync even when cloud/local lookups miss).
+        for connection in receivedRequests where usersMap[connection.fromUserId] == nil {
+            usersMap[connection.fromUserId] = User(
+                id: connection.fromUserId,
+                username: connection.fromUsername ?? "",
+                displayName: connection.fromDisplayName ?? connection.fromUsername ?? "Friend"
+            )
         }
     }
 

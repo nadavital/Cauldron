@@ -20,6 +20,34 @@ struct AppLogger {
     nonisolated static let network = Logger(subsystem: subsystem, category: "network")
 }
 
+// MARK: - Best-Effort Operation Helper
+
+/// Run a throwing async operation as *best-effort*: if it fails, the error is
+/// logged (so it's diagnosable) but swallowed (so it doesn't interrupt the user).
+///
+/// Use this instead of a bare `try?` for non-critical background work — cache
+/// writes, best-effort sync, opportunistic saves — where failure shouldn't stop
+/// the flow but should never disappear silently.
+///
+/// ```swift
+/// await bestEffort("Cache shared user") {
+///     try await sharingRepository.save(cloudUser)
+/// }
+/// ```
+@discardableResult
+func bestEffort<T>(
+    _ context: @autoclosure () -> String,
+    logger: Logger = AppLogger.general,
+    operation: () async throws -> T
+) async -> T? {
+    do {
+        return try await operation()
+    } catch {
+        logger.warning("\(context()) failed: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 // MARK: - Debug Logging Helper
 /// Extension to make logs visible in Xcode console during development
 extension Logger {

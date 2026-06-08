@@ -42,7 +42,7 @@ enum UserTier: Int, CaseIterable, Comparable {
         case .apprentice: return Color(hex: "#8E8E93") ?? .gray         // Gray
         case .potionMaker: return Color(hex: "#CD7F32") ?? .orange      // Bronze
         case .spellCaster: return Color(hex: "#FF3B30") ?? .red         // Red
-        case .grandWizard: return Color(hex: "#FFD700") ?? .yellow      // Gold
+        case .grandWizard: return Color(hex: "#E8A317") ?? .orange      // Amber gold (legible on light)
         case .legendarySorcerer: return Color(hex: "#AF52DE") ?? .purple // Purple
         }
     }

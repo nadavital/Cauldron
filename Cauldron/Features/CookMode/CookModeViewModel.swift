@@ -54,23 +54,17 @@ final class CookModeViewModel {
         if let newStep = await dependencies.cookSessionManager.nextStep() {
             currentStepIndex = newStep
             updateProgress()
-            
-            // Haptic feedback
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
+            Haptics.medium()
         }
     }
-    
+
     func previousStep() async {
         guard canGoBack else { return }
-        
+
         if let newStep = await dependencies.cookSessionManager.previousStep() {
             currentStepIndex = newStep
             updateProgress()
-            
-            // Haptic feedback
-            let generator = UIImpactFeedbackGenerator(style: .light)
-            generator.impactOccurred()
+            Haptics.light()
         }
     }
     
