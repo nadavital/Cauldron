@@ -256,11 +256,11 @@ struct UserProfileView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 56, height: 56)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                         .blur(radius: isUnlocked ? 0 : 3)
                         .opacity(isUnlocked ? 1.0 : 0.5)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: Theme.Radius.card)
                                 .stroke(isSelected ? Color.cauldronOrange : Color.clear, lineWidth: 2)
                         )
 
@@ -434,7 +434,7 @@ struct UserProfileView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.green.opacity(0.15))
-                    .cornerRadius(8)
+                    .cornerRadius(Theme.Radius.small)
                 }
 
             case .pendingOutgoing:
@@ -455,11 +455,11 @@ struct UserProfileView: View {
                             .font(.caption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(.orange)
+                    .foregroundColor(.cauldronOrange)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.15))
-                    .cornerRadius(8)
+                    .background(Color.cauldronOrange.opacity(0.15))
+                    .cornerRadius(Theme.Radius.small)
                 }
 
             case .pendingIncoming:
@@ -475,7 +475,7 @@ struct UserProfileView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.blue.opacity(0.15))
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
 
             case .none:
                 // Add Friend badge - tap to send request
@@ -495,7 +495,7 @@ struct UserProfileView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Color.cauldronOrange.opacity(0.15))
-                    .cornerRadius(8)
+                    .cornerRadius(Theme.Radius.small)
                 }
 
             case .syncing:
@@ -515,11 +515,11 @@ struct UserProfileView: View {
                             .font(.caption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(.orange)
+                    .foregroundColor(.cauldronOrange)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.15))
-                    .cornerRadius(8)
+                    .background(Color.cauldronOrange.opacity(0.15))
+                    .cornerRadius(Theme.Radius.small)
                 }
 
             case .currentUser:

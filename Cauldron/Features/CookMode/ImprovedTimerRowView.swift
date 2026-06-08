@@ -75,9 +75,9 @@ struct ImprovedTimerRowView: View {
         }
         .padding(16)
         .background(didComplete ? Color.cauldronOrange.opacity(0.18) : Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .cornerRadius(Theme.Radius.large)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Theme.Radius.large)
                 .stroke(Color.cauldronOrange.opacity(didComplete ? 0.6 : 0), lineWidth: 2)
         )
         .scaleEffect(didComplete ? 1.03 : 1.0)
@@ -176,7 +176,7 @@ struct QuickTimerButton: View {
                 .padding(.vertical, 8)
                 .background(Color.cauldronOrange.opacity(0.15))
                 .foregroundColor(.cauldronOrange)
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
         }
         .sheet(isPresented: $showingCustomTimer) {
             NavigationStack {

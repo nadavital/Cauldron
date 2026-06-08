@@ -52,7 +52,7 @@ struct TierBadgeView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(tier.color.opacity(0.15))
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
     }
 
     // MARK: - Expanded Style (Icon + name + boost)

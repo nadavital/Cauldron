@@ -177,7 +177,7 @@ struct CollectionCardView: View {
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 12))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: Theme.Radius.card)
                         .stroke(collectionColor.opacity(0.2), lineWidth: 1)
                 )
                 .overlay(alignment: .topLeading) {

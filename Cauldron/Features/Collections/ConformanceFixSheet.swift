@@ -52,7 +52,7 @@ struct ConformanceFixSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(.cauldronOrange)
                             .font(.title2)
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -66,8 +66,8 @@ struct ConformanceFixSheet: View {
                         }
                     }
                     .padding()
-                    .background(Color.orange.opacity(0.1))
-                    .cornerRadius(12)
+                    .background(Color.cauldronOrange.opacity(0.1))
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .padding()
 
@@ -172,7 +172,7 @@ struct ConformanceFixSheet: View {
                         .padding()
                         .background(selectedRecipeIds.isEmpty ? Color.gray : Color.cauldronOrange)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                     }
                     .disabled(selectedRecipeIds.isEmpty || isUpdating)
                 }
@@ -212,7 +212,7 @@ struct ConformanceFixSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
                                 .padding(6)
-                                .background(Circle().fill(.ultraThinMaterial))
+                                .glassEffect(.regular, in: Circle())
                                 .padding(6)
                         }
                     },

@@ -291,7 +291,7 @@ struct CollectionDetailView: View {
         } label: {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
+                    .foregroundColor(.cauldronOrange)
                     .font(.title3)
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
@@ -313,8 +313,8 @@ struct CollectionDetailView: View {
                     .font(.caption)
             }
             .padding()
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(12)
+            .background(Color.cauldronOrange.opacity(0.1))
+            .cornerRadius(Theme.Radius.card)
         }
         .buttonStyle(PressableScaleStyle())
         .padding(.horizontal, 16)

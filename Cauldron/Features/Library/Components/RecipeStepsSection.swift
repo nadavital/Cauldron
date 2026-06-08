@@ -100,7 +100,7 @@ private struct StepRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(isHighlighted ? Color.cauldronOrange.opacity(0.15) : Color.clear)
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
         .id("step-\(step.index)")
     }
 }

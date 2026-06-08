@@ -156,7 +156,7 @@ struct RecipeEditorView: View {
                     .scaledToFill()
                     .frame(maxWidth: .infinity)
                     .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
                     .clipped()
                 
                 // Change/Remove image button
@@ -181,7 +181,7 @@ struct RecipeEditorView: View {
                 Button {
                     showingImageOptions = true
                 } label: {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: Theme.Radius.card)
                         .fill(Color.appSurface)
                         .frame(height: 200)
                         .overlay {
@@ -407,7 +407,7 @@ struct RecipeEditorView: View {
                 }
                 .padding(12)
                 .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.vertical, 4)
                 .overlay(alignment: .topLeading) {
                 }
@@ -518,7 +518,7 @@ struct RecipeEditorView: View {
                 }
                 .padding(12)
                 .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.vertical, 4)
             }
             
@@ -782,9 +782,9 @@ struct StepEditorRow: View {
                 .frame(minHeight: 80)
                 .padding(8)
                 .background(Color.appSurface)
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Theme.Radius.small)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
             
@@ -870,7 +870,7 @@ struct TimerEditorRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.appSurface)
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
         .onAppear {
             // Initialize display value based on seconds
             if timer.seconds >= 3600 && timer.seconds % 3600 == 0 {

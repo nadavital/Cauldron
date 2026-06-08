@@ -49,7 +49,7 @@ private struct NutritionItem: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.cauldronOrange.opacity(0.1))
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
     }
 }
 

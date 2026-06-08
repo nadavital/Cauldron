@@ -203,7 +203,7 @@ struct ProfileEditView: View {
                                 .textCase(.lowercase)
                                 .padding()
                                 .background(Color.cauldronSecondaryBackground)
-                                .cornerRadius(12)
+                                .cornerRadius(Theme.Radius.card)
 
                             Text("3-20 characters, letters, numbers, and underscores only")
                                 .font(.caption)
@@ -220,7 +220,7 @@ struct ProfileEditView: View {
                                 .textInputAutocapitalization(.words)
                                 .padding()
                                 .background(Color.cauldronSecondaryBackground)
-                                .cornerRadius(12)
+                                .cornerRadius(Theme.Radius.card)
 
                             Text("This is how others will see you")
                                 .font(.caption)
@@ -261,7 +261,7 @@ struct ProfileEditView: View {
                                 }
                                 .padding()
                                 .background(Color.cauldronSecondaryBackground)
-                                .cornerRadius(12)
+                                .cornerRadius(Theme.Radius.card)
                             }
                             .buttonStyle(.plain)
                         }
@@ -277,7 +277,7 @@ struct ProfileEditView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
+                                        .foregroundColor(.cauldronOrange)
                                     Text("Delete Account")
                                         .foregroundColor(.primary)
                                     Spacer()
@@ -287,7 +287,7 @@ struct ProfileEditView: View {
                                 }
                                 .padding()
                                 .background(Color.cauldronSecondaryBackground)
-                                .cornerRadius(12)
+                                .cornerRadius(Theme.Radius.card)
                             }
                             .buttonStyle(.plain)
                         }

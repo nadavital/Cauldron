@@ -51,7 +51,7 @@ struct AIUnavailableCard: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 44))
-                .foregroundColor(.orange)
+                .foregroundColor(.cauldronOrange)
 
             Text("Apple Intelligence Not Available")
                 .font(.headline)
@@ -79,7 +79,7 @@ struct AnimatedMeshGradient: View {
             GeometryReader { proxy in
                 ZStack {
                     Circle()
-                        .fill(Color.orange.opacity(0.15))
+                        .fill(Color.cauldronOrange.opacity(0.15))
                         .frame(width: proxy.size.width * 0.8)
                         .blur(radius: 60)
                         .offset(x: animate ? -50 : 50, y: animate ? -50 : 50)
@@ -148,9 +148,7 @@ struct AIRecipePreview: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -181,9 +179,7 @@ struct AIRecipePreview: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
             }
 
             if let steps = partial.steps, !steps.isEmpty {
@@ -210,7 +206,7 @@ struct AIRecipePreview: View {
                                                 )
                                             )
                                     )
-                                    .shadow(color: .orange.opacity(0.3), radius: 4, x: 0, y: 2)
+                                    .shadow(color: .cauldronOrange.opacity(0.3), radius: 4, x: 0, y: 2)
 
                                 Text(step.text?.decodingHTMLEntities ?? "")
                                     .font(.body)
@@ -223,9 +219,7 @@ struct AIRecipePreview: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
-                .background(.ultraThinMaterial)
-                .cornerRadius(20)
-                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 5)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
             }
         }
     }
@@ -278,11 +272,9 @@ struct AIErrorCard: View {
             Spacer(minLength: 0)
         }
         .padding(20)
-        .background(Color.red.opacity(0.08))
-        .background(.ultraThinMaterial)
-        .cornerRadius(16)
+        .glassEffect(.regular.tint(Color.red.opacity(0.12)), in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                 .stroke(Color.red.opacity(0.2), lineWidth: 1)
         )
     }

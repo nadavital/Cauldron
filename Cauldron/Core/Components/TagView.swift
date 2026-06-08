@@ -72,9 +72,9 @@ struct TagView: View {
         .padding(.vertical, 6)
         .background(color.opacity(isSelected ? 0.25 : 0.15))
         .foregroundColor(color)
-        .cornerRadius(20)
+        .cornerRadius(Theme.Radius.xLarge)
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: Theme.Radius.xLarge)
                 .stroke(color, lineWidth: isSelected ? 1.5 : 0)
         )
         // Collapse into a single labeled element only for display-only tags.

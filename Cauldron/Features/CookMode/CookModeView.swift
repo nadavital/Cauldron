@@ -274,7 +274,7 @@ struct CookModeView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
                     .background(Color.cauldronSecondaryBackground)
-                    .cornerRadius(16)
+                    .cornerRadius(Theme.Radius.large)
                     .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
             }
         }
@@ -341,7 +341,7 @@ struct CookModeView: View {
                                     }
                                     .padding(16)
                                     .background(Color.cauldronSecondaryBackground)
-                                    .cornerRadius(16)
+                                    .cornerRadius(Theme.Radius.large)
                                 }
                                 .buttonStyle(.plain)
                             }

@@ -120,7 +120,7 @@ struct ImportPreviewSheet: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))
-                .foregroundColor(.orange)
+                .foregroundColor(.cauldronOrange)
             Text("Unable to Load")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -160,7 +160,7 @@ struct ImportPreviewSheet: View {
                     ownerId: recipe.ownerId
                 )
                 .frame(height: 250)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.horizontal)
                 .task(id: recipe.id) {
                     // Task will automatically cancel when recipe.id changes
@@ -191,9 +191,9 @@ struct ImportPreviewSheet: View {
                                         .font(.caption)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
-                                        .background(Color.orange.opacity(0.2))
-                                        .foregroundColor(.orange)
-                                        .cornerRadius(12)
+                                        .background(Color.cauldronOrange.opacity(0.2))
+                                        .foregroundColor(.cauldronOrange)
+                                        .cornerRadius(Theme.Radius.card)
                                 }
                             }
                             .padding(.horizontal)
@@ -239,8 +239,8 @@ struct ImportPreviewSheet: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.orange)
-                    .cornerRadius(12)
+                    .background(Color.cauldronOrange)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .disabled(isImporting)
                 .padding(.horizontal)
@@ -299,7 +299,7 @@ struct ImportPreviewSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color.secondary)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
             }
             .padding(.horizontal)
 
@@ -331,7 +331,7 @@ struct ImportPreviewSheet: View {
                             placeholderImage
                         }
                     }
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                     .padding(.horizontal)
                 }
 
@@ -365,8 +365,8 @@ struct ImportPreviewSheet: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.orange)
-                    .cornerRadius(12)
+                    .background(Color.cauldronOrange)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .disabled(isImporting)
                 .padding(.horizontal)

@@ -333,7 +333,8 @@ struct SearchTabView: View {
 
     /// Time filter + sort controls shown above recipe results.
     private var refinementBar: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        GlassEffectContainer(spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
             Menu {
                 Picker("Time", selection: $viewModel.timeFilter) {
                     ForEach(RecipeTimeFilter.allCases) { filter in
@@ -373,6 +374,7 @@ struct SearchTabView: View {
             }
 
             Spacer()
+            }
         }
     }
 
@@ -387,13 +389,10 @@ struct SearchTabView: View {
         .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
         .padding(.horizontal, Theme.Spacing.sm)
         .padding(.vertical, Theme.Spacing.xs)
-        .background {
-            if isActive {
-                Capsule().fill(Color.cauldronOrange.opacity(0.15))
-            } else {
-                Capsule().fill(.ultraThinMaterial)
-            }
-        }
+        .glassEffect(
+            isActive ? .regular.tint(Color.cauldronOrange.opacity(0.25)) : .regular,
+            in: Capsule()
+        )
     }
     
     private var peopleSearchView: some View {
@@ -578,7 +577,7 @@ struct UserSearchRowView: View {
             } label: {
                 HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.cauldronOrange)
                     Text("Retry")
                         .font(.caption)
                 }

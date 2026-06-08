@@ -294,7 +294,7 @@ private struct ExploreTagRecipeCardPlaceholder: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: Theme.Radius.large)
                 .fill(placeholderFill)
                 .frame(width: cardWidth, height: cardHeight)
 
