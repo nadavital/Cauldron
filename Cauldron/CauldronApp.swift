@@ -533,6 +533,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
                 AppLogger.general.info("🟣 SceneDelegate: Detected external share URL, processing...")
 
                 Task {
+                    await PendingShareManager.shared.setPendingURL(url)
                     await MainActor.run {
                         NotificationCenter.default.post(
                             name: .openExternalShare,
@@ -611,10 +612,15 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
         // Check if it's an external share deep link (cauldron://import/...)
         if url.scheme == "cauldron" && url.host == "import" {
             AppLogger.general.info("🟣 SceneDelegate: Detected external share deep link")
-            NotificationCenter.default.post(
-                name: .openExternalShare,
-                object: url
-            )
+            Task {
+                await PendingShareManager.shared.setPendingURL(url)
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: .openExternalShare,
+                        object: url
+                    )
+                }
+            }
             return
         }
 

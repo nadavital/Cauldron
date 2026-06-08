@@ -179,8 +179,7 @@ struct AddToCollectionSheet: View {
                 return
             }
 
-            collections = try await dependencies.collectionRepository.fetchAll()
-                .filter { $0.userId == currentUserId }
+            collections = try await dependencies.collectionRepository.fetchUserCollections(ownerId: currentUserId)
 
             // Pre-select collections that already contain this recipe
             selectedCollectionIds.removeAll()

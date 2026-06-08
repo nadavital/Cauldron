@@ -29,6 +29,7 @@ final class AIRecipeGeneratorViewModel {
 
     let dependencies: DependencyContainer
     private var generationTask: Task<Void, Never>?
+    private var activeGenerationID: UUID?
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {}
@@ -168,13 +169,22 @@ final class AIRecipeGeneratorViewModel {
 
         // Cancel any existing generation
         generationTask?.cancel()
+        let generationID = UUID()
+        activeGenerationID = generationID
 
-        generationTask = Task {
+        generationTask = Task { [generationID] in
+            defer {
+                if self.activeGenerationID == generationID {
+                    self.isGenerating = false
+                    self.generationTask = nil
+                }
+            }
+
             do {
                 let stream = dependencies.foundationModelsService.generateRecipe(from: generationPrompt)
 
                 for try await partial in stream {
-                    guard !Task.isCancelled else { break }
+                    guard !Task.isCancelled, self.activeGenerationID == generationID else { return }
 
                     // Store the partial recipe for UI updates
                     self.partialRecipe = partial
@@ -191,14 +201,20 @@ final class AIRecipeGeneratorViewModel {
                     let recipe = fullRecipe.toRecipe(withTags: selectedCategoryTags)
                     self.generatedRecipe = recipe
                     self.generationProgress = .complete
-                    self.isGenerating = false
                     AppLogger.general.info("Recipe generation completed: \(recipe.title)")
+                } else {
+                    self.errorMessage = "Recipe generation finished without enough recipe details. Try adding a little more guidance."
+                    self.generationProgress = .failed
+                    AppLogger.general.error("Recipe generation completed without a valid final recipe")
                 }
 
+            } catch is CancellationError {
+                guard self.activeGenerationID == generationID else { return }
+                self.generationProgress = .idle
             } catch {
+                guard self.activeGenerationID == generationID else { return }
                 self.errorMessage = error.localizedDescription
                 self.generationProgress = .failed
-                self.isGenerating = false
                 AppLogger.general.error("Recipe generation failed: \(error.localizedDescription)")
             }
         }
@@ -206,6 +222,8 @@ final class AIRecipeGeneratorViewModel {
 
     func cancelGeneration() {
         generationTask?.cancel()
+        generationTask = nil
+        activeGenerationID = nil
         isGenerating = false
         generationProgress = .idle
     }
@@ -232,8 +250,10 @@ final class AIRecipeGeneratorViewModel {
                 sourceNote
             }
 
-            // Get current user ID for CloudKit sync
-            let userId = CurrentUserSession.shared.userId
+            guard let userId = CurrentUserSession.shared.userId else {
+                errorMessage = "You must be signed in to save recipes."
+                return false
+            }
 
             let recipeToSave = Recipe(
                 id: recipe.id,
@@ -245,7 +265,7 @@ final class AIRecipeGeneratorViewModel {
                 tags: recipe.tags,
                 nutrition: recipe.nutrition,
                 notes: notesWithSource,
-                ownerId: userId  // Set ownerId so recipe syncs to CloudKit
+                ownerId: userId
             )
 
             // Save to repository (CloudKit sync happens automatically)
@@ -300,6 +320,9 @@ final class AIRecipeGeneratorViewModel {
         let fullSteps = steps.compactMap { partialStep -> GeneratedStep? in
             guard let text = partialStep.text else { return nil }
             return GeneratedStep(text: text, timerSeconds: partialStep.timerSeconds)
+        }
+        guard !fullIngredients.isEmpty, !fullSteps.isEmpty else {
+            return nil
         }
         
         // Combine AI-generated tags with selected categories

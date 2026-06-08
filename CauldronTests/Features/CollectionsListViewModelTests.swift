@@ -6,6 +6,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class CollectionsListViewModelTests: XCTestCase {
     func testSplitCollectionsForDisplayKeepsLegacyCopiesEditableButSeparatesSavedReferences() {
         let currentUserId = UUID()
@@ -62,5 +63,96 @@ final class CollectionsListViewModelTests: XCTestCase {
         XCTAssertFalse(sections.saved.contains { $0.id == legacyCopiedCollection.id })
         XCTAssertFalse(sections.owned.contains { $0.id == unrelatedNonOwnedCollection.id })
         XCTAssertFalse(sections.saved.contains { $0.id == unrelatedNonOwnedCollection.id })
+    }
+
+    func testCustomCoverPagePolicyDoesNotReserveMissingCustomCoverAheadOfRecipeImages() {
+        XCTAssertFalse(
+            CollectionCoverPagePolicy.shouldReserveCustomCoverPage(
+                coverImageType: .customImage,
+                coverImageURL: nil,
+                cloudCoverImageRecordName: nil,
+                hasLoadedCustomCoverImage: false
+            )
+        )
+    }
+
+    func testCustomCoverPagePolicyReservesExistingCustomCover() {
+        XCTAssertTrue(
+            CollectionCoverPagePolicy.shouldReserveCustomCoverPage(
+                coverImageType: .customImage,
+                coverImageURL: URL(fileURLWithPath: "/tmp/cover.jpg"),
+                cloudCoverImageRecordName: nil,
+                hasLoadedCustomCoverImage: false
+            )
+        )
+
+        XCTAssertTrue(
+            CollectionCoverPagePolicy.shouldReserveCustomCoverPage(
+                coverImageType: .customImage,
+                coverImageURL: nil,
+                cloudCoverImageRecordName: "collection-cover-record",
+                hasLoadedCustomCoverImage: false
+            )
+        )
+    }
+
+    func testCustomCoverImageCacheKeyChangesWhenModifiedAtChanges() {
+        let collectionId = UUID()
+        let imageURL = URL(fileURLWithPath: "/tmp/\(collectionId.uuidString).jpg")
+        let original = Collection(
+            id: collectionId,
+            name: "Covers",
+            userId: UUID(),
+            coverImageType: .customImage,
+            coverImageURL: imageURL,
+            coverImageModifiedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let replacedAtSamePath = original.updated(
+            coverImageType: .customImage,
+            coverImageURL: imageURL,
+            coverImageModifiedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+
+        XCTAssertNotEqual(original.customCoverImageCacheKey, replacedAtSamePath.customCoverImageCacheKey)
+    }
+
+    func testLoadCollectionsDoesNotUseNonOwnedLocalRecipeRowsForOwnedCollectionImages() async throws {
+        let dependencies = DependencyContainer.preview()
+        let currentUserId = UUID()
+        let sourceOwnerId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "tester",
+                displayName: "Tester",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+
+        let sourceRecipeId = UUID()
+        let sourceRecipe = Recipe(
+            id: sourceRecipeId,
+            title: "Cached Source",
+            ingredients: [],
+            steps: [],
+            yields: "4 servings",
+            imageURL: URL(string: "https://example.com/source.jpg"),
+            visibility: .publicRecipe,
+            ownerId: sourceOwnerId
+        )
+        let ownedCollection = Collection(
+            name: "Mine",
+            userId: currentUserId,
+            recipeIds: [sourceRecipeId]
+        )
+        try await dependencies.recipeRepository.create(sourceRecipe, skipCloudSync: true)
+        try await dependencies.collectionRepository.create(ownedCollection)
+
+        let viewModel = CollectionsListViewModel(dependencies: dependencies)
+        await viewModel.loadCollections()
+
+        let loadedCollection = try XCTUnwrap(viewModel.ownedCollections.first)
+        XCTAssertEqual(viewModel.recipeImageSources(for: loadedCollection).first?.imageURL, nil)
     }
 }

@@ -42,6 +42,8 @@ import os
     private let connectionCoordinator: ConnectionInteractionCoordinator
     private var recipeImageURLsById: [UUID: URL?] = [:]
     private var collectionImageRecipesById: [UUID: Recipe] = [:]
+    private var authoritativeRecipeCount: Int?
+    private let profileRecipeDisplayLimit = 500
 
     var currentUserId: UUID {
         dependencies.connectionManager.currentUserId
@@ -213,6 +215,7 @@ import os
             collectionImageRecipesById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
             }
+            await refreshAuthoritativeRecipeCount(forceRefresh: false)
             updateTierFromRecipes()
             return
         }
@@ -222,6 +225,7 @@ import os
 
         do {
             userRecipes = try await fetchUserRecipes()
+            await refreshAuthoritativeRecipeCount(forceRefresh: forceRefresh)
 
             // Cache the results
             dependencies.profileCacheManager.cacheRecipes(
@@ -245,8 +249,25 @@ import os
 
     /// Update the user's tier based on their recipe count
     private func updateTierFromRecipes() {
-        userRecipeCount = userRecipes.count
+        userRecipeCount = authoritativeRecipeCount ?? userRecipes.count
         userTier = UserTier.tier(for: userRecipeCount)
+    }
+
+    private func refreshAuthoritativeRecipeCount(forceRefresh: Bool) async {
+        guard !isCurrentUser else {
+            authoritativeRecipeCount = nil
+            return
+        }
+
+        do {
+            let counts = try await dependencies.recipeDiscoveryCache.batchFetchPublicRecipeCounts(
+                forOwnerIds: [user.id],
+                forceRefresh: forceRefresh
+            )
+            authoritativeRecipeCount = counts[user.id]
+        } catch {
+            AppLogger.general.warning("Failed to fetch authoritative public recipe count for \(self.user.username): \(error.localizedDescription)")
+        }
     }
 
     private func fetchUserRecipes() async throws -> [SharedRecipe] {
@@ -260,7 +281,7 @@ import os
         // If viewing your own profile, fetch from local storage (same as Cook tab)
         if isCurrentUser {
             recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
             AppLogger.general.info("Found \(recipes.count) owned recipes from local storage")
@@ -269,7 +290,8 @@ import os
             recipes = try await dependencies.recipeDiscoveryCache.querySharedRecipes(
                 ownerIds: [user.id],
                 visibility: .publicRecipe,
-                includeDerivedCopies: true
+                includeDerivedCopies: true,
+                limit: profileRecipeDisplayLimit
             )
             AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
         }
@@ -283,7 +305,10 @@ import os
             partialResult[recipe.id] = recipe.imageURL
         }
 
-        let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(recipes)
+        let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            recipes,
+            currentUserId: user.id
+        )
         AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) visible profile recipes")
 
         // Convert to SharedRecipe
@@ -343,7 +368,10 @@ import os
 
         // If viewing own profile, load local collections (excluding private)
         if isCurrentUser {
-            let localCollections = try await dependencies.collectionRepository.fetchAll(visibility: .publicRecipe)
+            let localCollections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId,
+                visibility: .publicRecipe
+            )
             AppLogger.general.info("Found \(localCollections.count) total local collections")
             allCollections.append(contentsOf: localCollections)
             seenCollectionIds.formUnion(localCollections.map(\.id))
@@ -401,6 +429,7 @@ import os
                 recipeId: recipeId,
                 imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
                 ownerId: recipe?.ownerId,
+                privateRecordName: recipe?.cloudRecordName,
                 hasCloudImage: recipe?.cloudImageRecordName != nil
             )
         }

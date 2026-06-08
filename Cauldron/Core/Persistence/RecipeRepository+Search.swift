@@ -50,10 +50,15 @@ extension RecipeRepository {
     }
 
     /// Fetch owned recipes that are saved copies of the given canonical public recipe IDs.
-    func fetchOwnedCopies(originalRecipeIds: [UUID]) async throws -> [Recipe] {
+    func fetchOwnedCopies(
+        originalRecipeIds: [UUID],
+        ownerId: UUID? = nil,
+        followingSourceOnly: Bool = false
+    ) async throws -> [Recipe] {
         let originalRecipeIdSet = Set(originalRecipeIds)
         guard !originalRecipeIdSet.isEmpty else { return [] }
-        guard let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
+        guard let effectiveOwnerId = ownerId ?? currentUserId else {
             return []
         }
 
@@ -61,7 +66,7 @@ extension RecipeRepository {
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { model in
                 model.isPreview == false &&
-                model.ownerId == currentUserId &&
+                model.ownerId == effectiveOwnerId &&
                 model.originalRecipeId != nil
             },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
@@ -73,6 +78,9 @@ extension RecipeRepository {
             guard let originalRecipeId = recipe.originalRecipeId else {
                 return false
             }
+            if followingSourceOnly, !recipe.isFollowingSourceUpdates {
+                return false
+            }
             return originalRecipeIdSet.contains(originalRecipeId)
         }
     }
@@ -81,24 +89,45 @@ extension RecipeRepository {
     /// library recipes over temporary preview records.
     func resolveLocalRelatedRecipes(
         referenceIds: [UUID],
-        includePreviews: Bool
+        includePreviews: Bool,
+        preferredOwnerId: UUID? = nil
     ) async throws -> (recipes: [Recipe], missingIds: [UUID]) {
         guard !referenceIds.isEmpty else {
             return ([], [])
         }
 
         let directMatches = try await fetch(ids: referenceIds)
-        let directMatchesById = Dictionary(uniqueKeysWithValues: directMatches.map { ($0.id, $0) })
+        let directMatchesById = Dictionary(directMatches.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+            if current.isPreview, !candidate.isPreview {
+                return candidate
+            }
+            if let preferredOwnerId, current.ownerId != preferredOwnerId, candidate.ownerId == preferredOwnerId {
+                return candidate
+            }
+            return current
+        })
 
-        let missingNonPreviewIds = referenceIds.filter { referenceId in
+        let sourceCopyLookupIds = referenceIds.filter { referenceId in
             guard let directMatch = directMatchesById[referenceId] else {
                 return true
             }
 
-            return directMatch.isPreview
+            if directMatch.isPreview {
+                return true
+            }
+
+            if let preferredOwnerId, directMatch.ownerId != preferredOwnerId {
+                return true
+            }
+
+            return false
         }
 
-        let ownedCopies = try await fetchOwnedCopies(originalRecipeIds: missingNonPreviewIds)
+        let ownedCopies = try await fetchOwnedCopies(
+            originalRecipeIds: sourceCopyLookupIds,
+            ownerId: preferredOwnerId,
+            followingSourceOnly: true
+        )
         var ownedCopiesByOriginalId: [UUID: Recipe] = [:]
         for ownedCopy in ownedCopies {
             guard let originalRecipeId = ownedCopy.originalRecipeId else {
@@ -112,7 +141,16 @@ extension RecipeRepository {
         var missingIds: [UUID] = []
 
         for referenceId in referenceIds {
-            if let directMatch = directMatchesById[referenceId], !directMatch.isPreview {
+            if let preferredOwnerId,
+               let ownedCopy = ownedCopiesByOriginalId[referenceId],
+               directMatchesById[referenceId]?.ownerId != preferredOwnerId {
+                resolvedRecipes.append(ownedCopy)
+            } else if let preferredOwnerId,
+                      let directMatch = directMatchesById[referenceId],
+                      !directMatch.isPreview,
+                      directMatch.ownerId != preferredOwnerId {
+                missingIds.append(referenceId)
+            } else if let directMatch = directMatchesById[referenceId], !directMatch.isPreview {
                 resolvedRecipes.append(directMatch)
             } else if let ownedCopy = ownedCopiesByOriginalId[referenceId] {
                 resolvedRecipes.append(ownedCopy)

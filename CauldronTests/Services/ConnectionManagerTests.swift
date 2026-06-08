@@ -87,6 +87,71 @@ final class ConnectionManagerTests: XCTestCase {
         }
     }
 
+    func testConnectionsViewModelAcceptRefreshesLocalArrays() async throws {
+        let dependencies = DependencyContainer.preview()
+        let currentUserId = UUID()
+        let fromUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "receiver",
+                displayName: "Receiver",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+        let pendingConnection = Connection(
+            id: UUID(),
+            fromUserId: fromUserId,
+            toUserId: currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(pendingConnection)
+        let viewModel = ConnectionsViewModel(dependencies: dependencies)
+        await viewModel.loadConnections()
+        XCTAssertEqual(viewModel.receivedRequests.map(\.id), [pendingConnection.id])
+
+        await viewModel.acceptRequest(pendingConnection)
+
+        XCTAssertTrue(viewModel.receivedRequests.isEmpty)
+        XCTAssertEqual(viewModel.connections.map(\.id), [pendingConnection.id])
+        XCTAssertEqual(viewModel.connections.first?.status, .accepted)
+    }
+
+    func testConnectionsViewModelRejectRefreshesLocalArrays() async throws {
+        let dependencies = DependencyContainer.preview()
+        let currentUserId = UUID()
+        let fromUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "receiver",
+                displayName: "Receiver",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+        let pendingConnection = Connection(
+            id: UUID(),
+            fromUserId: fromUserId,
+            toUserId: currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(pendingConnection)
+        let viewModel = ConnectionsViewModel(dependencies: dependencies)
+        await viewModel.loadConnections()
+        XCTAssertEqual(viewModel.receivedRequests.map(\.id), [pendingConnection.id])
+
+        await viewModel.rejectRequest(pendingConnection)
+
+        XCTAssertTrue(viewModel.receivedRequests.isEmpty)
+        XCTAssertTrue(viewModel.connections.isEmpty)
+    }
+
     func testSendConnectionRequestCreatesOptimisticState() async throws {
         let (connectionManager, _, _) = makeConnectionManager()
 
@@ -358,5 +423,60 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertNotNil(retried)
         XCTAssertEqual(retried?.status, .pending)
         XCTAssertEqual(retried?.attempts, 1)
+    }
+
+    // MARK: - Per-User Session Scoping (cross-account leak prevention)
+
+    /// Populating connections then resetting session state must clear them, so a
+    /// signed-out / switched user never sees the prior user's connections.
+    func testResetSessionStateClearsConnections() async throws {
+        let (connectionManager, dependencies, _) = makeConnectionManager()
+
+        let connection = Connection(
+            id: UUID(),
+            fromUserId: UUID(),
+            toUserId: connectionManager.currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(connection)
+        try await connectionManager.acceptConnection(connection)
+        XCTAssertFalse(connectionManager.connections.isEmpty, "Precondition: connections populated")
+
+        // When the session is reset (sign-out / account change)
+        connectionManager.resetSessionState()
+
+        // Then no prior-user connection state remains
+        XCTAssertTrue(connectionManager.connections.isEmpty)
+        XCTAssertTrue(connectionManager.syncErrors.isEmpty)
+    }
+
+    /// Loading connections for a different user must clear the previous user's
+    /// in-memory connections (the 30-min cache must not leak across accounts).
+    func testLoadConnectionsForDifferentUserClearsPriorUserState() async throws {
+        let (connectionManager, dependencies, _) = makeConnectionManager()
+
+        let priorConnection = Connection(
+            id: UUID(),
+            fromUserId: UUID(),
+            toUserId: connectionManager.currentUserId,
+            status: .pending,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        try await dependencies.connectionRepository.save(priorConnection)
+        try await connectionManager.acceptConnection(priorConnection)
+        XCTAssertFalse(connectionManager.connections.isEmpty, "Precondition: prior user's connections populated")
+
+        // When a different account loads connections
+        let differentUserId = UUID()
+        await connectionManager.loadConnections(forUserId: differentUserId)
+
+        // Then the prior user's connection must not remain visible
+        XCTAssertNil(
+            connectionManager.connections[priorConnection.id],
+            "Prior user's connection leaked into a different account"
+        )
     }
 }

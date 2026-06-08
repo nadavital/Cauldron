@@ -18,6 +18,13 @@ enum OperationQueueEvent {
     case queueEmpty
 }
 
+struct DeadLetteredSyncOperation: Codable, Equatable, Sendable {
+    let operationId: String
+    let errorDescription: String
+    let capturedAt: Date
+    let rawJSON: Data?
+}
+
 /// Actor responsible for managing pending operations and retry logic
 actor OperationQueueService {
     // MARK: - Properties
@@ -29,6 +36,7 @@ actor OperationQueueService {
 
     // Persistence
     private let persistenceKey: String
+    private let deadLetterPersistenceKey: String
 
     // MARK: - Initialization
 
@@ -40,8 +48,10 @@ actor OperationQueueService {
             // Keep queue persistence process-local in tests to avoid leaking operations
             // across test cases and causing nondeterministic retries.
             self.persistenceKey = "com.cauldron.operationQueue.operations.test.\(UUID().uuidString)"
+            self.deadLetterPersistenceKey = "\(self.persistenceKey).deadLetters"
         } else {
             self.persistenceKey = "com.cauldron.operationQueue.operations"
+            self.deadLetterPersistenceKey = "com.cauldron.operationQueue.operations.deadLetters"
         }
 
         var continuation: AsyncStream<OperationQueueEvent>.Continuation!
@@ -258,23 +268,78 @@ actor OperationQueueService {
     // MARK: - Private Methods
 
     /// Load operations from UserDefaults
-    private func loadPersistedOperations() {
+    private func loadPersistedOperations() async {
         guard !RuntimeEnvironment.isRunningTests else {
             operations.removeAll()
             return
         }
 
-        guard let data = UserDefaults.standard.data(forKey: persistenceKey),
-              let loaded = try? JSONDecoder().decode([UUID: SyncOperation].self, from: data) else {
+        guard let data = UserDefaults.standard.data(forKey: persistenceKey) else {
             // No persisted operations found (routine)
             return
         }
 
-        operations = loaded
+        let decoded = await Self.decodePersistedOperations(data)
+        operations = decoded.operations
+        if !decoded.deadLetters.isEmpty {
+            persistDeadLetteredOperations(decoded.deadLetters)
+            persistOperations()
+            AppLogger.general.warning("Recovered \(decoded.operations.count) sync operations and dead-lettered \(decoded.deadLetters.count) invalid persisted operations")
+        }
         // Loaded persisted operations (don't log routine operations)
 
         // Recover any stalled operations (e.g., app was killed during sync)
         recoverStalledOperations()
+    }
+
+    @MainActor
+    static func decodePersistedOperations(
+        _ data: Data,
+        capturedAt: Date = Date()
+    ) -> (operations: [UUID: SyncOperation], deadLetters: [DeadLetteredSyncOperation]) {
+        let decoder = JSONDecoder()
+
+        if let decoded = try? decoder.decode([UUID: SyncOperation].self, from: data) {
+            return (decoded, [])
+        }
+
+        var recovered: [UUID: SyncOperation] = [:]
+        var deadLetters: [DeadLetteredSyncOperation] = []
+
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data),
+              let operationObjects = jsonObject as? [String: Any] else {
+            return (
+                [:],
+                [
+                    DeadLetteredSyncOperation(
+                        operationId: "queue",
+                        errorDescription: "Persisted sync queue is not a decodable dictionary",
+                        capturedAt: capturedAt,
+                        rawJSON: data
+                    )
+                ]
+            )
+        }
+
+        for (operationId, operationObject) in operationObjects {
+            do {
+                let operationData = try JSONSerialization.data(withJSONObject: operationObject)
+                let operation = try decoder.decode(SyncOperation.self, from: operationData)
+                recovered[operation.id] = operation
+            } catch {
+                let rawJSON = try? JSONSerialization.data(withJSONObject: operationObject)
+                deadLetters.append(
+                    DeadLetteredSyncOperation(
+                        operationId: operationId,
+                        errorDescription: error.localizedDescription,
+                        capturedAt: capturedAt,
+                        rawJSON: rawJSON
+                    )
+                )
+            }
+        }
+
+        return (recovered, deadLetters)
     }
 
     /// Recover operations that have been stuck in progress too long (e.g., app was killed)
@@ -324,6 +389,25 @@ actor OperationQueueService {
         }
 
         UserDefaults.standard.set(data, forKey: persistenceKey)
+    }
+
+    private func persistDeadLetteredOperations(_ newDeadLetters: [DeadLetteredSyncOperation]) {
+        guard !RuntimeEnvironment.isRunningTests, !newDeadLetters.isEmpty else { return }
+
+        var deadLetters: [DeadLetteredSyncOperation] = []
+        if let existingData = UserDefaults.standard.data(forKey: deadLetterPersistenceKey),
+           let existing = try? JSONDecoder().decode([DeadLetteredSyncOperation].self, from: existingData) {
+            deadLetters = existing
+        }
+
+        deadLetters.append(contentsOf: newDeadLetters)
+
+        guard let data = try? JSONEncoder().encode(deadLetters) else {
+            AppLogger.general.error("Failed to encode dead-lettered sync operations")
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: deadLetterPersistenceKey)
     }
 
     /// Start the retry loop that processes pending operations

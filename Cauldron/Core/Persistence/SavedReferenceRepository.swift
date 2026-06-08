@@ -7,6 +7,28 @@ import Foundation
 import SwiftData
 import os
 
+extension Notification.Name {
+    /// Posted when a saved recipe reference is created, changed, or removed.
+    nonisolated static let savedRecipeReferencesChanged = Notification.Name("SavedRecipeReferencesChanged")
+
+    /// Posted when a saved collection reference is created or removed.
+    nonisolated static let savedCollectionReferencesChanged = Notification.Name("SavedCollectionReferencesChanged")
+}
+
+private nonisolated struct SavedReferenceReconciliationChanges: Sendable {
+    var addedRecipeReferences: [SavedRecipeReference] = []
+    var removedRecipeReferences: [SavedRecipeReference] = []
+    var addedCollectionReferences: [SavedCollectionReference] = []
+    var removedCollectionReferences: [SavedCollectionReference] = []
+
+    nonisolated var isEmpty: Bool {
+        addedRecipeReferences.isEmpty
+            && removedRecipeReferences.isEmpty
+            && addedCollectionReferences.isEmpty
+            && removedCollectionReferences.isEmpty
+    }
+}
+
 actor SavedReferenceRepository {
     private let modelContainer: ModelContainer
     private let savedReferenceCloudService: SavedReferenceCloudService?
@@ -39,7 +61,8 @@ actor SavedReferenceRepository {
     ) async throws -> (reference: SavedRecipeReference, reusedExistingReference: Bool) {
         let sourceRecipeId = sourceRecipe.relatedGraphReferenceID
         if let existing = try await recipeReference(userId: userId, sourceRecipeId: sourceRecipeId) {
-            if existing.materializedRecipeId == nil, let materializedRecipeId {
+            if let materializedRecipeId,
+               existing.materializedRecipeId != materializedRecipeId {
                 let updated = try await updateRecipeReference(existing.withMaterializedRecipeId(materializedRecipeId))
                 return (updated, true)
             }
@@ -69,6 +92,7 @@ actor SavedReferenceRepository {
         try context.save()
         await enqueueSavedRecipeReferenceSync(reference, type: .create)
         syncRecipeReferenceToCloud(reference)
+        postSavedRecipeReferenceChanged(changeType: "saved", reference: reference)
         logger.info("Saved recipe reference: \(sourceRecipeId)")
         return (reference, false)
     }
@@ -110,6 +134,7 @@ actor SavedReferenceRepository {
         try context.save()
         await enqueueSavedRecipeReferenceSync(reference, type: .delete)
         deleteRecipeReferenceFromCloud(reference)
+        postSavedRecipeReferenceChanged(changeType: "removed", reference: reference)
         return true
     }
 
@@ -136,6 +161,7 @@ actor SavedReferenceRepository {
         let updated = model.toDomain()
         await enqueueSavedRecipeReferenceSync(updated, type: .update)
         syncRecipeReferenceToCloud(updated)
+        postSavedRecipeReferenceChanged(changeType: "saved", reference: updated)
         return updated
     }
 
@@ -169,6 +195,7 @@ actor SavedReferenceRepository {
         try context.save()
         await enqueueSavedCollectionReferenceSync(reference, type: .create)
         syncCollectionReferenceToCloud(reference)
+        postSavedCollectionReferenceChanged(changeType: "saved", reference: reference, collection: sourceCollection)
         logger.info("Saved collection reference: \(sourceCollectionId)")
         return (reference, false)
     }
@@ -210,6 +237,7 @@ actor SavedReferenceRepository {
         try context.save()
         await enqueueSavedCollectionReferenceSync(reference, type: .delete)
         deleteCollectionReferenceFromCloud(reference)
+        postSavedCollectionReferenceChanged(changeType: "removed", reference: reference)
         return true
     }
 
@@ -228,19 +256,43 @@ actor SavedReferenceRepository {
         }
 
         let context = ModelContext(modelContainer)
-        for reference in remoteRecipeReferences {
+        let pendingReferenceOperations = await pendingReferenceOperations()
+        let effectiveRemoteRecipeReferences = Self.remoteRecipeReferences(
+            remoteRecipeReferences,
+            excludingPendingDeletes: pendingReferenceOperations,
+            for: userId
+        )
+        let effectiveRemoteCollectionReferences = Self.remoteCollectionReferences(
+            remoteCollectionReferences,
+            excludingPendingDeletes: pendingReferenceOperations,
+            for: userId
+        )
+        let localRecipeReferences = try fetchRecipeReferences(userId: userId, context: context)
+        let localCollectionReferences = try fetchCollectionReferences(userId: userId, context: context)
+        let localRecipeReferencesBySourceId = Self.newestRecipeReferencesBySourceId(localRecipeReferences)
+        let localCollectionSourceIds = Set(localCollectionReferences.map(\.sourceCollectionId))
+
+        for reference in effectiveRemoteRecipeReferences {
             try upsertRecipeReference(reference, context: context)
         }
-        for reference in remoteCollectionReferences {
+        for reference in effectiveRemoteCollectionReferences {
             try upsertCollectionReference(reference, context: context)
         }
-        try await reconcileLocalReferences(
+        var changes = try await reconcileLocalReferences(
             userId: userId,
-            remoteRecipeReferences: remoteRecipeReferences,
-            remoteCollectionReferences: remoteCollectionReferences,
+            remoteRecipeReferences: effectiveRemoteRecipeReferences,
+            remoteCollectionReferences: effectiveRemoteCollectionReferences,
             context: context
         )
+        changes.addedRecipeReferences = Self.appliedRemoteRecipeReferenceChanges(
+            effectiveRemoteRecipeReferences,
+            localBySourceId: localRecipeReferencesBySourceId
+        )
+        changes.addedCollectionReferences = effectiveRemoteCollectionReferences.filter {
+            !localCollectionSourceIds.contains($0.sourceCollectionId)
+        }
         try context.save()
+        postReconciliationChanges(changes)
     }
 
     func reconcileLocalReferences(
@@ -249,13 +301,14 @@ actor SavedReferenceRepository {
         remoteCollectionReferences: [SavedCollectionReference]
     ) async throws {
         let context = ModelContext(modelContainer)
-        try await reconcileLocalReferences(
+        let changes = try await reconcileLocalReferences(
             userId: userId,
             remoteRecipeReferences: remoteRecipeReferences,
             remoteCollectionReferences: remoteCollectionReferences,
             context: context
         )
         try context.save()
+        postReconciliationChanges(changes)
     }
 
     func forceSyncAllReferencesToCloud(userId: UUID) async throws {
@@ -447,43 +500,199 @@ actor SavedReferenceRepository {
         remoteRecipeReferences: [SavedRecipeReference],
         remoteCollectionReferences: [SavedCollectionReference],
         context: ModelContext
-    ) async throws {
+    ) async throws -> SavedReferenceReconciliationChanges {
+        var changes = SavedReferenceReconciliationChanges()
         let pendingRecipeReferenceIds = await pendingReferenceEntityIds(entityType: .savedRecipeReference)
         let pendingCollectionReferenceIds = await pendingReferenceEntityIds(entityType: .savedCollectionReference)
 
         let remoteRecipeSourceIds = Set(remoteRecipeReferences.map(\.sourceRecipeId))
-        let recipeDescriptor = FetchDescriptor<SavedRecipeReferenceModel>(
-            predicate: #Predicate { $0.userId == userId }
-        )
-        for model in try context.fetch(recipeDescriptor) {
+        for model in try fetchRecipeReferenceModels(userId: userId, context: context) {
             guard !remoteRecipeSourceIds.contains(model.sourceRecipeId),
                   !pendingRecipeReferenceIds.contains(model.id) else {
                 continue
             }
+            changes.removedRecipeReferences.append(model.toDomain())
             context.delete(model)
         }
 
         let remoteCollectionSourceIds = Set(remoteCollectionReferences.map(\.sourceCollectionId))
-        let collectionDescriptor = FetchDescriptor<SavedCollectionReferenceModel>(
-            predicate: #Predicate { $0.userId == userId }
-        )
-        for model in try context.fetch(collectionDescriptor) {
+        for model in try fetchCollectionReferenceModels(userId: userId, context: context) {
             guard !remoteCollectionSourceIds.contains(model.sourceCollectionId),
                   !pendingCollectionReferenceIds.contains(model.id) else {
                 continue
             }
+            changes.removedCollectionReferences.append(model.toDomain())
             context.delete(model)
+        }
+        return changes
+    }
+
+    private func fetchRecipeReferences(
+        userId: UUID,
+        context: ModelContext
+    ) throws -> [SavedRecipeReference] {
+        try fetchRecipeReferenceModels(userId: userId, context: context).map { $0.toDomain() }
+    }
+
+    private func fetchRecipeReferenceModels(
+        userId: UUID,
+        context: ModelContext
+    ) throws -> [SavedRecipeReferenceModel] {
+        let descriptor = FetchDescriptor<SavedRecipeReferenceModel>(
+            predicate: #Predicate { $0.userId == userId }
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private func fetchCollectionReferences(
+        userId: UUID,
+        context: ModelContext
+    ) throws -> [SavedCollectionReference] {
+        try fetchCollectionReferenceModels(userId: userId, context: context).map { $0.toDomain() }
+    }
+
+    private func fetchCollectionReferenceModels(
+        userId: UUID,
+        context: ModelContext
+    ) throws -> [SavedCollectionReferenceModel] {
+        let descriptor = FetchDescriptor<SavedCollectionReferenceModel>(
+            predicate: #Predicate { $0.userId == userId }
+        )
+        return try context.fetch(descriptor)
+    }
+
+    private nonisolated func postReconciliationChanges(_ changes: SavedReferenceReconciliationChanges) {
+        guard !changes.isEmpty else { return }
+
+        for reference in changes.addedRecipeReferences {
+            postSavedRecipeReferenceChanged(changeType: "saved", reference: reference)
+        }
+        for reference in changes.removedRecipeReferences {
+            postSavedRecipeReferenceChanged(changeType: "removed", reference: reference)
+        }
+        for reference in changes.addedCollectionReferences {
+            postSavedCollectionReferenceChanged(changeType: "saved", reference: reference)
+        }
+        for reference in changes.removedCollectionReferences {
+            postSavedCollectionReferenceChanged(changeType: "removed", reference: reference)
         }
     }
 
+    private nonisolated func postSavedRecipeReferenceChanged(
+        changeType: String,
+        reference: SavedRecipeReference
+    ) {
+        NotificationCenter.default.post(
+            name: .savedRecipeReferencesChanged,
+            object: reference.sourceRecipeId,
+            userInfo: [
+                "changeType": changeType,
+                "sourceRecipeId": reference.sourceRecipeId,
+                "reference": reference
+            ]
+        )
+    }
+
+    private nonisolated func postSavedCollectionReferenceChanged(
+        changeType: String,
+        reference: SavedCollectionReference,
+        collection: Collection? = nil
+    ) {
+        var userInfo: [String: Any] = [
+            "changeType": changeType,
+            "sourceCollectionId": reference.sourceCollectionId,
+            "reference": reference
+        ]
+        if let collection {
+            userInfo["collection"] = collection
+        }
+        NotificationCenter.default.post(
+            name: .savedCollectionReferencesChanged,
+            object: reference.sourceCollectionId,
+            userInfo: userInfo
+        )
+    }
+
+    nonisolated static func newestRecipeReferencesBySourceId(
+        _ references: [SavedRecipeReference]
+    ) -> [UUID: SavedRecipeReference] {
+        references.reduce(into: [:]) { result, reference in
+            guard let existing = result[reference.sourceRecipeId] else {
+                result[reference.sourceRecipeId] = reference
+                return
+            }
+            if existing.updatedAt < reference.updatedAt {
+                result[reference.sourceRecipeId] = reference
+            }
+        }
+    }
+
+    nonisolated static func appliedRemoteRecipeReferenceChanges(
+        _ remoteReferences: [SavedRecipeReference],
+        localBySourceId: [UUID: SavedRecipeReference]
+    ) -> [SavedRecipeReference] {
+        remoteReferences.filter { remoteReference in
+            guard let localReference = localBySourceId[remoteReference.sourceRecipeId] else {
+                return true
+            }
+            return localReference.updatedAt < remoteReference.updatedAt
+        }
+    }
+
+    nonisolated static func remoteRecipeReferences(
+        _ remoteReferences: [SavedRecipeReference],
+        excludingPendingDeletes operations: [SyncOperation],
+        for userId: UUID
+    ) -> [SavedRecipeReference] {
+        let deletedSourceIds = Set(
+            operations.compactMap { operation -> UUID? in
+                guard operation.type == .delete,
+                      operation.entityType == .savedRecipeReference,
+                      let payload = operation.payload,
+                      let reference = try? JSONDecoder().decode(SavedRecipeReference.self, from: payload),
+                      reference.userId == userId else {
+                    return nil
+                }
+                return reference.sourceRecipeId
+            }
+        )
+        guard !deletedSourceIds.isEmpty else { return remoteReferences }
+        return remoteReferences.filter { !deletedSourceIds.contains($0.sourceRecipeId) }
+    }
+
+    nonisolated static func remoteCollectionReferences(
+        _ remoteReferences: [SavedCollectionReference],
+        excludingPendingDeletes operations: [SyncOperation],
+        for userId: UUID
+    ) -> [SavedCollectionReference] {
+        let deletedSourceIds = Set(
+            operations.compactMap { operation -> UUID? in
+                guard operation.type == .delete,
+                      operation.entityType == .savedCollectionReference,
+                      let payload = operation.payload,
+                      let reference = try? JSONDecoder().decode(SavedCollectionReference.self, from: payload),
+                      reference.userId == userId else {
+                    return nil
+                }
+                return reference.sourceCollectionId
+            }
+        )
+        guard !deletedSourceIds.isEmpty else { return remoteReferences }
+        return remoteReferences.filter { !deletedSourceIds.contains($0.sourceCollectionId) }
+    }
+
     private func pendingReferenceEntityIds(entityType: EntityType) async -> Set<UUID> {
-        guard let operationQueueService else { return [] }
-        let operations = await operationQueueService.getAllOperations()
+        let operations = await pendingReferenceOperations()
         return Set(
             operations
                 .filter { $0.entityType == entityType && $0.status != .completed }
                 .map(\.entityId)
         )
+    }
+
+    private func pendingReferenceOperations() async -> [SyncOperation] {
+        guard let operationQueueService else { return [] }
+        return await operationQueueService.getAllOperations()
     }
 
     private nonisolated func syncRecipeReferenceToCloud(_ reference: SavedRecipeReference) {

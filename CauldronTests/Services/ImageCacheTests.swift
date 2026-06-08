@@ -55,6 +55,34 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertEqual(cachedImage?.cgImage?.height, image.cgImage?.height)
     }
 
+    func testSavingProfileImageInvalidatesIdBasedCacheEntry() async throws {
+        let userId = UUID()
+        let cacheKey = ImageCache.profileImageKey(userId: userId)
+        ImageCache.shared.set(cacheKey, image: makeImage(color: .systemRed))
+        let manager = ProfileImageManagerV2(
+            directoryName: "TestProfileImages-\(UUID().uuidString)",
+            cacheKeyGenerator: { ImageCache.profileImageKey(userId: $0) }
+        )
+
+        _ = try await manager.saveImage(makeImage(color: .systemGreen), userId: userId)
+
+        XCTAssertNil(ImageCache.shared.get(cacheKey))
+    }
+
+    func testSavingCollectionImageInvalidatesIdBasedCacheEntry() async throws {
+        let collectionId = UUID()
+        let cacheKey = ImageCache.collectionImageKey(collectionId: collectionId)
+        ImageCache.shared.set(cacheKey, image: makeImage(color: .systemRed))
+        let manager = CollectionImageManagerV2(
+            directoryName: "TestCollectionImages-\(UUID().uuidString)",
+            cacheKeyGenerator: { ImageCache.collectionImageKey(collectionId: $0) }
+        )
+
+        _ = try await manager.saveImage(makeImage(color: .systemGreen), collectionId: collectionId)
+
+        XCTAssertNil(ImageCache.shared.get(cacheKey))
+    }
+
     private func makeImage(color: UIColor) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12))
         return renderer.image { context in

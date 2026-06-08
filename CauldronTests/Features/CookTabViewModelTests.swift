@@ -208,6 +208,50 @@ final class CookTabViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.allRecipes.count, viewModel.favoriteRecipes.count)
     }
 
+    func testRefreshLibraryAfterCollectionMembershipChangeRebuildsRecipeImageLookup() async throws {
+        let dependencies = makeDependencies()
+        let currentUserId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "cook-owner",
+                displayName: "Cook Owner",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+
+        let collection = Collection.new(name: "Dinner", userId: currentUserId)
+        try await dependencies.collectionRepository.create(collection)
+        let viewModel = CookTabViewModel(
+            dependencies: dependencies,
+            preloadedData: PreloadedRecipeData(
+                allRecipes: [],
+                recentlyCookedIds: [],
+                collections: [collection]
+            )
+        )
+        let imageURL = URL(fileURLWithPath: "/tmp/\(UUID().uuidString).jpg")
+        let recipe = Recipe(
+            title: "Image Recipe",
+            ingredients: [],
+            steps: [],
+            imageURL: imageURL,
+            ownerId: currentUserId
+        )
+        try await dependencies.recipeRepository.create(recipe, skipCloudSync: true)
+        try await dependencies.collectionRepository.update(
+            collection.updated(recipeIds: [recipe.id])
+        )
+
+        await viewModel.refreshLibraryAfterCollectionMembershipChange()
+
+        let refreshedCollection = try XCTUnwrap(viewModel.collections.first { $0.id == collection.id })
+        let imageSource = try XCTUnwrap(viewModel.getRecipeImageSources(for: refreshedCollection).first)
+        XCTAssertEqual(imageSource.recipeId, refreshedCollection.recipeIds.first)
+        XCTAssertNotNil(imageSource.imageURL)
+    }
+
     // MARK: - Recently Cooked Tests
 
     func testRecentlyCookedFilteredCorrectly() async throws {
@@ -284,6 +328,113 @@ final class CookTabViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.collections.count, 2)
         XCTAssertEqual(viewModel.collections.first?.id, newCollection.id)
         XCTAssertEqual(viewModel.collections.last?.id, oldCollection.id)
+    }
+
+    func testHandleCollectionDeletedRemovesCollectionRowsImmediately() async throws {
+        let dependencies = makeDependencies()
+        let deletedCollection = Collection(name: "Delete Me", userId: UUID())
+        let keptCollection = Collection(name: "Keep Me", userId: UUID())
+        let preloadedData = PreloadedRecipeData(
+            allRecipes: [],
+            recentlyCookedIds: [],
+            collections: [deletedCollection, keptCollection]
+        )
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+
+        viewModel.handleCollectionDeleted(deletedCollection.id)
+
+        XCTAssertFalse(viewModel.collections.contains { $0.id == deletedCollection.id })
+        XCTAssertTrue(viewModel.collections.contains { $0.id == keptCollection.id })
+    }
+
+    func testHandleCollectionRecipesChangedUpdatesCollectionRowsImmediately() async throws {
+        let dependencies = makeDependencies()
+        let collection = Collection(name: "Empty", userId: UUID())
+        let recipeId = UUID()
+        let preloadedData = PreloadedRecipeData(
+            allRecipes: [],
+            recentlyCookedIds: [],
+            collections: [collection]
+        )
+        let viewModel = CookTabViewModel(dependencies: dependencies, preloadedData: preloadedData)
+
+        viewModel.handleCollectionRecipesChanged(
+            collectionId: collection.id,
+            recipeIds: [recipeId],
+            collection: nil
+        )
+
+        XCTAssertEqual(viewModel.collections.first?.recipeIds, [recipeId])
+    }
+
+    func testHandleSavedCollectionReferenceChangesUpdateSavedCollectionsImmediately() async throws {
+        let dependencies = makeDependencies()
+        let currentUserId = UUID()
+        let sourceOwnerId = UUID()
+        let sourceCollection = Collection(name: "Shared", userId: sourceOwnerId)
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "tester",
+                displayName: "Tester",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+
+        let viewModel = CookTabViewModel(
+            dependencies: dependencies,
+            preloadedData: PreloadedRecipeData(allRecipes: [], recentlyCookedIds: [], collections: [])
+        )
+
+        viewModel.handleSavedCollectionReferenceSaved(sourceCollection)
+        XCTAssertEqual(viewModel.savedCollections.map(\.id), [sourceCollection.id])
+
+        viewModel.handleSavedCollectionReferenceRemoved(sourceCollectionId: sourceCollection.id)
+        XCTAssertTrue(viewModel.savedCollections.isEmpty)
+    }
+
+    func testRefreshLocalLibraryExcludesNonOwnedLocalSourceRowsWithoutSavedReference() async throws {
+        let dependencies = makeDependencies()
+        let currentUserId = UUID()
+        let sourceOwnerId = UUID()
+        CurrentUserSession.shared.replaceCurrentUserIfChanged(
+            User(
+                id: currentUserId,
+                username: "tester",
+                displayName: "Tester",
+                createdAt: Date()
+            )
+        )
+        defer { CurrentUserSession.shared.signOut() }
+
+        let ownedRecipe = Recipe(
+            title: "Mine",
+            ingredients: [],
+            steps: [],
+            yields: "4 servings",
+            ownerId: currentUserId
+        )
+        let cachedSourceRecipe = Recipe(
+            title: "Someone Else",
+            ingredients: [],
+            steps: [],
+            yields: "4 servings",
+            visibility: .publicRecipe,
+            ownerId: sourceOwnerId
+        )
+        try await dependencies.recipeRepository.create(ownedRecipe, skipCloudSync: true)
+        try await dependencies.recipeRepository.create(cachedSourceRecipe, skipCloudSync: true)
+
+        let viewModel = CookTabViewModel(
+            dependencies: dependencies,
+            preloadedData: PreloadedRecipeData(allRecipes: [], recentlyCookedIds: [], collections: [])
+        )
+
+        await viewModel.refreshLocalLibrary()
+
+        XCTAssertEqual(viewModel.allRecipes.map(\.id), [ownedRecipe.id])
+        XCTAssertFalse(viewModel.allRecipes.contains { $0.id == cachedSourceRecipe.id })
     }
 
     // MARK: - Edge Cases

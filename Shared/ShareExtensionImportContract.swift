@@ -6,6 +6,90 @@ enum ShareExtensionImportContract {
     static let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
     static let pendingRecipeTextKey = "shareExtension.pendingRecipeText"
     static let preparedRecipePayloadKey = "shareExtension.preparedRecipePayload"
+
+    static func firstHTTPURL(in text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return validHTTPURL(from: trimmed)
+        }
+
+        let range = NSRange(location: 0, length: trimmed.utf16.count)
+        let matches = detector.matches(in: trimmed, options: [], range: range)
+
+        for match in matches {
+            guard let url = match.url,
+                  isHTTPURL(url) else {
+                continue
+            }
+            return url
+        }
+
+        return validHTTPURL(from: trimmed)
+    }
+
+    static func plainTextRecipeShouldTakePrecedenceOverURL(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let textWithoutURLs = removingHTTPURLs(from: trimmed)
+        let meaningfulLines = textWithoutURLs
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let normalized = textWithoutURLs.lowercased()
+
+        guard !normalized.isEmpty else { return false }
+
+        if normalized.contains("ingredients") || normalized.contains("instructions") || normalized.contains("directions") {
+            return true
+        }
+
+        let hasIngredientQuantity = normalized.range(
+            of: #"\b\d+([./]\d+)?\s*(cup|cups|tbsp|tablespoon|tablespoons|tsp|teaspoon|teaspoons|oz|ounce|ounces|g|gram|grams|lb|pound|pounds|ml|l)\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasCookingAction = [
+            "bake", "boil", "broil", "chop", "cook", "fold", "fry", "knead",
+            "mix", "preheat", "roast", "saute", "sauté", "simmer", "stir", "whisk"
+        ].contains { normalized.contains($0) }
+
+        if hasIngredientQuantity && (hasCookingAction || meaningfulLines.count >= 2) {
+            return true
+        }
+
+        if meaningfulLines.count >= 4 {
+            return true
+        }
+
+        return textWithoutURLs.count >= 120 && meaningfulLines.count >= 2
+    }
+
+    private static func removingHTTPURLs(from text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return text
+        }
+
+        let mutable = NSMutableString(string: text)
+        let range = NSRange(location: 0, length: mutable.length)
+        let matches = detector.matches(in: text, options: [], range: range)
+        for match in matches.reversed() {
+            guard let url = match.url, isHTTPURL(url) else { continue }
+            mutable.replaceCharacters(in: match.range, with: "")
+        }
+        return mutable.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func validHTTPURL(from string: String) -> URL? {
+        guard let url = URL(string: string), isHTTPURL(url) else { return nil }
+        return url
+    }
+
+    private static func isHTTPURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
 }
 
 /// Transport payload written by the Share Extension and consumed by the app.

@@ -56,7 +56,7 @@ struct CategoryRecipesListView: View {
             // Refresh recipes when importer is dismissed
             Task {
                 do {
-                    let allRecipes = try await dependencies.recipeRepository.fetchAll()
+                    let allRecipes = try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId)
                     let recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
                         allRecipes,
                         currentUserId: CurrentUserSession.shared.userId,
@@ -165,25 +165,8 @@ struct CategoryRecipesListView: View {
             Task {
                 try? await dependencies.recipeRepository.toggleFavorite(id: recipe.id)
                 if let index = localRecipes.firstIndex(where: { $0.id == recipe.id }) {
-                    var updatedRecipe = localRecipes[index]
-                    updatedRecipe = Recipe(
-                        id: updatedRecipe.id,
-                        title: updatedRecipe.title,
-                        ingredients: updatedRecipe.ingredients,
-                        steps: updatedRecipe.steps,
-                        yields: updatedRecipe.yields,
-                        totalMinutes: updatedRecipe.totalMinutes,
-                        tags: updatedRecipe.tags,
-                        nutrition: updatedRecipe.nutrition,
-                        sourceURL: updatedRecipe.sourceURL,
-                        sourceTitle: updatedRecipe.sourceTitle,
-                        notes: updatedRecipe.notes,
-                        imageURL: updatedRecipe.imageURL,
-                        isFavorite: !updatedRecipe.isFavorite,
-                        createdAt: updatedRecipe.createdAt,
-                        updatedAt: updatedRecipe.updatedAt
-                    )
-                    localRecipes[index] = updatedRecipe
+                    let updatedRecipe = localRecipes[index]
+                    localRecipes[index] = updatedRecipe.withFavorite(!updatedRecipe.isFavorite)
                 }
             }
         } label: {

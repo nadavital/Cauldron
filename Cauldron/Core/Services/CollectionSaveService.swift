@@ -46,11 +46,14 @@ actor CollectionSaveService {
             return sourceCollection
         }
 
-        let legacySavedCopy = try await collectionRepository.fetchAll().first { collection in
-            collection.userId == userId &&
-            collection.originalCollectionId == sourceCollectionId
+        if let legacyCopy = try await collectionRepository.fetchSavedCollectionCopy(
+            ownerId: userId,
+            sourceCollectionId: sourceCollectionId
+        ) {
+            return legacyCopy
         }
-        return legacySavedCopy == nil ? nil : sourceCollection
+
+        return nil
     }
 
     func saveCollectionToLibrary(
@@ -96,33 +99,18 @@ actor CollectionSaveService {
             reusedExistingCopy: referenceResult.reusedExistingReference
         )
     }
-
-    private func recipesInCollectionOrder(
-        sourceCollection: Collection,
-        visibleRecipes: [Recipe]
-    ) -> [Recipe] {
-        let recipesById = RecipeDeduplication.byIdPreferringBest(visibleRecipes)
-        var seenRecipeIds = Set<UUID>()
-        var orderedRecipes: [Recipe] = []
-
-        for recipeId in sourceCollection.recipeIds {
-            guard let recipe = recipesById[recipeId] else { continue }
-            orderedRecipes.append(recipe)
-            seenRecipeIds.insert(recipe.id)
-        }
-
-        orderedRecipes.append(contentsOf: visibleRecipes.filter { !seenRecipeIds.contains($0.id) })
-        return orderedRecipes
-    }
 }
 
 enum CollectionSaveServiceError: LocalizedError {
     case notAuthenticated
+    case sourceRecipesUnavailable(visibleCount: Int, totalCount: Int)
 
     var errorDescription: String? {
         switch self {
         case .notAuthenticated:
             "You must be signed in to save a collection."
+        case .sourceRecipesUnavailable(let visibleCount, let totalCount):
+            "This collection could not be updated because only \(visibleCount) of \(totalCount) source recipes are available."
         }
     }
 }

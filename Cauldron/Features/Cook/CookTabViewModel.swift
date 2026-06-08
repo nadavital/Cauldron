@@ -157,6 +157,7 @@ private struct CookTabDerivedSections {
     @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
     @ObservationIgnored private var smartRecommendationsTask: Task<Void, Never>?
     private var recipeImageURLsById: [UUID: URL?] = [:]
+    private var collectionPreviewRecipesById: [UUID: Recipe] = [:]
 
     init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
         self.dependencies = dependencies
@@ -170,7 +171,10 @@ private struct CookTabDerivedSections {
                 preloadedData.allRecipes,
                 currentUserId: CurrentUserSession.shared.userId
             )
-            let preloadedRecipes = RecipeGroupingService.hideRelatedRecipeReferences(preloadedLibraryRecipes)
+            let preloadedRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+                preloadedLibraryRecipes,
+                currentUserId: CurrentUserSession.shared.userId
+            )
             // CRITICAL: Set allRecipes and collections IMMEDIATELY (not in a Task)
             // This happens synchronously during init, so when CookTabView's body renders
             // for the first time, allRecipes and collections are already populated and won't show empty state
@@ -265,10 +269,59 @@ private struct CookTabDerivedSections {
         }
     }
 
+    func handleCollectionDeleted(_ collectionId: UUID) {
+        collections.removeAll { $0.id == collectionId }
+        savedCollections.removeAll { $0.id == collectionId }
+    }
+
+    func handleCollectionRecipesChanged(
+        collectionId: UUID,
+        recipeIds: [UUID],
+        collection updatedCollection: Collection?
+    ) {
+        updateCollectionRows(collectionId: collectionId) { collection in
+            if let updatedCollection {
+                return updatedCollection
+            }
+            return CollectionMembershipProjection.collectionWithRecipeIds(collection, recipeIds)
+        }
+    }
+
+    func handleSavedCollectionReferenceSaved(_ collection: Collection) {
+        guard let currentUserId = CurrentUserSession.shared.userId,
+              collection.userId != currentUserId else {
+            return
+        }
+
+        savedCollections.removeAll { $0.sourceCollectionReferenceId == collection.sourceCollectionReferenceId }
+        savedCollections.insert(collection, at: 0)
+        Task {
+            await loadPreviewRecipeMetadata(for: [collection])
+        }
+    }
+
+    func handleSavedCollectionReferenceRemoved(sourceCollectionId: UUID) {
+        savedCollections.removeAll { $0.sourceCollectionReferenceId == sourceCollectionId }
+    }
+
+    private func updateCollectionRows(
+        collectionId: UUID,
+        transform: (Collection) -> Collection
+    ) {
+        if let index = collections.firstIndex(where: { $0.id == collectionId }) {
+            collections[index] = transform(collections[index])
+            collections.sort { $0.updatedAt > $1.updatedAt }
+        }
+
+        if let index = savedCollections.firstIndex(where: { $0.id == collectionId }) {
+            savedCollections[index] = transform(savedCollections[index])
+        }
+    }
+
     /// Fetch owned recipes plus saved source references that are not materialized locally.
     private func fetchAllRecipesIncludingReferences() async throws -> [Recipe] {
         var recipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-            try await dependencies.recipeRepository.fetchAll(),
+            try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
             currentUserId: CurrentUserSession.shared.userId
         )
 
@@ -333,10 +386,19 @@ private struct CookTabDerivedSections {
     func refreshCollections() async {
         do {
             let collectionSections = try await loadCollectionSections()
+            await loadPreviewRecipeMetadata(for: collectionSections.saved)
             collections = collectionSections.owned
             savedCollections = collectionSections.saved
         } catch {
             AppLogger.general.error("Failed to refresh collections: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshLibraryAfterCollectionMembershipChange() async {
+        do {
+            try await reloadLocalLibrary(loadCollections: true)
+        } catch {
+            AppLogger.general.error("Failed to refresh library after collection membership change: \(error.localizedDescription)")
         }
     }
 
@@ -408,7 +470,10 @@ private struct CookTabDerivedSections {
                 }
                 return true
             }
-            filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(filteredRecipes)
+            filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
+                filteredRecipes,
+                currentUserId: currentUserId
+            )
 
             // Fetch owner tiers and user objects for display
             await fetchOwnerTiersAndUsers(for: filteredRecipes, forceRefresh: forceRefresh)
@@ -495,18 +560,41 @@ private struct CookTabDerivedSections {
 
     /// Get first 4 recipe image URLs for a collection (for grid display)
     func getRecipeImages(for collection: Collection) -> [URL?] {
-        Array(collection.recipeIds.prefix(4).map { recipeImageURLsById[$0] ?? nil })
+        Array(collection.recipeIds.prefix(12).compactMap { recipeId in
+            recipeImageURLsById[recipeId] ?? collectionPreviewRecipesById[recipeId]?.imageURL
+        }.prefix(4).map(Optional.some))
     }
 
     func getRecipeImageSources(for collection: Collection) -> [CollectionRecipeImageSource] {
-        collection.recipeIds.prefix(4).map { recipeId in
-            let recipe = allRecipes.first { $0.id == recipeId }
+        collection.recipeIds.prefix(12).map { recipeId in
+            let recipe = allRecipes.first { $0.id == recipeId } ?? collectionPreviewRecipesById[recipeId]
+            let isNonOwnedCollection = collection.userId != CurrentUserSession.shared.userId
             return CollectionRecipeImageSource(
                 recipeId: recipeId,
                 imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
-                ownerId: recipe?.ownerId,
-                hasCloudImage: recipe?.cloudImageRecordName != nil
+                ownerId: recipe?.ownerId ?? (isNonOwnedCollection ? collection.userId : nil),
+                privateRecordName: recipe?.cloudRecordName,
+                hasCloudImage: recipe?.cloudImageRecordName != nil || (recipe == nil && isNonOwnedCollection)
             )
+        }
+    }
+
+    private func loadPreviewRecipeMetadata(for collections: [Collection]) async {
+        let knownRecipeIds = Set(allRecipes.map(\.id)).union(Set(collectionPreviewRecipesById.keys))
+        let candidateIds = collections
+            .flatMap { $0.recipeIds.prefix(12) }
+            .filter { !knownRecipeIds.contains($0) }
+        let uniqueIds = Array(Set(candidateIds))
+        guard !uniqueIds.isEmpty else { return }
+
+        do {
+            let fetchedRecipes = try await dependencies.recipeDiscoveryCache.fetchPublicRecipes(ids: uniqueIds)
+            for (recipeId, recipe) in fetchedRecipes {
+                collectionPreviewRecipesById[recipeId] = recipe
+                recipeImageURLsById[recipeId] = recipe.imageURL
+            }
+        } catch {
+            AppLogger.general.warning("Failed to load saved collection preview recipe metadata: \(error.localizedDescription)")
         }
     }
 
@@ -524,7 +612,10 @@ private struct CookTabDerivedSections {
         async let fetchedRecipes = fetchAllRecipesIncludingReferences()
 
         let libraryRecipes = try await fetchedRecipes
-        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(libraryRecipes)
+        let recipes = RecipeGroupingService.hideRelatedRecipeReferences(
+            libraryRecipes,
+            currentUserId: CurrentUserSession.shared.userId
+        )
         let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
 
         allRecipes = recipes
@@ -536,6 +627,7 @@ private struct CookTabDerivedSections {
 
         if loadCollections {
             let collectionSections = try await loadCollectionSections()
+            await loadPreviewRecipeMetadata(for: collectionSections.saved)
             collections = collectionSections.owned
             savedCollections = collectionSections.saved
         }

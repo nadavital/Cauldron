@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CloudKit
 import SwiftData
 import os
 
@@ -17,6 +18,46 @@ extension Notification.Name {
     nonisolated static let collectionUpdated = Notification.Name("CollectionUpdated")
     /// Posted when recipes in a collection change
     nonisolated static let collectionRecipesChanged = Notification.Name("CollectionRecipesChanged")
+    /// Posted when a collection is deleted locally or suppressed by a remote tombstone
+    nonisolated static let collectionDeleted = Notification.Name("CollectionDeleted")
+}
+
+nonisolated enum CollectionDeletionSyncPolicy {
+    static func canDeleteActiveRecord(tombstoneSaveError: Error?) -> Bool {
+        tombstoneSaveError == nil
+    }
+}
+
+nonisolated enum CollectionDeleteReplayPolicy {
+    static func tombstoneForReplay(
+        localTombstone: DeletedCollectionTombstone?,
+        payloadData: Data?,
+        defaultDeletedAt: Date
+    ) -> DeletedCollectionTombstone? {
+        if let localTombstone {
+            return localTombstone
+        }
+
+        guard let payloadData,
+              let payload = try? JSONDecoder().decode(CollectionRepository.CollectionDeletePayload.self, from: payloadData) else {
+            return nil
+        }
+
+        return DeletedCollectionTombstone(
+            collectionId: payload.collectionId,
+            ownerId: payload.ownerId,
+            deletedAt: defaultDeletedAt,
+            cloudRecordName: nil,
+            sourceDeviceId: SyncDeviceIdentifier.current()
+        )
+    }
+
+    static func tombstoneForSuppressedActiveRecord(
+        localTombstone: DeletedCollectionTombstone?,
+        remoteTombstone: DeletedCollectionTombstone?
+    ) -> DeletedCollectionTombstone? {
+        remoteTombstone ?? localTombstone
+    }
 }
 
 /// Thread-safe repository for Collection operations
@@ -32,7 +73,7 @@ actor CollectionRepository {
     private var syncRetryTask: Task<Void, Never>?
     private var operationQueueReplayTask: Task<Void, Never>?
 
-    private struct CollectionDeletePayload: Codable, Sendable {
+    struct CollectionDeletePayload: Codable, Sendable {
         let collectionId: UUID
         let ownerId: UUID
     }
@@ -177,7 +218,8 @@ actor CollectionRepository {
 
     // MARK: - Read
 
-    /// Fetch all collections for current user
+    /// Fetch all local collections, regardless of owner. Prefer
+    /// `fetchUserCollections(ownerId:visibility:)` for user-facing surfaces.
     func fetchAll() async throws -> [Collection] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionModel>(
@@ -199,6 +241,50 @@ actor CollectionRepository {
 
         let models = try context.fetch(descriptor)
         return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)
+    }
+
+    /// Fetch collections owned by a specific user. UI/library surfaces should use
+    /// this instead of raw `fetchAll()` when showing the current user's data.
+    func fetchUserCollections(
+        ownerId: UUID?,
+        visibility: RecipeVisibility? = nil
+    ) async throws -> [Collection] {
+        guard let ownerId else { return [] }
+
+        let context = ModelContext(modelContainer)
+        let descriptor: FetchDescriptor<CollectionModel>
+        if let visibility {
+            let visibilityRaw = visibility.rawValue
+            descriptor = FetchDescriptor<CollectionModel>(
+                predicate: #Predicate { model in
+                    model.userId == ownerId && model.visibility == visibilityRaw
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        } else {
+            descriptor = FetchDescriptor<CollectionModel>(
+                predicate: #Predicate { model in
+                    model.userId == ownerId
+                },
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        }
+
+        let models = try context.fetch(descriptor)
+        return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context)
+    }
+
+    func fetchSavedCollectionCopy(ownerId: UUID, sourceCollectionId: UUID) async throws -> Collection? {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { model in
+                model.userId == ownerId && model.originalCollectionId == sourceCollectionId
+            },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+
+        let models = try context.fetch(descriptor)
+        return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context).first
     }
 
     /// Fetch a specific collection by ID
@@ -339,7 +425,8 @@ actor CollectionRepository {
                 object: nil,
                 userInfo: [
                     "collectionId": collection.id,
-                    "recipeIds": collection.recipeIds
+                    "recipeIds": collection.recipeIds,
+                    "collection": collection
                 ]
             )
         }
@@ -586,6 +673,116 @@ actor CollectionRepository {
         }
     }
 
+    private func removedMembershipEdges(
+        for collection: Collection,
+        deletedAt: Date
+    ) -> [CollectionMembershipEdge] {
+        collection.recipeIds.enumerated().map { offset, recipeId in
+            CollectionMembershipEdge(
+                collectionId: collection.id,
+                recipeId: recipeId,
+                ownerId: collection.userId,
+                status: .removed,
+                updatedAt: deletedAt,
+                sortOrder: offset,
+                sourceDeviceId: SyncDeviceIdentifier.current()
+            )
+        }
+    }
+
+    private func localMembershipEdges(collectionId: UUID) throws -> [CollectionMembershipEdge] {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionMembershipModel>(
+            predicate: #Predicate { $0.collectionId == collectionId }
+        )
+        return try context.fetch(descriptor).map { $0.toDomain() }
+    }
+
+    private func upsertLocalDeletedCollectionTombstone(
+        _ tombstone: DeletedCollectionTombstone,
+        context: ModelContext
+    ) throws {
+        let descriptor = FetchDescriptor<DeletedCollectionModel>()
+        let existing = try context.fetch(descriptor).first { $0.collectionId == tombstone.collectionId }
+
+        if let existing {
+            guard existing.deletedAt == nil || existing.deletedAt! <= tombstone.deletedAt else {
+                return
+            }
+            existing.ownerId = tombstone.ownerId
+            existing.deletedAt = tombstone.deletedAt
+            existing.cloudRecordName = existing.cloudRecordName ?? tombstone.cloudRecordName
+            existing.sourceDeviceId = existing.sourceDeviceId ?? tombstone.sourceDeviceId
+            existing.schemaVersion = max(existing.schemaVersion, tombstone.schemaVersion)
+        } else {
+            context.insert(
+                DeletedCollectionModel(
+                    collectionId: tombstone.collectionId,
+                    ownerId: tombstone.ownerId,
+                    deletedAt: tombstone.deletedAt,
+                    cloudRecordName: tombstone.cloudRecordName,
+                    sourceDeviceId: tombstone.sourceDeviceId,
+                    schemaVersion: tombstone.schemaVersion
+                )
+            )
+        }
+    }
+
+    private func localDeletedCollectionTombstone(collectionId: UUID) throws -> DeletedCollectionTombstone? {
+        let context = ModelContext(modelContainer)
+        return try localDeletedCollectionTombstones(context: context)
+            .first { $0.collectionId == collectionId }
+    }
+
+    private func localDeletedCollectionTombstones(context: ModelContext) throws -> [DeletedCollectionTombstone] {
+        let descriptor = FetchDescriptor<DeletedCollectionModel>()
+        return try context.fetch(descriptor).compactMap { model in
+            guard let collectionId = model.collectionId,
+                  let ownerId = model.ownerId,
+                  let deletedAt = model.deletedAt else {
+                return nil
+            }
+
+            return DeletedCollectionTombstone(
+                collectionId: collectionId,
+                ownerId: ownerId,
+                deletedAt: deletedAt,
+                cloudRecordName: model.cloudRecordName,
+                sourceDeviceId: model.sourceDeviceId,
+                schemaVersion: model.schemaVersion
+            )
+        }
+    }
+
+    private func removeLocalCollectionSuppressedByTombstone(
+        _ tombstone: DeletedCollectionTombstone,
+        context: ModelContext
+    ) throws {
+        let collectionId = tombstone.collectionId
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { $0.id == collectionId }
+        )
+
+        guard let model = try context.fetch(descriptor).first else { return }
+
+        let collection = try applyMembershipOverlay(
+            to: [model.toDomain()],
+            context: context
+        ).first ?? model.toDomain()
+
+        for edge in removedMembershipEdges(for: collection, deletedAt: tombstone.deletedAt) {
+            try upsertLocalMembershipEdge(edge, context: context)
+        }
+
+        context.delete(model)
+        try context.save()
+        NotificationCenter.default.post(
+            name: .collectionDeleted,
+            object: collectionId,
+            userInfo: ["collectionId": collectionId]
+        )
+    }
+
     private func insertSyncedCollection(
         _ collection: Collection,
         seedMembershipEdges: Bool
@@ -623,15 +820,36 @@ actor CollectionRepository {
             throw CollectionRepositoryError.collectionNotFound
         }
 
-        let collection = try model.toDomain()
+        let collection = try applyMembershipOverlay(
+            to: [model.toDomain()],
+            context: context
+        ).first ?? model.toDomain()
         try await assertCanModify(collection)
+        let deletedAt = Date()
+        let tombstone = DeletedCollectionTombstone(
+            collectionId: collection.id,
+            ownerId: collection.userId,
+            deletedAt: deletedAt,
+            cloudRecordName: collection.cloudRecordName,
+            sourceDeviceId: SyncDeviceIdentifier.current()
+        )
+        let removedMembershipEdges = removedMembershipEdges(for: collection, deletedAt: deletedAt)
+
+        try upsertLocalDeletedCollectionTombstone(tombstone, context: context)
+        for edge in removedMembershipEdges {
+            try upsertLocalMembershipEdge(edge, context: context)
+        }
 
         // 1. Delete locally (immediate)
-        try deleteLocalMembershipEdges(collectionId: id, context: context)
         context.delete(model)
         try context.save()
 
         // Deleted collection locally
+        NotificationCenter.default.post(
+            name: .collectionDeleted,
+            object: id,
+            userInfo: ["collectionId": id]
+        )
 
         guard !RuntimeEnvironment.isRunningTests else {
             return
@@ -649,7 +867,7 @@ actor CollectionRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, id, collection, collectionCloudService] in
+        Task.detached { [weak self, id, tombstone, removedMembershipEdges] in
             guard let self = self else { return }
 
             // Mark operation as in progress
@@ -657,7 +875,10 @@ actor CollectionRepository {
 
             // Delete from CloudKit
             do {
-                try await collectionCloudService.deleteCollection(id, ownerId: collection.userId)
+                try await self.syncCollectionDeletionToCloudKit(
+                    tombstone: tombstone,
+                    removedMembershipEdges: removedMembershipEdges
+                )
                 // Deleted collection from CloudKit
 
                 // Mark operation as completed
@@ -715,8 +936,21 @@ actor CollectionRepository {
         }
 
         do {
+            if let tombstone = try localDeletedCollectionTombstone(collectionId: collection.id) {
+                let removedEdges = try localMembershipEdges(collectionId: collection.id)
+                try await syncCollectionDeletionToCloudKit(
+                    tombstone: tombstone,
+                    removedMembershipEdges: removedEdges
+                )
+                pendingSyncCollections.remove(collection.id)
+                return
+            }
+
             // Always sync the freshest local state to reduce stale change-tag conflicts.
-            let collectionToSync = (try? await fetch(id: collection.id)) ?? collection
+            guard let collectionToSync = try await fetch(id: collection.id) else {
+                pendingSyncCollections.remove(collection.id)
+                return
+            }
 
             // Syncing collection to CloudKit
             try await collectionCloudService.saveCollection(collectionToSync)
@@ -796,6 +1030,46 @@ actor CollectionRepository {
         }
     }
 
+    private func syncCollectionDeletionToCloudKit(
+        tombstone: DeletedCollectionTombstone,
+        removedMembershipEdges: [CollectionMembershipEdge]
+    ) async throws {
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else {
+            throw CloudKitError.accountNotAvailable(.couldNotDetermine)
+        }
+
+        do {
+            try await collectionCloudService.saveDeletedCollectionTombstone(tombstone)
+        } catch {
+            logger.error("Failed to save collection tombstone before active-record delete: \(error.localizedDescription)")
+            if !CollectionDeletionSyncPolicy.canDeleteActiveRecord(tombstoneSaveError: error) {
+                throw error
+            }
+        }
+
+        var deferredError: Error?
+        do {
+            try await collectionCloudService.saveMembershipEdges(removedMembershipEdges)
+        } catch {
+            logger.error("Failed to save removed collection membership edges before active-record delete: \(error.localizedDescription)")
+            if deferredError == nil, !isMissingCloudKitSchemaError(error) {
+                deferredError = error
+            }
+        }
+
+        try await collectionCloudService.deleteCollection(tombstone.collectionId)
+
+        if let deferredError {
+            throw deferredError
+        }
+    }
+
+    private func isMissingCloudKitSchemaError(_ error: Error) -> Bool {
+        guard let ckError = error as? CKError else { return false }
+        return ckError.code == .unknownItem || ckError.errorCode == 11 || ckError.code == .invalidArguments
+    }
+
     private func isPendingSync(collectionId: UUID) -> Bool {
         pendingSyncCollections.contains(collectionId)
     }
@@ -857,6 +1131,13 @@ actor CollectionRepository {
         case .create, .update:
             do {
                 guard let collection = try await fetch(id: operation.entityId) else {
+                    if let tombstone = try localDeletedCollectionTombstone(collectionId: operation.entityId) {
+                        let removedEdges = try localMembershipEdges(collectionId: operation.entityId)
+                        try await syncCollectionDeletionToCloudKit(
+                            tombstone: tombstone,
+                            removedMembershipEdges: removedEdges
+                        )
+                    }
                     await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
                     return
                 }
@@ -880,11 +1161,20 @@ actor CollectionRepository {
 
         case .delete:
             do {
-                if let payload = operation.payload.flatMap({ try? JSONDecoder().decode(CollectionDeletePayload.self, from: $0) }) {
-                    try await collectionCloudService.deleteCollection(payload.collectionId, ownerId: payload.ownerId)
-                } else {
-                    try await collectionCloudService.deleteCollection(operation.entityId)
+                let tombstone = CollectionDeleteReplayPolicy.tombstoneForReplay(
+                    localTombstone: try localDeletedCollectionTombstone(collectionId: operation.entityId),
+                    payloadData: operation.payload,
+                    defaultDeletedAt: Date()
+                )
+                guard let tombstone else {
+                    throw CollectionRepositoryError.invalidData
                 }
+
+                let removedEdges = try localMembershipEdges(collectionId: operation.entityId)
+                try await syncCollectionDeletionToCloudKit(
+                    tombstone: tombstone,
+                    removedMembershipEdges: removedEdges
+                )
                 await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
             } catch {
                 await operationQueueService.markFailed(
@@ -924,7 +1214,11 @@ actor CollectionRepository {
                     continue
                 }
 
-                try await collectionCloudService.saveCollection(collection)
+                await syncCollectionToCloudKit(collection)
+                guard !pendingSyncCollections.contains(collectionId) else {
+                    continue
+                }
+
                 let membershipSynced = await syncPendingMembershipEdgesToCloudKit(collectionId: collectionId)
                 if membershipSynced {
                     self.pendingSyncCollections.remove(collectionId)
@@ -985,20 +1279,61 @@ actor CollectionRepository {
         }
 
         do {
+            let remoteDeletedCollections = try await collectionCloudService.fetchDeletedCollectionTombstones(ownerId: userId)
             let cloudCollections = try await collectionCloudService.fetchCollections(forUserId: userId)
             let cloudMembershipEdges = try await collectionCloudService.fetchMembershipEdges(forUserId: userId)
-            let cloudMembershipEdgesByCollection = Dictionary(grouping: cloudMembershipEdges, by: \.collectionId)
             let context = ModelContext(modelContainer)
-            for edge in cloudMembershipEdges {
+            for tombstone in remoteDeletedCollections {
+                try upsertLocalDeletedCollectionTombstone(tombstone, context: context)
+                try removeLocalCollectionSuppressedByTombstone(tombstone, context: context)
+            }
+            let remoteDeletedByCollectionId = remoteDeletedCollections.reduce(into: [UUID: DeletedCollectionTombstone]()) { result, tombstone in
+                if let existing = result[tombstone.collectionId] {
+                    if existing.deletedAt < tombstone.deletedAt {
+                        result[tombstone.collectionId] = tombstone
+                    }
+                } else {
+                    result[tombstone.collectionId] = tombstone
+                }
+            }
+            let deletedCollectionIds = Set(
+                try localDeletedCollectionTombstones(context: context).map(\.collectionId)
+            )
+            let activeCloudMembershipEdges = cloudMembershipEdges.filter {
+                !deletedCollectionIds.contains($0.collectionId)
+            }
+            let cloudMembershipEdgesByCollection = Dictionary(grouping: activeCloudMembershipEdges, by: \.collectionId)
+            for edge in activeCloudMembershipEdges {
                 try upsertLocalMembershipEdge(edge, context: context)
             }
-            if !cloudMembershipEdges.isEmpty {
+            if !activeCloudMembershipEdges.isEmpty || !remoteDeletedCollections.isEmpty {
                 try context.save()
             }
             // Fetched collections from CloudKit
 
             // Merge with local collections
             for cloudCollection in cloudCollections {
+                guard !deletedCollectionIds.contains(cloudCollection.id) else {
+                    logger.info("Skipping collection suppressed by deleted collection tombstone: \(cloudCollection.id)")
+                    if let tombstone = CollectionDeleteReplayPolicy.tombstoneForSuppressedActiveRecord(
+                        localTombstone: try localDeletedCollectionTombstone(collectionId: cloudCollection.id),
+                        remoteTombstone: remoteDeletedByCollectionId[cloudCollection.id]
+                    ) {
+                        let removedEdges = try localMembershipEdges(collectionId: cloudCollection.id)
+                        do {
+                            try await syncCollectionDeletionToCloudKit(
+                                tombstone: tombstone,
+                                removedMembershipEdges: removedEdges
+                            )
+                        } catch {
+                            logger.warning("Failed to clean stale active collection suppressed by tombstone: \(error.localizedDescription)")
+                        }
+                    } else {
+                        logger.warning("Skipping stale active collection cleanup without a durable tombstone: \(cloudCollection.id)")
+                    }
+                    continue
+                }
+
                 let localCollection = try await fetch(id: cloudCollection.id)
 
                 if let local = localCollection {
@@ -1050,9 +1385,62 @@ actor CollectionRepository {
         let models = try context.fetch(descriptor)
         // Found collections to delete
 
-        // Delete each collection (includes CloudKit cleanup)
+        // Delete each collection and wait for CloudKit cleanup before account deletion continues.
         for model in models {
-            try await delete(id: model.id)
+            let collection = try applyMembershipOverlay(
+                to: [model.toDomain()],
+                context: context
+            ).first ?? model.toDomain()
+            let deletedAt = Date()
+            let tombstone = DeletedCollectionTombstone(
+                collectionId: collection.id,
+                ownerId: collection.userId,
+                deletedAt: deletedAt,
+                cloudRecordName: collection.cloudRecordName,
+                sourceDeviceId: SyncDeviceIdentifier.current()
+            )
+            let removedMembershipEdges = removedMembershipEdges(for: collection, deletedAt: deletedAt)
+
+            try upsertLocalDeletedCollectionTombstone(tombstone, context: context)
+            for edge in removedMembershipEdges {
+                try upsertLocalMembershipEdge(edge, context: context)
+            }
+            context.delete(model)
+            try context.save()
+
+            NotificationCenter.default.post(
+                name: .collectionDeleted,
+                object: collection.id,
+                userInfo: ["collectionId": collection.id]
+            )
+
+            guard !RuntimeEnvironment.isRunningTests else {
+                continue
+            }
+
+            await operationQueueService.addOperation(
+                type: .delete,
+                entityType: .collection,
+                entityId: collection.id
+            )
+            await operationQueueService.markInProgress(operationId: collection.id)
+
+            do {
+                try await syncCollectionDeletionToCloudKit(
+                    tombstone: tombstone,
+                    removedMembershipEdges: removedMembershipEdges
+                )
+                await operationQueueService.markCompleted(
+                    entityId: collection.id,
+                    entityType: .collection
+                )
+            } catch {
+                await operationQueueService.markFailed(
+                    operationId: collection.id,
+                    error: error.localizedDescription
+                )
+                throw error
+            }
         }
 
         // Deleted all user collections

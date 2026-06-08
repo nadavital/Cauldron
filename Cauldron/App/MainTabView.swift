@@ -33,9 +33,17 @@ struct MainTabView: View {
     @State private var isSavingPreparedSharedRecipe = false
     @State private var showSharedRecipeSavedToast = false
     @State private var sidebarRefreshTask: Task<Void, Never>?
+    @State private var activeShareImportAcknowledgement: ShareImportAcknowledgement?
+    @Binding private var pendingSharedContent: ContentView.SharedContentWrapper?
     @ObservedObject private var connectionManager: ConnectionManager
 
     @State private var searchNavigationPath = NavigationPath()
+
+    private enum ShareImportAcknowledgement: Equatable {
+        case prepared(Data)
+        case text(String)
+        case url(URL)
+    }
 
     private struct SharedImportRequest: Identifiable {
         let id = UUID()
@@ -64,9 +72,14 @@ struct MainTabView: View {
         )
     }
 
-    init(dependencies: DependencyContainer, preloadedData: PreloadedRecipeData?) {
+    init(
+        dependencies: DependencyContainer,
+        preloadedData: PreloadedRecipeData?,
+        pendingSharedContent: Binding<ContentView.SharedContentWrapper?> = .constant(nil)
+    ) {
         self.dependencies = dependencies
         self.preloadedData = preloadedData
+        self._pendingSharedContent = pendingSharedContent
         self.connectionManager = dependencies.connectionManager
     }
 
@@ -86,7 +99,7 @@ struct MainTabView: View {
                 }
             }
         }
-        .sheet(item: $sharedImportRequest) { request in
+        .sheet(item: $sharedImportRequest, onDismiss: acknowledgeActiveShareImport) { request in
             ImporterView(
                 dependencies: dependencies,
                 initialURL: request.initialURL,
@@ -108,21 +121,11 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToSharedContent"))) { notification in
             if let contentWrapper = notification.object as? ContentView.SharedContentWrapper {
                 AppLogger.general.info("📍 Navigating to shared content in Search tab")
-                selectedTab = .search
-
-                // Reset path first to ensure clean navigation
-                searchNavigationPath = NavigationPath()
-
-                // Push content based on type
-                switch contentWrapper.content {
-                case .recipe(let recipe, _):
-                    searchNavigationPath.append(recipe)
-                case .profile(let user):
-                    searchNavigationPath.append(user)
-                case .collection(let collection, _):
-                    searchNavigationPath.append(collection)
-                }
+                navigateToSharedContent(contentWrapper)
             }
+        }
+        .task(id: pendingSharedContent?.id) {
+            deliverPendingSharedContentIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SwitchToSearchTab"))) { _ in
             // Switch to Search tab when "Find people to add" is tapped from Friends empty state
@@ -131,9 +134,13 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openRecipeImportURL)) { notification in
             guard let url = notification.object as? URL else { return }
+            if ShareExtensionImportStore.pendingPreparedRecipe() != nil {
+                AppLogger.general.info("📥 Prepared Share Extension payload supersedes URL handoff")
+                openPendingImporterIfNeeded()
+                return
+            }
             AppLogger.general.info("📥 Opening importer from Share Extension URL: \(url.absoluteString)")
-            _ = ShareExtensionImportStore.consumePendingRecipeURL()
-            openImporter(with: url)
+            openImporter(with: url, acknowledgement: .url(url))
         }
         .task {
             guard !didCheckInitialPendingImport else { return }
@@ -175,6 +182,9 @@ struct MainTabView: View {
             scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .collectionRecipesChanged)) { _ in
+            scheduleSidebarCollectionsRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { _ in
             scheduleSidebarCollectionsRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { notification in
@@ -234,6 +244,32 @@ struct MainTabView: View {
             }
     }
 
+    @MainActor
+    private func deliverPendingSharedContentIfNeeded() {
+        guard let contentWrapper = pendingSharedContent else { return }
+        AppLogger.general.info("📍 Delivering deferred shared content route")
+        navigateToSharedContent(contentWrapper)
+        pendingSharedContent = nil
+    }
+
+    @MainActor
+    private func navigateToSharedContent(_ contentWrapper: ContentView.SharedContentWrapper) {
+        selectedTab = .search
+
+        // Reset path first to ensure clean navigation
+        searchNavigationPath = NavigationPath()
+
+        // Push content based on type
+        switch contentWrapper.content {
+        case .recipe(let recipe, _):
+            searchNavigationPath.append(recipe)
+        case .profile(let user):
+            searchNavigationPath.append(user)
+        case .collection(let collection, _):
+            searchNavigationPath.append(collection)
+        }
+    }
+
     private var tabScaffold: some View {
         TabView(selection: selectedTabBinding) {
             Tab("Cook", systemImage: "flame.fill", value: .cook) {
@@ -291,12 +327,13 @@ struct MainTabView: View {
     }
 
     private func openPendingImporterIfNeeded() {
-        guard !isSavingPreparedSharedRecipe else {
+        guard !isSavingPreparedSharedRecipe,
+              sharedImportRequest == nil else {
             return
         }
 
-        if let prepared = ShareExtensionImportStore.consumePreparedRecipe() {
-            AppLogger.general.info("📥 Consumed prepared Share Extension recipe payload")
+        if let prepared = ShareExtensionImportStore.pendingPreparedRecipe() {
+            AppLogger.general.info("📥 Found pending prepared Share Extension recipe payload")
             isSavingPreparedSharedRecipe = true
             Task {
                 await autoSavePreparedSharedRecipe(prepared)
@@ -304,18 +341,18 @@ struct MainTabView: View {
             return
         }
 
-        if let pendingText = ShareExtensionImportStore.consumePendingRecipeText() {
-            AppLogger.general.info("📥 Consumed pending Share Extension text")
-            openImporter(withText: pendingText)
+        if let pendingText = ShareExtensionImportStore.pendingRecipeText() {
+            AppLogger.general.info("📥 Found pending Share Extension text")
+            openImporter(withText: pendingText, acknowledgement: .text(pendingText))
             return
         }
 
-        guard let pendingURL = ShareExtensionImportStore.consumePendingRecipeURL() else {
+        guard let pendingURL = ShareExtensionImportStore.pendingRecipeURL() else {
             return
         }
 
-        AppLogger.general.info("📥 Consumed pending Share Extension URL: \(pendingURL.absoluteString)")
-        openImporter(with: pendingURL)
+        AppLogger.general.info("📥 Found pending Share Extension URL: \(pendingURL.absoluteString)")
+        openImporter(with: pendingURL, acknowledgement: .url(pendingURL))
     }
 
     #if targetEnvironment(macCatalyst)
@@ -331,8 +368,9 @@ struct MainTabView: View {
     }
     #endif
 
-    private func openImporter(with url: URL) {
+    private func openImporter(with url: URL, acknowledgement: ShareImportAcknowledgement? = nil) {
         selectedTab = .cook
+        activeShareImportAcknowledgement = acknowledgement
         sharedImportRequest = SharedImportRequest(
             initialURL: url,
             initialText: nil,
@@ -341,8 +379,9 @@ struct MainTabView: View {
         )
     }
 
-    private func openImporter(withText text: String) {
+    private func openImporter(withText text: String, acknowledgement: ShareImportAcknowledgement? = nil) {
         selectedTab = .cook
+        activeShareImportAcknowledgement = acknowledgement
         sharedImportRequest = SharedImportRequest(
             initialURL: nil,
             initialText: text,
@@ -351,8 +390,13 @@ struct MainTabView: View {
         )
     }
 
-    private func openPreparedImporter(recipe: Recipe, sourceInfo: String) {
+    private func openPreparedImporter(
+        recipe: Recipe,
+        sourceInfo: String,
+        acknowledgement: ShareImportAcknowledgement? = nil
+    ) {
         selectedTab = .cook
+        activeShareImportAcknowledgement = acknowledgement
         sharedImportRequest = SharedImportRequest(
             initialURL: nil,
             initialText: nil,
@@ -362,8 +406,9 @@ struct MainTabView: View {
     }
 
     @MainActor
-    private func autoSavePreparedSharedRecipe(_ prepared: PreparedSharedRecipe) async {
+    private func autoSavePreparedSharedRecipe(_ pending: ShareExtensionImportStore.PendingPreparedSharedRecipe) async {
         defer { isSavingPreparedSharedRecipe = false }
+        let prepared = pending.preparedRecipe
 
         let recipeForImport: Recipe
         do {
@@ -375,22 +420,54 @@ struct MainTabView: View {
             AppLogger.general.warning("⚠️ Failed to reparse prepared share recipe; falling back to preprocessed payload: \(error.localizedDescription)")
         }
 
+        guard let userId = CurrentUserSession.shared.userId else {
+            AppLogger.general.error("❌ Cannot auto-save prepared share recipe without a current user")
+            openPreparedImporter(
+                recipe: recipeForImport,
+                sourceInfo: prepared.sourceInfo,
+                acknowledgement: .prepared(pending.payloadData)
+            )
+            return
+        }
+
         let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
             from: recipeForImport,
-            userId: CurrentUserSession.shared.userId,
+            userId: userId,
             imageManager: dependencies.imageManager
         )
 
         do {
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.general.info("✅ Auto-saved prepared share recipe: \(recipeToSave.title)")
+            ShareExtensionImportStore.acknowledgePreparedRecipe(matching: pending.payloadData)
             NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
             selectedTab = .cook
             showSharedRecipeSavedToast = true
         } catch {
             AppLogger.general.error("❌ Failed to auto-save prepared share recipe: \(error.localizedDescription)")
-            openPreparedImporter(recipe: recipeForImport, sourceInfo: prepared.sourceInfo)
+            openPreparedImporter(
+                recipe: recipeForImport,
+                sourceInfo: prepared.sourceInfo,
+                acknowledgement: .prepared(pending.payloadData)
+            )
         }
+    }
+
+    private func acknowledgeActiveShareImport() {
+        guard let acknowledgement = activeShareImportAcknowledgement else {
+            return
+        }
+
+        switch acknowledgement {
+        case .prepared(let payloadData):
+            ShareExtensionImportStore.acknowledgePreparedRecipe(matching: payloadData)
+        case .text(let text):
+            ShareExtensionImportStore.acknowledgePendingRecipeText(matching: text)
+        case .url(let url):
+            ShareExtensionImportStore.acknowledgePendingRecipeURL(matching: url)
+        }
+
+        activeShareImportAcknowledgement = nil
     }
 
     @MainActor
@@ -406,14 +483,9 @@ struct MainTabView: View {
         }
 
         do {
-            let allCollections = try await dependencies.collectionRepository.fetchAll()
-            let ownedCollections: [Collection]
-
-            if let currentUserID = CurrentUserSession.shared.userId {
-                ownedCollections = allCollections.filter { $0.userId == currentUserID }
-            } else {
-                ownedCollections = allCollections
-            }
+            let ownedCollections = try await dependencies.collectionRepository.fetchUserCollections(
+                ownerId: CurrentUserSession.shared.userId
+            )
 
             sidebarCollections = ownedCollections.sorted { $0.updatedAt > $1.updatedAt }
 
@@ -486,5 +558,5 @@ struct MainTabView: View {
 }
 
 #Preview {
-    MainTabView(dependencies: .preview(), preloadedData: nil)
+    MainTabView(dependencies: .preview(), preloadedData: nil, pendingSharedContent: .constant(nil))
 }

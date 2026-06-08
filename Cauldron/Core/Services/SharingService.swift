@@ -109,16 +109,27 @@ actor SharingService {
 
     // In-memory cache for shared recipes with TTL
     private var cachedSharedRecipes: [SharedRecipe] = []
+    private var cachedSharedRecipesUserId: UUID?
     private var cacheTimestamp: Date?
     private let cacheTTL: TimeInterval = 5 * 60 // 5 minutes
 
     /// Get cached shared recipes if still valid (for instant UI)
-    func getCachedSharedRecipes() -> [SharedRecipe]? {
+    func getCachedSharedRecipes(for userId: UUID) -> [SharedRecipe]? {
+        guard cachedSharedRecipesUserId == userId else {
+            return nil
+        }
+
         guard let timestamp = cacheTimestamp,
               Date().timeIntervalSince(timestamp) < cacheTTL else {
             return nil
         }
         return cachedSharedRecipes
+    }
+
+    func resetSharedRecipeCache() {
+        cachedSharedRecipes = []
+        cachedSharedRecipesUserId = nil
+        cacheTimestamp = nil
     }
 
     /// Get all recipes shared with the current user (from PUBLIC database)
@@ -127,16 +138,16 @@ actor SharingService {
     /// NOTE: These are recipes available for browsing, but not necessarily saved to the user's collection.
     /// To save a recipe for later, users must explicitly add it to their personal collection via "Add to My Recipes".
     func getSharedRecipes(forceRefresh: Bool = false) async throws -> [SharedRecipe] {
-        // Return cached data if valid and not forcing refresh
-        if !forceRefresh, let cached = getCachedSharedRecipes() {
-            return cached
-        }
-
         // Get current user to know who we are
         let currentUser = await MainActor.run { CurrentUserSession.shared.currentUser }
         guard let currentUser = currentUser else {
             logger.warning("No current user - cannot fetch shared recipes")
             return []
+        }
+
+        // Return cached data if valid and not forcing refresh
+        if !forceRefresh, let cached = getCachedSharedRecipes(for: currentUser.id) {
+            return cached
         }
 
         // Get connected friends from CloudKit
@@ -167,7 +178,9 @@ actor SharingService {
 
             // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
             // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
-            let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(friendsPublicRecipes)
+            let filteredRecipes = RecipeGroupingService.deduplicateSharedFeedRecipes(
+                RecipeGroupingService.hideRelatedRecipeReferences(friendsPublicRecipes)
+            )
 
             // Batch fetch all owners at once to avoid N+1 queries
             let ownerIds = Set(filteredRecipes.compactMap { $0.ownerId })
@@ -175,7 +188,9 @@ actor SharingService {
                 byUserIds: Array(ownerIds),
                 forceRefresh: forceRefresh
             )
-            let ownersMap = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0) })
+            let ownersMap = Dictionary(owners.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+                candidate.createdAt > current.createdAt ? candidate : current
+            })
 
             // Convert to SharedRecipe objects using the pre-fetched owners
             for recipe in filteredRecipes {
@@ -199,6 +214,7 @@ actor SharingService {
 
         // Update in-memory cache
         cachedSharedRecipes = allSharedRecipes
+        cachedSharedRecipesUserId = currentUser.id
         cacheTimestamp = Date()
 
         return allSharedRecipes

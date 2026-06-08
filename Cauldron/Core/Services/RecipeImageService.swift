@@ -131,7 +131,8 @@ class RecipeImageService {
         localURL url: URL?,
         ownerId: UUID? = nil,
         targetPixelSize: CGFloat? = nil,
-        cacheVariant: String? = nil
+        cacheVariant: String? = nil,
+        privateRecordName: String? = nil
     ) async -> Result<UIImage, ImageLoadError> {
         let recipeCacheKey = ImageCache.recipeImageKey(
             recipeId: recipeId,
@@ -182,7 +183,7 @@ class RecipeImageService {
             let tryOrder: [Bool] = isOwnRecipe ? [false, true] : [true, false]  // fromPublic values
 
             for fromPublic in tryOrder {
-                if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, fromPublic: fromPublic) {
+                if let filename = try await imageManager.downloadImageFromCloud(recipeId: recipeId, fromPublic: fromPublic, privateRecordName: fromPublic ? nil : privateRecordName) {
                     // Image downloaded successfully, load it
                     let fileManager = FileManager.default
                     guard let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {

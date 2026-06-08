@@ -101,10 +101,24 @@ struct CollectionDetailView: View {
         CurrentUserSession.shared.userId != nil && !isOwned
     }
 
-    init(collection: Collection, dependencies: DependencyContainer) {
+    init(
+        collection: Collection,
+        dependencies: DependencyContainer,
+        initialOwner: User? = nil,
+        initialRecipeImages: [URL?] = [],
+        initialRecipeImageSources: [CollectionRecipeImageSource] = [],
+        initialRelation: CollectionLibraryRelation = .unknown
+    ) {
         self.initialCollection = collection
         self.dependencies = dependencies
         self._collection = State(initialValue: collection)
+        // Seed presentation state for instant display; refreshed on load.
+        // `initialRelation` is accepted for call-site compatibility; the
+        // owned/saved relationship is re-resolved from local + cloud state.
+        _ = initialRelation
+        self._collectionOwner = State(initialValue: initialOwner)
+        self._recipeImages = State(initialValue: initialRecipeImages)
+        self._recipeImageSources = State(initialValue: initialRecipeImageSources)
     }
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
@@ -216,6 +230,12 @@ struct CollectionDetailView: View {
             Task {
                 await loadRecipes()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { notification in
+            handleCollectionDeleted(notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .savedCollectionReferencesChanged)) { notification in
+            handleSavedCollectionReferencesChanged(notification)
         }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
@@ -334,6 +354,10 @@ struct CollectionDetailView: View {
                 if let updatedCollection = try await dependencies.collectionRepository.fetch(id: collection.id) {
                     collection = updatedCollection
                     AppLogger.general.info("✅ Refreshed collection: \(collection.name) with \(collection.recipeCount) recipes")
+                } else {
+                    AppLogger.general.info("Collection detail dismissed because collection was deleted: \(collection.id)")
+                    dismissDeletedCollection()
+                    return
                 }
 
                 let fetchedRecipes = try await dependencies.recipeRepository.fetch(ids: collection.recipeIds)
@@ -371,6 +395,7 @@ struct CollectionDetailView: View {
                     recipeId: recipeId,
                     imageURL: recipe?.imageURL,
                     ownerId: recipe?.ownerId,
+                    privateRecordName: recipe?.cloudRecordName,
                     hasCloudImage: recipe?.cloudImageRecordName != nil
                 )
             }
@@ -444,6 +469,62 @@ struct CollectionDetailView: View {
         } catch {
             AppLogger.general.error("❌ Failed to repair public collection memberships: \(error.localizedDescription)")
             errorMessage = "Failed to repair collection sharing: \(error.localizedDescription)"
+            showError = true
+        }
+    }
+
+    private func handleCollectionDeleted(_ notification: Notification) {
+        let deletedCollectionId = notification.object as? UUID
+            ?? notification.userInfo?["collectionId"] as? UUID
+        guard deletedCollectionId == collection.id else { return }
+        dismissDeletedCollection()
+    }
+
+    private func dismissDeletedCollection() {
+        activeSheet = nil
+        dismiss()
+    }
+
+    private func handleSavedCollectionReferencesChanged(_ notification: Notification) {
+        guard canSaveCollection,
+              let sourceCollectionId = notification.userInfo?["sourceCollectionId"] as? UUID,
+              sourceCollectionId == collection.sourceCollectionReferenceId else {
+            return
+        }
+
+        let changeType = notification.userInfo?["changeType"] as? String
+        switch changeType {
+        case "removed":
+            savedCollection = nil
+        case "saved":
+            savedCollection = notification.userInfo?["collection"] as? Collection ?? collection
+        default:
+            Task {
+                await loadExistingSavedCollection()
+            }
+        }
+    }
+
+    private func removeSavedCollectionFromLibrary() async {
+        guard !isSavingCollection,
+              let currentUserId = CurrentUserSession.shared.userId else {
+            return
+        }
+
+        isSavingCollection = true
+        let previousSavedCollection = savedCollection
+        savedCollection = nil
+        defer { isSavingCollection = false }
+
+        do {
+            _ = try await dependencies.savedReferenceRepository.deleteCollectionReference(
+                userId: currentUserId,
+                sourceCollectionId: collection.sourceCollectionReferenceId
+            )
+        } catch {
+            savedCollection = previousSavedCollection
+            AppLogger.general.error("❌ Failed to remove saved collection: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
             showError = true
         }
     }
@@ -634,13 +715,25 @@ struct CollectionDetailView: View {
     private var collectionPrimaryAction: some View {
         if canSaveCollection {
             if savedCollection != nil {
-                Label("Saved", systemImage: "checkmark")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .foregroundStyle(.green)
-                    .background(Color.green.opacity(0.12), in: Capsule())
-                    .accessibilityLabel("Saved")
+                Menu {
+                    Button(role: .destructive) {
+                        Task {
+                            await removeSavedCollectionFromLibrary()
+                        }
+                    } label: {
+                        Label("Remove from Library", systemImage: "bookmark.slash")
+                    }
+                    .disabled(isSavingCollection)
+                } label: {
+                    Label("Saved", systemImage: "checkmark")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.green)
+                        .background(Color.green.opacity(0.12), in: Capsule())
+                }
+                .disabled(isSavingCollection)
+                .accessibilityLabel("Saved Collection Actions")
             } else {
                 Button {
                     Task {

@@ -68,7 +68,8 @@ private enum RecipeImageLoadingPipeline {
         imageURL: URL?,
         ownerId: UUID?,
         targetPixelSize: CGFloat?,
-        cacheVariant: String
+        cacheVariant: String,
+        privateRecordName: String? = nil
     ) async -> Result<UIImage, ImageLoadError> {
         if let recipeId = recipeId {
             return await service.loadImage(
@@ -76,7 +77,8 @@ private enum RecipeImageLoadingPipeline {
                 localURL: imageURL,
                 ownerId: ownerId,
                 targetPixelSize: targetPixelSize,
-                cacheVariant: cacheVariant
+                cacheVariant: cacheVariant,
+                privateRecordName: privateRecordName
             )
         }
         return await service.loadImage(from: imageURL, targetPixelSize: targetPixelSize)
@@ -111,6 +113,9 @@ struct RecipeImageView: View {
     let recipeImageService: RecipeImageService
     let recipeId: UUID?
     let ownerId: UUID?
+    /// Optional CloudKit private record name (for legacy recipes whose record
+    /// name differs from their UUID). Enables the private-database image fallback.
+    let privateRecordName: String?
     /// Optional: reports the loaded image's average luminance (0 = dark, 1 =
     /// light) so overlays can pick legible (white/black) foreground colors.
     var onLuminance: ((Double) -> Void)? = nil
@@ -140,6 +145,7 @@ struct RecipeImageView: View {
         recipeImageService: RecipeImageService,
         recipeId: UUID? = nil,
         ownerId: UUID? = nil,
+        privateRecordName: String? = nil,
         onLuminance: ((Double) -> Void)? = nil
     ) {
         self.imageURL = imageURL
@@ -148,6 +154,7 @@ struct RecipeImageView: View {
         self.recipeImageService = recipeImageService
         self.recipeId = recipeId
         self.ownerId = ownerId
+        self.privateRecordName = privateRecordName
         self.onLuminance = onLuminance
 
         // Initialize with cache to avoid placeholder flicker on back-navigation.
@@ -192,7 +199,8 @@ struct RecipeImageView: View {
             imageURL: imageURL,
             ownerId: ownerId,
             targetPixelSize: targetPixelSize,
-            cacheVariant: cacheVariant
+            cacheVariant: cacheVariant,
+            privateRecordName: privateRecordName
         )
         switch result {
         case .success(let image):
@@ -335,19 +343,19 @@ extension RecipeImageView {
 
     /// Create a card-sized image view from a Recipe object (with CloudKit fallback)
     init(recipe: Recipe, recipeImageService: RecipeImageService, onLuminance: ((Double) -> Void)? = nil) {
-        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, onLuminance: onLuminance)
+        self.init(imageURL: recipe.imageURL, size: .card, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName, onLuminance: onLuminance)
     }
 
     /// Create a thumbnail-sized image view from a Recipe object (with CloudKit fallback)
     init(thumbnailForRecipe recipe: Recipe, recipeImageService: RecipeImageService) {
-        self.init(imageURL: recipe.imageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+        self.init(imageURL: recipe.imageURL, size: .thumbnail, showPlaceholderText: false, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName)
     }
 }
 
 extension HeroRecipeImageView {
     /// Create from a Recipe object (with CloudKit fallback)
     init(recipe: Recipe, recipeImageService: RecipeImageService) {
-        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId)
+        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName)
     }
 }
 
@@ -359,6 +367,9 @@ struct HeroRecipeImageView: View {
     let recipeImageService: RecipeImageService
     let recipeId: UUID?
     let ownerId: UUID?
+    /// Optional CloudKit private record name (for legacy recipes whose record
+    /// name differs from their UUID). Enables the private-database image fallback.
+    let privateRecordName: String?
 
     @Environment(\.displayScale) private var displayScale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -381,11 +392,12 @@ struct HeroRecipeImageView: View {
         max(containerWidth, 500) * displayScale
     }
 
-    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil) {
+    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil, privateRecordName: String? = nil) {
         self.imageURL = imageURL
         self.recipeImageService = recipeImageService
         self.recipeId = recipeId
         self.ownerId = ownerId
+        self.privateRecordName = privateRecordName
 
         if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(recipeId: recipeId, variant: cacheVariant) {
             _loadedImage = State(initialValue: cachedImage)
@@ -450,7 +462,8 @@ struct HeroRecipeImageView: View {
             imageURL: imageURL,
             ownerId: ownerId,
             targetPixelSize: targetPixelSize,
-            cacheVariant: cacheVariant
+            cacheVariant: cacheVariant,
+            privateRecordName: privateRecordName
         )
         switch result {
         case .success(let image):

@@ -246,7 +246,20 @@ final class ShareViewController: UIViewController {
     private func processSharedContent() async {
         setProcessingState(message: "Analyzing shared recipe...")
 
-        if let url = await extractSharedURL() {
+        let explicitURL = await extractExplicitSharedURL()
+        let text = await extractSharedText()
+
+        if let text,
+           ShareExtensionImportContract.plainTextRecipeShouldTakePrecedenceOverURL(text) {
+            sharedText = text
+            await MainActor.run { [weak self] in
+                self?.setTextReadyState(text: text)
+            }
+            return
+        }
+
+        let textURL = text.flatMap { ShareExtensionImportContract.firstHTTPURL(in: $0) }
+        if let url = explicitURL ?? textURL {
             guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
                 setFailureState(message: "This link type is not supported.")
                 return
@@ -269,7 +282,7 @@ final class ShareViewController: UIViewController {
             return
         }
 
-        guard let text = await extractSharedText() else {
+        guard let text else {
             setFailureState(message: "No webpage URL or recipe text found in this share.")
             return
         }
@@ -280,7 +293,7 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func extractSharedURL() async -> URL? {
+    private func extractExplicitSharedURL() async -> URL? {
         guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
             return nil
         }
@@ -291,12 +304,6 @@ final class ShareViewController: UIViewController {
             for provider in attachments {
                 if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
                    let url = await loadURL(from: provider) {
-                    return url
-                }
-
-                if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
-                   let text = await loadText(from: provider),
-                   let url = extractFirstURL(from: text) {
                     return url
                 }
             }
@@ -362,32 +369,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func extractFirstURL(from text: String) -> URL? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return URL(string: trimmed)
-        }
-
-        let range = NSRange(location: 0, length: trimmed.utf16.count)
-        let matches = detector.matches(in: trimmed, options: [], range: range)
-
-        for match in matches {
-            guard let url = match.url,
-                  let scheme = url.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https" else {
-                continue
-            }
-            return url
-        }
-
-        if let fallback = URL(string: trimmed),
-           let scheme = fallback.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
-            return fallback
-        }
-
-        return nil
+        ShareExtensionImportContract.firstHTTPURL(in: text)
     }
 
     private func loadPreviewImageIfAvailable(from imageURLString: String?) {

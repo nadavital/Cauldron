@@ -142,7 +142,8 @@ struct CollectionCoverView: View {
                 showPlaceholderText: false,
                 recipeImageService: dependencies.recipeImageService,
                 recipeId: recipe.id,
-                ownerId: recipe.ownerId
+                ownerId: recipe.ownerId,
+                privateRecordName: recipe.cloudRecordName
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()

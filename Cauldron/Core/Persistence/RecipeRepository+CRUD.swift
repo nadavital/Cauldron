@@ -11,6 +11,20 @@ import os
 import CloudKit
 import UIKit
 
+enum AccountDeletionRecipeCleanupError: LocalizedError {
+    case ownerMismatch(UUID)
+    case remoteDeletionIncomplete(UUID, [String])
+
+    var errorDescription: String? {
+        switch self {
+        case .ownerMismatch(let recipeId):
+            return "Recipe \(recipeId) is not owned by the account being deleted."
+        case .remoteDeletionIncomplete(let recipeId, let failures):
+            return "Could not fully delete recipe \(recipeId) from iCloud: \(failures.joined(separator: "; "))"
+        }
+    }
+}
+
 extension RecipeRepository {
     
     // MARK: - Create
@@ -61,8 +75,11 @@ extension RecipeRepository {
         context.insert(model)
         try context.save()
 
-        // If this recipe was previously deleted, remove the tombstone
-        try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
+        // If this owned recipe was previously deleted, remove the tombstone.
+        // Preview/cache records should not clear durable deletion facts.
+        if !recipeToSave.isPreview {
+            try await deletedRecipeRepository.unmarkAsDeleted(recipeId: recipe.id)
+        }
 
         // Skip CloudKit sync if requested (e.g., when downloading from CloudKit)
         if skipCloudSync || RuntimeEnvironment.isRunningTests {
@@ -129,6 +146,12 @@ extension RecipeRepository {
             if recipes.count > 1 {
                 logger.warning("🔄 Found \(recipes.count) duplicates for recipe ID: \(id)")
 
+                let nonPreviewOwnerIds = Set(recipes.filter { !$0.isPreview }.compactMap(\.ownerId))
+                if nonPreviewOwnerIds.count > 1 {
+                    logger.warning("Skipping duplicate repair for recipe ID \(id) because duplicates belong to different owners")
+                    continue
+                }
+
                 let canonical = recipes.max(by: { lhs, rhs in
                     let lhsScore = duplicateRepairScore(lhs)
                     let rhsScore = duplicateRepairScore(rhs)
@@ -172,6 +195,13 @@ extension RecipeRepository {
     }
 
     private func mergeDuplicateRecipe(_ duplicate: RecipeModel, into canonical: RecipeModel) {
+        let canonicalIsCopy = Recipe.resolvedFollowsSourceUpdates(
+            originalRecipeId: canonical.originalRecipeId,
+            savedAt: canonical.savedAt,
+            sourceRecipeUpdatedAt: canonical.sourceRecipeUpdatedAt,
+            followsSourceUpdates: canonical.followsSourceUpdates
+        )
+
         canonical.isFavorite = canonical.isFavorite || duplicate.isFavorite
         canonical.createdAt = min(canonical.createdAt, duplicate.createdAt)
         canonical.updatedAt = max(canonical.updatedAt, duplicate.updatedAt)
@@ -200,22 +230,24 @@ extension RecipeRepository {
         if canonical.notes == nil {
             canonical.notes = duplicate.notes
         }
-        if canonical.originalRecipeId == nil {
-            canonical.originalRecipeId = duplicate.originalRecipeId
+        if canonicalIsCopy {
+            if canonical.originalRecipeId == nil {
+                canonical.originalRecipeId = duplicate.originalRecipeId
+            }
+            if canonical.originalCreatorId == nil {
+                canonical.originalCreatorId = duplicate.originalCreatorId
+            }
+            if canonical.originalCreatorName == nil {
+                canonical.originalCreatorName = duplicate.originalCreatorName
+            }
+            if canonical.savedAt == nil {
+                canonical.savedAt = duplicate.savedAt
+            }
+            if canonical.sourceRecipeUpdatedAt == nil {
+                canonical.sourceRecipeUpdatedAt = duplicate.sourceRecipeUpdatedAt
+            }
+            canonical.followsSourceUpdates = canonical.followsSourceUpdates || duplicate.followsSourceUpdates
         }
-        if canonical.originalCreatorId == nil {
-            canonical.originalCreatorId = duplicate.originalCreatorId
-        }
-        if canonical.originalCreatorName == nil {
-            canonical.originalCreatorName = duplicate.originalCreatorName
-        }
-        if canonical.savedAt == nil {
-            canonical.savedAt = duplicate.savedAt
-        }
-        if canonical.sourceRecipeUpdatedAt == nil {
-            canonical.sourceRecipeUpdatedAt = duplicate.sourceRecipeUpdatedAt
-        }
-        canonical.followsSourceUpdates = canonical.followsSourceUpdates || duplicate.followsSourceUpdates
         canonical.isPreview = canonical.isPreview && duplicate.isPreview
 
         if canonical.nutritionBlob == nil {
@@ -301,12 +333,20 @@ extension RecipeRepository {
     
     /// Fetch a recipe by ID
     func fetch(id: UUID) async throws -> Recipe? {
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
+        return try await fetch(id: id, preferredOwnerId: currentUserId)
+    }
+
+    internal func fetch(id: UUID, preferredOwnerId: UUID?) async throws -> Recipe? {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.id == id }
         )
-        
-        guard let model = try context.fetch(descriptor).first else {
+
+        guard let model = preferredRecipeModel(
+            from: try context.fetch(descriptor),
+            preferredOwnerId: preferredOwnerId
+        ) else {
             return nil
         }
         return try model.toDomain()
@@ -320,16 +360,47 @@ extension RecipeRepository {
             predicate: #Predicate { ids.contains($0.id) }
         )
         
-        let models = try context.fetch(descriptor)
-        return try models.map { try $0.toDomain() }
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
+        let modelsById = Dictionary(grouping: try context.fetch(descriptor), by: \.id)
+        var recipes: [Recipe] = []
+        recipes.reserveCapacity(ids.count)
+
+        for id in ids {
+            guard let models = modelsById[id],
+                  let model = preferredRecipeModel(from: models, preferredOwnerId: currentUserId) else {
+                continue
+            }
+
+            recipes.append(try model.toDomain())
+        }
+
+        return recipes
     }
     
-    /// Fetch all recipes (excludes preview recipes)
+    /// Fetch all local non-preview recipes, regardless of owner. Prefer
+    /// `fetchLibraryRecipes(ownerId:)` for user-facing library surfaces.
     func fetchAll() async throws -> [Recipe] {
         let context = ModelContext(modelContainer)
         // Filter out preview recipes (isPreview = true) - they're for offline access only
         let descriptor = FetchDescriptor<RecipeModel>(
             predicate: #Predicate { $0.isPreview == false },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+
+        let models = try context.fetch(descriptor)
+        return try models.map { try $0.toDomain() }
+    }
+
+    /// Fetch the current user's library recipes only. This is the boundary UI
+    /// surfaces should use for local library/profile/collection selection.
+    func fetchLibraryRecipes(ownerId: UUID?) async throws -> [Recipe] {
+        guard let ownerId else { return [] }
+
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { model in
+                model.isPreview == false && model.ownerId == ownerId
+            },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
 
@@ -368,7 +439,7 @@ extension RecipeRepository {
         skipCloudSync: Bool = false
     ) async throws {
         // Capture old state before updating to detect image changes
-        let oldRecipe = try await fetch(id: recipe.id)
+        let oldRecipe = try await fetch(id: recipe.id, preferredOwnerId: recipe.ownerId)
         guard let oldRecipe = oldRecipe else {
             throw RepositoryError.notFound
         }
@@ -442,7 +513,10 @@ extension RecipeRepository {
             predicate: #Predicate { $0.id == recipe.id }
         )
 
-        guard let model = try context.fetch(descriptor).first else {
+        guard let model = preferredRecipeModel(
+            from: try context.fetch(descriptor),
+            preferredOwnerId: recipe.ownerId
+        ) else {
             throw RepositoryError.notFound
         }
 
@@ -487,7 +561,11 @@ extension RecipeRepository {
             predicate: #Predicate { $0.id == id }
         )
 
-        guard let model = try context.fetch(descriptor).first else {
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
+        guard let model = preferredRecipeModel(
+            from: try context.fetch(descriptor),
+            preferredOwnerId: currentUserId
+        ) else {
             throw RepositoryError.notFound
         }
 
@@ -635,8 +713,10 @@ extension RecipeRepository {
         )
     }
     
-    /// One-time migration: Update all recipes to set current user as owner
-    /// This fixes recipes from the old reference system that may have wrong owner IDs
+    /// One-time migration: assign the current user to legacy local recipes that
+    /// predate ownership metadata. Standalone records owned by another user are
+    /// treated as cached public/source records, but legacy saved copies are
+    /// claimed into the current user's library while preserving attribution.
     func migrateRecipeOwnership(currentUserId: UUID) async throws {
         let context = ModelContext(modelContainer)
         let fetchDescriptor = FetchDescriptor<RecipeModel>()
@@ -654,19 +734,14 @@ extension RecipeRepository {
                 continue
             }
 
-            // Only update recipes that don't have the current user as owner
-            if model.ownerId != currentUserId {
-                let oldOwnerId = model.ownerId
-
-                // If the recipe has an owner and it's not the current user,
-                // preserve that as the original creator for attribution
-                if let oldOwnerId = oldOwnerId {
-                    if model.originalCreatorId == nil {
-                        model.originalCreatorId = oldOwnerId
-                    }
+            if model.ownerId == nil {
+                model.ownerId = currentUserId
+                migratedCount += 1
+            } else if model.ownerId != currentUserId,
+                      model.originalRecipeId != nil || model.savedAt != nil {
+                if model.originalCreatorId == nil {
+                    model.originalCreatorId = model.ownerId
                 }
-
-                // Set current user as the owner
                 model.ownerId = currentUserId
                 migratedCount += 1
             }
@@ -688,12 +763,27 @@ extension RecipeRepository {
             predicate: #Predicate { $0.id == id }
         )
 
-        guard let model = try context.fetch(descriptor).first else {
+        let currentUserId = await MainActor.run(body: { CurrentUserSession.shared.userId })
+        guard let model = preferredRecipeModel(
+            from: try context.fetch(descriptor),
+            preferredOwnerId: currentUserId
+        ) else {
             throw RepositoryError.notFound
         }
 
         // Get the recipe before deletion for CloudKit sync and tombstone
         let recipe = try model.toDomain()
+        let canMutateCloudState = currentUserId.map { recipe.canMutateCloudState(for: $0) } ?? false
+
+        if !recipe.isPreview {
+            let currentUserId = await CurrentUserSession.shared.userId
+            if let currentUserId,
+               let ownerId = recipe.ownerId,
+               ownerId != currentUserId {
+                logger.warning("Blocked deletion of non-owned recipe: \(recipe.id)")
+                throw RepositoryError.notAuthorized
+            }
+        }
 
         if !recipe.isPreview {
             let currentUserId = await CurrentUserSession.shared.userId
@@ -714,7 +804,7 @@ extension RecipeRepository {
             try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
         }
 
-        if !recipe.isPreview {
+        if canMutateCloudState {
             // Mark as deleted (create tombstone) to prevent re-downloading from CloudKit.
             try await deletedRecipeRepository.markAsDeleted(
                 recipeId: recipe.id,
@@ -725,7 +815,7 @@ extension RecipeRepository {
         // Delete local image file immediately
         if recipe.imageURL != nil {
             await imageManager.deleteImage(recipeId: recipe.id)
-            await imageSyncManager.removePendingUpload(recipe.id)
+            await imageSyncManager.removeAllPendingUploads(recipe.id)
         }
 
         // Post notification that recipe was deleted
@@ -733,11 +823,13 @@ extension RecipeRepository {
 
         if recipe.isPreview {
             logger.info("Removed local preview recipe cache: \(recipe.title)")
+        } else if !canMutateCloudState {
+            logger.info("Removed local cached recipe without remote delete because it is not owned by the current user: \(recipe.title)")
         } else {
             logger.info("Deleted recipe locally and created tombstone: \(recipe.title)")
         }
 
-        guard !recipe.isPreview else {
+        guard canMutateCloudState else {
             return
         }
 
@@ -770,7 +862,7 @@ extension RecipeRepository {
 
             var privateDeleteSucceeded = true
             var publicDeleteSucceeded = true
-            var tombstoneSucceeded = true
+            var tombstoneSaveError: Error?
 
             if !recipe.isPreview, let ownerId = recipe.ownerId {
                 do {
@@ -782,12 +874,16 @@ extension RecipeRepository {
                     )
                     try await recipeCloudService.saveDeletedRecipeTombstone(tombstone)
                 } catch {
-                    tombstoneSucceeded = false
+                    tombstoneSaveError = error
                     await self.operationQueueService.markFailed(
                         operationId: recipe.id,
                         error: "Deleted recipe tombstone save failed: \(error.localizedDescription)"
                     )
                 }
+            }
+
+            guard RecipeDeletionSyncPolicy.canDeleteActiveRecords(tombstoneSaveError: tombstoneSaveError) else {
+                return
             }
 
             // Delete image from CloudKit if exists
@@ -831,7 +927,7 @@ extension RecipeRepository {
                 }
             }
 
-            if tombstoneSucceeded, privateDeleteSucceeded, publicDeleteSucceeded {
+            if privateDeleteSucceeded, publicDeleteSucceeded {
                 await self.operationQueueService.markCompleted(
                     entityId: recipe.id,
                     entityType: .recipe
@@ -839,7 +935,7 @@ extension RecipeRepository {
             } else if privateDeleteSucceeded {
                 await self.operationQueueService.markFailed(
                     operationId: recipe.id,
-                    error: tombstoneSucceeded ? "Public DB deletion failed" : "Deleted recipe tombstone save failed"
+                    error: "Public DB deletion failed"
                 )
             }
         }
@@ -867,7 +963,7 @@ extension RecipeRepository {
 
         if recipe.imageURL != nil {
             await imageManager.deleteImage(recipeId: recipe.id)
-            await imageSyncManager.removePendingUpload(recipe.id)
+            await imageSyncManager.removeAllPendingUploads(recipe.id)
         }
 
         NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
@@ -891,12 +987,139 @@ extension RecipeRepository {
         let models = try context.fetch(descriptor)
         logger.info("Found \(models.count) recipes to delete")
 
-        // Delete each recipe (includes CloudKit cleanup and image deletion)
+        var recipes: [Recipe] = []
         for model in models {
-            let recipe = try model.toDomain()
-            try await delete(id: recipe.id)
+            recipes.append(try model.toDomain())
         }
 
+        if !RuntimeEnvironment.isRunningTests {
+            let accountStatus = await cloudKitCore.checkAccountStatus()
+            guard accountStatus.isAvailable else {
+                throw CloudKitError.accountNotAvailable(accountStatus)
+            }
+        }
+
+        // Account deletion must not rely on the normal optimistic delete queue.
+        // Finish destructive CloudKit work while the deleting user is still active.
+        for recipe in recipes {
+            try await deleteRemoteRecipeArtifactsForAccountDeletion(recipe, deletingUserId: userId)
+        }
+
+        let deletionContext = ModelContext(modelContainer)
+        for recipe in recipes {
+            let recipeDescriptor = FetchDescriptor<RecipeModel>(
+                predicate: #Predicate { model in
+                    model.id == recipe.id && model.ownerId == userId
+                }
+            )
+
+            for model in try deletionContext.fetch(recipeDescriptor) {
+                deletionContext.delete(model)
+            }
+
+            if let collectionRepository = collectionRepository {
+                try await collectionRepository.removeRecipeFromAllCollections(recipe.id)
+            }
+
+            if recipe.imageURL != nil {
+                await imageManager.deleteImage(recipeId: recipe.id)
+                await imageSyncManager.removeAllPendingUploads(recipe.id)
+            }
+
+            await operationQueueService.markCompleted(entityId: recipe.id, entityType: .recipe)
+            NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
+        }
+
+        try deletionContext.save()
         logger.info("✅ Deleted all user recipes")
+    }
+
+    private func deleteRemoteRecipeArtifactsForAccountDeletion(
+        _ recipe: Recipe,
+        deletingUserId: UUID
+    ) async throws {
+        guard !RuntimeEnvironment.isRunningTests else { return }
+        guard !recipe.isPreview else { return }
+        guard recipe.ownerId == deletingUserId else {
+            throw AccountDeletionRecipeCleanupError.ownerMismatch(recipe.id)
+        }
+
+        var failures: [String] = []
+
+        do {
+            try await recipeCloudService.saveDeletedRecipeTombstone(
+                DeletedRecipeTombstone(
+                    recipeId: recipe.id,
+                    ownerId: deletingUserId,
+                    cloudRecordName: recipe.cloudRecordName
+                )
+            )
+        } catch {
+            throw AccountDeletionRecipeCleanupError.remoteDeletionIncomplete(
+                recipe.id,
+                ["tombstone: \(error.localizedDescription)"]
+            )
+        }
+
+        if recipe.cloudRecordName != nil {
+            do {
+                try await recipeCloudService.deleteRecipe(recipe)
+            } catch {
+                failures.append("private recipe: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+        } catch {
+            failures.append("public recipe: \(error.localizedDescription)")
+        }
+
+        if !failures.isEmpty {
+            throw AccountDeletionRecipeCleanupError.remoteDeletionIncomplete(recipe.id, failures)
+        }
+    }
+
+    private func preferredRecipeModel(
+        from models: [RecipeModel],
+        preferredOwnerId: UUID?
+    ) -> RecipeModel? {
+        guard !models.isEmpty else { return nil }
+
+        let selectedModel = models.max { lhs, rhs in
+            recipeSelectionScore(lhs, preferredOwnerId: preferredOwnerId) <
+                recipeSelectionScore(rhs, preferredOwnerId: preferredOwnerId)
+        }
+
+        if models.count > 1, let selectedModel {
+            logger.warning("Ambiguous local recipe id \(selectedModel.id.uuidString, privacy: .public); selected owner \(selectedModel.ownerId?.uuidString ?? "none", privacy: .public)")
+        }
+
+        return selectedModel
+    }
+
+    private func recipeSelectionScore(
+        _ model: RecipeModel,
+        preferredOwnerId: UUID?
+    ) -> Double {
+        var score = model.updatedAt.timeIntervalSince1970 / 1_000_000_000
+
+        if let preferredOwnerId, model.ownerId == preferredOwnerId {
+            score += 10_000
+        }
+
+        if !model.isPreview {
+            score += 1_000
+        }
+
+        if model.ownerId != nil {
+            score += 100
+        }
+
+        if model.cloudRecordName != nil {
+            score += 10
+        }
+
+        return score
     }
 }

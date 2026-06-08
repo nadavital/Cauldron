@@ -201,9 +201,8 @@ actor ConnectionCloudService {
 
         for (userPair, pairConnections) in connectionsByPair {
             if pairConnections.count > 1 {
-                let sorted = pairConnections.sorted { $0.updatedAt > $1.updatedAt }
-                let toKeep = sorted.first!
-                let toDelete = Array(sorted.dropFirst())
+                let toKeep = Self.canonicalDuplicateConnection(from: pairConnections)!
+                let toDelete = pairConnections.filter { $0.id != toKeep.id }
 
                 logger.warning("🧹 Found \(pairConnections.count) duplicate connections for users \(Array(userPair))")
                 logger.info("  Keeping: \(toKeep.id) (status: \(toKeep.status.rawValue), updated: \(toKeep.updatedAt))")
@@ -226,6 +225,27 @@ actor ConnectionCloudService {
         }
 
         return connectionsToKeep
+    }
+
+    nonisolated static func canonicalDuplicateConnection(from connections: [Connection]) -> Connection? {
+        connections.max { lhs, rhs in
+            let lhsStatusScore = duplicateRetentionStatusScore(lhs)
+            let rhsStatusScore = duplicateRetentionStatusScore(rhs)
+            if lhsStatusScore != rhsStatusScore {
+                return lhsStatusScore < rhsStatusScore
+            }
+
+            return lhs.updatedAt < rhs.updatedAt
+        }
+    }
+
+    private nonisolated static func duplicateRetentionStatusScore(_ connection: Connection) -> Int {
+        switch connection.status {
+        case .accepted:
+            return 1
+        case .pending:
+            return 0
+        }
     }
 
     /// Delete a connection from CloudKit PUBLIC database

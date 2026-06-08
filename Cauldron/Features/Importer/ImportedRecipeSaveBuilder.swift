@@ -9,7 +9,6 @@ import Foundation
 
 enum ImportedRecipeSaveBuilder {
     static func recipeForSave(from recipe: Recipe, userId: UUID?) -> Recipe {
-        let resolvedOwnerId = userId ?? recipe.ownerId
         let resolvedNotes = buildNotes(for: recipe)
 
         return Recipe(
@@ -27,20 +26,20 @@ enum ImportedRecipeSaveBuilder {
             imageURL: recipe.imageURL,
             isFavorite: recipe.isFavorite,
             visibility: recipe.visibility,
-            ownerId: resolvedOwnerId,
-            cloudRecordName: recipe.cloudRecordName,
-            cloudImageRecordName: recipe.cloudImageRecordName,
-            imageModifiedAt: recipe.imageModifiedAt,
+            ownerId: userId,
+            cloudRecordName: nil,
+            cloudImageRecordName: nil,
+            imageModifiedAt: nil,
             createdAt: recipe.createdAt,
             updatedAt: recipe.updatedAt,
-            originalRecipeId: recipe.originalRecipeId,
-            originalCreatorId: recipe.originalCreatorId,
-            originalCreatorName: recipe.originalCreatorName,
-            savedAt: recipe.savedAt,
-            sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
-            followsSourceUpdates: recipe.followsSourceUpdates,
-            relatedRecipeIds: recipe.relatedRecipeIds,
-            isPreview: recipe.isPreview
+            originalRecipeId: nil,
+            originalCreatorId: nil,
+            originalCreatorName: nil,
+            savedAt: nil,
+            sourceRecipeUpdatedAt: nil,
+            followsSourceUpdates: false,
+            relatedRecipeIds: [],
+            isPreview: false
         )
     }
 

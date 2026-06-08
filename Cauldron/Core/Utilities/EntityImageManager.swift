@@ -52,11 +52,12 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// Track in-flight downloads to prevent duplicate requests
     private var inFlightDownloads: [UUID: Task<URL?, Error>] = [:]
 
-    /// Track in-flight database-aware downloads (key: "entityId-public" or "entityId-private")
+    /// Track in-flight database-aware downloads. Private keys include the
+    /// effective CloudKit record name so UUID misses do not poison legacy names.
     private var inFlightDatabaseDownloads: [String: Task<String?, Error>] = [:]
 
     /// Cache for "not found" results to avoid repeated CloudKit lookups
-    /// Key: "entityId-public" or "entityId-private", Value: timestamp when cached
+    /// Key matches `databaseDownloadCacheKey`, Value: timestamp when cached
     private var notFoundCache: [String: Date] = [:]
 
     /// How long to cache "not found" results (5 minutes)
@@ -69,7 +70,10 @@ actor EntityImageManager<Entity: ImageManageable> {
 
     // Database-aware cloud operations for recipes
     private let uploadToCloudWithDatabase: ((UUID, Data, Bool) async throws -> String)?
-    private let downloadFromCloudWithDatabase: ((UUID, Bool) async throws -> Data?)?
+    // The trailing String? is an optional private-database record name (legacy
+    // recipes whose CloudKit private record name != their UUID). Ignored for the
+    // public branch; falls back to the UUID when nil.
+    private let downloadFromCloudWithDatabase: ((UUID, Bool, String?) async throws -> Data?)?
 
     /// Initialize with configuration
     /// - Parameters:
@@ -91,7 +95,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         downloadFromCloud: ((UUID) async throws -> Data?)? = nil,
         deleteFromCloud: ((UUID) async throws -> Void)? = nil,
         uploadToCloudWithDatabase: ((UUID, Data, Bool) async throws -> String)? = nil,
-        downloadFromCloudWithDatabase: ((UUID, Bool) async throws -> Data?)? = nil
+        downloadFromCloudWithDatabase: ((UUID, Bool, String?) async throws -> Data?)? = nil
     ) {
         self.directoryName = directoryName
         self.maxDimension = maxDimension
@@ -142,6 +146,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
 
         try optimizedData.write(to: fileURL)
+        removeCacheEntry(entityId: entityId)
         return fileURL
     }
 
@@ -178,11 +183,13 @@ actor EntityImageManager<Entity: ImageManageable> {
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
 
-        // Clear from ImageCache if cache key generator is configured
-        if let cacheKeyGenerator = cacheKeyGenerator {
-            Task { @MainActor in
-                ImageCache.shared.remove(cacheKeyGenerator(entityId))
-            }
+        removeCacheEntry(entityId: entityId)
+    }
+
+    private func removeCacheEntry(entityId: UUID) {
+        guard let cacheKeyGenerator else { return }
+        Task { @MainActor in
+            ImageCache.shared.remove(cacheKeyGenerator(entityId))
         }
     }
 
@@ -278,6 +285,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         }
 
         try FileManager.default.copyItem(at: sourceURL, to: targetURL)
+        removeCacheEntry(entityId: targetId)
         return targetFilename
     }
 
@@ -386,6 +394,9 @@ actor EntityImageManager<Entity: ImageManageable> {
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-default")
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-public")
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-private")
+        notFoundCache = notFoundCache.filter { key, _ in
+            !key.hasPrefix("\(entityId.uuidString)-private-")
+        }
     }
 
     /// Clear all "not found" cache entries (useful after network recovery)
@@ -401,8 +412,13 @@ actor EntityImageManager<Entity: ImageManageable> {
     ///
     /// This method uses request coalescing and "not found" caching to prevent
     /// redundant CloudKit requests.
-    func downloadImageFromCloud(entityId: UUID, fromPublic: Bool) async throws -> String? {
-        let cacheKey = "\(entityId.uuidString)-\(fromPublic ? "public" : "private")"
+    func downloadImageFromCloud(entityId: UUID, fromPublic: Bool, privateRecordName: String? = nil) async throws -> String? {
+        let recordNameForPrivate = fromPublic ? nil : privateRecordName
+        let cacheKey = databaseDownloadCacheKey(
+            entityId: entityId,
+            fromPublic: fromPublic,
+            privateRecordName: recordNameForPrivate
+        )
 
         // Check "not found" cache first
         if let cachedTime = notFoundCache[cacheKey] {
@@ -427,7 +443,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         // Create and store the task IMMEDIATELY to prevent race conditions
         // The task must be stored before any suspension point
         let downloadTask = Task<String?, Error> { [cacheKey] in
-            guard let imageData = try await downloadFromCloudWithDatabase(entityId, fromPublic) else {
+            guard let imageData = try await downloadFromCloudWithDatabase(entityId, fromPublic, recordNameForPrivate) else {
                 // Cache the "not found" result
                 self.notFoundCache[cacheKey] = Date()
                 return nil
@@ -451,6 +467,18 @@ actor EntityImageManager<Entity: ImageManageable> {
             inFlightDatabaseDownloads.removeValue(forKey: cacheKey)
             throw error
         }
+    }
+
+    private func databaseDownloadCacheKey(
+        entityId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String?
+    ) -> String {
+        if fromPublic {
+            return "\(entityId.uuidString)-public"
+        }
+
+        return "\(entityId.uuidString)-private-\(privateRecordName ?? entityId.uuidString)"
     }
 
     /// Delete image from CloudKit
@@ -566,8 +594,8 @@ func createRecipeImageManager(recipeService: RecipeCloudService) -> RecipeImageM
         uploadToCloudWithDatabase: { recipeId, data, toPublic in
             try await recipeService.uploadImageAsset(recipeId: recipeId, imageData: data, toPublic: toPublic)
         },
-        downloadFromCloudWithDatabase: { recipeId, fromPublic in
-            try await recipeService.downloadImageAsset(recipeId: recipeId, fromPublic: fromPublic)
+        downloadFromCloudWithDatabase: { recipeId, fromPublic, privateRecordName in
+            try await recipeService.downloadImageAsset(recipeId: recipeId, fromPublic: fromPublic, privateRecordName: privateRecordName)
         }
     )
 }
@@ -661,8 +689,10 @@ extension RecipeImageManager {
     }
 
     /// Download image from CloudKit for recipe (database-aware)
-    func downloadImageFromCloud(recipeId: UUID, fromPublic: Bool) async throws -> String? {
-        try await downloadImageFromCloud(entityId: recipeId, fromPublic: fromPublic)
+    /// - Parameter privateRecordName: Optional CloudKit private record name for legacy
+    ///   recipes whose record name differs from their UUID. Used only for the private branch.
+    func downloadImageFromCloud(recipeId: UUID, fromPublic: Bool, privateRecordName: String? = nil) async throws -> String? {
+        try await downloadImageFromCloud(entityId: recipeId, fromPublic: fromPublic, privateRecordName: privateRecordName)
     }
 }
 

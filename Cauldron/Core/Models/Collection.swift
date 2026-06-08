@@ -234,6 +234,12 @@ struct Collection: Codable, Sendable, Hashable, Identifiable {
         return localModified > cloudModified
     }
 
+    nonisolated var customCoverImageCacheKey: String {
+        let imageKey = coverImageURL?.absoluteString ?? cloudCoverImageRecordName ?? "no-cover"
+        let modifiedKey = coverImageModifiedAt.map { String($0.timeIntervalSince1970) } ?? "no-modified-date"
+        return "\(id.uuidString)|\(coverImageType.rawValue)|\(imageKey)|\(modifiedKey)"
+    }
+
     // MARK: - Hashable & Equatable
 
     nonisolated static func == (lhs: Collection, rhs: Collection) -> Bool {

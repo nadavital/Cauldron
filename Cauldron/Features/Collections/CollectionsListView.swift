@@ -82,6 +82,11 @@ struct CollectionsListView: View {
                 await viewModel.loadCollections()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .collectionDeleted)) { _ in
+            Task {
+                await viewModel.loadCollections()
+            }
+        }
     }
 
     private var gridColumns: [GridItem] {
@@ -122,8 +127,14 @@ struct CollectionsListView: View {
                     ForEach(collections) { collection in
                         let transitionID = "collection-\(collection.id.uuidString)"
                         NavigationLink {
-                            CollectionDetailView(collection: collection, dependencies: dependencies)
-                                .navigationTransition(.zoom(sourceID: transitionID, in: cardTransition))
+                            CollectionDetailView(
+                                collection: collection,
+                                dependencies: dependencies,
+                                initialRecipeImages: viewModel.recipeImages(for: collection),
+                                initialRecipeImageSources: viewModel.recipeImageSources(for: collection),
+                                initialRelation: isSavedSection ? .saved(referenceId: nil) : .owned
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: cardTransition))
                         } label: {
                             CollectionCardView(
                                 collection: collection,

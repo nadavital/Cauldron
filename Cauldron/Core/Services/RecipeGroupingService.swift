@@ -34,7 +34,7 @@ enum RecipeGroupingService {
         let deduplicatedRecipes: [Recipe]
         guard let currentUserId else {
             deduplicatedRecipes = recipes
-            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes, currentUserId: nil) : deduplicatedRecipes
         }
 
         let ownedOriginalRecipeIds = Set(
@@ -46,7 +46,7 @@ enum RecipeGroupingService {
         )
 
         guard !ownedOriginalRecipeIds.isEmpty else {
-            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(recipes) : recipes
+            return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(recipes, currentUserId: currentUserId) : recipes
         }
 
         var seenFollowingSourceIds = Set<UUID>()
@@ -64,20 +64,48 @@ enum RecipeGroupingService {
             return seenFollowingSourceIds.insert(originalRecipeId).inserted
         }
 
-        return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes) : deduplicatedRecipes
+        return hidingRelatedRecipeReferences ? hideRelatedRecipeReferences(deduplicatedRecipes, currentUserId: currentUserId) : deduplicatedRecipes
     }
 
     /// Hide recipes that are only displayed as related children of another recipe.
-    nonisolated static func hideRelatedRecipeReferences(_ recipes: [Recipe]) -> [Recipe] {
+    nonisolated static func hideRelatedRecipeReferences(
+        _ recipes: [Recipe],
+        currentUserId: UUID? = nil
+    ) -> [Recipe] {
         let referencedIds = Set(recipes.flatMap(\.relatedRecipeIds))
         guard !referencedIds.isEmpty else { return recipes }
 
         let visibleRecipes = recipes.filter { recipe in
-            !referencedIds.contains(recipe.id) && !referencedIds.contains(recipe.relatedGraphReferenceID)
+            if let currentUserId,
+               recipe.ownerId == currentUserId,
+               !recipe.isPreview {
+                return true
+            }
+
+            return !referencedIds.contains(recipe.id) && !referencedIds.contains(recipe.relatedGraphReferenceID)
         }
 
         // Avoid an empty library if legacy/cyclic data references every recipe.
         return visibleRecipes.isEmpty ? recipes : visibleRecipes
+    }
+
+    /// Collapse friend/shared feeds to one visible recipe per source lineage.
+    /// Saved copies that still follow an original should not produce duplicate feed cards.
+    nonisolated static func deduplicateSharedFeedRecipes(_ recipes: [Recipe]) -> [Recipe] {
+        let groupedRecipes = Dictionary(grouping: recipes, by: \.sourceAssetReferenceID)
+        return groupedRecipes.values.compactMap { candidates in
+            candidates.max { lhs, rhs in
+                isSharedFeedCandidate(rhs, betterThan: lhs)
+            }
+        }
+        .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private nonisolated static func isSharedFeedCandidate(_ lhs: Recipe, betterThan rhs: Recipe) -> Bool {
+        if lhs.isFollowingSourceUpdates != rhs.isFollowingSourceUpdates {
+            return !lhs.isFollowingSourceUpdates
+        }
+        return lhs.updatedAt > rhs.updatedAt
     }
 
     nonisolated static func matchesSearchFilters(
@@ -132,7 +160,9 @@ enum RecipeGroupingService {
         }
         let allCandidates = Array(bestCandidateByRecipeID.values)
         let friendIds = Set(friends.map(\.id))
-        let friendsById = Dictionary(uniqueKeysWithValues: friends.map { ($0.id, $0) })
+        let friendsById = Dictionary(friends.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+            candidate.createdAt > current.createdAt ? candidate : current
+        })
         let now = Date()
 
         // Group related copies under original ID.
@@ -152,7 +182,7 @@ enum RecipeGroupingService {
         for (groupId, candidates) in grouped {
             guard !Task.isCancelled else { return [] }
             let recipes = candidates.map(\.recipe)
-            let recipeScores = Dictionary(uniqueKeysWithValues: candidates.map { ($0.recipe.id, $0.textScore) })
+            let recipeScores = Dictionary(candidates.map { ($0.recipe.id, $0.textScore) }, uniquingKeysWith: max)
 
             // Choose best representative recipe.
             let primary: Recipe
@@ -175,7 +205,9 @@ enum RecipeGroupingService {
                     return friendsById[ownerId]
                 }
             let uniqueFriendSavers = Array(
-                Dictionary(uniqueKeysWithValues: friendSavers.map { ($0.id, $0) }).values
+                Dictionary(friendSavers.map { ($0.id, $0) }, uniquingKeysWith: { current, candidate in
+                    candidate.createdAt > current.createdAt ? candidate : current
+                }).values
             )
 
             let saveCount = recipes.count

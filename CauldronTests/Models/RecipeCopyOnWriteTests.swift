@@ -726,6 +726,57 @@ final class RecipeCopyOnWriteTests: XCTestCase {
         XCTAssertTrue(relatedOnlyEdit.hasEditableDifferences(comparedTo: original))
     }
 
+    func testWithFavorite_PreservesOwnershipAndSyncMetadata() {
+        let ownerId = UUID()
+        let originalRecipeId = UUID()
+        let creatorId = UUID()
+        let relatedId = UUID()
+        let base = Recipe(
+            title: "Saved Soup",
+            ingredients: [Ingredient(name: "Beans", quantity: nil)],
+            steps: [CookStep(index: 0, text: "Simmer", timers: [])],
+            yields: "2 servings",
+            totalMinutes: 35,
+            tags: [Tag(name: "Lunch")],
+            nutrition: Nutrition(calories: 250, protein: 12, fat: 4, carbohydrates: 40),
+            sourceURL: URL(string: "https://example.com/soup"),
+            sourceTitle: "Example Soup",
+            notes: "Use extra broth",
+            imageURL: URL(fileURLWithPath: "/tmp/soup.jpg"),
+            isFavorite: false,
+            visibility: .privateRecipe,
+            ownerId: ownerId,
+            cloudRecordName: "private-record",
+            cloudImageRecordName: "image-record",
+            imageModifiedAt: Date(timeIntervalSince1970: 1_700_000_001),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_010),
+            originalRecipeId: originalRecipeId,
+            originalCreatorId: creatorId,
+            originalCreatorName: "Avery",
+            savedAt: Date(timeIntervalSince1970: 1_700_000_020),
+            sourceRecipeUpdatedAt: Date(timeIntervalSince1970: 1_700_000_030),
+            followsSourceUpdates: true,
+            relatedRecipeIds: [relatedId],
+            isPreview: true
+        )
+
+        let favorite = base.withFavorite(true)
+
+        XCTAssertTrue(favorite.isFavorite)
+        XCTAssertEqual(favorite.visibility, base.visibility)
+        XCTAssertEqual(favorite.ownerId, ownerId)
+        XCTAssertEqual(favorite.cloudRecordName, base.cloudRecordName)
+        XCTAssertEqual(favorite.cloudImageRecordName, base.cloudImageRecordName)
+        XCTAssertEqual(favorite.originalRecipeId, originalRecipeId)
+        XCTAssertEqual(favorite.originalCreatorId, creatorId)
+        XCTAssertEqual(favorite.savedAt, base.savedAt)
+        XCTAssertEqual(favorite.sourceRecipeUpdatedAt, base.sourceRecipeUpdatedAt)
+        XCTAssertEqual(favorite.followsSourceUpdates, base.followsSourceUpdates)
+        XCTAssertEqual(favorite.relatedRecipeIds, [relatedId])
+        XCTAssertEqual(favorite.isPreview, base.isPreview)
+    }
+
     private func makeRecipe(
         id: UUID = UUID(),
         title: String,

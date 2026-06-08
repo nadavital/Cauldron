@@ -50,16 +50,33 @@ enum ImageSyncState: Sendable {
     }
 }
 
+/// Which CloudKit database an image upload targets. Pending-upload retry state
+/// is tracked per-scope so a successful private upload cannot clear a still-needed
+/// public upload retry (and vice-versa).
+enum ImageUploadScope: String, Sendable, CaseIterable {
+    case privateDB
+    case publicDB
+}
+
 /// Actor to manage pending image sync operations
 actor ImageSyncManager {
-    /// Set of recipe IDs with pending image uploads
-    private(set) var pendingUploads: Set<UUID> = []
+    /// Recipe IDs with a pending private-database image upload.
+    private(set) var pendingPrivateUploads: Set<UUID> = []
+
+    /// Recipe IDs with a pending public-database image upload.
+    private(set) var pendingPublicUploads: Set<UUID> = []
+
+    /// All recipe IDs with any pending upload (either scope). Read-only convenience
+    /// for status/aggregate callers; retries operate on the scoped sets directly.
+    var pendingUploads: Set<UUID> { pendingPrivateUploads.union(pendingPublicUploads) }
 
     /// Set of recipe IDs with pending image downloads
     private(set) var pendingDownloads: Set<UUID> = []
 
     // UserDefaults keys for persistence
-    private let pendingUploadsKey = "com.cauldron.pendingImageUploads"
+    private let pendingPrivateUploadsKey = "com.cauldron.pendingImageUploads.private"
+    private let pendingPublicUploadsKey = "com.cauldron.pendingImageUploads.public"
+    private let legacyPendingUploadsKey = "com.cauldron.pendingImageUploads"
     private let pendingDownloadsKey = "com.cauldron.pendingImageDownloads"
 
     // Event stream for reactive updates
@@ -85,24 +102,44 @@ actor ImageSyncManager {
 
     /// Load pending operations from UserDefaults
     private func loadPendingOperations() {
-        // Load pending uploads
-        if let data = UserDefaults.standard.data(forKey: pendingUploadsKey),
+        // Load scoped pending uploads
+        pendingPrivateUploads = Self.loadUUIDSet(forKey: pendingPrivateUploadsKey)
+        pendingPublicUploads = Self.loadUUIDSet(forKey: pendingPublicUploadsKey)
+
+        // One-time migration from the legacy unscoped key: a legacy pending id
+        // could need either database, so retry both scopes to be safe.
+        if let data = UserDefaults.standard.data(forKey: legacyPendingUploadsKey),
            let uuidStrings = try? JSONDecoder().decode([String].self, from: data) {
-            pendingUploads = Set(uuidStrings.compactMap { UUID(uuidString: $0) })
+            let legacy = Set(uuidStrings.compactMap { UUID(uuidString: $0) })
+            if !legacy.isEmpty {
+                pendingPrivateUploads.formUnion(legacy)
+                pendingPublicUploads.formUnion(legacy)
+                savePendingUploads()
+            }
+            UserDefaults.standard.removeObject(forKey: legacyPendingUploadsKey)
         }
 
         // Load pending downloads
-        if let data = UserDefaults.standard.data(forKey: pendingDownloadsKey),
-           let uuidStrings = try? JSONDecoder().decode([String].self, from: data) {
-            pendingDownloads = Set(uuidStrings.compactMap { UUID(uuidString: $0) })
-        }
+        pendingDownloads = Self.loadUUIDSet(forKey: pendingDownloadsKey)
     }
 
-    /// Save pending uploads to UserDefaults
+    private static func loadUUIDSet(forKey key: String) -> Set<UUID> {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let uuidStrings = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(uuidStrings.compactMap { UUID(uuidString: $0) })
+    }
+
+    /// Save both scoped pending-upload sets to UserDefaults
     private func savePendingUploads() {
-        let uuidStrings = pendingUploads.map { $0.uuidString }
-        if let data = try? JSONEncoder().encode(uuidStrings) {
-            UserDefaults.standard.set(data, forKey: pendingUploadsKey)
+        saveUUIDSet(pendingPrivateUploads, forKey: pendingPrivateUploadsKey)
+        saveUUIDSet(pendingPublicUploads, forKey: pendingPublicUploadsKey)
+    }
+
+    private func saveUUIDSet(_ set: Set<UUID>, forKey key: String) {
+        if let data = try? JSONEncoder().encode(set.map { $0.uuidString }) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
@@ -114,16 +151,34 @@ actor ImageSyncManager {
         }
     }
 
-    /// Add a recipe ID to pending uploads
-    func addPendingUpload(_ recipeId: UUID) {
-        pendingUploads.insert(recipeId)
+    /// Add a recipe ID to pending uploads for a specific database scope.
+    func addPendingUpload(_ recipeId: UUID, scope: ImageUploadScope) {
+        switch scope {
+        case .privateDB: pendingPrivateUploads.insert(recipeId)
+        case .publicDB: pendingPublicUploads.insert(recipeId)
+        }
         savePendingUploads()
         eventContinuation.yield(.uploadAdded(recipeId))
     }
 
-    /// Remove a recipe ID from pending uploads
-    func removePendingUpload(_ recipeId: UUID) {
-        pendingUploads.remove(recipeId)
+    /// Remove a recipe ID from pending uploads for a specific database scope.
+    /// Only emits completion once the recipe has no pending upload in EITHER scope.
+    func removePendingUpload(_ recipeId: UUID, scope: ImageUploadScope) {
+        switch scope {
+        case .privateDB: pendingPrivateUploads.remove(recipeId)
+        case .publicDB: pendingPublicUploads.remove(recipeId)
+        }
+        savePendingUploads()
+        if !pendingPrivateUploads.contains(recipeId) && !pendingPublicUploads.contains(recipeId) {
+            eventContinuation.yield(.uploadCompleted(recipeId))
+        }
+    }
+
+    /// Remove a recipe ID from pending uploads in BOTH scopes (e.g. on delete or
+    /// when there is no local image to upload at all).
+    func removeAllPendingUploads(_ recipeId: UUID) {
+        pendingPrivateUploads.remove(recipeId)
+        pendingPublicUploads.remove(recipeId)
         savePendingUploads()
         eventContinuation.yield(.uploadCompleted(recipeId))
     }
@@ -195,7 +250,8 @@ actor ImageSyncManager {
         let clearedUploads = pendingUploads
         let clearedDownloads = pendingDownloads
 
-        pendingUploads.removeAll()
+        pendingPrivateUploads.removeAll()
+        pendingPublicUploads.removeAll()
         pendingDownloads.removeAll()
         savePendingUploads()
         savePendingDownloads()

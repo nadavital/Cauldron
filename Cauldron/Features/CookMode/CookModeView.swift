@@ -243,7 +243,8 @@ struct CookModeView: View {
             showPlaceholderText: false,
             recipeImageService: dependencies.recipeImageService,
             recipeId: recipe.id,
-            ownerId: recipe.ownerId
+            ownerId: recipe.ownerId,
+            privateRecordName: recipe.cloudRecordName
         )
         .frame(height: isRegularWidthLayout ? 300 : 230)
         .overlay(alignment: .bottom) {

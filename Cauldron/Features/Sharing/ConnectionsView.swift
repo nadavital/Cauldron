@@ -472,6 +472,7 @@ final class ConnectionsViewModel {
     func acceptRequest(_ connection: Connection) async {
         do {
             try await dependencies.connectionManager.acceptConnection(connection)
+            updateConnectionsFromManager()
             AppLogger.general.info("✅ Connection accepted successfully")
         } catch {
             alertMessage = "Failed to accept request: \(error.localizedDescription)"
@@ -482,6 +483,7 @@ final class ConnectionsViewModel {
     func rejectRequest(_ connection: Connection) async {
         do {
             try await dependencies.connectionManager.rejectConnection(connection)
+            updateConnectionsFromManager()
             AppLogger.general.info("✅ Connection rejected successfully")
         } catch {
             alertMessage = "Failed to reject request: \(error.localizedDescription)"

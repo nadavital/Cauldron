@@ -157,7 +157,7 @@ Whole-collection save creates a user-owned collection copy, saves each visible r
 
 ## Remaining Release Work
 
-- Deploy CloudKit schema changes for `DeletedRecipe`, `CollectionMembership`, and collection copy-on-write metadata, with query indexes for `ownerId`, `deletedAt`, `collectionId`, `recipeId`, `updatedAt`, `originalCollectionId`, and `originalCollectionOwnerId`.
+- Deploy CloudKit schema changes for `DeletedRecipe`, `DeletedCollection`, `CollectionMembership`, and collection copy-on-write metadata, with query indexes for `ownerId`, `deletedAt`, `collectionId`, `recipeId`, `updatedAt`, `originalCollectionId`, and `originalCollectionOwnerId`.
 - Run the iOS and Mac Catalyst test suites on a machine with matching Xcode/CoreSimulator/macOS components.
 - Exercise a real two-device upgrade path before release: old build creates collections, new build removes membership, second device upgrades and verifies no stale `recipeIds` resurrection.
 

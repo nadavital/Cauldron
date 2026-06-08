@@ -53,6 +53,7 @@ actor CloudKitCore {
         static let sharedRecipe = "SharedRecipe"
         static let savedRecipeReference = "SavedRecipeReference"
         static let collection = "Collection"
+        static let deletedCollection = "DeletedCollection"
         static let savedCollectionReference = "SavedCollectionReference"
         static let collectionMembership = "CollectionMembership"
         static let connection = "Connection"

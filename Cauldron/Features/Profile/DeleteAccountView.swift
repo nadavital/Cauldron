@@ -135,6 +135,11 @@ struct DeleteAccountView: View {
 
             // Step 5: Clear local user data and sign out
             AppLogger.general.info("Clearing local data and signing out...")
+            await dependencies.profileImageManager.deleteImage(userId: userId)
+            dependencies.connectionManager.resetSessionState()
+            FriendsTabViewModel.shared.resetSessionState()
+            await dependencies.sharingService.resetSharedRecipeCache()
+
             await MainActor.run {
                 ReferralManager.shared.reset()
                 CurrentUserSession.shared.signOut()

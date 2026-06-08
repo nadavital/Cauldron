@@ -119,7 +119,7 @@ struct GroceryListMergeView: View {
     private func loadRecipes() async {
         do {
             allRecipes = RecipeGroupingService.deduplicateLocalLibraryRecipes(
-                try await dependencies.recipeRepository.fetchAll(),
+                try await dependencies.recipeRepository.fetchLibraryRecipes(ownerId: CurrentUserSession.shared.userId),
                 currentUserId: CurrentUserSession.shared.userId
             )
         } catch {
