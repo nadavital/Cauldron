@@ -321,7 +321,7 @@ struct PeopleSearchUserRow: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.cauldronOrange)
                     Text("Retry")
                         .font(.caption)
                 }

@@ -578,7 +578,7 @@ struct UserSearchRowView: View {
             } label: {
                 HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(.cauldronOrange)
                     Text("Retry")
                         .font(.caption)
                 }

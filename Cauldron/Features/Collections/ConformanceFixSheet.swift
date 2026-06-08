@@ -52,7 +52,7 @@ struct ConformanceFixSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(.cauldronOrange)
                             .font(.title2)
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -66,7 +66,7 @@ struct ConformanceFixSheet: View {
                         }
                     }
                     .padding()
-                    .background(Color.orange.opacity(0.1))
+                    .background(Color.cauldronOrange.opacity(0.1))
                     .cornerRadius(12)
                 }
                 .padding()

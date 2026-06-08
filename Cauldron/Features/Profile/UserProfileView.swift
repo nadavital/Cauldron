@@ -455,10 +455,10 @@ struct UserProfileView: View {
                             .font(.caption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(.orange)
+                    .foregroundColor(.cauldronOrange)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.15))
+                    .background(Color.cauldronOrange.opacity(0.15))
                     .cornerRadius(8)
                 }
 
@@ -515,10 +515,10 @@ struct UserProfileView: View {
                             .font(.caption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(.orange)
+                    .foregroundColor(.cauldronOrange)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.15))
+                    .background(Color.cauldronOrange.opacity(0.15))
                     .cornerRadius(8)
                 }
 

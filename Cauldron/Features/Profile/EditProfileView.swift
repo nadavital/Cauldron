@@ -277,7 +277,7 @@ struct ProfileEditView: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.orange)
+                                        .foregroundColor(.cauldronOrange)
                                     Text("Delete Account")
                                         .foregroundColor(.primary)
                                     Spacer()

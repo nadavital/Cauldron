@@ -51,7 +51,7 @@ struct WhatsNewView: View {
                         )
                         FeatureRow(
                             symbol: "list.bullet.rectangle",
-                            color: .orange,
+                            color: .cauldronOrange,
                             title: "Cleaner Recipe Details",
                             detail: "Related recipes, saved recipes, and preview recipes now behave more consistently across your library."
                         )

@@ -120,7 +120,7 @@ struct ImportPreviewSheet: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))
-                .foregroundColor(.orange)
+                .foregroundColor(.cauldronOrange)
             Text("Unable to Load")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -191,8 +191,8 @@ struct ImportPreviewSheet: View {
                                         .font(.caption)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
-                                        .background(Color.orange.opacity(0.2))
-                                        .foregroundColor(.orange)
+                                        .background(Color.cauldronOrange.opacity(0.2))
+                                        .foregroundColor(.cauldronOrange)
                                         .cornerRadius(12)
                                 }
                             }
@@ -239,7 +239,7 @@ struct ImportPreviewSheet: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.orange)
+                    .background(Color.cauldronOrange)
                     .cornerRadius(12)
                 }
                 .disabled(isImporting)
@@ -365,7 +365,7 @@ struct ImportPreviewSheet: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.orange)
+                    .background(Color.cauldronOrange)
                     .cornerRadius(12)
                 }
                 .disabled(isImporting)

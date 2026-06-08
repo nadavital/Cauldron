@@ -45,7 +45,7 @@ struct WelcomeView: View {
                         )
                         FeatureRow(
                             symbol: "timer",
-                            color: .orange,
+                            color: .cauldronOrange,
                             title: "Cook Mode",
                             detail: "Hands-free cooking with step-by-step instructions and built-in timers."
                         )
