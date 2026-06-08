@@ -69,8 +69,8 @@ struct ContentView: View {
                                 await userSession.initialize(dependencies: dependencies)
                             }
                         )
-                    } else if userSession.needsOnboarding {
-                        // Show onboarding for new users
+                    } else if userSession.needsOnboarding || RuntimeEnvironment.shouldForceOnboarding {
+                        // Show onboarding for new users (or when previewing via launch flag)
                         OnboardingView(dependencies: dependencies) {
                             // Onboarding completed, will trigger view update
                         }

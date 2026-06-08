@@ -233,6 +233,7 @@ struct RecipeImportPreviewView: View {
                     .padding(.vertical)
                 }
             }
+            .warmCanvas()
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -337,6 +338,8 @@ struct RecipeImportPreviewView: View {
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
+
+            Haptics.success()
 
             // Call the callback to notify parent view
             onSave()

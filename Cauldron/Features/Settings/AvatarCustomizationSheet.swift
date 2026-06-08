@@ -36,6 +36,7 @@ struct AvatarCustomizationSheet: View {
                 }
                 .padding()
             }
+            .warmCanvas()
             .navigationTitle("Customize Avatar")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

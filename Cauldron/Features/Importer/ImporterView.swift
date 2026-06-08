@@ -250,7 +250,7 @@ struct ImporterView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)
                         .padding(12)
-                        .background(Color.cauldronBackground)
+                        .background(Color.appSurface)
                         .cornerRadius(10)
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
@@ -305,7 +305,7 @@ struct ImporterView: View {
                 TextEditor(text: $viewModel.textInput)
                     .frame(minHeight: 220)
                     .padding(12)
-                    .background(Color.cauldronBackground)
+                    .background(Color.appSurface)
                     .cornerRadius(10)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)

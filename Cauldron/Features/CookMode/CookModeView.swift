@@ -60,6 +60,7 @@ struct CookModeView: View {
                 compactContent
             }
         }
+        .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -514,42 +515,42 @@ struct CookModeView: View {
         }
     }
 
+    /// Celebratory overlay shown when the cook finishes the last step.
     private var navigationControls: some View {
-        HStack(spacing: 16) {
-            Button {
-                coordinator.previousStep()
-            } label: {
-                Label("Back", systemImage: "chevron.left")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(coordinator.isFirstStep ? Color.cauldronSecondaryBackground.opacity(0.5) : Color.cauldronSecondaryBackground)
-                    .foregroundColor(coordinator.isFirstStep ? .secondary : .primary)
-                    .cornerRadius(12)
-            }
-            .disabled(coordinator.isFirstStep)
-
-            Button {
-                if coordinator.isLastStep {
-                    coordinator.endSession()
-                } else {
-                    coordinator.nextStep()
-                }
-            } label: {
-                HStack {
-                    Text(coordinator.isLastStep ? "Done" : "Next")
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                Button {
+                    coordinator.previousStep()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
                         .fontWeight(.semibold)
-                    Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                        .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.cauldronOrange)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .shadow(color: Color.cauldronOrange.opacity(0.3), radius: 4, x: 0, y: 2)
+                .buttonStyle(.glass)
+                .controlSize(.extraLarge)
+                .disabled(coordinator.isFirstStep)
+
+                Button {
+                    if coordinator.isLastStep {
+                        Haptics.success()
+                        coordinator.endSession()
+                    } else {
+                        coordinator.nextStep()
+                    }
+                } label: {
+                    HStack {
+                        Text(coordinator.isLastStep ? "Done" : "Next")
+                            .fontWeight(.semibold)
+                        Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(.cauldronOrange)
             }
         }
         .padding()
-        .background(Color.cauldronBackground)
     }
 }
 

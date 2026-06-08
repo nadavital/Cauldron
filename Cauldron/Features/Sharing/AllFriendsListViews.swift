@@ -88,6 +88,8 @@ struct AllFriendsRecipesListView: View {
 struct AllFriendsCollectionsListView: View {
     let collections: [Collection]
     let dependencies: DependencyContainer
+    /// Resolves a collection's owner so cards can show a creator tag (optional).
+    var ownerProvider: ((Collection) -> User?)? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var collectionImageCache: [UUID: [URL?]] = [:]
@@ -104,6 +106,7 @@ struct AllFriendsCollectionsListView: View {
                             collection: collection,
                             recipeImages: collectionImageCache[collection.id] ?? [],
                             preferredWidth: nil,
+                            owner: ownerProvider?(collection),
                             dependencies: dependencies
                         )
                     }

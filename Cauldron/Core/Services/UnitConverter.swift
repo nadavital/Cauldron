@@ -36,7 +36,9 @@ enum UnitSystem: String, CaseIterable, Identifiable {
 }
 
 /// Pure helpers for converting quantities/ingredients between measurement systems.
-enum UnitConverter {
+/// `nonisolated` so it's safe to call from SwiftUI view bodies regardless of the
+/// project's default-actor isolation.
+nonisolated enum UnitConverter {
 
     // MARK: - Public API
 
