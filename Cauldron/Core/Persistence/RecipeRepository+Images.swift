@@ -28,10 +28,13 @@ extension RecipeRepository {
     internal func uploadRecipeImage(_ recipe: Recipe, to databaseType: DatabaseType) async {
         guard recipe.imageURL != nil else { return }
 
+        let scope: ImageUploadScope = databaseType == .public ? .publicDB : .privateDB
+
         let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
         guard hasLocalImage else {
             logger.warning("⚠️ Skipping image upload for recipe '\(recipe.title)' because local image file is missing")
-            await imageSyncManager.removePendingUpload(recipe.id)
+            // No local image to upload at all — clear pending in both scopes.
+            await imageSyncManager.removeAllPendingUploads(recipe.id)
             return
         }
 
@@ -39,7 +42,7 @@ extension RecipeRepository {
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.warning("CloudKit not available - image will sync later")
-            await imageSyncManager.addPendingUpload(recipe.id)
+            await imageSyncManager.addPendingUpload(recipe.id, scope: scope)
             return
         }
 
@@ -64,8 +67,8 @@ extension RecipeRepository {
             let updatedRecipe = recipe.withCloudImageMetadata(recordName: recordName, modifiedAt: modificationDate)
             try await updateRecipeInDatabase(updatedRecipe)
 
-            // Remove from pending uploads
-            await imageSyncManager.removePendingUpload(recipe.id)
+            // Remove from pending uploads for this scope only
+            await imageSyncManager.removePendingUpload(recipe.id, scope: scope)
 
             // Notify views that recipe was updated (so RecipeDetailView can refresh and show the image)
             NotificationCenter.default.post(
@@ -82,11 +85,11 @@ extension RecipeRepository {
                 // Don't add to pending uploads - retry won't help until user takes action
             } else {
                 // Other errors can be retried
-                await imageSyncManager.addPendingUpload(recipe.id)
+                await imageSyncManager.addPendingUpload(recipe.id, scope: scope)
             }
         } catch {
             logger.error("❌ Image upload failed: \(error.localizedDescription)")
-            await imageSyncManager.addPendingUpload(recipe.id)
+            await imageSyncManager.addPendingUpload(recipe.id, scope: scope)
         }
     }
 
@@ -302,7 +305,9 @@ extension RecipeRepository {
     /// Retry uploading images that failed previously
     /// - Returns: True if all uploads succeeded or there were no pending uploads, false otherwise
     internal func retryPendingImageUploads() async -> Bool {
-        let pendingUploads = await imageSyncManager.pendingUploads
+        let pendingPrivate = await imageSyncManager.pendingPrivateUploads
+        let pendingPublic = await imageSyncManager.pendingPublicUploads
+        let pendingUploads = pendingPrivate.union(pendingPublic)
         guard !pendingUploads.isEmpty else { return true }
 
         logger.info("Retrying image upload for \(pendingUploads.count) recipes")
@@ -326,7 +331,7 @@ extension RecipeRepository {
             // Give up after 10 attempts (with exponential backoff, this is ~24 hours)
             if retryCount >= 10 {
                 logger.warning("Giving up on image upload for recipe \(recipeId) after 10 attempts")
-                await imageSyncManager.removePendingUpload(recipeId)
+                await imageSyncManager.removeAllPendingUploads(recipeId)
                 imageRetryAttempts.removeValue(forKey: recipeId)
                 continue
             }
@@ -334,7 +339,7 @@ extension RecipeRepository {
             do {
                 guard let recipe = try await fetch(id: recipeId) else {
                     // Recipe was deleted, remove from pending
-                    await imageSyncManager.removePendingUpload(recipeId)
+                    await imageSyncManager.removeAllPendingUploads(recipeId)
                     imageRetryAttempts.removeValue(forKey: recipeId)
                     continue
                 }
@@ -347,15 +352,23 @@ extension RecipeRepository {
 
                 guard recipe.canMutateCloudState(for: currentUserId) else {
                     logger.warning("Dropping pending image upload for recipe not owned by the current user: \(recipeId)")
-                    await imageSyncManager.removePendingUpload(recipeId)
+                    await imageSyncManager.removeAllPendingUploads(recipeId)
                     imageRetryAttempts.removeValue(forKey: recipeId)
                     continue
                 }
 
-                // Try to upload again
-                await uploadRecipeImage(recipe, to: .private)
-                if recipe.visibility == .publicRecipe {
-                    await uploadRecipeImage(recipe, to: .public)
+                // Retry only the scope(s) that are actually pending for this recipe,
+                // so a previously-succeeded scope isn't redundantly re-uploaded.
+                if pendingPrivate.contains(recipeId) {
+                    await uploadRecipeImage(recipe, to: .private)
+                }
+                if pendingPublic.contains(recipeId) {
+                    if recipe.visibility == .publicRecipe {
+                        await uploadRecipeImage(recipe, to: .public)
+                    } else {
+                        // No longer public — clear the stale public pending bit.
+                        await imageSyncManager.removePendingUpload(recipeId, scope: .publicDB)
+                    }
                 }
 
                 imageRetryAttempts.removeValue(forKey: recipeId) // Reset on success

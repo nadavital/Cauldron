@@ -815,7 +815,7 @@ extension RecipeRepository {
         // Delete local image file immediately
         if recipe.imageURL != nil {
             await imageManager.deleteImage(recipeId: recipe.id)
-            await imageSyncManager.removePendingUpload(recipe.id)
+            await imageSyncManager.removeAllPendingUploads(recipe.id)
         }
 
         // Post notification that recipe was deleted
@@ -963,7 +963,7 @@ extension RecipeRepository {
 
         if recipe.imageURL != nil {
             await imageManager.deleteImage(recipeId: recipe.id)
-            await imageSyncManager.removePendingUpload(recipe.id)
+            await imageSyncManager.removeAllPendingUploads(recipe.id)
         }
 
         NotificationCenter.default.post(name: NSNotification.Name("RecipeDeleted"), object: recipe.id)
@@ -1023,7 +1023,7 @@ extension RecipeRepository {
 
             if recipe.imageURL != nil {
                 await imageManager.deleteImage(recipeId: recipe.id)
-                await imageSyncManager.removePendingUpload(recipe.id)
+                await imageSyncManager.removeAllPendingUploads(recipe.id)
             }
 
             await operationQueueService.markCompleted(entityId: recipe.id, entityType: .recipe)
