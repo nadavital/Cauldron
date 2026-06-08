@@ -209,7 +209,7 @@ struct ConnectionRequestCard: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.cauldronOrange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.cauldronOrange.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.vertical, 2)
     }
@@ -247,7 +247,7 @@ struct ConnectionCard: View {
             }
             .padding(16)
             .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(16)
+            .cornerRadius(Theme.Radius.large)
             .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
@@ -296,7 +296,7 @@ struct SentRequestCard: View {
             }
             .padding(16)
             .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(16)
+            .cornerRadius(Theme.Radius.large)
             .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)

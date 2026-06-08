@@ -314,7 +314,7 @@ struct CollectionDetailView: View {
             }
             .padding()
             .background(Color.cauldronOrange.opacity(0.1))
-            .cornerRadius(12)
+            .cornerRadius(Theme.Radius.card)
         }
         .buttonStyle(PressableScaleStyle())
         .padding(.horizontal, 16)

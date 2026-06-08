@@ -131,7 +131,7 @@ struct RecipeHeaderSection: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(warning.color.opacity(0.1))
-                        .cornerRadius(8)
+                        .cornerRadius(Theme.Radius.small)
                     }
                 }
                 .padding(.top, 4)

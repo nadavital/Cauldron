@@ -592,7 +592,7 @@ struct CookTabView: View {
         .padding(24)
         .frame(maxWidth: .infinity)
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .cornerRadius(Theme.Radius.large)
         .padding(.horizontal, Theme.Spacing.md)
     }
 
@@ -818,7 +818,7 @@ struct CategoryCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(12)
+        .cornerRadius(Theme.Radius.card)
         .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
 }

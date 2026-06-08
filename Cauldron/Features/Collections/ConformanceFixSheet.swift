@@ -67,7 +67,7 @@ struct ConformanceFixSheet: View {
                     }
                     .padding()
                     .background(Color.cauldronOrange.opacity(0.1))
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .padding()
 
@@ -172,7 +172,7 @@ struct ConformanceFixSheet: View {
                         .padding()
                         .background(selectedRecipeIds.isEmpty ? Color.gray : Color.cauldronOrange)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                     }
                     .disabled(selectedRecipeIds.isEmpty || isUpdating)
                 }

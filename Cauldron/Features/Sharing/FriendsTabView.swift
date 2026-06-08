@@ -337,7 +337,7 @@ struct FriendsTabView: View {
             .padding(.vertical, 50)
         }
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .cornerRadius(Theme.Radius.large)
         .padding(.horizontal, 16)
     }
 

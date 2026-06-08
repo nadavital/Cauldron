@@ -23,7 +23,7 @@ struct WhatsNewView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 72, height: 72)
-                        .cornerRadius(16)
+                        .cornerRadius(Theme.Radius.large)
 
                     VStack(spacing: 8) {
                         Text("What's New")

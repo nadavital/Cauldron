@@ -72,7 +72,7 @@ struct AppIconPickerView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 52, height: 52)
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(iconManager.currentTheme.name)
@@ -125,7 +125,7 @@ struct AppIconPickerView: View {
         }
         .padding()
         .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(16)
+        .cornerRadius(Theme.Radius.large)
     }
 
     // MARK: - Icons Grid
@@ -164,9 +164,9 @@ struct AppIconPickerView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 72, height: 72)
-                            .cornerRadius(16)
+                            .cornerRadius(Theme.Radius.large)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 16)
+                                RoundedRectangle(cornerRadius: Theme.Radius.large)
                                     .stroke(isSelected ? Color.cauldronOrange : Color.clear, lineWidth: 3)
                             )
                     } else {
@@ -175,7 +175,7 @@ struct AppIconPickerView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 72, height: 72)
-                            .cornerRadius(16)
+                            .cornerRadius(Theme.Radius.large)
                             .blur(radius: 4)
                             .saturation(0.3)
                             .opacity(0.6)

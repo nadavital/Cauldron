@@ -72,7 +72,7 @@ struct RecipeImportPreviewView: View {
                         }
                         .padding()
                         .background(Color.cauldronSecondaryBackground)
-                        .cornerRadius(12)
+                        .cornerRadius(Theme.Radius.card)
                         .padding(.horizontal)
                     
                     // Recipe details
@@ -115,7 +115,7 @@ struct RecipeImportPreviewView: View {
                                             .padding(.vertical, 5)
                                             .background(Color.cauldronOrange.opacity(0.15))
                                             .foregroundColor(.cauldronOrange)
-                                            .cornerRadius(8)
+                                            .cornerRadius(Theme.Radius.small)
                                     }
                                 }
                             }
@@ -320,7 +320,7 @@ struct RecipeImportPreviewView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.cauldronOrange.opacity(0.1))
-        .cornerRadius(8)
+        .cornerRadius(Theme.Radius.small)
     }
     
     

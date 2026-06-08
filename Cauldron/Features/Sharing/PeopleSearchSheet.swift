@@ -271,7 +271,7 @@ struct PeopleSearchUserRow: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
+                .cornerRadius(Theme.Radius.small)
 
         case .pendingIncoming:
             HStack(spacing: 8) {

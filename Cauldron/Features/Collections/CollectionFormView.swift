@@ -143,7 +143,7 @@ struct CollectionFormView: View {
                                 if recipe.imageURL != nil {
                                     RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
                                 } else {
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: Theme.Radius.small)
                                         .fill(Color.appSurface)
                                         .frame(width: 60, height: 60)
                                         .overlay(

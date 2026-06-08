@@ -160,7 +160,7 @@ struct ImportPreviewSheet: View {
                     ownerId: recipe.ownerId
                 )
                 .frame(height: 250)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
                 .padding(.horizontal)
                 .task(id: recipe.id) {
                     // Task will automatically cancel when recipe.id changes
@@ -193,7 +193,7 @@ struct ImportPreviewSheet: View {
                                         .padding(.vertical, 6)
                                         .background(Color.cauldronOrange.opacity(0.2))
                                         .foregroundColor(.cauldronOrange)
-                                        .cornerRadius(12)
+                                        .cornerRadius(Theme.Radius.card)
                                 }
                             }
                             .padding(.horizontal)
@@ -240,7 +240,7 @@ struct ImportPreviewSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.cauldronOrange)
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .disabled(isImporting)
                 .padding(.horizontal)
@@ -299,7 +299,7 @@ struct ImportPreviewSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color.secondary)
-                .cornerRadius(12)
+                .cornerRadius(Theme.Radius.card)
             }
             .padding(.horizontal)
 
@@ -331,7 +331,7 @@ struct ImportPreviewSheet: View {
                             placeholderImage
                         }
                     }
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                     .padding(.horizontal)
                 }
 
@@ -366,7 +366,7 @@ struct ImportPreviewSheet: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.cauldronOrange)
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.Radius.card)
                 }
                 .disabled(isImporting)
                 .padding(.horizontal)
