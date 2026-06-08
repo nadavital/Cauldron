@@ -11,12 +11,20 @@ struct CollectionRecipeImageSource: Hashable, Sendable {
     let recipeId: UUID?
     let imageURL: URL?
     let ownerId: UUID?
+    let privateRecordName: String?
     let hasCloudImage: Bool
 
-    init(recipeId: UUID? = nil, imageURL: URL?, ownerId: UUID? = nil, hasCloudImage: Bool = false) {
+    init(
+        recipeId: UUID? = nil,
+        imageURL: URL?,
+        ownerId: UUID? = nil,
+        privateRecordName: String? = nil,
+        hasCloudImage: Bool = false
+    ) {
         self.recipeId = recipeId
         self.imageURL = imageURL
         self.ownerId = ownerId
+        self.privateRecordName = privateRecordName
         self.hasCloudImage = hasCloudImage
     }
 
@@ -102,7 +110,8 @@ struct CollectionCoverArtwork: View {
             showPlaceholderText: false,
             recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService,
             recipeId: imageSource.recipeId,
-            ownerId: imageSource.ownerId
+            ownerId: imageSource.ownerId,
+            privateRecordName: imageSource.privateRecordName
         )
         .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
         .frame(width: width, height: height)

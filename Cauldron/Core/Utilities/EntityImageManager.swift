@@ -52,11 +52,12 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// Track in-flight downloads to prevent duplicate requests
     private var inFlightDownloads: [UUID: Task<URL?, Error>] = [:]
 
-    /// Track in-flight database-aware downloads (key: "entityId-public" or "entityId-private")
+    /// Track in-flight database-aware downloads. Private keys include the
+    /// effective CloudKit record name so UUID misses do not poison legacy names.
     private var inFlightDatabaseDownloads: [String: Task<String?, Error>] = [:]
 
     /// Cache for "not found" results to avoid repeated CloudKit lookups
-    /// Key: "entityId-public" or "entityId-private", Value: timestamp when cached
+    /// Key matches `databaseDownloadCacheKey`, Value: timestamp when cached
     private var notFoundCache: [String: Date] = [:]
 
     /// How long to cache "not found" results (5 minutes)
@@ -393,6 +394,9 @@ actor EntityImageManager<Entity: ImageManageable> {
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-default")
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-public")
         notFoundCache.removeValue(forKey: "\(entityId.uuidString)-private")
+        notFoundCache = notFoundCache.filter { key, _ in
+            !key.hasPrefix("\(entityId.uuidString)-private-")
+        }
     }
 
     /// Clear all "not found" cache entries (useful after network recovery)
@@ -409,7 +413,12 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// This method uses request coalescing and "not found" caching to prevent
     /// redundant CloudKit requests.
     func downloadImageFromCloud(entityId: UUID, fromPublic: Bool, privateRecordName: String? = nil) async throws -> String? {
-        let cacheKey = "\(entityId.uuidString)-\(fromPublic ? "public" : "private")"
+        let recordNameForPrivate = fromPublic ? nil : privateRecordName
+        let cacheKey = databaseDownloadCacheKey(
+            entityId: entityId,
+            fromPublic: fromPublic,
+            privateRecordName: recordNameForPrivate
+        )
 
         // Check "not found" cache first
         if let cachedTime = notFoundCache[cacheKey] {
@@ -433,8 +442,6 @@ actor EntityImageManager<Entity: ImageManageable> {
 
         // Create and store the task IMMEDIATELY to prevent race conditions
         // The task must be stored before any suspension point
-        // Only the private branch uses the record name; public always keys by UUID.
-        let recordNameForPrivate = fromPublic ? nil : privateRecordName
         let downloadTask = Task<String?, Error> { [cacheKey] in
             guard let imageData = try await downloadFromCloudWithDatabase(entityId, fromPublic, recordNameForPrivate) else {
                 // Cache the "not found" result
@@ -460,6 +467,18 @@ actor EntityImageManager<Entity: ImageManageable> {
             inFlightDatabaseDownloads.removeValue(forKey: cacheKey)
             throw error
         }
+    }
+
+    private func databaseDownloadCacheKey(
+        entityId: UUID,
+        fromPublic: Bool,
+        privateRecordName: String?
+    ) -> String {
+        if fromPublic {
+            return "\(entityId.uuidString)-public"
+        }
+
+        return "\(entityId.uuidString)-private-\(privateRecordName ?? entityId.uuidString)"
     }
 
     /// Delete image from CloudKit

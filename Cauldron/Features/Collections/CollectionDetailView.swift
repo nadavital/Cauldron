@@ -395,6 +395,7 @@ struct CollectionDetailView: View {
                     recipeId: recipeId,
                     imageURL: recipe?.imageURL,
                     ownerId: recipe?.ownerId,
+                    privateRecordName: recipe?.cloudRecordName,
                     hasCloudImage: recipe?.cloudImageRecordName != nil
                 )
             }
