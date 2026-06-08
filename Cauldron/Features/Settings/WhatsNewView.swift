@@ -30,7 +30,7 @@ struct WhatsNewView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
 
-                        Text("Collections, discovery, and recipe details feel cleaner.")
+                        Text("A calmer design language, steadier sharing, and cleaner recipe surfaces.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,28 +38,28 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         FeatureRow(
-                            symbol: "books.vertical.fill",
-                            color: .purple,
-                            title: "Richer Collections",
-                            detail: "Collections now feel more like cookbooks, with photo headers, custom covers, and clearer saved collection organization."
+                            symbol: "sparkles",
+                            color: .cauldronOrange,
+                            title: "Refreshed Design",
+                            detail: "Cauldron has a warmer visual system with cleaner navigation, softer surfaces, and more consistent large-screen layouts."
                         )
                         FeatureRow(
-                            symbol: "magnifyingglass",
+                            symbol: "books.vertical.fill",
                             color: .blue,
-                            title: "Better Recipe Discovery",
-                            detail: "Search, tags, and Explore results have been polished so the right recipes are easier to find."
+                            title: "Better Collections",
+                            detail: "Saved collections and recipe groups are easier to scan, organize, and revisit across your devices."
                         )
                         FeatureRow(
                             symbol: "list.bullet.rectangle",
-                            color: .cauldronOrange,
+                            color: .purple,
                             title: "Cleaner Recipe Details",
-                            detail: "Related recipes, saved recipes, and preview recipes now behave more consistently across your library."
+                            detail: "Recipe screens have been tightened up so ingredients, steps, related recipes, and source details feel more predictable."
                         )
                         FeatureRow(
                             symbol: "checkmark.seal.fill",
                             color: .green,
-                            title: "More Predictable Saving",
-                            detail: "Cauldron is better at recognizing recipes and collections you already saved, with fewer confusing duplicates."
+                            title: "More Reliable Sharing",
+                            detail: "Friend, image, and saved-recipe flows include additional stability fixes for smoother syncing."
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
