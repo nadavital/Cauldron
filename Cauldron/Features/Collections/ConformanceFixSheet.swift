@@ -212,7 +212,7 @@ struct ConformanceFixSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(Color(red: 0.5, green: 0.0, blue: 0.0))
                                 .padding(6)
-                                .background(Circle().fill(.ultraThinMaterial))
+                                .glassEffect(.regular, in: Circle())
                                 .padding(6)
                         }
                     },

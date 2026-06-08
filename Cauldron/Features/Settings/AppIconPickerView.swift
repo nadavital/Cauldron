@@ -56,7 +56,7 @@ struct AppIconPickerView: View {
                         .overlay {
                             ProgressView("Changing icon...")
                                 .padding()
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                         }
                 }
             }
