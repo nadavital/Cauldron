@@ -280,32 +280,9 @@ def compose_template_iphone(screenshot_path: Path) -> Image.Image:
     return device
 
 
-def compose_frameless_device(screenshot_path: Path, screen_corner_radius: int, border: int = 12) -> Image.Image:
-    shot = Image.open(screenshot_path).convert('RGB')
-    screen = shot.convert('RGBA')
-    mask = rounded_mask(screen.size, screen_corner_radius)
-
-    device = Image.new(
-        'RGBA',
-        (screen.width + (border * 2), screen.height + (border * 2)),
-        (0, 0, 0, 0),
-    )
-    shell = Image.new('RGBA', device.size, (42, 40, 38, 255))
-    shell_mask = rounded_mask(device.size, screen_corner_radius + border)
-    device.paste(shell, (0, 0), shell_mask)
-    device.paste(screen, (border, border), mask)
-
-    shadow = Image.new('RGBA', (device.width + 80, device.height + 80), (0, 0, 0, 0))
-    shadow_layer = Image.new('RGBA', device.size, (0, 0, 0, 95))
-    shadow.paste(shadow_layer, (40, 40), shell_mask)
-    shadow = shadow.filter(ImageFilter.GaussianBlur(24))
-    shadow.alpha_composite(device, (40, 28))
-    return shadow
-
-
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
-        return compose_frameless_device(screenshot_path, screen_corner_radius)
+        return compose_template_iphone(screenshot_path)
 
     frame = Image.open(frame_path).convert('RGBA')
     shot = Image.open(screenshot_path).convert('RGB')
@@ -324,9 +301,6 @@ def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_
 
 
 def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image, corner_radius: int) -> Image.Image:
-    if not frame_path.exists():
-        return compose_frameless_device(screenshot_path, corner_radius, border=2)
-
     frame = Image.open(frame_path).convert('RGBA')
     shot = crop_black_border(Image.open(screenshot_path).convert('RGB'))
     x0, y0, x1, y1 = find_screen_bbox(frame)
@@ -455,9 +429,7 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
     bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
 
-    mac_wall = None
-    if spec.name == 'Mac':
-        mac_wall = Image.open(BG_MAC).convert('RGB') if BG_MAC.exists() else bg
+    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' else None
 
     for i, shot in enumerate(spec.shots, start=1):
         x0 = (i - 1) * spec.canvas_size[0]
