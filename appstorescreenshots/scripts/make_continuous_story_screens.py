@@ -69,32 +69,26 @@ class PlatformSpec:
 
 IPHONE_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
-    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('groceries_tab', 'Cook From One Place', 'Recipes, groceries, and shared inspiration stay close at hand.'),
+    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
+    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
+    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
 )
 
 IPAD_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('cook_mode', 'Cook Mode', 'Follow along step by step with large, hands-on controls.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('collections', 'Curate Your Cookbooks', 'Collections feel organized, visual, and ready for iPad and Mac.'),
+    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
+    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
+    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
 )
 
 MAC_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('collection_view', 'Collections', 'Organize favorites into collections faster.'),
+    Shot('collections', 'Curate Your Cookbooks', 'Collections feel organized, visual, and ready for iPad and Mac.'),
+    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
+    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
+    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
 )
 
 WEBSITE_SOURCE_NAMES = {
@@ -120,7 +114,7 @@ SPECS = (
         top_area=378,
         bottom_area=310,
         side_margin=84,
-        title_size=144,
+        title_size=118,
         body_size=56,
         text_left_margin=96,
         icon_size_first=118,
@@ -280,9 +274,32 @@ def compose_template_iphone(screenshot_path: Path) -> Image.Image:
     return device
 
 
+def compose_frameless_device(screenshot_path: Path, screen_corner_radius: int, border: int = 12) -> Image.Image:
+    shot = Image.open(screenshot_path).convert('RGB')
+    screen = shot.convert('RGBA')
+    mask = rounded_mask(screen.size, screen_corner_radius)
+
+    device = Image.new(
+        'RGBA',
+        (screen.width + (border * 2), screen.height + (border * 2)),
+        (0, 0, 0, 0),
+    )
+    shell = Image.new('RGBA', device.size, (42, 40, 38, 255))
+    shell_mask = rounded_mask(device.size, screen_corner_radius + border)
+    device.paste(shell, (0, 0), shell_mask)
+    device.paste(screen, (border, border), mask)
+
+    shadow = Image.new('RGBA', (device.width + 80, device.height + 80), (0, 0, 0, 0))
+    shadow_layer = Image.new('RGBA', device.size, (0, 0, 0, 95))
+    shadow.paste(shadow_layer, (40, 40), shell_mask)
+    shadow = shadow.filter(ImageFilter.GaussianBlur(24))
+    shadow.alpha_composite(device, (40, 28))
+    return shadow
+
+
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
-        return compose_template_iphone(screenshot_path)
+        return compose_frameless_device(screenshot_path, screen_corner_radius)
 
     frame = Image.open(frame_path).convert('RGBA')
     shot = Image.open(screenshot_path).convert('RGB')
@@ -301,6 +318,9 @@ def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_
 
 
 def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image, corner_radius: int) -> Image.Image:
+    if not frame_path.exists():
+        return compose_frameless_device(screenshot_path, corner_radius, border=2)
+
     frame = Image.open(frame_path).convert('RGBA')
     shot = crop_black_border(Image.open(screenshot_path).convert('RGB'))
     x0, y0, x1, y1 = find_screen_bbox(frame)
@@ -429,7 +449,9 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
     bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
 
-    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' else None
+    mac_wall = None
+    if spec.name == 'Mac':
+        mac_wall = Image.open(BG_MAC).convert('RGB') if BG_MAC.exists() else bg
 
     for i, shot in enumerate(spec.shots, start=1):
         x0 = (i - 1) * spec.canvas_size[0]

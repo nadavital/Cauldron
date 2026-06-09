@@ -45,6 +45,18 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    nonisolated static var screenshotTab: String? {
+        #if DEBUG
+        guard isSimulatorQAMode else { return nil }
+        let prefix = "--cauldron-screenshot-tab="
+        return arguments
+            .first(where: { $0.hasPrefix(prefix) })
+            .map { String($0.dropFirst(prefix.count)) }
+        #else
+        nil
+        #endif
+    }
+
     /// Force the onboarding flow for visual review (it's normally skipped in QA seed mode).
     nonisolated static var shouldForceOnboarding: Bool {
         #if DEBUG
