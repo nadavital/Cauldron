@@ -50,6 +50,11 @@ IPHONE_FRAME = first_existing_path(
 IPAD_FRAME = first_existing_path(
     'CAULDRON_IPAD_FRAME',
     (
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13" - Silver - Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13"*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13"*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 11"*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 11"*Portrait.png',
         '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13 - M5 - Silver - Portrait.png',
         '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13*Silver*Portrait.png',
         '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13*Portrait.png',
