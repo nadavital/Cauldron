@@ -29,7 +29,7 @@ struct ContentView: View {
     // This is separate from the build number - the app can have multiple builds without triggering What's New.
     // When you ship a feature update, set this to match that version (e.g., "1.4.1").
     // When you ship a bug fix, leave this unchanged so no splash appears.
-    private static let whatsNewContentVersion = "1.5"
+    private static let whatsNewContentVersion = "1.7"
 
     @Environment(\.dependencies) private var dependencies
     @StateObject private var userSession = CurrentUserSession.shared
@@ -80,12 +80,30 @@ struct ContentView: View {
                         // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
                         // This data pipeline ensures CookTabViewModel initializes with populated arrays
                         // instead of empty arrays, preventing the empty state from ever rendering.
+                        #if DEBUG
+                        if let scene = RuntimeEnvironment.screenshotScene {
+                            ScreenshotSceneView(
+                                scene: scene,
+                                dependencies: dependencies,
+                                preloadedData: preloadedData
+                            )
+                            .id(userSession.userId)
+                        } else {
+                            MainTabView(
+                                dependencies: dependencies,
+                                preloadedData: preloadedData,
+                                pendingSharedContent: $sharedContentWrapper
+                            )
+                            .id(userSession.userId)
+                        }
+                        #else
                         MainTabView(
                             dependencies: dependencies,
                             preloadedData: preloadedData,
                             pendingSharedContent: $sharedContentWrapper
                         )
-                            .id(userSession.userId)
+                        .id(userSession.userId)
+                        #endif
                     }
                 }
             }
@@ -580,6 +598,90 @@ struct ContentView: View {
         }
     }
 }
+
+#if DEBUG
+private struct ScreenshotSceneView: View {
+    let scene: String
+    let dependencies: DependencyContainer
+    let preloadedData: PreloadedRecipeData?
+
+    private var recipes: [Recipe] {
+        preloadedData?.allRecipes ?? []
+    }
+
+    private var collections: [Collection] {
+        preloadedData?.collections ?? []
+    }
+
+    private var featuredRecipe: Recipe? {
+        recipes.first { $0.title == "Pot Roast" }
+            ?? recipes.first
+    }
+
+    private var featuredCollection: Collection? {
+        collections.first { !$0.recipeIds.isEmpty }
+            ?? collections.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            switch scene {
+            case "recipe_view":
+                if let recipe = featuredRecipe {
+                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
+            case "generate_recipe":
+                AIRecipeGeneratorView(dependencies: dependencies)
+            case "cook_mode", "live_activity":
+                if let recipe = featuredRecipe {
+                    ScreenshotCookModeScene(
+                        recipe: recipe,
+                        coordinator: dependencies.cookModeCoordinator,
+                        dependencies: dependencies
+                    )
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
+            case "profile_view":
+                UserProfileView(user: SimulatorQASeed.currentUser, dependencies: dependencies)
+            case "collection_view":
+                if let collection = featuredCollection {
+                    CollectionDetailView(collection: collection, dependencies: dependencies)
+                } else {
+                    CollectionsListView(dependencies: dependencies)
+                }
+            default:
+                MainTabView(dependencies: dependencies, preloadedData: preloadedData)
+            }
+        }
+    }
+}
+
+private struct ScreenshotCookModeScene: View {
+    let recipe: Recipe
+    let coordinator: CookModeCoordinator
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        CookModeView(
+            recipe: recipe,
+            coordinator: coordinator,
+            dependencies: dependencies
+        )
+        .onAppear {
+            if coordinator.currentRecipe?.id != recipe.id || coordinator.totalSteps == 0 {
+                coordinator.currentRecipe = recipe
+                coordinator.currentStepIndex = 0
+                coordinator.totalSteps = recipe.steps.count
+                coordinator.sessionStartTime = Date()
+                coordinator.isActive = true
+            }
+        }
+    }
+}
+#endif
 
 #Preview {
     ContentView()

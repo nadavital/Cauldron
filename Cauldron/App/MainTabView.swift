@@ -26,7 +26,7 @@ struct MainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let dependencies: DependencyContainer
     let preloadedData: PreloadedRecipeData?
-    @State private var selectedTab: AppTab = .cook
+    @State private var selectedTab: AppTab
     @State private var sidebarCollections: [Collection] = []
     @State private var sharedImportRequest: SharedImportRequest?
     @State private var didCheckInitialPendingImport = false
@@ -81,6 +81,7 @@ struct MainTabView: View {
         self.preloadedData = preloadedData
         self._pendingSharedContent = pendingSharedContent
         self.connectionManager = dependencies.connectionManager
+        self._selectedTab = State(initialValue: Self.initialSelectedTab())
     }
 
     var body: some View {
@@ -209,6 +210,25 @@ struct MainTabView: View {
             resetCatalystWindowTitle()
             #endif
         }
+    }
+
+    private static func initialSelectedTab() -> AppTab {
+        #if DEBUG
+        switch RuntimeEnvironment.screenshotTab {
+        case "groceries":
+            return .groceries
+        case "friends", "sharing":
+            return .sharing
+        case "search":
+            return .search
+        case "collections":
+            return .collections
+        default:
+            return .cook
+        }
+        #else
+        return .cook
+        #endif
     }
 
     @ViewBuilder
