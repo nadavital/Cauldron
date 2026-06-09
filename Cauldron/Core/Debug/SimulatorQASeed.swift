@@ -8,9 +8,6 @@
 #if DEBUG
 import Foundation
 import SwiftData
-#if canImport(UIKit)
-import UIKit
-#endif
 
 @MainActor
 enum SimulatorQASeed {
@@ -423,108 +420,47 @@ enum SimulatorQASeed {
 
     private static func seedRecipeImages() throws -> SeededRecipeImageURLs {
         SeededRecipeImageURLs(
-            lemonChicken: try writeRecipeImage(
-                filename: "qa-lemon-herb-chicken.png",
-                title: "Lemon Herb Chicken",
-                symbolName: "leaf.fill",
-                colors: [
-                    UIColor(red: 0.18, green: 0.52, blue: 0.34, alpha: 1),
-                    UIColor(red: 0.95, green: 0.78, blue: 0.28, alpha: 1)
-                ]
+            lemonChicken: try copyBundledRecipeImage(
+                resourceName: "skillet-chicken",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1.jpg"
             ),
-            pantryPasta: try writeRecipeImage(
-                filename: "qa-pantry-pasta.png",
-                title: "Pantry Pasta",
-                symbolName: "fork.knife",
-                colors: [
-                    UIColor(red: 0.73, green: 0.19, blue: 0.14, alpha: 1),
-                    UIColor(red: 0.96, green: 0.58, blue: 0.22, alpha: 1)
-                ]
+            pantryPasta: try copyBundledRecipeImage(
+                resourceName: "pantry-pasta",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA2.jpg"
             ),
-            cardamomBuns: try writeRecipeImage(
-                filename: "qa-cardamom-buns.png",
-                title: "Cardamom Buns",
-                symbolName: "birthday.cake.fill",
-                colors: [
-                    UIColor(red: 0.75, green: 0.45, blue: 0.22, alpha: 1),
-                    UIColor(red: 0.98, green: 0.75, blue: 0.48, alpha: 1)
-                ]
+            cardamomBuns: try copyBundledRecipeImage(
+                resourceName: "chocolate-chip-cookie",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA3.jpg"
             ),
-            savedBuns: try writeRecipeImage(
-                filename: "qa-saved-cardamom-buns.png",
-                title: "Saved Buns",
-                symbolName: "heart.fill",
-                colors: [
-                    UIColor(red: 0.62, green: 0.31, blue: 0.72, alpha: 1),
-                    UIColor(red: 0.96, green: 0.68, blue: 0.78, alpha: 1)
-                ]
+            savedBuns: try copyBundledRecipeImage(
+                resourceName: "chocolate-chip-cookie",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA4.jpg"
             ),
-            ramen: try writeRecipeImage(
-                filename: "qa-miso-ramen.png",
-                title: "Miso Ramen",
-                symbolName: "takeoutbag.and.cup.and.straw.fill",
-                colors: [
-                    UIColor(red: 0.13, green: 0.32, blue: 0.64, alpha: 1),
-                    UIColor(red: 0.44, green: 0.78, blue: 0.84, alpha: 1)
-                ]
+            ramen: try copyBundledRecipeImage(
+                resourceName: "table-dinner",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA5.jpg"
             )
         )
     }
 
-    private static func writeRecipeImage(
-        filename: String,
-        title: String,
-        symbolName: String,
-        colors: [UIColor]
-    ) throws -> URL {
+    private static func copyBundledRecipeImage(resourceName: String, filename: String) throws -> URL {
         let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("RecipeImages", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent(filename)
 
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900))
-        let image = renderer.image { context in
-            let rect = CGRect(x: 0, y: 0, width: 1200, height: 900)
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let cgColors = colors.map(\.cgColor) as CFArray
-            let locations: [CGFloat] = [0, 1]
-
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: cgColors, locations: locations) {
-                context.cgContext.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: rect.minX, y: rect.minY),
-                    end: CGPoint(x: rect.maxX, y: rect.maxY),
-                    options: []
-                )
-            }
-
-            UIColor.white.withAlphaComponent(0.16).setFill()
-            UIBezierPath(ovalIn: CGRect(x: 330, y: 190, width: 540, height: 540)).fill()
-
-            UIColor.white.withAlphaComponent(0.32).setStroke()
-            let platePath = UIBezierPath(ovalIn: CGRect(x: 300, y: 160, width: 600, height: 600))
-            platePath.lineWidth = 18
-            platePath.stroke()
-
-            if let symbol = UIImage(systemName: symbolName) {
-                let symbolRect = CGRect(x: 450, y: 280, width: 300, height: 300)
-                symbol.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: symbolRect)
-            }
-
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .center
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 54, weight: .semibold),
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: paragraphStyle
-            ]
-            title.draw(in: CGRect(x: 140, y: 720, width: 920, height: 80), withAttributes: attributes)
+        guard let sourceURL = Bundle.main.url(
+            forResource: resourceName,
+            withExtension: "jpg",
+            subdirectory: "ScreenshotSeedImages"
+        ) ?? Bundle.main.url(forResource: resourceName, withExtension: "jpg") else {
+            throw CocoaError(.fileNoSuchFile)
         }
 
-        guard let data = image.pngData() else {
-            throw CocoaError(.fileWriteUnknown)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
         }
-        try data.write(to: url, options: .atomic)
+        try FileManager.default.copyItem(at: sourceURL, to: url)
         return url
     }
 }

@@ -282,6 +282,8 @@ def compose_template_iphone(screenshot_path: Path) -> Image.Image:
 
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
+        if frame_path != IPHONE_FRAME:
+            raise RuntimeError(f'Missing required frame at {frame_path}')
         return compose_template_iphone(screenshot_path)
 
     frame = Image.open(frame_path).convert('RGBA')
