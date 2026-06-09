@@ -605,7 +605,7 @@ private struct ScreenshotSceneView: View {
     }
 
     private var featuredRecipe: Recipe? {
-        recipes.first { $0.title == "Saved Cardamom Buns" }
+        recipes.first { $0.title == "Maya's Cookies" }
             ?? recipes.first
     }
 
@@ -627,7 +627,7 @@ private struct ScreenshotSceneView: View {
                 AIRecipeGeneratorView(dependencies: dependencies)
             case "cook_mode", "live_activity":
                 if let recipe = featuredRecipe {
-                    CookModeView(
+                    ScreenshotCookModeScene(
                         recipe: recipe,
                         coordinator: dependencies.cookModeCoordinator,
                         dependencies: dependencies
@@ -645,6 +645,29 @@ private struct ScreenshotSceneView: View {
                 }
             default:
                 MainTabView(dependencies: dependencies, preloadedData: preloadedData)
+            }
+        }
+    }
+}
+
+private struct ScreenshotCookModeScene: View {
+    let recipe: Recipe
+    let coordinator: CookModeCoordinator
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        CookModeView(
+            recipe: recipe,
+            coordinator: coordinator,
+            dependencies: dependencies
+        )
+        .onAppear {
+            if coordinator.currentRecipe?.id != recipe.id || coordinator.totalSteps == 0 {
+                coordinator.currentRecipe = recipe
+                coordinator.currentStepIndex = 0
+                coordinator.totalSteps = recipe.steps.count
+                coordinator.sessionStartTime = Date()
+                coordinator.isActive = true
             }
         }
     }

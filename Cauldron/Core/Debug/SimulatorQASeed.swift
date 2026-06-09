@@ -13,8 +13,8 @@ import SwiftData
 enum SimulatorQASeed {
     static let currentUser = User(
         id: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
-        username: "nadavqa",
-        displayName: "Nadav QA",
+        username: "nadav_cooks",
+        displayName: "Nadav Avital",
         referralCode: "QA2026",
         profileEmoji: "🍳",
         profileColor: "#FF9933"
@@ -64,6 +64,7 @@ enum SimulatorQASeed {
         let context = ModelContext(dependencies.modelContainer)
 
         do {
+            ImageCache.shared.clear()
             try clearSeededState(in: context)
             try seedUsers(in: context)
             let recipes = try seedRecipes(in: context)
@@ -144,10 +145,10 @@ enum SimulatorQASeed {
         let recipes = [
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
-                title: "Lemon Herb Chicken",
-                ingredients: ["2 chicken breasts", "1 lemon", "2 tbsp olive oil", "1 tsp thyme"],
-                steps: ["Season chicken with salt and thyme.", "Sear until golden.", "Finish with lemon juice."],
-                tags: ["Dinner", "Weeknight", "Chicken"],
+                title: "Lemon Chicken",
+                ingredients: ["6 chicken thighs", "1 lb baby potatoes", "1 pint cherry tomatoes", "1 red onion", "1 lemon", "2 tsp oregano"],
+                steps: ["Toss potatoes, tomatoes, onion, and lemon with olive oil.", "Nestle chicken on top and season generously.", "Roast until the chicken is golden and the potatoes are tender."],
+                tags: ["Dinner", "Chicken", "One Pan"],
                 ownerId: currentUser.id,
                 visibility: .publicRecipe,
                 updatedAt: now,
@@ -155,10 +156,10 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
-                title: "Offline Pantry Pasta",
-                ingredients: ["8 oz pasta", "1 can tomatoes", "2 cloves garlic", "Parmesan"],
-                steps: ["Boil pasta.", "Simmer tomatoes with garlic.", "Toss pasta with sauce."],
-                tags: ["Dinner", "Pasta", "Offline"],
+                title: "Broccoli Pasta",
+                ingredients: ["12 oz penne", "2 cups broccoli florets", "1 cup cooked chicken", "1/2 cup cream", "1/3 cup Parmesan", "1 lemon"],
+                steps: ["Boil penne and add broccoli for the last two minutes.", "Warm chicken with cream, Parmesan, and lemon zest.", "Toss everything together with a splash of pasta water."],
+                tags: ["Dinner", "Pasta", "Weeknight"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-3_600),
@@ -166,10 +167,10 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
-                title: "Shared Cardamom Buns",
-                ingredients: ["3 cups flour", "1 cup milk", "2 tsp cardamom", "1 packet yeast"],
-                steps: ["Mix dough.", "Proof until doubled.", "Shape buns.", "Bake until golden."],
-                tags: ["Baking", "Dessert", "Brunch"],
+                title: "Brown Butter Cookies",
+                ingredients: ["1 cup browned butter", "1 cup brown sugar", "2 eggs", "2 cups flour", "1 tsp vanilla", "1 cup dark chocolate"],
+                steps: ["Brown the butter and let it cool slightly.", "Mix dough and fold in chopped chocolate.", "Chill, scoop, and bake until the edges are set."],
+                tags: ["Dessert", "Baking", "Cookies"],
                 ownerId: friendA.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-7_200),
@@ -178,10 +179,10 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
-                title: "Saved Cardamom Buns",
-                ingredients: ["3 cups flour", "1 cup milk", "2 tsp cardamom", "1 packet yeast"],
-                steps: ["Mix dough.", "Proof until doubled.", "Shape buns.", "Bake until golden."],
-                tags: ["Baking", "Dessert", "Saved"],
+                title: "Maya's Cookies",
+                ingredients: ["1 cup browned butter", "1 cup brown sugar", "2 eggs", "2 cups flour", "1 tsp vanilla", "1 cup dark chocolate"],
+                steps: ["Brown the butter and let it cool slightly.", "Mix dough and fold in chopped chocolate.", "Chill, scoop, and bake until the edges are set."],
+                tags: ["Dessert", "Baking", "Saved"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-1_800),
@@ -193,10 +194,10 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
-                title: "Miso Mushroom Ramen",
-                ingredients: ["4 cups stock", "2 tbsp miso", "6 oz mushrooms", "2 packs noodles"],
-                steps: ["Simmer mushrooms in stock.", "Whisk in miso.", "Cook noodles and assemble bowls."],
-                tags: ["Dinner", "Soup", "Vegetarian"],
+                title: "Roast Chicken",
+                ingredients: ["1 roast chicken", "2 cups herbed rice", "1 cucumber salad", "1 pan roasted vegetables", "Fresh herbs"],
+                steps: ["Carve the roast chicken and spoon pan juices over the top.", "Pile rice and vegetables onto a large serving platter.", "Finish with herbs and serve family style."],
+                tags: ["Dinner", "Roast", "Hosting"],
                 ownerId: friendB.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-5_400),
@@ -205,13 +206,14 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
-                title: "No-Image Picnic Notes",
-                ingredients: ["1 loaf bread", "Seasonal fruit", "Soft cheese", "Olives"],
+                title: "Market Picnic Board",
+                ingredients: ["1 baguette", "Seasonal fruit", "Soft cheese", "Olives", "Marcona almonds"],
                 steps: ["Pack everything cold.", "Slice bread at the table.", "Serve family style."],
-                tags: ["Snack", "Picnic", "No Image"],
+                tags: ["Snack", "Picnic", "Weekend"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
-                updatedAt: now.addingTimeInterval(-9_000)
+                updatedAt: now.addingTimeInterval(-9_000),
+                totalMinutes: 45
             )
         ]
 
@@ -233,17 +235,17 @@ enum SimulatorQASeed {
             .filter { $0.ownerId != currentUser.id }
             .map(\.id)
         let imageRecipeIds = [
-            recipeByTitle["Lemon Herb Chicken"],
-            recipeByTitle["Offline Pantry Pasta"],
-            recipeByTitle["Saved Cardamom Buns"],
-            recipeByTitle["Miso Mushroom Ramen"]
+            recipeByTitle["Lemon Chicken"],
+            recipeByTitle["Broccoli Pasta"],
+            recipeByTitle["Maya's Cookies"],
+            recipeByTitle["Roast Chicken"]
         ].compactMap { $0 }
 
         let collections = [
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
-                name: "Weeknight Wins",
-                description: "Three owned recipes for local collection checks.",
+                name: "Weeknight Dinners",
+                description: "Easy dinners that still feel cooked with care.",
                 userId: currentUser.id,
                 recipeIds: Array(ownRecipeIds.prefix(3)),
                 visibility: .privateRecipe,
@@ -252,7 +254,7 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")!,
-                name: "Friends' Favorites",
+                name: "Saved From Friends",
                 description: "Go-to dishes shared by friends.",
                 userId: friendA.id,
                 recipeIds: sharedRecipeIds,
@@ -262,38 +264,45 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3")!,
-                name: "QA One Image",
-                description: "One recipe image for single-photo cover checks.",
+                name: "Just Desserts",
+                description: "Cookies, cakes, and weeknight sweets.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(1)),
+                recipeIds: [recipeByTitle["Maya's Cookies"]].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "photo",
                 color: "#F06449"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4")!,
-                name: "QA Two Images",
-                description: "Two recipe images for split cover checks.",
+                name: "Pasta Nights",
+                description: "Fast bowls for late work nights.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(2)),
+                recipeIds: [
+                    recipeByTitle["Broccoli Pasta"],
+                    recipeByTitle["Lemon Chicken"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.2x1",
                 color: "#5B8DEF"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5")!,
-                name: "QA Three Images",
-                description: "Three recipe images for asymmetrical collage checks.",
+                name: "Dinner Party",
+                description: "Low-stress dishes for feeding friends.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(3)),
+                recipeIds: [
+                    recipeByTitle["Roast Chicken"],
+                    recipeByTitle["Lemon Chicken"],
+                    recipeByTitle["Broccoli Pasta"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.3x1",
                 color: "#7B61FF"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6")!,
-                name: "QA Four Images",
-                description: "Four recipe images for collage and swipe checks.",
+                name: "Family Favorites",
+                description: "Recipes everyone asks for again.",
                 userId: currentUser.id,
                 recipeIds: Array(imageRecipeIds.prefix(4)),
                 visibility: .privateRecipe,
@@ -302,10 +311,10 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7")!,
-                name: "QA No Images",
-                description: "No recipe images so the fallback gradient stays testable.",
+                name: "Picnic Ideas",
+                description: "Packable snacks for weekends outside.",
                 userId: currentUser.id,
-                recipeIds: [recipeByTitle["No-Image Picnic Notes"]].compactMap { $0 },
+                recipeIds: [recipeByTitle["Market Picnic Board"]].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "sparkles",
                 color: "#2E8B57"
@@ -378,6 +387,7 @@ enum SimulatorQASeed {
         visibility: RecipeVisibility,
         updatedAt: Date,
         imageURL: URL? = nil,
+        totalMinutes: Int = 30,
         isPreview: Bool = false,
         originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
@@ -390,7 +400,7 @@ enum SimulatorQASeed {
             ingredients: ingredients.map { Ingredient(name: $0) },
             steps: steps.enumerated().map { CookStep(index: $0.offset, text: $0.element) },
             yields: "4 servings",
-            totalMinutes: 30,
+            totalMinutes: totalMinutes,
             tags: tags.map { Tag(name: $0) },
             imageURL: imageURL,
             visibility: visibility,
