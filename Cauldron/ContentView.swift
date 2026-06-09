@@ -80,12 +80,21 @@ struct ContentView: View {
                         // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
                         // This data pipeline ensures CookTabViewModel initializes with populated arrays
                         // instead of empty arrays, preventing the empty state from ever rendering.
-                        MainTabView(
-                            dependencies: dependencies,
-                            preloadedData: preloadedData,
-                            pendingSharedContent: $sharedContentWrapper
-                        )
+                        if let scene = RuntimeEnvironment.screenshotScene {
+                            ScreenshotSceneView(
+                                scene: scene,
+                                dependencies: dependencies,
+                                preloadedData: preloadedData
+                            )
                             .id(userSession.userId)
+                        } else {
+                            MainTabView(
+                                dependencies: dependencies,
+                                preloadedData: preloadedData,
+                                pendingSharedContent: $sharedContentWrapper
+                            )
+                                .id(userSession.userId)
+                        }
                     }
                 }
             }
@@ -580,6 +589,67 @@ struct ContentView: View {
         }
     }
 }
+
+#if DEBUG
+private struct ScreenshotSceneView: View {
+    let scene: String
+    let dependencies: DependencyContainer
+    let preloadedData: PreloadedRecipeData?
+
+    private var recipes: [Recipe] {
+        preloadedData?.allRecipes ?? []
+    }
+
+    private var collections: [Collection] {
+        preloadedData?.collections ?? []
+    }
+
+    private var featuredRecipe: Recipe? {
+        recipes.first { $0.title == "Saved Cardamom Buns" }
+            ?? recipes.first
+    }
+
+    private var featuredCollection: Collection? {
+        collections.first { !$0.recipeIds.isEmpty }
+            ?? collections.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            switch scene {
+            case "recipe_view":
+                if let recipe = featuredRecipe {
+                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
+            case "generate_recipe":
+                AIRecipeGeneratorView(dependencies: dependencies)
+            case "cook_mode", "live_activity":
+                if let recipe = featuredRecipe {
+                    CookModeView(
+                        recipe: recipe,
+                        coordinator: dependencies.cookModeCoordinator,
+                        dependencies: dependencies
+                    )
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
+            case "profile_view":
+                UserProfileView(user: SimulatorQASeed.currentUser, dependencies: dependencies)
+            case "collection_view":
+                if let collection = featuredCollection {
+                    CollectionDetailView(collection: collection, dependencies: dependencies)
+                } else {
+                    CollectionsListView(dependencies: dependencies)
+                }
+            default:
+                MainTabView(dependencies: dependencies, preloadedData: preloadedData)
+            }
+        }
+    }
+}
+#endif
 
 #Preview {
     ContentView()

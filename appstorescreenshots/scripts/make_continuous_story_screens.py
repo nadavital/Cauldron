@@ -69,26 +69,32 @@ class PlatformSpec:
 
 IPHONE_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('groceries_tab', 'Cook From One Place', 'Recipes, groceries, and shared inspiration stay close at hand.'),
-    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
-    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
-    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
+    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
+    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
+    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
+    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
+    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
+    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
 )
 
 IPAD_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('collections', 'Curate Your Cookbooks', 'Collections feel organized, visual, and ready for iPad and Mac.'),
-    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
-    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
-    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
+    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
+    Shot('cook_mode', 'Cook Mode', 'Follow along step by step with large, hands-on controls.'),
+    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
+    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
+    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
+    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
 )
 
 MAC_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('collections', 'Curate Your Cookbooks', 'Collections feel organized, visual, and ready for iPad and Mac.'),
-    Shot('friends_tab', 'Share What You Cook', 'Follow friends and discover saved recipes in a calmer social space.'),
-    Shot('search_tab', 'Find The Right Recipe', 'Search and explore with cleaner filters, tags, and large-screen layouts.'),
-    Shot('whats_new', 'Fresh For 1.7', 'A warmer design language, clearer collections, and steadier sharing.'),
+    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
+    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
+    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
+    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
+    Shot('collection_view', 'Collections', 'Organize favorites into collections faster.'),
 )
 
 WEBSITE_SOURCE_NAMES = {
@@ -114,7 +120,7 @@ SPECS = (
         top_area=378,
         bottom_area=310,
         side_margin=84,
-        title_size=118,
+        title_size=144,
         body_size=56,
         text_left_margin=96,
         icon_size_first=118,
