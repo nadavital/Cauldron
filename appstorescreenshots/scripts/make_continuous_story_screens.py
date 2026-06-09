@@ -25,7 +25,7 @@ IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '1.3'
 MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '1.3'
 
 BG_MOBILE = ROOT / 'background.png'
-BG_MAC = ROOT / 'macoswallpaper.jpeg'
+BG_MAC = ROOT / 'mac wallpaper'
 ICON_PATH = ROOT / 'cauldroniconpng.png'
 
 def first_existing_path(env_name: str, candidates: tuple[str, ...]) -> Path:
@@ -422,29 +422,6 @@ def make_generated_mac_wallpaper(size: tuple[int, int]) -> Image.Image:
     return Image.alpha_composite(bg.convert('RGBA'), overlay.filter(ImageFilter.GaussianBlur(18))).convert('RGB')
 
 
-def draw_mac_desktop_chrome(screen_bg: Image.Image) -> Image.Image:
-    desktop = screen_bg.convert('RGBA')
-    w, h = desktop.size
-    chrome = Image.new('RGBA', desktop.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(chrome)
-
-    menu_h = max(18, round(h * 0.035))
-    draw.rounded_rectangle((0, 0, w, menu_h), radius=0, fill=(255, 252, 246, 172))
-    draw.rounded_rectangle((round(w * 0.38), h - round(h * 0.085), round(w * 0.62), h - round(h * 0.025)), radius=18, fill=(255, 252, 246, 120))
-
-    dock_y = h - round(h * 0.072)
-    icon = max(12, round(h * 0.030))
-    gap = max(6, round(icon * 0.48))
-    colors = ((255, 149, 0), (255, 204, 0), (52, 199, 89), (0, 122, 255), (175, 82, 222))
-    total = len(colors) * icon + (len(colors) - 1) * gap
-    x = (w - total) // 2
-    for color in colors:
-        draw.rounded_rectangle((x, dock_y, x + icon, dock_y + icon), radius=max(4, icon // 4), fill=color + (210,))
-        x += icon + gap
-
-    return Image.alpha_composite(desktop, chrome)
-
-
 def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image | None, corner_radius: int) -> Image.Image:
     if not frame_path.exists():
         return compose_generated_mac_frame(screenshot_path, corner_radius)
@@ -458,7 +435,6 @@ def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Im
         screen_bg = make_generated_mac_wallpaper((sw, sh)).convert('RGBA')
     else:
         screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
-    screen_bg = draw_mac_desktop_chrome(screen_bg)
 
     # Floating app window on top of wallpaper inside the Mac screen.
     window_w = int(round(sw * 0.78))

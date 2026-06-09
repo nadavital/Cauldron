@@ -137,6 +137,7 @@ Temporary Items
 appstorescreenshots/*
 !appstorescreenshots/Food Pics/
 !appstorescreenshots/Food Pics/**
+!appstorescreenshots/mac wallpaper
 !appstorescreenshots/scripts/
 !appstorescreenshots/scripts/**
 
