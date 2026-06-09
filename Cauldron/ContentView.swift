@@ -605,7 +605,7 @@ private struct ScreenshotSceneView: View {
     }
 
     private var featuredRecipe: Recipe? {
-        recipes.first { $0.title == "Maya's Cookies" }
+        recipes.first { $0.title == "Pot Roast" }
             ?? recipes.first
     }
 

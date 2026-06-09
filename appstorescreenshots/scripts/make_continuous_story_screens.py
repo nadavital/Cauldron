@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from functools import lru_cache
 import os
 from pathlib import Path
 
@@ -385,7 +386,66 @@ def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_
     return crop_to_visible_alpha(out)
 
 
-def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image, corner_radius: int) -> Image.Image:
+@lru_cache(maxsize=4)
+def make_generated_mac_wallpaper(size: tuple[int, int]) -> Image.Image:
+    w, h = size
+    column = Image.new('RGB', (1, h))
+    px = column.load()
+    top = (247, 236, 216)
+    mid = (238, 169, 92)
+    bottom = (89, 78, 67)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        if t < 0.60:
+            u = t / 0.60
+            color = tuple(round(top[i] * (1 - u) + mid[i] * u) for i in range(3))
+        else:
+            u = (t - 0.60) / 0.40
+            color = tuple(round(mid[i] * (1 - u) + bottom[i] * u) for i in range(3))
+        px[0, y] = color
+    bg = column.resize(size, Image.Resampling.BICUBIC)
+
+    overlay = Image.new('RGBA', size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    draw.polygon(
+        [(-w * 0.08, h * 0.90), (w * 0.40, h * 0.22), (w * 0.68, h * 0.54), (w * 0.14, h * 1.08)],
+        fill=(255, 244, 203, 118),
+    )
+    draw.polygon(
+        [(w * 0.30, -h * 0.08), (w * 1.10, h * 0.44), (w * 0.92, h * 0.78), (w * 0.10, h * 0.26)],
+        fill=(255, 184, 93, 92),
+    )
+    draw.polygon(
+        [(w * 0.62, -h * 0.04), (w * 1.08, h * 0.14), (w * 0.82, h * 0.92), (w * 0.48, h * 0.70)],
+        fill=(72, 66, 61, 82),
+    )
+    return Image.alpha_composite(bg.convert('RGBA'), overlay.filter(ImageFilter.GaussianBlur(18))).convert('RGB')
+
+
+def draw_mac_desktop_chrome(screen_bg: Image.Image) -> Image.Image:
+    desktop = screen_bg.convert('RGBA')
+    w, h = desktop.size
+    chrome = Image.new('RGBA', desktop.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(chrome)
+
+    menu_h = max(18, round(h * 0.035))
+    draw.rounded_rectangle((0, 0, w, menu_h), radius=0, fill=(255, 252, 246, 172))
+    draw.rounded_rectangle((round(w * 0.38), h - round(h * 0.085), round(w * 0.62), h - round(h * 0.025)), radius=18, fill=(255, 252, 246, 120))
+
+    dock_y = h - round(h * 0.072)
+    icon = max(12, round(h * 0.030))
+    gap = max(6, round(icon * 0.48))
+    colors = ((255, 149, 0), (255, 204, 0), (52, 199, 89), (0, 122, 255), (175, 82, 222))
+    total = len(colors) * icon + (len(colors) - 1) * gap
+    x = (w - total) // 2
+    for color in colors:
+        draw.rounded_rectangle((x, dock_y, x + icon, dock_y + icon), radius=max(4, icon // 4), fill=color + (210,))
+        x += icon + gap
+
+    return Image.alpha_composite(desktop, chrome)
+
+
+def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image | None, corner_radius: int) -> Image.Image:
     if not frame_path.exists():
         return compose_generated_mac_frame(screenshot_path, corner_radius)
 
@@ -394,23 +454,32 @@ def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Im
     x0, y0, x1, y1 = find_screen_bbox(frame)
     sw, sh = x1 - x0 + 1, y1 - y0 + 1
 
-    screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
+    if wallpaper is None:
+        screen_bg = make_generated_mac_wallpaper((sw, sh)).convert('RGBA')
+    else:
+        screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
+    screen_bg = draw_mac_desktop_chrome(screen_bg)
 
     # Floating app window on top of wallpaper inside the Mac screen.
-    window_w = int(round(sw * 0.86))
+    window_w = int(round(sw * 0.78))
     window_h = int(round(window_w * shot.height / shot.width))
-    if window_h > int(sh * 0.80):
-        window_h = int(sh * 0.80)
+    if window_h > int(sh * 0.70):
+        window_h = int(sh * 0.70)
         window_w = int(round(window_h * shot.width / shot.height))
 
     window_img = fit_cover(shot, (window_w, window_h)).convert('RGBA')
     window_mask = rounded_mask((window_w, window_h), corner_radius)
     window = Image.new('RGBA', (window_w, window_h), (0, 0, 0, 0))
     window.paste(window_img, (0, 0), window_mask)
+    shadow = Image.new('RGBA', (window_w + 80, window_h + 80), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle((40, 40, 40 + window_w, 40 + window_h), radius=corner_radius, fill=(0, 0, 0, 105))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(28))
 
     sx = (sw - window_w) // 2
-    sy = int(round((sh - window_h) * 0.53))
+    sy = int(round((sh - window_h) * 0.48))
 
+    screen_bg.paste(shadow, (sx - 40, sy - 34), shadow)
     screen_bg.paste(window, (sx, sy), window)
 
     base = Image.new('RGBA', frame.size, (0, 0, 0, 0))
@@ -517,7 +586,7 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
     bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
 
-    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' and BG_MAC.exists() else bg
+    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' and BG_MAC.exists() else None
 
     for i, shot in enumerate(spec.shots, start=1):
         x0 = (i - 1) * spec.canvas_size[0]
@@ -525,7 +594,6 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
 
         shot_path = source_path(spec, shot.key)
         if spec.name == 'Mac':
-            assert mac_wall is not None
             device = compose_macbook_frame(spec.frame_path, shot_path, mac_wall, spec.screen_corner_radius)
         else:
             device = compose_mobile_frame(spec.frame_path, shot_path, spec.screen_corner_radius)

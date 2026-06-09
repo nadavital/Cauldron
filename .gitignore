@@ -135,6 +135,8 @@ Temporary Items
 
 # Keep screenshot generator scripts in git, but ignore screenshot assets/outputs.
 appstorescreenshots/*
+!appstorescreenshots/Food Pics/
+!appstorescreenshots/Food Pics/**
 !appstorescreenshots/scripts/
 !appstorescreenshots/scripts/**
 

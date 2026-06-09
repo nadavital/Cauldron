@@ -85,7 +85,13 @@ enum SimulatorQASeed {
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3")!,
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4")!,
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5")!,
-            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6")!
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12")!
         ]
         let collectionIds = [
             UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
@@ -145,48 +151,52 @@ enum SimulatorQASeed {
         let recipes = [
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
-                title: "Lemon Chicken",
-                ingredients: ["6 chicken thighs", "1 lb baby potatoes", "1 pint cherry tomatoes", "1 red onion", "1 lemon", "2 tsp oregano"],
-                steps: ["Toss potatoes, tomatoes, onion, and lemon with olive oil.", "Nestle chicken on top and season generously.", "Roast until the chicken is golden and the potatoes are tender."],
-                tags: ["Dinner", "Chicken", "One Pan"],
+                title: "Pot Roast",
+                ingredients: ["3 lb chuck roast", "3 carrots", "2 onions", "2 cups beef stock", "2 tbsp tomato paste", "Fresh thyme"],
+                steps: ["Brown the roast deeply on all sides.", "Add vegetables, stock, tomato paste, and thyme.", "Braise until the meat is tender and the sauce is glossy."],
+                tags: ["Dinner", "Slow Cooked", "Comfort"],
                 ownerId: currentUser.id,
                 visibility: .publicRecipe,
                 updatedAt: now,
-                imageURL: imageURLs.lemonChicken
+                imageURL: imageURLs.potRoast,
+                totalMinutes: 210
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
-                title: "Broccoli Pasta",
-                ingredients: ["12 oz penne", "2 cups broccoli florets", "1 cup cooked chicken", "1/2 cup cream", "1/3 cup Parmesan", "1 lemon"],
-                steps: ["Boil penne and add broccoli for the last two minutes.", "Warm chicken with cream, Parmesan, and lemon zest.", "Toss everything together with a splash of pasta water."],
-                tags: ["Dinner", "Pasta", "Weeknight"],
+                title: "Mac and Cheese",
+                ingredients: ["1 lb macaroni", "3 cups sharp cheddar", "1 cup Gruyere", "3 cups milk", "3 tbsp butter", "Panko crumbs"],
+                steps: ["Boil macaroni until just shy of tender.", "Whisk a creamy cheese sauce and fold in the pasta.", "Bake until bubbling with a browned top."],
+                tags: ["Dinner", "Pasta", "Comfort"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-3_600),
-                imageURL: imageURLs.pantryPasta
+                imageURL: imageURLs.macAndCheese,
+                totalMinutes: 55
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
-                title: "Brown Butter Cookies",
-                ingredients: ["1 cup browned butter", "1 cup brown sugar", "2 eggs", "2 cups flour", "1 tsp vanilla", "1 cup dark chocolate"],
-                steps: ["Brown the butter and let it cool slightly.", "Mix dough and fold in chopped chocolate.", "Chill, scoop, and bake until the edges are set."],
-                tags: ["Dessert", "Baking", "Cookies"],
+                title: "Chocolate Babka",
+                ingredients: ["Enriched dough", "Chocolate filling", "Cocoa powder", "Butter", "Sugar syrup"],
+                steps: ["Roll dough around the chocolate filling.", "Twist into loaves and let rise.", "Bake until glossy, then brush with syrup."],
+                tags: ["Dessert", "Baking", "Shared"],
                 ownerId: friendA.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-7_200),
-                imageURL: imageURLs.cardamomBuns,
+                imageURL: imageURLs.babka,
+                totalMinutes: 180,
                 isPreview: true
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
-                title: "Maya's Cookies",
-                ingredients: ["1 cup browned butter", "1 cup brown sugar", "2 eggs", "2 cups flour", "1 tsp vanilla", "1 cup dark chocolate"],
-                steps: ["Brown the butter and let it cool slightly.", "Mix dough and fold in chopped chocolate.", "Chill, scoop, and bake until the edges are set."],
+                title: "Maya's Babka",
+                ingredients: ["Enriched dough", "Chocolate filling", "Cocoa powder", "Butter", "Sugar syrup"],
+                steps: ["Roll dough around the chocolate filling.", "Twist into loaves and let rise.", "Bake until glossy, then brush with syrup."],
                 tags: ["Dessert", "Baking", "Saved"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-1_800),
-                imageURL: imageURLs.savedBuns,
+                imageURL: imageURLs.babkaSaved,
+                totalMinutes: 180,
                 originalRecipeId: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
                 originalCreatorId: friendA.id,
                 originalCreatorName: friendA.displayName,
@@ -194,26 +204,101 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
-                title: "Roast Chicken",
-                ingredients: ["1 roast chicken", "2 cups herbed rice", "1 cucumber salad", "1 pan roasted vegetables", "Fresh herbs"],
-                steps: ["Carve the roast chicken and spoon pan juices over the top.", "Pile rice and vegetables onto a large serving platter.", "Finish with herbs and serve family style."],
-                tags: ["Dinner", "Roast", "Hosting"],
+                title: "Schnitzel Plate",
+                ingredients: ["4 chicken cutlets", "1 cup breadcrumbs", "2 eggs", "Flour", "Lemon", "Mashed potatoes"],
+                steps: ["Pound chicken cutlets thin.", "Dredge in flour, egg, and breadcrumbs.", "Fry until crisp and serve with lemon."],
+                tags: ["Dinner", "Chicken", "Crispy"],
                 ownerId: friendB.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-5_400),
-                imageURL: imageURLs.ramen,
+                imageURL: imageURLs.schnitzel,
                 isPreview: true
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
-                title: "Market Picnic Board",
-                ingredients: ["1 baguette", "Seasonal fruit", "Soft cheese", "Olives", "Marcona almonds"],
-                steps: ["Pack everything cold.", "Slice bread at the table.", "Serve family style."],
-                tags: ["Snack", "Picnic", "Weekend"],
+                title: "Mixed Salsas",
+                ingredients: ["Tomatoes", "Corn", "Avocado", "Lime", "Cilantro", "Jalapeno"],
+                steps: ["Dice vegetables into separate bowls.", "Season each salsa with lime, salt, and cilantro.", "Serve with chips or grilled meat."],
+                tags: ["Snack", "Party", "Fresh"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-9_000),
-                totalMinutes: 45
+                imageURL: imageURLs.mixedSalsas,
+                totalMinutes: 25
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7",
+                title: "Grilled Steak",
+                ingredients: ["2 ribeye steaks", "Kosher salt", "Black pepper", "Garlic butter", "Rosemary"],
+                steps: ["Season steaks generously.", "Sear over high heat until deeply browned.", "Rest with garlic butter before slicing."],
+                tags: ["Dinner", "Grill", "Steak"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-10_800),
+                imageURL: imageURLs.steak,
+                totalMinutes: 35
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8",
+                title: "Grandma's Challah",
+                ingredients: ["Bread flour", "Eggs", "Honey", "Yeast", "Sesame seeds"],
+                steps: ["Knead dough until smooth.", "Braid and proof until puffy.", "Brush with egg wash and bake."],
+                tags: ["Bread", "Baking", "Family"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-12_600),
+                imageURL: imageURLs.challah,
+                totalMinutes: 165
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9",
+                title: "Apple Crisp",
+                ingredients: ["Apples", "Brown sugar", "Oats", "Cinnamon", "Butter"],
+                steps: ["Slice apples into a baking dish.", "Scatter oat crumble over the top.", "Bake until bubbling and golden."],
+                tags: ["Dessert", "Fruit", "Baking"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-14_400),
+                imageURL: imageURLs.appleCrisp,
+                totalMinutes: 60
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10",
+                title: "Blood Orange Cake",
+                ingredients: ["Blood oranges", "Flour", "Sugar", "Eggs", "Olive oil", "Vanilla"],
+                steps: ["Layer sliced oranges in the pan.", "Pour olive oil cake batter over the fruit.", "Bake and invert while warm."],
+                tags: ["Dessert", "Cake", "Citrus"],
+                ownerId: friendA.id,
+                visibility: .publicRecipe,
+                updatedAt: now.addingTimeInterval(-16_200),
+                imageURL: imageURLs.bloodOrangeCake,
+                totalMinutes: 75,
+                isPreview: true
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11",
+                title: "Friday Pizza",
+                ingredients: ["Pizza dough", "Tomato sauce", "Mozzarella", "Basil", "Ricotta"],
+                steps: ["Stretch dough onto a hot pan.", "Top with sauce, mozzarella, and basil.", "Bake until the crust is blistered."],
+                tags: ["Dinner", "Pizza", "Weekend"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-18_000),
+                imageURL: imageURLs.pizza,
+                totalMinutes: 40
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12",
+                title: "Moroccan Donuts",
+                ingredients: ["Flour", "Yeast", "Sugar", "Warm water", "Cinnamon sugar"],
+                steps: ["Mix a sticky dough and let it rise.", "Shape into rings with wet hands.", "Fry and toss in cinnamon sugar."],
+                tags: ["Dessert", "Fried", "Holiday"],
+                ownerId: friendB.id,
+                visibility: .publicRecipe,
+                updatedAt: now.addingTimeInterval(-19_800),
+                imageURL: imageURLs.moroccanDonuts,
+                totalMinutes: 90,
+                isPreview: true
             )
         ]
 
@@ -228,26 +313,28 @@ enum SimulatorQASeed {
         let recipeByTitle = recipes.reduce(into: [String: UUID]()) { result, recipe in
             result[recipe.title] = recipe.id
         }
-        let ownRecipeIds = recipes
-            .filter { $0.ownerId == currentUser.id && !$0.isPreview }
-            .map(\.id)
         let sharedRecipeIds = recipes
             .filter { $0.ownerId != currentUser.id }
             .map(\.id)
         let imageRecipeIds = [
-            recipeByTitle["Lemon Chicken"],
-            recipeByTitle["Broccoli Pasta"],
-            recipeByTitle["Maya's Cookies"],
-            recipeByTitle["Roast Chicken"]
+            recipeByTitle["Pot Roast"],
+            recipeByTitle["Mac and Cheese"],
+            recipeByTitle["Maya's Babka"],
+            recipeByTitle["Schnitzel Plate"]
         ].compactMap { $0 }
 
         let collections = [
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
-                name: "Weeknight Dinners",
-                description: "Easy dinners that still feel cooked with care.",
+                name: "Family Dinners",
+                description: "Comfort food for slow Sundays and weeknights.",
                 userId: currentUser.id,
-                recipeIds: Array(ownRecipeIds.prefix(3)),
+                recipeIds: [
+                    recipeByTitle["Pot Roast"],
+                    recipeByTitle["Mac and Cheese"],
+                    recipeByTitle["Grilled Steak"],
+                    recipeByTitle["Friday Pizza"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "fork.knife",
                 color: "#FF9933"
@@ -264,22 +351,28 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3")!,
-                name: "Just Desserts",
-                description: "Cookies, cakes, and weeknight sweets.",
+                name: "Desserts",
+                description: "Cakes, crisps, donuts, and bakes.",
                 userId: currentUser.id,
-                recipeIds: [recipeByTitle["Maya's Cookies"]].compactMap { $0 },
+                recipeIds: [
+                    recipeByTitle["Maya's Babka"],
+                    recipeByTitle["Apple Crisp"],
+                    recipeByTitle["Blood Orange Cake"],
+                    recipeByTitle["Moroccan Donuts"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "photo",
                 color: "#F06449"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4")!,
-                name: "Pasta Nights",
-                description: "Fast bowls for late work nights.",
+                name: "Bakes",
+                description: "Breads and sweets worth sharing.",
                 userId: currentUser.id,
                 recipeIds: [
-                    recipeByTitle["Broccoli Pasta"],
-                    recipeByTitle["Lemon Chicken"]
+                    recipeByTitle["Grandma's Challah"],
+                    recipeByTitle["Maya's Babka"],
+                    recipeByTitle["Apple Crisp"]
                 ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.2x1",
@@ -291,9 +384,10 @@ enum SimulatorQASeed {
                 description: "Low-stress dishes for feeding friends.",
                 userId: currentUser.id,
                 recipeIds: [
-                    recipeByTitle["Roast Chicken"],
-                    recipeByTitle["Lemon Chicken"],
-                    recipeByTitle["Broccoli Pasta"]
+                    recipeByTitle["Mixed Salsas"],
+                    recipeByTitle["Pot Roast"],
+                    recipeByTitle["Grilled Steak"],
+                    recipeByTitle["Blood Orange Cake"]
                 ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.3x1",
@@ -311,10 +405,14 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7")!,
-                name: "Picnic Ideas",
-                description: "Packable snacks for weekends outside.",
+                name: "Party Snacks",
+                description: "Small plates for people hovering near the table.",
                 userId: currentUser.id,
-                recipeIds: [recipeByTitle["Market Picnic Board"]].compactMap { $0 },
+                recipeIds: [
+                    recipeByTitle["Mixed Salsas"],
+                    recipeByTitle["Friday Pizza"],
+                    recipeByTitle["Moroccan Donuts"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "sparkles",
                 color: "#2E8B57"
@@ -421,34 +519,69 @@ enum SimulatorQASeed {
     }
 
     private struct SeededRecipeImageURLs {
-        let lemonChicken: URL
-        let pantryPasta: URL
-        let cardamomBuns: URL
-        let savedBuns: URL
-        let ramen: URL
+        let appleCrisp: URL
+        let babka: URL
+        let babkaSaved: URL
+        let bloodOrangeCake: URL
+        let challah: URL
+        let macAndCheese: URL
+        let mixedSalsas: URL
+        let moroccanDonuts: URL
+        let pizza: URL
+        let potRoast: URL
+        let schnitzel: URL
+        let steak: URL
     }
 
     private static func seedRecipeImages() throws -> SeededRecipeImageURLs {
         SeededRecipeImageURLs(
-            lemonChicken: try copyBundledRecipeImage(
-                resourceName: "skillet-chicken",
-                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1.jpg"
+            appleCrisp: try copyBundledRecipeImage(
+                resourceName: "apple crisp",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA9.jpg"
             ),
-            pantryPasta: try copyBundledRecipeImage(
-                resourceName: "pantry-pasta",
-                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA2.jpg"
-            ),
-            cardamomBuns: try copyBundledRecipeImage(
-                resourceName: "chocolate-chip-cookie",
+            babka: try copyBundledRecipeImage(
+                resourceName: "babka",
                 filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA3.jpg"
             ),
-            savedBuns: try copyBundledRecipeImage(
-                resourceName: "chocolate-chip-cookie",
+            babkaSaved: try copyBundledRecipeImage(
+                resourceName: "babka",
                 filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA4.jpg"
             ),
-            ramen: try copyBundledRecipeImage(
-                resourceName: "table-dinner",
+            bloodOrangeCake: try copyBundledRecipeImage(
+                resourceName: "blood orange upside down cake",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA10.jpg"
+            ),
+            challah: try copyBundledRecipeImage(
+                resourceName: "challah",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA8.jpg"
+            ),
+            macAndCheese: try copyBundledRecipeImage(
+                resourceName: "mac n cheese",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA2.jpg"
+            ),
+            mixedSalsas: try copyBundledRecipeImage(
+                resourceName: "mixed salsas",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA6.jpg"
+            ),
+            moroccanDonuts: try copyBundledRecipeImage(
+                resourceName: "moroccan donuts",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA12.jpg"
+            ),
+            pizza: try copyBundledRecipeImage(
+                resourceName: "pizza",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA11.jpg"
+            ),
+            potRoast: try copyBundledRecipeImage(
+                resourceName: "pot roast",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1.jpg"
+            ),
+            schnitzel: try copyBundledRecipeImage(
+                resourceName: "schnitzel",
                 filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA5.jpg"
+            ),
+            steak: try copyBundledRecipeImage(
+                resourceName: "steak",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA7.jpg"
             )
         )
     }
@@ -461,9 +594,14 @@ enum SimulatorQASeed {
 
         guard let sourceURL = Bundle.main.url(
             forResource: resourceName,
+            withExtension: "jpeg",
+            subdirectory: "ScreenshotSeedImages"
+        ) ?? Bundle.main.url(
+            forResource: resourceName,
             withExtension: "jpg",
             subdirectory: "ScreenshotSeedImages"
-        ) ?? Bundle.main.url(forResource: resourceName, withExtension: "jpg") else {
+        ) ?? Bundle.main.url(forResource: resourceName, withExtension: "jpeg")
+            ?? Bundle.main.url(forResource: resourceName, withExtension: "jpg") else {
             throw CocoaError(.fileNoSuchFile)
         }
 
