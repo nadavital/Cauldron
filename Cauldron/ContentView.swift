@@ -80,6 +80,7 @@ struct ContentView: View {
                         // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
                         // This data pipeline ensures CookTabViewModel initializes with populated arrays
                         // instead of empty arrays, preventing the empty state from ever rendering.
+                        #if DEBUG
                         if let scene = RuntimeEnvironment.screenshotScene {
                             ScreenshotSceneView(
                                 scene: scene,
@@ -93,8 +94,16 @@ struct ContentView: View {
                                 preloadedData: preloadedData,
                                 pendingSharedContent: $sharedContentWrapper
                             )
-                                .id(userSession.userId)
+                            .id(userSession.userId)
                         }
+                        #else
+                        MainTabView(
+                            dependencies: dependencies,
+                            preloadedData: preloadedData,
+                            pendingSharedContent: $sharedContentWrapper
+                        )
+                        .id(userSession.userId)
+                        #endif
                     }
                 }
             }
