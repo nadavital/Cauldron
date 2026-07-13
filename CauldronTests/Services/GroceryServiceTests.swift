@@ -167,10 +167,34 @@ final class GroceryServiceTests: XCTestCase {
         // When
         let merged = await service.mergeGroceryLists([list1, list2])
 
-        // Then - Should keep only the first one (doesn't convert units yet)
+        // Then - incompatible dimensions must both be preserved.
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(Set(merged.compactMap { $0.quantity?.unit }), [.cup, .gram])
+    }
+
+    func testMergeGroceryLists_ConvertsCompatibleUnitsBeforeCombining() async {
+        let merged = await service.mergeGroceryLists([[
+            GroceryItem(name: "oil", quantity: Quantity(value: 1, unit: .cup)),
+            GroceryItem(name: "oil", quantity: Quantity(value: 2, unit: .tablespoon))
+        ]])
+
         XCTAssertEqual(merged.count, 1)
-        XCTAssertEqual(merged[0].quantity?.value, 2)
         XCTAssertEqual(merged[0].quantity?.unit, .cup)
+        XCTAssertEqual(merged[0].quantity?.value ?? 0, 1.125, accuracy: 0.001)
+    }
+
+    func testMergeGroceryLists_PreservesAndAddsQuantityRanges() async {
+        let merged = await service.mergeGroceryLists([[
+            GroceryItem(
+                name: "oil",
+                quantity: Quantity(value: 1, upperValue: 2, unit: .cup)
+            ),
+            GroceryItem(name: "oil", quantity: Quantity(value: 2, unit: .tablespoon))
+        ]])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].quantity?.value ?? 0, 1.125, accuracy: 0.001)
+        XCTAssertEqual(merged[0].quantity?.upperValue ?? 0, 2.125, accuracy: 0.001)
     }
 
     func testMergeGroceryLists_MultipleIngredients() async {

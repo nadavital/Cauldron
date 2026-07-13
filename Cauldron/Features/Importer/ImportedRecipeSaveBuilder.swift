@@ -12,11 +12,11 @@ enum ImportedRecipeSaveBuilder {
         let data: Data
         let expectedModificationDate: Date?
     }
-    static func recipeForSave(from recipe: Recipe, userId: UUID?) -> Recipe {
+    static func recipeForSave(from recipe: Recipe, userId: UUID?, destinationID: UUID? = nil) -> Recipe {
         let resolvedNotes = buildNotes(for: recipe)
 
         return Recipe(
-            id: recipe.id,
+            id: destinationID ?? recipe.id,
             title: recipe.title,
             ingredients: recipe.ingredients,
             steps: recipe.steps,

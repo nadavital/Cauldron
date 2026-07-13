@@ -31,6 +31,7 @@ struct MainTabView: View {
     @State private var sharedImportRequest: SharedImportRequest?
     @State private var didCheckInitialPendingImport = false
     @State private var isSavingPreparedSharedRecipe = false
+    @State private var isIngestingShareTransport = false
     @State private var showSharedRecipeSavedToast = false
     @State private var sidebarRefreshTask: Task<Void, Never>?
     @State private var activeShareImportAcknowledgement: ShareImportAcknowledgement?
@@ -43,6 +44,12 @@ struct MainTabView: View {
         case prepared(Data)
         case text(String)
         case url(URL)
+        case durableJob(UUID)
+
+        var durableJobID: UUID? {
+            guard case .durableJob(let id) = self else { return nil }
+            return id
+        }
     }
 
     private struct SharedImportRequest: Identifiable {
@@ -51,6 +58,7 @@ struct MainTabView: View {
         let initialText: String?
         let preparedRecipe: Recipe?
         let preparedSourceInfo: String?
+        let destinationRecipeID: UUID?
     }
 
     private var isCookModeActive: Bool {
@@ -105,7 +113,9 @@ struct MainTabView: View {
                 initialURL: request.initialURL,
                 initialText: request.initialText,
                 preparedRecipe: request.preparedRecipe,
-                preparedSourceInfo: request.preparedSourceInfo
+                preparedSourceInfo: request.preparedSourceInfo,
+                destinationRecipeID: request.destinationRecipeID,
+                onSuccessfulSave: completeActiveDurableImport
             )
         }
         .tint(.cauldronOrange)
@@ -134,8 +144,12 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openRecipeImportURL)) { notification in
             guard let url = notification.object as? URL else { return }
-            if ShareExtensionImportStore.pendingPreparedRecipe() != nil {
-                AppLogger.general.info("📥 Prepared Share Extension payload supersedes URL handoff")
+            guard sharedImportRequest == nil else {
+                AppLogger.general.debug("Ignoring duplicate import URL notification while an import is already open")
+                return
+            }
+            if ShareExtensionImportStore.pendingTransportItem() != nil {
+                AppLogger.general.info("📥 Durable Share Extension handoff supersedes URL notification")
                 openPendingImporterIfNeeded()
                 return
             }
@@ -157,6 +171,9 @@ struct MainTabView: View {
             #endif
             openPendingImporterIfNeeded()
             scheduleSidebarCollectionsRefresh()
+            Task {
+                await dependencies.cookModeCoordinator.reconcileExternalState()
+            }
         }
         .onChange(of: horizontalSizeClass) {
             scheduleSidebarCollectionsRefresh()
@@ -328,7 +345,16 @@ struct MainTabView: View {
 
     private func openPendingImporterIfNeeded() {
         guard !isSavingPreparedSharedRecipe,
+              !isIngestingShareTransport,
               sharedImportRequest == nil else {
+            return
+        }
+
+        if let transportItem = ShareExtensionImportStore.pendingTransportItem() {
+            isIngestingShareTransport = true
+            Task {
+                await ingestShareTransportItem(transportItem)
+            }
             return
         }
 
@@ -355,6 +381,62 @@ struct MainTabView: View {
         openImporter(with: pendingURL, acknowledgement: .url(pendingURL))
     }
 
+    @MainActor
+    private func ingestShareTransportItem(_ item: ShareExtensionInboxItem) async {
+        defer { isIngestingShareTransport = false }
+
+        do {
+            let job = try await dependencies.recipeImportInboxStore.ingest(item)
+            ShareExtensionImportStore.acknowledgeTransportItem(id: item.id)
+
+            if let payloadData = item.preparedPayload,
+               let prepared = ShareExtensionImportStore.preparedRecipe(from: payloadData) {
+                _ = try await dependencies.recipeImportInboxStore.transition(id: job.id, to: .needsReview)
+                openPreparedImporter(
+                    recipe: prepared.recipe,
+                    sourceInfo: prepared.sourceInfo,
+                    acknowledgement: .durableJob(job.id)
+                )
+                return
+            }
+
+            if let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty,
+               ShareExtensionImportStore.plainTextRecipeShouldTakePrecedenceOverURL(text) {
+                _ = try await dependencies.recipeImportInboxStore.transition(id: job.id, to: .needsReview)
+                openImporter(withText: text, acknowledgement: .durableJob(job.id))
+                return
+            }
+
+            if let urlString = item.urlString,
+               let url = URL(string: urlString),
+               let scheme = url.scheme?.lowercased(),
+               scheme == "http" || scheme == "https" {
+                _ = try await dependencies.recipeImportInboxStore.transition(id: job.id, to: .needsReview)
+                openImporter(with: url, acknowledgement: .durableJob(job.id))
+                return
+            }
+
+            if let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty {
+                _ = try await dependencies.recipeImportInboxStore.transition(id: job.id, to: .needsReview)
+                openImporter(withText: text, acknowledgement: .durableJob(job.id))
+                return
+            }
+
+            _ = try await dependencies.recipeImportInboxStore.transition(
+                id: job.id,
+                to: .failed,
+                errorCategory: "invalidPayload"
+            )
+            scheduleNextPendingImport()
+        } catch {
+            // The cross-process handoff remains untouched until durable app
+            // persistence succeeds, so relaunching can retry without data loss.
+            AppLogger.general.error("Failed to persist shared import handoff: \(error.localizedDescription)")
+        }
+    }
+
     #if targetEnvironment(macCatalyst)
     private func resetCatalystWindowTitle() {
         guard let windowScene = UIApplication.shared.connectedScenes
@@ -375,7 +457,8 @@ struct MainTabView: View {
             initialURL: url,
             initialText: nil,
             preparedRecipe: nil,
-            preparedSourceInfo: nil
+            preparedSourceInfo: nil,
+            destinationRecipeID: acknowledgement?.durableJobID
         )
     }
 
@@ -386,7 +469,8 @@ struct MainTabView: View {
             initialURL: nil,
             initialText: text,
             preparedRecipe: nil,
-            preparedSourceInfo: nil
+            preparedSourceInfo: nil,
+            destinationRecipeID: acknowledgement?.durableJobID
         )
     }
 
@@ -401,7 +485,8 @@ struct MainTabView: View {
             initialURL: nil,
             initialText: nil,
             preparedRecipe: recipe,
-            preparedSourceInfo: sourceInfo
+            preparedSourceInfo: sourceInfo,
+            destinationRecipeID: acknowledgement?.durableJobID
         )
     }
 
@@ -506,10 +591,25 @@ struct MainTabView: View {
             ShareExtensionImportStore.acknowledgePendingRecipeText(matching: text)
         case .url(let url):
             ShareExtensionImportStore.acknowledgePendingRecipeURL(matching: url)
+        case .durableJob:
+            // Dismissal is not completion. The durable inbox entry remains
+            // until a successful recipe save or an explicit discard.
+            break
         }
 
         activeShareImportAcknowledgement = nil
         scheduleNextPendingImport()
+    }
+
+    private func completeActiveDurableImport() async -> Bool {
+        guard case .durableJob(let id) = activeShareImportAcknowledgement else { return true }
+        do {
+            try await dependencies.recipeImportInboxStore.complete(id: id)
+            return true
+        } catch {
+            AppLogger.general.error("Failed to mark import complete: \(error.localizedDescription)")
+            return false
+        }
     }
 
     private func scheduleNextPendingImport() {

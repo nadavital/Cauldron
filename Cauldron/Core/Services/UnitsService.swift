@@ -24,15 +24,29 @@ actor UnitsService {
         }
         
         // Convert to base unit, then to target
+        let converted: Quantity
         if quantity.unit.isVolume && targetUnit.isVolume {
             let milliliters = convertToMilliliters(quantity)
-            return convertFromMilliliters(milliliters, to: targetUnit)
+            converted = convertFromMilliliters(milliliters, to: targetUnit)
         } else if quantity.unit.isWeight && targetUnit.isWeight {
             let grams = convertToGrams(quantity)
-            return convertFromGrams(grams, to: targetUnit)
+            converted = convertFromGrams(grams, to: targetUnit)
+        } else {
+            return nil
         }
-        
-        return nil
+
+        guard let upperValue = quantity.upperValue,
+              let convertedUpper = convert(
+                Quantity(value: upperValue, unit: quantity.unit),
+                to: targetUnit
+              ) else {
+            return converted
+        }
+        return Quantity(
+            value: converted.value,
+            upperValue: convertedUpper.value,
+            unit: converted.unit
+        )
     }
     
     /// Normalize units to preferred system (metric or imperial)

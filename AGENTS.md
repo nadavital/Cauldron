@@ -7,6 +7,7 @@ Guidance for coding agents working in this repository.
 - Main targets: iOS/iPad app, Mac Catalyst app, Widget extension, Share extension
 - Core backend: CloudKit (+ Firebase for share-link hosting endpoints)
 - Parser stack: model-backed import pipeline with parity-tested assembly
+- Intelligence routing: deterministic parsing plus Apple on-device Foundation Models and availability-gated Private Cloud Compute
 
 ## Repository Layout
 - App code: `/Users/nadav/Desktop/Cauldron/Cauldron`
@@ -37,6 +38,7 @@ Guidance for coding agents working in this repository.
 - Import quality is core product value:
   - Model-backed parser + shared import pipeline should stay consistent across URL, text, and share-extension entry points.
   - Parser behavior changes should keep parity/regression tests green.
+  - Share-extension handoffs must be persisted into `RecipeImportInboxStore` before the cross-process transport item is acknowledged; dismissal is not completion.
 - Social sharing is a core workflow:
   - Invite links/referrals, friend connections, and profile/friends UX should remain reliable and low-friction.
   - Saving someone else's recipe should preserve attribution while creating a synced, profile-visible user-owned copy that follows source updates until the saver edits it.
@@ -49,6 +51,7 @@ Guidance for coding agents working in this repository.
   - Operation queue + CloudKit sync paths should not be bypassed without a clear migration plan.
   - Deleted recipes are represented by durable private CloudKit `DeletedRecipe` tombstones; deletion wins over stale active recipe records.
   - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
+- Cook Mode state shared with Live Activities and App Intents is persisted through `CookSessionSharedStore`; app and widget navigation must use the shared reducer rather than independent defaults mutations.
 - Update-surface behavior matters:
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.
 

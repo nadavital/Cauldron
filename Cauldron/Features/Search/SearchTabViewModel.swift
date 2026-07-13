@@ -76,13 +76,22 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
     var ownerTiers: [UUID: UserTier] = [:] // Cached owner tiers for search boost
     var timeFilter: RecipeTimeFilter = .any
     var sortOrder: RecipeSortOrder = .relevance
+    var requiredIngredientsText: String = ""
+    var excludedIngredientsText: String = ""
 
     /// Search results after applying the time filter and chosen sort order.
     /// Category/text filtering already happens upstream in the grouping service.
     var displayedRecipeResults: [SearchRecipeGroup] {
-        let filtered = timeFilter == .any
+        let timeFiltered = timeFilter == .any
             ? recipeSearchResults
             : recipeSearchResults.filter { timeFilter.matches(minutes: $0.primaryRecipe.totalMinutes) }
+        let ingredientRefinement = RecipeIngredientRefinement(
+            requiredText: requiredIngredientsText,
+            excludedText: excludedIngredientsText
+        )
+        let filtered = timeFiltered.filter { group in
+            ingredientRefinement.matches(ingredientNames: group.primaryRecipe.ingredients.map(\.name))
+        }
 
         switch sortOrder {
         case .relevance:
@@ -102,12 +111,19 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
 
     /// Whether any non-default filter/sort is active (for showing a clear control).
     var hasActiveRefinements: Bool {
-        timeFilter != .any || sortOrder != .relevance
+        timeFilter != .any
+            || sortOrder != .relevance
+            || !RecipeIngredientRefinement(
+                requiredText: requiredIngredientsText,
+                excludedText: excludedIngredientsText
+            ).isEmpty
     }
 
     func clearRefinements() {
         timeFilter = .any
         sortOrder = .relevance
+        requiredIngredientsText = ""
+        excludedIngredientsText = ""
     }
 
     let dependencies: DependencyContainer

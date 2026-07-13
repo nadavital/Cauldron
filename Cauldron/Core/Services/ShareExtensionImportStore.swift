@@ -18,7 +18,26 @@ enum ShareExtensionImportStore {
         if let item = fileInboxHead() {
             return item.urlString.flatMap(validInboxURL)
         }
-        pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+        return pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+    }
+
+    /// Returns the oldest atomic file handoff without consuming it. The app
+    /// persists this into its durable import inbox before acknowledging it.
+    static func pendingTransportItem() -> ShareExtensionInboxItem? {
+        // Return the raw transport, including malformed payloads. Validation
+        // belongs to the durable inbox so failures remain visible/recoverable.
+        if let item = ShareExtensionInboxFiles.items().first?.item {
+            return item
+        }
+        return UserDefaults(suiteName: ShareExtensionImportContract.appGroupID)
+            .flatMap { inbox(in: $0).first }
+    }
+
+    static func acknowledgeTransportItem(id: UUID) {
+        ShareExtensionInboxFiles.remove(id: id)
+        if let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) {
+            _ = removeFirstInboxItem(in: defaults) { $0.id == id }
+        }
     }
 
     static func pendingRecipeURL(in defaults: UserDefaults?) -> URL? {
@@ -37,7 +56,7 @@ enum ShareExtensionImportStore {
         if let item = fileInboxHead() {
             return item.text
         }
-        pendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+        return pendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func pendingRecipeText(in defaults: UserDefaults?) -> String? {
@@ -56,7 +75,7 @@ enum ShareExtensionImportStore {
                 inboxID: item.id
             )
         }
-        pendingPreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
+        return pendingPreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     private static func fileInboxHead() -> ShareExtensionInboxItem? {
@@ -75,14 +94,22 @@ enum ShareExtensionImportStore {
     }
 
     private static func defaultsInboxHead(in defaults: UserDefaults) -> ShareExtensionInboxItem? {
-        while let item = inbox(in: defaults).first {
-            guard !isUsableInboxItem(item) else { return item }
-            _ = removeFirstInboxItem(in: defaults) { $0.id == item.id }
+        let items = inbox(in: defaults)
+        var usable: [ShareExtensionInboxItem] = []
+        for item in items where isUsableInboxItem(item) {
+            usable.append(item)
         }
-        return nil
+        if usable.count != items.count {
+            if usable.isEmpty {
+                defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
+            } else if let data = try? JSONEncoder().encode(usable) {
+                defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
+            }
+        }
+        return usable.first
     }
 
-    private static func validInboxURL(_ string: String) -> URL? {
+    nonisolated private static func validInboxURL(_ string: String) -> URL? {
         guard let url = URL(string: string),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https" else { return nil }
@@ -90,7 +117,12 @@ enum ShareExtensionImportStore {
     }
 
     private static func isUsableInboxItem(_ item: ShareExtensionInboxItem) -> Bool {
-        let hasPreparedRecipe = item.preparedPayload.flatMap(preparedRecipe(from:)) != nil
+        let hasPreparedRecipe: Bool
+        if let payload = item.preparedPayload {
+            hasPreparedRecipe = preparedRecipe(from: payload) != nil
+        } else {
+            hasPreparedRecipe = false
+        }
         let hasText = item.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         let hasURL = item.urlString.flatMap(validInboxURL) != nil
         return hasPreparedRecipe || hasText || hasURL
@@ -174,11 +206,8 @@ enum ShareExtensionImportStore {
     }
 
     static func acknowledgePendingRecipeURL(matching url: URL? = nil) {
-        if let entry = ShareExtensionInboxFiles.items().first,
-           let value = entry.item.urlString.flatMap(URL.init(string:)),
-           url == nil || value == url {
-            ShareExtensionInboxFiles.remove(id: entry.item.id)
-        }
+        // Never acknowledge the atomic file handoff through a legacy URL.
+        // It is removed only by `acknowledgeTransportItem` after durable ingest.
         acknowledgePendingRecipeURL(matching: url, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 

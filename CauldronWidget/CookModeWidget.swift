@@ -13,7 +13,7 @@ import SwiftUI
 @main
 struct CauldronWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Register the Live Activity
+        ActiveCookWidget()
         CookModeLiveActivity()
     }
 }

@@ -304,6 +304,14 @@ struct SearchTabView: View {
             } else {
                 refinementBar
 
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    TextField("Must include ingredients (comma separated)", text: $viewModel.requiredIngredientsText)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Exclude ingredients (comma separated)", text: $viewModel.excludedIngredientsText)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .accessibilityElement(children: .contain)
+
                 if results.isEmpty {
                     EmptyStateView(
                         title: "No Matches",

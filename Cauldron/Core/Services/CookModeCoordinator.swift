@@ -14,6 +14,13 @@ import ActivityKit
 #endif
 
 /// Coordinates the persistent cook mode session across the app
+enum CookModeStartOutcome: Sendable, Equatable {
+    case started
+    case alreadyActive
+    case conflict
+    case invalidRecipe
+}
+
 @MainActor
 @Observable
 class CookModeCoordinator {
@@ -74,6 +81,10 @@ class CookModeCoordinator {
         dependencies.timerManager.onTimersChanged = { [weak self] in
             self?.updateLiveActivityForTimerChange()
         }
+        if CookSessionSharedStore.read() == nil,
+           !dependencies.timerManager.activeTimers.isEmpty {
+            dependencies.timerManager.stopAllTimers()
+        }
 
         // Listen for recipe deletion notifications
         Task { @MainActor in
@@ -87,9 +98,8 @@ class CookModeCoordinator {
         // Listen for step changes from Live Activity
         Task { @MainActor in
             for await notification in NotificationCenter.default.notifications(named: NSNotification.Name("CookModeStepChanged")) {
-                if let userInfo = notification.object as? [String: Int],
-                   let newStep = userInfo["step"] {
-                    handleStepChangeFromLiveActivity(newStep: newStep)
+                if let snapshot = notification.object as? CookSessionSharedSnapshot {
+                    handleStepChangeFromLiveActivity(snapshot: snapshot)
                 }
             }
         }
@@ -116,36 +126,48 @@ class CookModeCoordinator {
     }
 
     /// Handle step change initiated from Live Activity
-    private func handleStepChangeFromLiveActivity(newStep: Int) {
+    private func handleStepChangeFromLiveActivity(snapshot: CookSessionSharedSnapshot) {
         guard isActive,
               let recipe = currentRecipe,
-              newStep >= 0,
-              newStep < recipe.steps.count else {
+              snapshot.recipeID == recipe.id,
+              let latest = CookSessionSharedStore.read(defaults: sharedDefaults),
+              latest.recipeID == snapshot.recipeID,
+              latest.revision == snapshot.revision,
+              snapshot.stepIndex >= 0,
+              snapshot.stepIndex < recipe.steps.count else {
             return
         }
 
         // Update current step
-        currentStepIndex = newStep
-        saveState()
+        currentStepIndex = snapshot.stepIndex
 
         // Update Live Activity
         Task { await updateLiveActivity() }
 
         Haptics.light()
 
-        AppLogger.general.info("🔄 Step changed from Live Activity: \(newStep + 1)/\(self.totalSteps)")
+        AppLogger.general.info("🔄 Step changed from Live Activity: \(snapshot.stepIndex + 1)/\(self.totalSteps)")
     }
 
     // MARK: - Public Methods
 
     /// Start cooking a recipe
-    func startCooking(_ recipe: Recipe) async {
+    @discardableResult
+    func startCooking(_ recipe: Recipe) async -> CookModeStartOutcome {
+        guard !recipe.steps.isEmpty else {
+            AppLogger.general.warning("Cannot start Cook Mode for a recipe without steps")
+            return .invalidRecipe
+        }
+
         // Check if different recipe is already cooking
         if isActive, let current = currentRecipe, current.id != recipe.id {
             // Show conflict alert
             pendingRecipe = recipe
             showSessionConflictAlert = true
-            return
+            return .conflict
+        } else if isActive, currentRecipe?.id == recipe.id {
+            showFullScreen = true
+            return .alreadyActive
         }
 
         // Start new session
@@ -168,6 +190,7 @@ class CookModeCoordinator {
         await startLiveActivity()
 
         AppLogger.general.info("✅ Started cooking session: \(recipe.title)")
+        return .started
     }
 
     /// Start cooking with pending recipe (after conflict resolution)
@@ -178,7 +201,7 @@ class CookModeCoordinator {
         endSession()
 
         // Start new session
-        await startCooking(pending)
+        _ = await startCooking(pending)
 
         // Clear pending
         pendingRecipe = nil
@@ -186,12 +209,12 @@ class CookModeCoordinator {
 
     /// Navigate to next step
     func nextStep() {
-        guard let recipe = currentRecipe, currentStepIndex < recipe.steps.count - 1 else {
+        guard let recipe = currentRecipe, currentStepIndex < recipe.steps.count - 1,
+              let snapshot = CookSessionSharedStore.move(by: 1, defaults: sharedDefaults) else {
             return
         }
 
-        currentStepIndex += 1
-        saveState()
+        currentStepIndex = min(snapshot.stepIndex, recipe.steps.count - 1)
 
         // Update Live Activity
         Task { await updateLiveActivity() }
@@ -203,10 +226,10 @@ class CookModeCoordinator {
 
     /// Navigate to previous step
     func previousStep() {
-        guard currentStepIndex > 0 else { return }
+        guard currentStepIndex > 0,
+              let snapshot = CookSessionSharedStore.move(by: -1, defaults: sharedDefaults) else { return }
 
-        currentStepIndex -= 1
-        saveState()
+        currentStepIndex = snapshot.stepIndex
 
         // Update Live Activity
         Task { await updateLiveActivity() }
@@ -233,6 +256,7 @@ class CookModeCoordinator {
         guard isActive else { return }
 
         let recipeName = currentRecipe?.title ?? "Unknown"
+        let endedRecipeID = currentRecipe?.id
 
         // Batch all state changes together to prevent cascading view updates
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -256,7 +280,7 @@ class CookModeCoordinator {
         }
 
         // End Live Activity
-        Task { await endLiveActivity() }
+        Task { await endLiveActivity(recipeID: endedRecipeID) }
 
         AppLogger.general.info("🛑 Ended cooking session: \(recipeName)")
     }
@@ -264,39 +288,93 @@ class CookModeCoordinator {
     /// Restore session from persistent storage
     func restoreState() async {
         // Check if we have a saved session
-        guard let recipeIdString = sharedDefaults?.string(forKey: "\(storageKey).recipeId"),
-              let recipeId = UUID(uuidString: recipeIdString) else {
+        guard let persisted = persistedSnapshot() else {
             // No saved cooking session to restore (routine)
             return
         }
 
-        let stepIndex = sharedDefaults?.integer(forKey: "\(storageKey).stepIndex") ?? 0
+        let recipeId = persisted.recipeID
+        let stepIndex = persisted.stepIndex
+        let sessionBeforeFetch = currentRecipe?.id
 
         // Fetch recipe from repository
         do {
-            if let recipe = try await dependencies.recipeRepository.fetch(id: recipeId) {
+            let fetchedRecipe = try await dependencies.recipeRepository.fetch(id: recipeId)
+
+            // MainActor is reentrant while the repository fetch is suspended.
+            // Never let an old restore overwrite a session started in the meantime.
+            guard currentRecipe?.id == sessionBeforeFetch,
+                  persistedSnapshot()?.recipeID == recipeId else {
+                return
+            }
+
+            if let recipe = fetchedRecipe,
+               !recipe.steps.isEmpty {
                 // Restore session state
                 currentRecipe = recipe
-                currentStepIndex = min(stepIndex, recipe.steps.count - 1) // Validate step index
+                currentStepIndex = min(max(stepIndex, 0), recipe.steps.count - 1)
                 totalSteps = recipe.steps.count
                 isActive = true
 
-                // Don't restore session start time - use current time
-                sessionStartTime = Date()
+                sessionStartTime = persisted.sessionStartTime
 
                 // Don't auto-show full screen - just show banner
                 showFullScreen = false
+
+                // Normalize the app-group state as well. Live Activity intents
+                // read these values in another process and must not continue
+                // using stale bounds after recipe steps change.
+                saveState()
+                await updateLiveActivity()
 
                 AppLogger.general.info("✅ Restored cooking session: \(recipe.title) at step \(self.currentStepIndex + 1)")
             } else {
                 // Recipe was deleted
                 AppLogger.general.warning("⚠️ Recipe from saved session no longer exists")
-                clearState()
+                if isActive {
+                    endSession()
+                } else {
+                    clearState()
+                }
             }
         } catch {
             AppLogger.general.error("❌ Failed to restore cooking session: \(error.localizedDescription)")
-            clearState()
+            // Preserve both persisted and in-memory state on transient fetch
+            // failures so a later foreground reconciliation can retry safely.
         }
+    }
+
+    /// Reconciles changes made by a Live Activity intent running in the widget
+    /// process. NotificationCenter is process-local, so persisted app-group
+    /// state is the authority when the app becomes active again.
+    @discardableResult
+    func reconcileExternalState() async -> Bool {
+        guard let persisted = persistedSnapshot() else {
+            if isActive {
+                endSession()
+            }
+            return true
+        }
+        let recipeId = persisted.recipeID
+
+        if currentRecipe?.id != recipeId || !isActive {
+            await restoreState()
+            return isActive && currentRecipe?.id == recipeId
+        }
+
+        guard let recipe = currentRecipe, !recipe.steps.isEmpty else {
+            endSession()
+            return false
+        }
+
+        let persistedStep = persisted.stepIndex
+        let validatedStep = min(max(persistedStep, 0), recipe.steps.count - 1)
+        guard validatedStep != currentStepIndex else { return true }
+
+        currentStepIndex = validatedStep
+        totalSteps = recipe.steps.count
+        Task { await updateLiveActivity() }
+        return true
     }
 
     // MARK: - Current Step Helpers
@@ -304,6 +382,7 @@ class CookModeCoordinator {
     /// Get the current step object
     var currentStep: CookStep? {
         guard let recipe = currentRecipe,
+              currentStepIndex >= 0,
               currentStepIndex < recipe.steps.count else {
             return nil
         }
@@ -339,6 +418,17 @@ class CookModeCoordinator {
         sharedDefaults?.set(totalSteps, forKey: "\(storageKey).totalSteps")
         sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "\(storageKey).timestamp")
 
+        if let synchronized = CookSessionSharedStore.synchronizeSession(
+            recipeID: recipe.id,
+            preferredStep: currentStepIndex,
+            totalSteps: totalSteps,
+            sessionStartTime: sessionStartTime ?? Date(),
+            stepInstructions: recipe.steps.map(\.text),
+            defaults: sharedDefaults
+        ) {
+            currentStepIndex = synchronized.stepIndex
+        }
+
         AppLogger.general.debug("💾 Saved cook session state")
     }
 
@@ -347,8 +437,29 @@ class CookModeCoordinator {
         sharedDefaults?.removeObject(forKey: "\(storageKey).stepIndex")
         sharedDefaults?.removeObject(forKey: "\(storageKey).totalSteps")
         sharedDefaults?.removeObject(forKey: "\(storageKey).timestamp")
+        CookSessionSharedStore.clear(defaults: sharedDefaults)
 
         AppLogger.general.debug("🗑️ Cleared cook session state")
+    }
+
+    private func persistedSnapshot() -> CookSessionSharedSnapshot? {
+        if let snapshot = CookSessionSharedStore.read(defaults: sharedDefaults) {
+            return snapshot
+        }
+        guard let recipeIdString = sharedDefaults?.string(forKey: "\(storageKey).recipeId"),
+              let recipeID = UUID(uuidString: recipeIdString) else {
+            return nil
+        }
+        let totalSteps = sharedDefaults?.integer(forKey: "\(storageKey).totalSteps") ?? 0
+        guard totalSteps > 0 else { return nil }
+        let stepIndex = sharedDefaults?.integer(forKey: "\(storageKey).stepIndex") ?? 0
+        let timestamp = sharedDefaults?.double(forKey: "\(storageKey).timestamp") ?? 0
+        return CookSessionSharedSnapshot(
+            recipeID: recipeID,
+            stepIndex: stepIndex,
+            totalSteps: totalSteps,
+            sessionStartTime: timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : Date()
+        )
     }
 
     // MARK: - Live Activity Methods
@@ -397,10 +508,14 @@ class CookModeCoordinator {
 
     private func updateLiveActivity() async {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
-        guard let activity = currentActivity,
-              let _ = currentRecipe else {
+        guard let recipe = currentRecipe else {
             return
         }
+        let activity = currentActivity ?? Activity<CookModeActivityAttributes>.activities.first {
+            $0.attributes.recipeId == recipe.id.uuidString
+        }
+        guard let activity else { return }
+        currentActivity = activity
 
         // Get shortest timer (running or paused)
         let shortestTimer = dependencies.timerManager.activeTimers
@@ -436,14 +551,20 @@ class CookModeCoordinator {
         #endif
     }
 
-    private func endLiveActivity() async {
+    private func endLiveActivity(recipeID: UUID?) async {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
-        guard let activity = currentActivity else { return }
-
-        await activity.end(
-            .init(state: activity.content.state, staleDate: nil),
-            dismissalPolicy: .immediate
-        )
+        let activities = Activity<CookModeActivityAttributes>.activities.filter { activity in
+            if let recipeID {
+                return activity.attributes.recipeId == recipeID.uuidString
+            }
+            return activity.id == currentActivity?.id
+        }
+        for activity in activities {
+            await activity.end(
+                .init(state: activity.content.state, staleDate: nil),
+                dismissalPolicy: .immediate
+            )
+        }
 
         currentActivity = nil
         AppLogger.general.info("🛑 Ended Live Activity")

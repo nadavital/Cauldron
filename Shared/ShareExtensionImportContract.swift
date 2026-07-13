@@ -1,7 +1,7 @@
 import Foundation
 
 /// Shared contract between Share Extension and app target for recipe import handoff.
-enum ShareExtensionImportContract {
+nonisolated enum ShareExtensionImportContract {
     static let appGroupID = "group.Nadav.Cauldron"
     static let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
     static let pendingRecipeTextKey = "shareExtension.pendingRecipeText"
@@ -96,7 +96,7 @@ enum ShareExtensionImportContract {
 
 /// One atomic share handoff. Keeping URL/text/prepared data together prevents
 /// separate UserDefaults keys from being mixed when shares arrive quickly.
-struct ShareExtensionInboxItem: Codable, Sendable, Equatable, Identifiable {
+nonisolated struct ShareExtensionInboxItem: Codable, Sendable, Equatable, Identifiable {
     let id: UUID
     let createdAt: Date
     let urlString: String?
@@ -172,7 +172,7 @@ enum ShareExtensionInboxFiles {
 }
 
 /// Transport payload written by the Share Extension and consumed by the app.
-struct PreparedShareRecipePayload: Codable, Sendable {
+nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
     let title: String
     let ingredients: [String]
     let steps: [String]

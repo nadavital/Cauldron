@@ -30,7 +30,7 @@ struct WhatsNewView: View {
                             .font(.largeTitle)
                             .fontWeight(.bold)
 
-                        Text("Collections, discovery, and recipe details feel cleaner.")
+                        Text("Imports recover, Cook Mode travels with you, and your library is easier to trust.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,28 +38,28 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 18) {
                         FeatureRow(
-                            symbol: "books.vertical.fill",
+                            symbol: "tray.full.fill",
                             color: .purple,
-                            title: "Richer Collections",
-                            detail: "Collections now feel more like cookbooks, with photo headers, custom covers, and clearer saved collection organization."
+                            title: "Import Inbox",
+                            detail: "Shared recipes are saved to a durable inbox first, so an interrupted import can be reviewed or retried later."
                         )
                         FeatureRow(
                             symbol: "magnifyingglass",
                             color: .blue,
-                            title: "Better Recipe Discovery",
-                            detail: "Search, tags, and Explore results have been polished so the right recipes are easier to find."
+                            title: "Ingredient Search",
+                            detail: "Require ingredients you have, exclude ingredients you avoid, and sort results by time, name, or recency."
                         )
                         FeatureRow(
-                            symbol: "list.bullet.rectangle",
+                            symbol: "flame.fill",
                             color: .cauldronOrange,
-                            title: "Cleaner Recipe Details",
-                            detail: "Related recipes, saved recipes, and preview recipes now behave more consistently across your library."
+                            title: "Cook Mode Everywhere",
+                            detail: "Resume and navigate cooking from Siri, Shortcuts, widgets, and Live Activities—even after Cauldron relaunches."
                         )
                         FeatureRow(
                             symbol: "checkmark.seal.fill",
                             color: .green,
-                            title: "More Predictable Saving",
-                            detail: "Cauldron is better at recognizing recipes and collections you already saved, with fewer confusing duplicates."
+                            title: "More Reliable by Design",
+                            detail: "Persistent timers, clearer sync health, safer grocery merging, private diagnostics, and Apple Intelligence fallback make everyday use steadier."
                         )
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

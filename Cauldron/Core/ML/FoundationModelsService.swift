@@ -18,34 +18,102 @@ typealias RecipeSnapshot = GeneratedRecipe.PartiallyGenerated
 /// Service for Apple Intelligence on-device recipe generation
 /// Uses Foundation Models framework for structured content generation
 actor FoundationModelsService {
+    private let routingPolicy: RecipeModelRoutingPolicy
+    private let diagnostics: any DiagnosticsRecording
 
-    init() {
+    init(
+        routingPolicy: RecipeModelRoutingPolicy = RecipeModelRoutingPolicy(),
+        diagnostics: any DiagnosticsRecording = PrivacySafeDiagnosticsRecorder()
+    ) {
+        self.routingPolicy = routingPolicy
+        self.diagnostics = diagnostics
         // No persistent session - we create fresh sessions per request to avoid context accumulation
     }
 
     /// Create a fresh session with recipe-specific instructions
-    private func createSession() -> LanguageModelSession {
+    private func createOnDeviceSession() -> LanguageModelSession {
         LanguageModelSession(
             instructions: {
-                """
-                Generate practical recipes with clear measurements and detailed steps.
-                Do not include timers on most steps - only on long cooking steps like baking or boiling.
-                """
+                Self.recipeInstructions
             }
         )
     }
 
+    private func createSession(
+        for task: RecipeIntelligenceTask
+    ) -> (session: LanguageModelSession?, route: RecipeModelRoute, onDeviceAvailable: Bool) {
+        let availability = modelAvailabilitySnapshot()
+        let route = routingPolicy.route(task: task, availability: availability)
+
+        if route == .privateCloudCompute {
+            if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
+                let model = PrivateCloudComputeLanguageModel()
+                if model.isAvailable && !model.quotaUsage.isLimitReached {
+                    return (
+                        LanguageModelSession(model: model, instructions: Self.recipeInstructions),
+                        .privateCloudCompute,
+                        availability.onDeviceAvailable
+                    )
+                }
+            }
+        }
+
+        guard availability.onDeviceAvailable else {
+            return (nil, .deterministic, false)
+        }
+        return (createOnDeviceSession(), .onDevice, true)
+    }
+
+    private func modelAvailabilitySnapshot() -> RecipeModelAvailability {
+        let systemModel = SystemLanguageModel.default
+        let onDeviceAvailable = systemModel.isAvailable
+
+        if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
+            let cloudModel = PrivateCloudComputeLanguageModel()
+            return RecipeModelAvailability(
+                supportsIOS27Models: true,
+                onDeviceAvailable: onDeviceAvailable,
+                onDeviceSupportsVision: systemModel.capabilities.contains(.vision),
+                privateCloudAvailable: cloudModel.isAvailable,
+                privateCloudSupportsVision: cloudModel.capabilities.contains(.vision),
+                privateCloudQuotaReached: cloudModel.quotaUsage.isLimitReached
+            )
+        }
+
+        return RecipeModelAvailability(
+            supportsIOS27Models: false,
+            onDeviceAvailable: onDeviceAvailable,
+            onDeviceSupportsVision: false,
+            privateCloudAvailable: false,
+            privateCloudSupportsVision: false,
+            privateCloudQuotaReached: false
+        )
+    }
+
+    private static let recipeInstructions = """
+        Generate practical recipes with clear measurements and detailed steps.
+        Do not include timers on most steps - only on long cooking steps like baking or boiling.
+        Never invent missing source facts when parsing. Preserve attribution and distinguish extraction from inference.
+        """
+
     /// Check if Apple Intelligence is available on this device
     var isAvailable: Bool {
         get async {
-            // Check if Foundation Models are available
-            switch SystemLanguageModel.default.availability {
-            case .available:
+            if SystemLanguageModel.default.isAvailable {
                 return true
-            case .unavailable:
-                return false
             }
+            if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
+                let cloudModel = PrivateCloudComputeLanguageModel()
+                return cloudModel.isAvailable && !cloudModel.quotaUsage.isLimitReached
+            }
+            return false
         }
+    }
+
+    /// Availability for callers that still construct an on-device-only
+    /// LanguageModelSession themselves.
+    var isOnDeviceAvailable: Bool {
+        get async { SystemLanguageModel.default.isAvailable }
     }
 
     /// Generate a complete recipe from a text prompt with streaming updates
@@ -53,25 +121,54 @@ actor FoundationModelsService {
     /// - Returns: AsyncThrowingStream of partial recipe updates
     nonisolated func generateRecipe(from prompt: String) -> AsyncThrowingStream<GeneratedRecipe.PartiallyGenerated, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let producer = Task {
                 do {
                     // Create a fresh session for each generation to avoid context window issues
-                    let session = await self.createSession()
+                    let selection = await self.createSession(
+                        for: .generateRecipe(promptLength: prompt.count)
+                    )
+                    await self.diagnostics.record(
+                        .modelRoute(task: .generate, route: selection.route, usedFallback: false)
+                    )
 
-                    let stream = session.streamResponse(
-                        generating: GeneratedRecipe.self,
-                        includeSchemaInPrompt: false,
-                        options: GenerationOptions(sampling: .greedy)
-                    ) {
-                        "Generate a recipe for: \(prompt)"
+                    var emittedResponse = false
 
-                        "Example format:"
-                        GeneratedRecipe.examplePasta
+                    func consume(_ session: LanguageModelSession) async throws {
+                        let stream = session.streamResponse(
+                            generating: GeneratedRecipe.self,
+                            includeSchemaInPrompt: false,
+                            options: GenerationOptions(samplingMode: .greedy)
+                        ) {
+                            "Generate a recipe for: \(prompt)"
+
+                            "Example format:"
+                            GeneratedRecipe.examplePasta
+                        }
+
+                        for try await partialResponse in stream {
+                            emittedResponse = true
+                            continuation.yield(partialResponse.content)
+                        }
                     }
 
-                    for try await partialResponse in stream {
-                        // partialResponse.content is GeneratedRecipe.PartiallyGenerated
-                        continuation.yield(partialResponse.content)
+                    guard let selectedSession = selection.session else {
+                        throw FoundationModelsError.notAvailable
+                    }
+
+                    do {
+                        try await consume(selectedSession)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        guard selection.route == .privateCloudCompute,
+                              selection.onDeviceAvailable,
+                              !emittedResponse else {
+                            throw error
+                        }
+                        await self.diagnostics.record(
+                            .modelRoute(task: .generate, route: .onDevice, usedFallback: true)
+                        )
+                        try await consume(await self.createOnDeviceSession())
                     }
 
                     continuation.finish()
@@ -79,32 +176,56 @@ actor FoundationModelsService {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in
+                producer.cancel()
+            }
         }
     }
 
     /// Parse text into structured recipe using on-device model
     func parseRecipeText(_ text: String) async throws -> Recipe? {
-        guard await isAvailable else {
-            return nil // Fallback to heuristic parsing
-        }
-
         do {
             // Create a fresh session for parsing to avoid context accumulation
-            let session = createSession()
-
-            let result = try await session.respond(
-                to: """
+            let prompt = """
                 Parse the following recipe text into a structured format:
 
                 \(text)
 
                 Extract the title, ingredients with quantities, cooking steps, yields, and any other relevant information.
-                """,
-                generating: GeneratedRecipe.self,
-                options: GenerationOptions(temperature: 0.3)
+                """
+            let selection = createSession(for: .parseText(characterCount: text.count))
+            await diagnostics.record(
+                .modelRoute(task: .parseText, route: selection.route, usedFallback: false)
             )
+            guard let selectedSession = selection.session else {
+                return nil
+            }
+
+            let result: LanguageModelSession.Response<GeneratedRecipe>
+            do {
+                result = try await selectedSession.respond(
+                    to: prompt,
+                    generating: GeneratedRecipe.self,
+                    options: GenerationOptions(temperature: 0.3)
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard selection.route == .privateCloudCompute,
+                      selection.onDeviceAvailable else { throw error }
+                await diagnostics.record(
+                    .modelRoute(task: .parseText, route: .onDevice, usedFallback: true)
+                )
+                result = try await createOnDeviceSession().respond(
+                    to: prompt,
+                    generating: GeneratedRecipe.self,
+                    options: GenerationOptions(temperature: 0.3)
+                )
+            }
 
             return result.content.toRecipe()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             // If AI parsing fails, return nil to fall back to heuristic parsing
             return nil
@@ -113,19 +234,33 @@ actor FoundationModelsService {
 
     /// Rewrite step text for clarity
     func clarifyStep(_ stepText: String) async throws -> String? {
-        guard await isAvailable else {
+        // Create a fresh session for clarifying to avoid context accumulation
+        let selection = createSession(for: .clarifyStep)
+        await diagnostics.record(
+            .modelRoute(task: .clarify, route: selection.route, usedFallback: false)
+        )
+        guard let session = selection.session else {
             return nil
         }
 
-        // Create a fresh session for clarifying to avoid context accumulation
-        let session = createSession()
-
-        let result = try await session.respond(
-            to: """
+        let prompt = """
             Rewrite this cooking step to be more clear and concise, maintaining all important details:
             \(stepText)
             """
-        )
+
+        let result: LanguageModelSession.Response<String>
+        do {
+            result = try await session.respond(to: prompt)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard selection.route == .privateCloudCompute,
+                  selection.onDeviceAvailable else { throw error }
+            await diagnostics.record(
+                .modelRoute(task: .clarify, route: .onDevice, usedFallback: true)
+            )
+            result = try await createOnDeviceSession().respond(to: prompt)
+        }
 
         return result.content
     }

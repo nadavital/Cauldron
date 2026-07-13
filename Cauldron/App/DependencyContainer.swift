@@ -108,6 +108,9 @@ class DependencyContainer: ObservableObject {
     let imageMigrationService: CloudImageMigration
     let imageSyncManager: ImageSyncManager
     let operationQueueService: OperationQueueService
+    let recipeImportInboxStore: RecipeImportInboxStore
+    let libraryArchiveService: LibraryArchiveService
+    let diagnosticsRecorder: any DiagnosticsRecording
 
     // MARK: - Layer 5: Feature Services
 
@@ -169,6 +172,8 @@ class DependencyContainer: ObservableObject {
         self.collectionImageManager = createCollectionImageManager(collectionService: collectionCloudService)
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
+        self.recipeImportInboxStore = RecipeImportInboxStore()
+        self.diagnosticsRecorder = PrivacySafeDiagnosticsRecorder()
 
         // ============================================================
         // LAYER 3: Local Persistence (Repositories)
@@ -208,13 +213,17 @@ class DependencyContainer: ObservableObject {
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
         self.connectionRepository = ConnectionRepository(modelContainer: modelContainer)
+        self.libraryArchiveService = LibraryArchiveService(
+            recipeRepository: recipeRepository,
+            collectionRepository: collectionRepository
+        )
 
         // ============================================================
         // LAYER 4: Domain Services
         // ============================================================
         self.unitsService = UnitsService()
         self.cookSessionManager = CookSessionManager()
-        self.foundationModelsService = FoundationModelsService()
+        self.foundationModelsService = FoundationModelsService(diagnostics: diagnosticsRecorder)
         self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
         self.recipeOCRService = RecipeOCRService()
         self.recipeLineClassificationService = RecipeLineClassificationService()

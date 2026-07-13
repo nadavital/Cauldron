@@ -22,6 +22,9 @@ struct ProfileSheet: View {
     @State private var recipeCount = 0
     @State private var collectionCount = 0
     @State private var friendCount = 0
+    @State private var archiveDocument: LibraryArchiveDocument?
+    @State private var showingArchiveExporter = false
+    @State private var archiveStatusMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -69,6 +72,24 @@ struct ProfileSheet: View {
             }
             .sheet(isPresented: $showProfileEdit) {
                 ProfileEditView(dependencies: dependencies)
+            }
+            .fileExporter(
+                isPresented: $showingArchiveExporter,
+                document: archiveDocument,
+                contentType: .cauldronLibraryArchive,
+                defaultFilename: "Cauldron Library"
+            ) { result in
+                if case .failure = result {
+                    archiveStatusMessage = "Cauldron couldn't export your library. Your recipes were not changed."
+                }
+            }
+            .alert("Library Archive", isPresented: Binding(
+                get: { archiveStatusMessage != nil },
+                set: { if !$0 { archiveStatusMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(archiveStatusMessage ?? "")
             }
             .task {
                 await loadStats()
@@ -449,10 +470,58 @@ struct ProfileSheet: View {
                 .cornerRadius(Theme.Radius.card)
             }
             .buttonStyle(.plain)
+
+            Button {
+                Task { await prepareArchiveExport() }
+            } label: {
+                quickLinkLabel(
+                    title: "Export Portable Recipe Data",
+                    systemImage: "square.and.arrow.up"
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                SyncHealthView(viewModel: dependencies.operationQueueViewModel)
+            } label: {
+                quickLinkLabel(title: "Queued iCloud Uploads", systemImage: "icloud.and.arrow.up")
+            }
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Helpers
+
+    private func quickLinkLabel(title: String, systemImage: String) -> some View {
+        HStack {
+            Image(systemName: systemImage)
+                .foregroundColor(.cauldronOrange)
+            Text(title)
+                .foregroundColor(.primary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Color.cauldronSecondaryBackground)
+        .cornerRadius(Theme.Radius.card)
+    }
+
+    @MainActor
+    private func prepareArchiveExport() async {
+        guard let userID = currentUserSession.userId else {
+            archiveStatusMessage = "Sign in to iCloud before exporting your library."
+            return
+        }
+        do {
+            let data = try await dependencies.libraryArchiveService.export(ownerID: userID)
+            archiveDocument = LibraryArchiveDocument(data: data)
+            showingArchiveExporter = true
+        } catch {
+            archiveStatusMessage = "Cauldron couldn't prepare your library backup."
+        }
+    }
 
     private var currentIconPreviewName: String {
         iconPreviewAssetName(for: iconManager.currentTheme)

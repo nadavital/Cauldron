@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol ModelRecipeTextParsing: Sendable {
+nonisolated protocol ModelRecipeTextParsing: Sendable {
     func parse(
         lines: [String],
         sourceURL: URL?,

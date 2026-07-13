@@ -31,33 +31,62 @@ actor GroceryService {
     
     /// Merge multiple grocery lists, deduping and combining quantities
     func mergeGroceryLists(_ lists: [[GroceryItem]]) async -> [GroceryItem] {
-        var mergedItems: [String: GroceryItem] = [:]
+        var mergedItems: [String: [GroceryItem]] = [:]
         
         for list in lists {
             for item in list {
                 let normalizedName = item.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 
-                if let existing = mergedItems[normalizedName] {
-                    // Try to combine quantities if same unit
-                    if let existingQty = existing.quantity,
-                       let newQty = item.quantity,
-                       existingQty.unit == newQty.unit {
-                        mergedItems[normalizedName] = GroceryItem(
-                            name: existing.name,
-                            quantity: Quantity(
-                                value: existingQty.value + newQty.value,
-                                unit: existingQty.unit
+                var bucket = mergedItems[normalizedName] ?? []
+                var didMerge = false
+
+                for index in bucket.indices {
+                    let existing = bucket[index]
+                    switch (existing.quantity, item.quantity) {
+                    case (.none, .none):
+                        didMerge = true
+                    case (.some(let existingQuantity), .some(let incomingQuantity)):
+                        if let converted = await unitsService.convert(
+                            incomingQuantity,
+                            to: existingQuantity.unit
+                        ) {
+                            bucket[index] = GroceryItem(
+                                name: existing.name,
+                                quantity: Quantity(
+                                    value: existingQuantity.value + converted.value,
+                                    upperValue: existingQuantity.upperValue == nil && converted.upperValue == nil
+                                        ? nil
+                                        : (existingQuantity.upperValue ?? existingQuantity.value)
+                                            + (converted.upperValue ?? converted.value),
+                                    unit: existingQuantity.unit
+                                )
                             )
-                        )
+                            didMerge = true
+                        }
+                    default:
+                        break
                     }
-                    // Otherwise keep existing (could be improved with unit conversion)
-                } else {
-                    mergedItems[normalizedName] = item
+                    if didMerge { break }
                 }
+
+                // Never silently discard an incompatible or differently
+                // specified quantity. Keep it as a separate attributed line.
+                if !didMerge { bucket.append(item) }
+                mergedItems[normalizedName] = bucket
             }
         }
         
-        return Array(mergedItems.values).sorted { $0.name < $1.name }
+        return mergedItems.values.flatMap { $0 }.sorted {
+            let nameOrder = $0.name.localizedCaseInsensitiveCompare($1.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            if $0.name != $1.name { return $0.name < $1.name }
+            let lhsUnit = $0.quantity?.unit.rawValue ?? ""
+            let rhsUnit = $1.quantity?.unit.rawValue ?? ""
+            if lhsUnit != rhsUnit { return lhsUnit < rhsUnit }
+            let lhsValue = $0.quantity?.value ?? -.infinity
+            let rhsValue = $1.quantity?.value ?? -.infinity
+            return lhsValue < rhsValue
+        }
     }
     
     /// Generate shopping list text for export

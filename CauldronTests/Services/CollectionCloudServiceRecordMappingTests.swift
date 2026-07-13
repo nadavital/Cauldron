@@ -214,7 +214,8 @@ final class CollectionCloudServiceRecordMappingTests: XCTestCase {
                     recipeId: edge.recipeId
                 )
             )
-            XCTAssertEqual(try await service.membershipEdge(from: record), edge)
+            let decodedEdge = try await service.membershipEdge(from: record)
+            XCTAssertEqual(decodedEdge, edge)
         }
     }
 }

@@ -178,6 +178,7 @@ struct CollectionDetailView: View {
                 .padding(.bottom, 100)
             }
         }
+        .modifier(CollectionSwipeActionsCoordinator())
         .warmCanvas()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -842,6 +843,10 @@ struct CollectionDetailView: View {
 
     @ViewBuilder
     private var recipesCompactContent: some View {
+        recipesCompactStack
+    }
+
+    private var recipesCompactStack: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             ForEach(visibleRecipes) { recipe in
                 NavigationLink {
@@ -850,6 +855,15 @@ struct CollectionDetailView: View {
                     RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
                 .buttonStyle(PressableScaleStyle())
+                .swipeActions(allowsFullSwipe: false) {
+                    if isOwned {
+                        Button(role: .destructive) {
+                            Task { await removeRecipe(recipe) }
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+                }
                 .contextMenu {
                     if isOwned {
                         Button(role: .destructive) {
@@ -931,6 +945,17 @@ struct CollectionDetailView: View {
         visibleRecipes = recipes.filter { recipe in
             recipe.title.localizedCaseInsensitiveContains(trimmedSearchText) ||
             recipe.tags.contains(where: { $0.name.localizedCaseInsensitiveContains(trimmedSearchText) })
+        }
+    }
+}
+
+private struct CollectionSwipeActionsCoordinator: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 27.0, macOS 27.0, *) {
+            content.swipeActionsContainer()
+        } else {
+            content
         }
     }
 }

@@ -25,17 +25,11 @@ final class OperationQueueViewModel {
 
     @ObservationIgnored
     private let service: OperationQueueService
-    @ObservationIgnored
-    private var eventTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
     init(service: OperationQueueService) {
         self.service = service
-
-        // Start listening to events
-        startEventListener()
-
         // Load initial state
         Task {
             await loadState()
@@ -84,6 +78,16 @@ final class OperationQueueViewModel {
             await service.clearCompletedOperations()
             await loadState()
         }
+    }
+
+    var healthSnapshot: SyncHealthSnapshot {
+        SyncHealthSnapshot.make(
+            operations: pendingOperations
+        )
+    }
+
+    func refresh() {
+        Task { await loadState() }
     }
 
     /// Helper to check if entity is currently syncing
@@ -147,43 +151,6 @@ final class OperationQueueViewModel {
         }
     }
 
-    /// Listen to operation queue events and update UI state
-    private func startEventListener() {
-        eventTask = Task {
-            for await event in service.events {
-                await handleEvent(event)
-            }
-        }
-    }
-
-    /// Handle operation queue events
-    private func handleEvent(_ event: OperationQueueEvent) async {
-        switch event {
-        case .operationAdded(let operation):
-            AppLogger.general.info("🔔 Operation added: \(operation.displayDescription)")
-            await loadState()
-
-        case .operationStarted(let operation):
-            AppLogger.general.info("▶️ Operation started: \(operation.displayDescription)")
-            await loadState()
-
-        case .operationCompleted(let id):
-            AppLogger.general.info("✅ Operation completed: \(id)")
-            await loadState()
-
-        case .operationFailed(let operation):
-            AppLogger.general.warning("⚠️ Operation failed: \(operation.displayDescription)")
-            await loadState()
-
-        case .operationRetrying(let operation):
-            AppLogger.general.info("🔄 Operation retrying: \(operation.displayDescription)")
-            await loadState()
-
-        case .queueEmpty:
-            AppLogger.general.info("📭 Operation queue is now empty")
-            await loadState()
-        }
-    }
 }
 
 // MARK: - Preview Support

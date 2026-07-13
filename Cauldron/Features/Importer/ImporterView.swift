@@ -21,6 +21,8 @@ struct ImporterView: View {
     private let autoImportFromInitialURL: Bool
     private let autoImportFromInitialText: Bool
     private let hasPreparedRecipe: Bool
+    private let destinationRecipeID: UUID?
+    private let onSuccessfulSave: () async -> Bool
 
     private struct PreviewContext: Identifiable {
         let id = UUID()
@@ -33,7 +35,9 @@ struct ImporterView: View {
         initialURL: URL? = nil,
         initialText: String? = nil,
         preparedRecipe: Recipe? = nil,
-        preparedSourceInfo: String? = nil
+        preparedSourceInfo: String? = nil,
+        destinationRecipeID: UUID? = nil,
+        onSuccessfulSave: @escaping () async -> Bool = { true }
     ) {
         let viewModel = ImporterViewModel(dependencies: dependencies)
         if let initialURL {
@@ -48,6 +52,8 @@ struct ImporterView: View {
         self.autoImportFromInitialURL = initialURL != nil
         self.autoImportFromInitialText = initialText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         self.hasPreparedRecipe = preparedRecipe != nil
+        self.destinationRecipeID = destinationRecipeID
+        self.onSuccessfulSave = onSuccessfulSave
         _viewModel = State(initialValue: viewModel)
     }
     
@@ -107,10 +113,8 @@ struct ImporterView: View {
                     importedRecipe: context.recipe,
                     dependencies: viewModel.dependencies,
                     sourceInfo: context.sourceInfo,
-                    onSave: {
-                        // Dismiss the importer sheet when recipe is saved
-                        dismiss()
-                    }
+                    destinationRecipeID: destinationRecipeID,
+                    onSave: onSuccessfulSave
                 )
             }
             .fullScreenCover(isPresented: $showingOCRPicker) {

@@ -14,17 +14,25 @@ struct RecipeImportPreviewView: View {
     let importedRecipe: Recipe
     let dependencies: DependencyContainer
     let sourceInfo: String
-    let onSave: () -> Void  // Callback when recipe is saved
+    let destinationRecipeID: UUID?
+    let onSave: () async -> Bool
     
     @State private var editedRecipe: Recipe
     @State private var isSaving = false
     @State private var showSuccess = false
     @State private var showingEditSheet = false
     
-    init(importedRecipe: Recipe, dependencies: DependencyContainer, sourceInfo: String, onSave: @escaping () -> Void = {}) {
+    init(
+        importedRecipe: Recipe,
+        dependencies: DependencyContainer,
+        sourceInfo: String,
+        destinationRecipeID: UUID? = nil,
+        onSave: @escaping () async -> Bool = { true }
+    ) {
         self.importedRecipe = importedRecipe
         self.dependencies = dependencies
         self.sourceInfo = sourceInfo
+        self.destinationRecipeID = destinationRecipeID
         self.onSave = onSave
         self._editedRecipe = State(initialValue: importedRecipe)
     }
@@ -265,11 +273,22 @@ struct RecipeImportPreviewView: View {
             .sheet(isPresented: $showingEditSheet) {
                 RecipeEditorView(
                     dependencies: dependencies,
-                    recipe: editedRecipe,
+                    recipe: destinationRecipeID.map {
+                        ImportedRecipeSaveBuilder.recipeForSave(
+                            from: editedRecipe,
+                            userId: CurrentUserSession.shared.userId,
+                            destinationID: $0
+                        )
+                    } ?? editedRecipe,
                     onSaveAndDismiss: {
                         // When editor saves during import, dismiss the entire import flow
-                        onSave()
-                        dismiss()
+                        Task { @MainActor in
+                            if await onSave() {
+                                dismiss()
+                            } else {
+                                isSaving = false
+                            }
+                        }
                     },
                     isImporting: true
                 )
@@ -335,9 +354,25 @@ struct RecipeImportPreviewView: View {
                 return
             }
 
-            let recipeToSave = ImportedRecipeSaveBuilder.recipeForSave(from: editedRecipe, userId: userId)
+            let recipeToSave = ImportedRecipeSaveBuilder.recipeForSave(
+                from: editedRecipe,
+                userId: userId,
+                destinationID: destinationRecipeID
+            )
 
-            // Save to repository (CloudKit sync happens automatically)
+            // A durable import always reuses the job UUID. If the app was
+            // terminated after create but before completing the inbox entry,
+            // relaunch converges on the existing recipe instead of duplicating it.
+            if let destinationRecipeID,
+               let existing = try await dependencies.recipeRepository.fetch(id: destinationRecipeID),
+               existing.ownerId == userId {
+                guard await onSave() else {
+                    isSaving = false
+                    return
+                }
+                dismiss()
+                return
+            }
             try await dependencies.recipeRepository.create(recipeToSave)
             Task {
                 guard let stagedImage = await ImportedRecipeSaveBuilder.stageRemoteImage(
@@ -387,7 +422,10 @@ struct RecipeImportPreviewView: View {
             Haptics.success()
 
             // Call the callback to notify parent view
-            onSave()
+            guard await onSave() else {
+                isSaving = false
+                return
+            }
 
             // Dismiss this view
             dismiss()

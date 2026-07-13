@@ -18,6 +18,8 @@ struct CookTabView: View {
     @State private var showingAIGenerator = false
     @State private var showingCollectionForm = false
     @State private var showingProfileSheet = false
+    @State private var showingImportInbox = false
+    @State private var inboxJobToReview: RecipeImportJob?
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
     @State private var showDeleteConfirmation = false
@@ -122,6 +124,14 @@ struct CookTabView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingImportInbox = true
+                    } label: {
+                        Label("Import Inbox", systemImage: "tray.full")
+                    }
+                    .accessibilityHint("Shows recipe imports waiting for review or retry")
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
                         dependencies: viewModel.dependencies,
                         showingEditor: createRecipeEditorBinding,
@@ -146,6 +156,20 @@ struct CookTabView: View {
                 }
             }) {
                 ImporterView(dependencies: viewModel.dependencies)
+            }
+            .sheet(isPresented: $showingImportInbox) {
+                ImportInboxView(store: viewModel.dependencies.recipeImportInboxStore) { job in
+                    showingImportInbox = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        inboxJobToReview = job
+                    }
+                }
+            }
+            .sheet(item: $inboxJobToReview, onDismiss: {
+                Task { await refreshCookLibrary() }
+            }) { job in
+                inboxImporter(for: job)
             }
             .sheet(isPresented: $showingEditor, onDismiss: {
                 Task {
@@ -318,6 +342,83 @@ struct CookTabView: View {
 
     private func refreshCookLibrary() async {
         await viewModel.refreshLocalLibrary()
+    }
+
+    @ViewBuilder
+    private func inboxImporter(for job: RecipeImportJob) -> some View {
+        switch job.source {
+        case .url(let value):
+            ImporterView(
+                dependencies: viewModel.dependencies,
+                initialURL: URL(string: value),
+                destinationRecipeID: job.id,
+                onSuccessfulSave: { await completeInboxJob(job.id) }
+            )
+        case .text(let value):
+            ImporterView(
+                dependencies: viewModel.dependencies,
+                initialText: value,
+                destinationRecipeID: job.id,
+                onSuccessfulSave: { await completeInboxJob(job.id) }
+            )
+        case .prepared(let data):
+            if let prepared = ShareExtensionImportStore.preparedRecipe(from: data) {
+                ImporterView(
+                    dependencies: viewModel.dependencies,
+                    preparedRecipe: prepared.recipe,
+                    preparedSourceInfo: prepared.sourceInfo,
+                    destinationRecipeID: job.id,
+                    onSuccessfulSave: { await completeInboxJob(job.id) }
+                )
+            } else {
+                ContentUnavailableView("Import Unavailable", systemImage: "exclamationmark.triangle")
+            }
+        case .shareTransport(let item):
+            if let data = item.preparedPayload,
+               let prepared = ShareExtensionImportStore.preparedRecipe(from: data) {
+                ImporterView(
+                    dependencies: viewModel.dependencies,
+                    preparedRecipe: prepared.recipe,
+                    preparedSourceInfo: prepared.sourceInfo,
+                    destinationRecipeID: job.id,
+                    onSuccessfulSave: { await completeInboxJob(job.id) }
+                )
+            } else if let text = item.text,
+                      ShareExtensionImportStore.plainTextRecipeShouldTakePrecedenceOverURL(text) {
+                ImporterView(
+                    dependencies: viewModel.dependencies,
+                    initialText: text,
+                    destinationRecipeID: job.id,
+                    onSuccessfulSave: { await completeInboxJob(job.id) }
+                )
+            } else if let value = item.urlString, let url = URL(string: value) {
+                ImporterView(
+                    dependencies: viewModel.dependencies,
+                    initialURL: url,
+                    destinationRecipeID: job.id,
+                    onSuccessfulSave: { await completeInboxJob(job.id) }
+                )
+            } else if let text = item.text {
+                ImporterView(
+                    dependencies: viewModel.dependencies,
+                    initialText: text,
+                    destinationRecipeID: job.id,
+                    onSuccessfulSave: { await completeInboxJob(job.id) }
+                )
+            } else {
+                ContentUnavailableView("Import Unavailable", systemImage: "exclamationmark.triangle")
+            }
+        }
+    }
+
+    private func completeInboxJob(_ id: UUID) async -> Bool {
+        do {
+            try await viewModel.dependencies.recipeImportInboxStore.complete(id: id)
+            return true
+        } catch {
+            AppLogger.general.error("Failed to mark import complete: \(error.localizedDescription)")
+            return false
+        }
     }
 
     // MARK: - Reusable Section Building Blocks

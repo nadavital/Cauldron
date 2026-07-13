@@ -45,7 +45,7 @@ actor GroceryCategorizer {
     /// Check if categorization is available
     var isAvailable: Bool {
         get async {
-            await foundationModelsService.isAvailable
+            await foundationModelsService.isOnDeviceAvailable
         }
     }
 
