@@ -7,6 +7,7 @@
 
 import UIKit
 import UniformTypeIdentifiers
+import ImageIO
 
 final class ShareViewController: UIViewController {
     private var hasProcessedShare = false
@@ -267,16 +268,20 @@ final class ShareViewController: UIViewController {
 
             sharedURL = url
 
-            let payload = await SharedRecipePreprocessor.prepareRecipePayload(from: url)
-            preparedPayload = payload
-
             await MainActor.run { [weak self] in
-                guard let self else { return }
-                if let payload {
+                self?.setFallbackReadyState(sourceURL: url)
+            }
+
+            // The link is ready to hand off immediately. Enrichment is best-effort
+            // and upgrades the preview if it completes while the extension is open.
+            Task { [weak self] in
+                guard let payload = await SharedRecipePreprocessor.prepareRecipePayload(from: url),
+                      !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self, !self.hasSavedPayload else { return }
+                    self.preparedPayload = payload
                     self.setReadyState(with: payload, sourceURL: url)
                     self.loadPreviewImageIfAvailable(from: payload.imageURL)
-                } else {
-                    self.setFallbackReadyState(sourceURL: url)
                 }
             }
             return
@@ -396,9 +401,18 @@ final class ShareViewController: UIViewController {
                 guard !Task.isCancelled,
                       let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode),
-                      let image = UIImage(data: data) else {
+                      httpResponse.mimeType?.hasPrefix("image/") == true,
+                      httpResponse.expectedContentLength <= 8_000_000 || httpResponse.expectedContentLength < 0,
+                      data.count <= 8_000_000,
+                      let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 1_200
+                      ] as CFDictionary) else {
                     return
                 }
+                let image = UIImage(cgImage: cgImage)
 
                 await MainActor.run {
                     self.previewImageView.image = image
@@ -580,6 +594,7 @@ final class ShareViewController: UIViewController {
         }
 
         setSavingState()
+        persistInboxItem(url: sharedURL, text: preparedPayload == nil ? sharedText : nil, payload: preparedPayload)
         if let sharedURL {
             persistPendingURL(sharedURL)
         }
@@ -603,6 +618,29 @@ final class ShareViewController: UIViewController {
     private func persistPendingURL(_ url: URL) {
         guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
         defaults.set(url.absoluteString, forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+    }
+
+    private func persistInboxItem(url: URL?, text: String?, payload: PreparedShareRecipePayload?) {
+        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
+        let payloadData = payload.flatMap { try? JSONEncoder().encode($0) }
+        let item = ShareExtensionInboxItem(
+            urlString: url?.absoluteString,
+            text: text,
+            preparedPayload: payloadData
+        )
+        try? ShareExtensionInboxFiles.enqueue(item)
+
+        // Keep the defaults representation during migration for older app builds.
+        var items: [ShareExtensionInboxItem] = []
+        if let data = defaults.data(forKey: ShareExtensionImportContract.inboxKey),
+           let decoded = try? JSONDecoder().decode([ShareExtensionInboxItem].self, from: data) {
+            items = decoded
+        }
+        items.append(item)
+        items = Array(items.suffix(ShareExtensionImportContract.maximumInboxItemCount))
+        if let data = try? JSONEncoder().encode(items) {
+            defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
+        }
     }
 
     private func persistPendingText(_ text: String) {

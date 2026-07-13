@@ -242,7 +242,7 @@ struct CollectionCoverView: View {
 
         if let image {
             if let currentImage = customCoverImage {
-                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
+                if image !== currentImage {
                     customCoverImage = image
                 }
             } else {

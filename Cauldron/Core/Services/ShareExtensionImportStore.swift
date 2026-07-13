@@ -11,36 +11,99 @@ enum ShareExtensionImportStore {
     struct PendingPreparedSharedRecipe {
         let preparedRecipe: PreparedSharedRecipe
         let payloadData: Data
+        let inboxID: UUID?
     }
 
     static func pendingRecipeURL() -> URL? {
+        if let item = fileInboxHead() {
+            return item.urlString.flatMap(validInboxURL)
+        }
         pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func pendingRecipeURL(in defaults: UserDefaults?) -> URL? {
-        guard let defaults,
+        guard let defaults else { return nil }
+        if let item = defaultsInboxHead(in: defaults) {
+            return item.urlString.flatMap(validInboxURL)
+        }
+        guard
               let urlString = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) else {
             return nil
         }
-        return URL(string: urlString)
+        return validInboxURL(urlString)
     }
 
     static func pendingRecipeText() -> String? {
+        if let item = fileInboxHead() {
+            return item.text
+        }
         pendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func pendingRecipeText(in defaults: UserDefaults?) -> String? {
         guard let defaults else { return nil }
+        if let item = defaultsInboxHead(in: defaults) { return item.text }
         return defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
     static func pendingPreparedRecipe() -> PendingPreparedSharedRecipe? {
+        if let item = fileInboxHead() {
+            guard let payloadData = item.preparedPayload,
+                  let preparedRecipe = preparedRecipe(from: payloadData) else { return nil }
+            return PendingPreparedSharedRecipe(
+                preparedRecipe: preparedRecipe,
+                payloadData: payloadData,
+                inboxID: item.id
+            )
+        }
         pendingPreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
+    private static func fileInboxHead() -> ShareExtensionInboxItem? {
+        while let item = ShareExtensionInboxFiles.items().first?.item {
+            if !isUsableInboxItem(item) {
+                AppLogger.general.error("Discarding invalid prepared share inbox item: \(item.id)")
+                ShareExtensionInboxFiles.remove(id: item.id)
+                if let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) {
+                    _ = removeFirstInboxItem(in: defaults) { $0.id == item.id }
+                }
+                continue
+            }
+            return item
+        }
+        return nil
+    }
+
+    private static func defaultsInboxHead(in defaults: UserDefaults) -> ShareExtensionInboxItem? {
+        while let item = inbox(in: defaults).first {
+            guard !isUsableInboxItem(item) else { return item }
+            _ = removeFirstInboxItem(in: defaults) { $0.id == item.id }
+        }
+        return nil
+    }
+
+    private static func validInboxURL(_ string: String) -> URL? {
+        guard let url = URL(string: string),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return nil }
+        return url
+    }
+
+    private static func isUsableInboxItem(_ item: ShareExtensionInboxItem) -> Bool {
+        let hasPreparedRecipe = item.preparedPayload.flatMap(preparedRecipe(from:)) != nil
+        let hasText = item.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasURL = item.urlString.flatMap(validInboxURL) != nil
+        return hasPreparedRecipe || hasText || hasURL
+    }
+
     static func pendingPreparedRecipe(in defaults: UserDefaults?) -> PendingPreparedSharedRecipe? {
-        guard let defaults,
-              let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
+        guard let defaults else { return nil }
+        if let item = defaultsInboxHead(in: defaults) {
+            guard let payloadData = item.preparedPayload,
+                  let preparedRecipe = preparedRecipe(from: payloadData) else { return nil }
+            return PendingPreparedSharedRecipe(preparedRecipe: preparedRecipe, payloadData: payloadData, inboxID: item.id)
+        }
+        guard let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
             return nil
         }
 
@@ -49,7 +112,7 @@ enum ShareExtensionImportStore {
             return nil
         }
 
-        return PendingPreparedSharedRecipe(preparedRecipe: preparedRecipe, payloadData: payloadData)
+        return PendingPreparedSharedRecipe(preparedRecipe: preparedRecipe, payloadData: payloadData, inboxID: nil)
     }
 
     static func firstHTTPURL(in text: String) -> URL? {
@@ -111,11 +174,25 @@ enum ShareExtensionImportStore {
     }
 
     static func acknowledgePendingRecipeURL(matching url: URL? = nil) {
+        if let entry = ShareExtensionInboxFiles.items().first,
+           let value = entry.item.urlString.flatMap(URL.init(string:)),
+           url == nil || value == url {
+            ShareExtensionInboxFiles.remove(id: entry.item.id)
+        }
         acknowledgePendingRecipeURL(matching: url, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func acknowledgePendingRecipeURL(matching url: URL? = nil, in defaults: UserDefaults?) {
         guard let defaults else { return }
+        if removeFirstInboxItem(in: defaults, where: { item in
+            guard let value = item.urlString.flatMap(URL.init(string:)) else { return false }
+            return url == nil || value == url
+        }) {
+            if defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) == url?.absoluteString {
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+            }
+            return
+        }
         if let url, pendingRecipeURL(in: defaults) != url {
             return
         }
@@ -123,11 +200,21 @@ enum ShareExtensionImportStore {
     }
 
     static func acknowledgePendingRecipeText(matching text: String? = nil) {
+        if let entry = ShareExtensionInboxFiles.items().first,
+           text == nil || entry.item.text == text {
+            ShareExtensionInboxFiles.remove(id: entry.item.id)
+        }
         acknowledgePendingRecipeText(matching: text, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func acknowledgePendingRecipeText(matching text: String? = nil, in defaults: UserDefaults?) {
         guard let defaults else { return }
+        if removeFirstInboxItem(in: defaults, where: { text == nil || $0.text == text }) {
+            if defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) == text {
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+            }
+            return
+        }
         if let text, pendingRecipeText(in: defaults) != text {
             return
         }
@@ -135,11 +222,23 @@ enum ShareExtensionImportStore {
     }
 
     static func acknowledgePreparedRecipe(matching payloadData: Data? = nil) {
+        if let entry = ShareExtensionInboxFiles.items().first,
+           payloadData == nil || entry.item.preparedPayload == payloadData {
+            ShareExtensionInboxFiles.remove(id: entry.item.id)
+        }
         acknowledgePreparedRecipe(matching: payloadData, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
     static func acknowledgePreparedRecipe(matching payloadData: Data? = nil, in defaults: UserDefaults?) {
         guard let defaults else { return }
+        if removeFirstInboxItem(in: defaults, where: { payloadData == nil || $0.preparedPayload == payloadData }) {
+            if defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) == payloadData {
+                defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+            }
+            return
+        }
         if let payloadData,
            defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) != payloadData {
             return
@@ -159,6 +258,38 @@ enum ShareExtensionImportStore {
             AppLogger.general.error("❌ Failed to decode prepared share payload: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    static func inbox(in defaults: UserDefaults) -> [ShareExtensionInboxItem] {
+        guard let data = defaults.data(forKey: ShareExtensionImportContract.inboxKey) else {
+            return []
+        }
+        guard let items = try? JSONDecoder().decode([ShareExtensionInboxItem].self, from: data) else {
+            defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
+            return []
+        }
+        return items.sorted {
+            if $0.createdAt == $1.createdAt {
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            return $0.createdAt < $1.createdAt
+        }
+    }
+
+    @discardableResult
+    private static func removeFirstInboxItem(
+        in defaults: UserDefaults,
+        where predicate: (ShareExtensionInboxItem) -> Bool
+    ) -> Bool {
+        var items = inbox(in: defaults)
+        guard let index = items.firstIndex(where: predicate) else { return false }
+        items.remove(at: index)
+        if items.isEmpty {
+            defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
+        } else if let data = try? JSONEncoder().encode(items) {
+            defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
+        }
+        return true
     }
 
 }

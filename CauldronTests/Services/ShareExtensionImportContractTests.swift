@@ -60,6 +60,67 @@ final class ShareExtensionImportContractTests: XCTestCase {
         XCTAssertEqual(ShareExtensionImportContract.pendingRecipeURLKey, "shareExtension.pendingRecipeURL")
         XCTAssertEqual(ShareExtensionImportContract.pendingRecipeTextKey, "shareExtension.pendingRecipeText")
         XCTAssertEqual(ShareExtensionImportContract.preparedRecipePayloadKey, "shareExtension.preparedRecipePayload")
+        XCTAssertEqual(ShareExtensionImportContract.inboxKey, "shareExtension.inbox.v1")
+    }
+
+    func testQueuedSharesAreReadAndAcknowledgedInFIFOOrder() throws {
+        let defaults = try makeIsolatedDefaults()
+        let first = ShareExtensionInboxItem(
+            createdAt: Date(timeIntervalSince1970: 1),
+            urlString: "https://example.com/first"
+        )
+        let second = ShareExtensionInboxItem(
+            createdAt: Date(timeIntervalSince1970: 2),
+            text: "Second recipe text"
+        )
+        defaults.set(try JSONEncoder().encode([first, second]), forKey: ShareExtensionImportContract.inboxKey)
+
+        XCTAssertEqual(ShareExtensionImportStore.pendingRecipeURL(in: defaults), URL(string: "https://example.com/first"))
+        XCTAssertNil(ShareExtensionImportStore.pendingRecipeText(in: defaults))
+
+        ShareExtensionImportStore.acknowledgePendingRecipeURL(
+            matching: URL(string: "https://example.com/first"),
+            in: defaults
+        )
+
+        XCTAssertEqual(ShareExtensionImportStore.pendingRecipeText(in: defaults), "Second recipe text")
+        ShareExtensionImportStore.acknowledgePendingRecipeText(matching: "Second recipe text", in: defaults)
+        XCTAssertTrue(ShareExtensionImportStore.inbox(in: defaults).isEmpty)
+    }
+
+    func testQueuedPreparedPayloadDoesNotMixWithNewerLegacyKeys() throws {
+        let defaults = try makeIsolatedDefaults()
+        let payload = PreparedShareRecipePayload(
+            title: "Queued Soup",
+            ingredients: ["Stock"],
+            steps: ["Warm"]
+        )
+        let payloadData = try JSONEncoder().encode(payload)
+        let item = ShareExtensionInboxItem(preparedPayload: payloadData)
+        defaults.set(try JSONEncoder().encode([item]), forKey: ShareExtensionImportContract.inboxKey)
+        defaults.set("https://example.com/newer-legacy", forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+
+        let pending = try XCTUnwrap(ShareExtensionImportStore.pendingPreparedRecipe(in: defaults))
+        XCTAssertEqual(pending.preparedRecipe.recipe.title, "Queued Soup")
+        XCTAssertEqual(pending.inboxID, item.id)
+    }
+
+    func testMalformedAndEmptyInboxHeadsDoNotBlockLaterShares() throws {
+        let defaults = try makeIsolatedDefaults()
+        let malformed = ShareExtensionInboxItem(preparedPayload: Data("not-json".utf8))
+        let empty = ShareExtensionInboxItem()
+        let invalidURL = ShareExtensionInboxItem(urlString: "not a URL")
+        let valid = ShareExtensionInboxItem(urlString: "https://example.com/recovered")
+        defaults.set(
+            try JSONEncoder().encode([malformed, empty, invalidURL, valid]),
+            forKey: ShareExtensionImportContract.inboxKey
+        )
+
+        XCTAssertEqual(
+            ShareExtensionImportStore.pendingRecipeURL(in: defaults),
+            URL(string: "https://example.com/recovered")
+        )
+        XCTAssertEqual(ShareExtensionImportStore.inbox(in: defaults), [valid])
     }
 
     func testPendingRecipeTextConsumption_LeavesPendingURLForCallerToSupersedeExplicitly() throws {

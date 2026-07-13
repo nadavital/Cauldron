@@ -13,7 +13,13 @@ import Foundation
 import UIKit
 import SwiftUI
 import CloudKit
+import ImageIO
 import os
+
+struct SavedImageFile: Sendable {
+    let filename: String
+    let modificationDate: Date
+}
 
 // MARK: - ImageManageable Protocol
 
@@ -186,6 +192,11 @@ actor EntityImageManager<Entity: ImageManageable> {
         removeCacheEntry(entityId: entityId)
     }
 
+    func deleteImageIfUnchanged(entityId: UUID, modificationDate: Date) {
+        guard getImageModificationDate(entityId: entityId) == modificationDate else { return }
+        deleteImage(entityId: entityId)
+    }
+
     private func removeCacheEntry(entityId: UUID) {
         guard let cacheKeyGenerator else { return }
         Task { @MainActor in
@@ -247,20 +258,82 @@ actor EntityImageManager<Entity: ImageManageable> {
     ///   - entityId: The entity ID to save as
     /// - Returns: The filename of the saved image
     func downloadAndSaveImage(from url: URL, entityId: UUID) async throws -> String {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let expectedModificationDate = getImageModificationDate(entityId: entityId)
+        let data = try await downloadOptimizedImageData(from: url)
+        return try saveDownloadedImageData(
+            data,
+            entityId: entityId,
+            expectedModificationDate: expectedModificationDate
+        )
+    }
+
+    func downloadOptimizedImageData(from url: URL) async throws -> Data {
+        guard url.scheme?.lowercased() == "https" || url.scheme?.lowercased() == "http" else {
+            throw EntityImageError.downloadFailed
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200,
+              (200...299).contains(httpResponse.statusCode),
               let mimeType = httpResponse.mimeType,
-              mimeType.hasPrefix("image/") else {
+              mimeType.hasPrefix("image/"),
+              httpResponse.expectedContentLength <= 20_000_000 || httpResponse.expectedContentLength < 0 else {
             throw EntityImageError.downloadFailed
         }
 
-        guard let image = UIImage(data: data) else {
+        var data = Data()
+        data.reserveCapacity(min(max(Int(httpResponse.expectedContentLength), 0), 20_000_000))
+        for try await byte in bytes {
+            guard data.count < 20_000_000 else { throw EntityImageError.downloadFailed }
+            data.append(byte)
+        }
+
+        try Task.checkCancellation()
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDimension
+              ] as CFDictionary) else {
             throw EntityImageError.invalidImageData
         }
 
-        return try saveImageReturningFilename(image, entityId: entityId)
+        return try optimizeImageForUpload(UIImage(cgImage: cgImage))
+    }
+
+    func saveDownloadedImageData(
+        _ data: Data,
+        entityId: UUID,
+        expectedModificationDate: Date?
+    ) throws -> String {
+        try saveDownloadedImageDataWithToken(
+            data,
+            entityId: entityId,
+            expectedModificationDate: expectedModificationDate
+        ).filename
+    }
+
+    func saveDownloadedImageDataWithToken(
+        _ data: Data,
+        entityId: UUID,
+        expectedModificationDate: Date?
+    ) throws -> SavedImageFile {
+        let currentModificationDate = getImageModificationDate(entityId: entityId)
+        guard currentModificationDate == expectedModificationDate else {
+            throw EntityImageError.downloadFailed
+        }
+
+        let filename = "\(entityId.uuidString).jpg"
+        let fileURL = imageDirectoryURL.appendingPathComponent(filename)
+        try data.write(to: fileURL, options: .atomic)
+        removeCacheEntry(entityId: entityId)
+        guard let modificationDate = getImageModificationDate(entityId: entityId) else {
+            throw EntityImageError.downloadFailed
+        }
+        return SavedImageFile(filename: filename, modificationDate: modificationDate)
     }
 
     /// Copy image from one entity to another
@@ -658,6 +731,10 @@ extension RecipeImageManager {
         deleteImage(entityId: recipeId)
     }
 
+    func deleteImageIfUnchanged(recipeId: UUID, modificationDate: Date) {
+        deleteImageIfUnchanged(entityId: recipeId, modificationDate: modificationDate)
+    }
+
     /// Get image URL for recipe
     func imageURL(recipeId: UUID) -> URL {
         imageURL(entityId: recipeId)
@@ -676,6 +753,34 @@ extension RecipeImageManager {
     /// Download and save image from URL for recipe
     func downloadAndSaveImage(from url: URL, recipeId: UUID) async throws -> String {
         try await downloadAndSaveImage(from: url, entityId: recipeId)
+    }
+
+    func downloadOptimizedImageData(from url: URL, recipeId: UUID) async throws -> Data {
+        try await downloadOptimizedImageData(from: url)
+    }
+
+    func saveDownloadedImageData(
+        _ data: Data,
+        recipeId: UUID,
+        expectedModificationDate: Date?
+    ) throws -> String {
+        try saveDownloadedImageData(
+            data,
+            entityId: recipeId,
+            expectedModificationDate: expectedModificationDate
+        )
+    }
+
+    func saveDownloadedImageDataWithToken(
+        _ data: Data,
+        recipeId: UUID,
+        expectedModificationDate: Date?
+    ) throws -> SavedImageFile {
+        try saveDownloadedImageDataWithToken(
+            data,
+            entityId: recipeId,
+            expectedModificationDate: expectedModificationDate
+        )
     }
 
     /// Copy image from one recipe to another

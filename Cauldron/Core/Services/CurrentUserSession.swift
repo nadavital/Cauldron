@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 import os
 import Combine
+import CloudKit
 
 /// Manages the current user's session and authentication state
 @MainActor
@@ -27,8 +28,10 @@ class CurrentUserSession: ObservableObject {
     private let profileEmojiKey = "currentProfileEmoji"
     private let profileColorKey = "currentProfileColor"
     private let referralCodeKey = "currentReferralCode"
+    private let cloudKitSystemRecordNameKey = "currentCloudKitSystemRecordName"
     private let hasCompletedLocalOnboardingKey = "hasCompletedLocalOnboarding"
     private let logger = Logger(subsystem: "com.cauldron", category: "UserSession")
+    private var refreshTask: Task<Void, Never>?
 
     var userId: UUID? {
         currentUser?.id
@@ -91,6 +94,70 @@ class CurrentUserSession: ObservableObject {
 
         ReferralManager.shared.configure(userCloudService: dependencies.userCloudService, connectionCloudService: dependencies.connectionCloudService)
 
+        // Verify the active iCloud identity before exposing account-scoped local
+        // data. Only the identity lookup is on the readiness path; images,
+        // subscriptions, and referral counts remain background work.
+        if let localUser = restoreUserFromDefaults() {
+            let accountStatus = await dependencies.cloudKitCore.checkAccountStatus()
+            cloudKitAccountStatus = accountStatus
+
+            if accountStatus.isAvailable {
+                var verifiedSystemRecordName: String?
+                do {
+                    let systemRecordName = try await dependencies.cloudKitCore.getCurrentUserRecordID().recordName
+                    verifiedSystemRecordName = systemRecordName
+                    if let cloudUser = try await dependencies.userCloudService.fetchCurrentUserProfile() {
+                        currentUser = cloudUser
+                        saveUserToDefaults(cloudUser)
+                        UserDefaults.standard.set(systemRecordName, forKey: cloudKitSystemRecordNameKey)
+                        isInitialized = true
+                        needsOnboarding = false
+                        needsiCloudSignIn = false
+
+                        refreshTask?.cancel()
+                        refreshTask = Task { [weak self] in
+                            await self?.finishVerifiedUserRefresh(cloudUser, dependencies: dependencies)
+                        }
+                        return
+                    }
+
+                    // The active iCloud account has no Cauldron profile. Do not
+                    // reveal the previous account's locally cached library.
+                    currentUser = nil
+                    isInitialized = true
+                    needsOnboarding = true
+                    needsiCloudSignIn = false
+                    return
+                } catch {
+                    let storedRecordName = UserDefaults.standard.string(forKey: cloudKitSystemRecordNameKey)
+                    guard let verifiedSystemRecordName,
+                          storedRecordName == verifiedSystemRecordName else {
+                        logger.error("Could not safely verify iCloud identity: \(error.localizedDescription)")
+                        currentUser = nil
+                        isInitialized = true
+                        needsOnboarding = false
+                        needsiCloudSignIn = true
+                        return
+                    }
+                    logger.warning("Verified cached iCloud identity; using offline local session: \(error.localizedDescription)")
+                    currentUser = localUser
+                    isInitialized = true
+                    needsOnboarding = false
+                    needsiCloudSignIn = false
+                    return
+                }
+            }
+
+            // Account-scoped local data remains locked until the active CloudKit
+            // identity is positively verified. Ambiguous availability cannot prove
+            // that the device has not switched iCloud accounts since last launch.
+            currentUser = nil
+            isInitialized = true
+            needsOnboarding = false
+            needsiCloudSignIn = true
+            return
+        }
+
         // Step 1: Check iCloud account status
         let accountStatus = await dependencies.cloudKitCore.checkAccountStatus()
         cloudKitAccountStatus = accountStatus
@@ -101,6 +168,7 @@ class CurrentUserSession: ObservableObject {
                 // Found existing user in CloudKit - use it
                 currentUser = cloudUser
                 saveUserToDefaults(cloudUser)
+                await persistCurrentCloudIdentity(dependencies: dependencies)
 
                 // Download profile image from CloudKit if it exists and local copy is missing
                 await downloadProfileImageIfNeeded(for: cloudUser, dependencies: dependencies)
@@ -118,37 +186,21 @@ class CurrentUserSession: ObservableObject {
         }
 
         // Step 3: Check local storage for existing user
-        if let userIdString = UserDefaults.standard.string(forKey: userIdKey),
-           let userId = UUID(uuidString: userIdString),
-           let username = UserDefaults.standard.string(forKey: usernameKey),
-           let displayName = UserDefaults.standard.string(forKey: displayNameKey) {
-
-            // Retrieve optional profile emoji and color
-            let profileEmoji = UserDefaults.standard.string(forKey: profileEmojiKey)
-            let profileColor = UserDefaults.standard.string(forKey: profileColorKey)
-            let referralCode = UserDefaults.standard.string(forKey: referralCodeKey)
-
-            // Recreate user object from local storage
-            currentUser = User(
-                id: userId,
-                username: username,
-                displayName: displayName,
-                referralCode: referralCode,
-                profileEmoji: profileEmoji,
-                profileColor: profileColor
-            )
+        if let localUser = restoreUserFromDefaults() {
+            currentUser = localUser
 
             // If iCloud is available, try to sync
             if accountStatus.isAvailable {
                 do {
                     let cloudUser = try await dependencies.userCloudService.fetchOrCreateCurrentUser(
-                        username: username,
-                        displayName: displayName,
-                        profileEmoji: profileEmoji,
-                        profileColor: profileColor
+                        username: localUser.username,
+                        displayName: localUser.displayName,
+                        profileEmoji: localUser.profileEmoji,
+                        profileColor: localUser.profileColor
                     )
                     currentUser = cloudUser
                     saveUserToDefaults(cloudUser)
+                    await persistCurrentCloudIdentity(dependencies: dependencies)
 
                     // Download profile image from CloudKit if it exists and local copy is missing
                     await downloadProfileImageIfNeeded(for: cloudUser, dependencies: dependencies)
@@ -188,6 +240,33 @@ class CurrentUserSession: ObservableObject {
         }
     }
 
+    private func restoreUserFromDefaults() -> User? {
+        guard let userIdString = UserDefaults.standard.string(forKey: userIdKey),
+              let userId = UUID(uuidString: userIdString),
+              let username = UserDefaults.standard.string(forKey: usernameKey),
+              let displayName = UserDefaults.standard.string(forKey: displayNameKey) else {
+            return nil
+        }
+
+        return User(
+            id: userId,
+            username: username,
+            displayName: displayName,
+            referralCode: UserDefaults.standard.string(forKey: referralCodeKey),
+            profileEmoji: UserDefaults.standard.string(forKey: profileEmojiKey),
+            profileColor: UserDefaults.standard.string(forKey: profileColorKey)
+        )
+    }
+
+    private func finishVerifiedUserRefresh(_ cloudUser: User, dependencies: DependencyContainer) async {
+        guard !Task.isCancelled, currentUser?.id == cloudUser.id else { return }
+
+        async let profileImage: Void = downloadProfileImageIfNeeded(for: cloudUser, dependencies: dependencies)
+        async let subscriptions: Void = setupNotificationSubscription(for: cloudUser.id, dependencies: dependencies)
+        async let referralCount: Void = syncReferralCountIfNeeded(for: cloudUser, dependencies: dependencies)
+        _ = await (profileImage, subscriptions, referralCount)
+    }
+
     /// Save user data to UserDefaults
     private func saveUserToDefaults(_ user: User) {
         UserDefaults.standard.set(user.id.uuidString, forKey: userIdKey)
@@ -196,6 +275,11 @@ class CurrentUserSession: ObservableObject {
         UserDefaults.standard.set(user.profileEmoji, forKey: profileEmojiKey)
         UserDefaults.standard.set(user.profileColor, forKey: profileColorKey)
         UserDefaults.standard.set(user.referralCode, forKey: referralCodeKey)
+    }
+
+    private func persistCurrentCloudIdentity(dependencies: DependencyContainer) async {
+        guard let recordID = try? await dependencies.cloudKitCore.getCurrentUserRecordID() else { return }
+        UserDefaults.standard.set(recordID.recordName, forKey: cloudKitSystemRecordNameKey)
     }
 
     func replaceCurrentUserIfChanged(_ updatedUser: User) {
@@ -329,6 +413,7 @@ class CurrentUserSession: ObservableObject {
 
         // Save to UserDefaults
         saveUserToDefaults(user)
+        await persistCurrentCloudIdentity(dependencies: dependencies)
 
         currentUser = user
         needsOnboarding = false
@@ -431,12 +516,16 @@ class CurrentUserSession: ObservableObject {
     func signOut() {
         logger.info("Signing out user")
 
+        refreshTask?.cancel()
+        refreshTask = nil
+
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: displayNameKey)
         UserDefaults.standard.removeObject(forKey: profileEmojiKey)
         UserDefaults.standard.removeObject(forKey: profileColorKey)
         UserDefaults.standard.removeObject(forKey: referralCodeKey)
+        UserDefaults.standard.removeObject(forKey: cloudKitSystemRecordNameKey)
 
         currentUser = nil
         needsOnboarding = true

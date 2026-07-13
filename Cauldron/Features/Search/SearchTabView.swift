@@ -176,7 +176,7 @@ struct SearchTabView: View {
 
             // Content based on search mode
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     if searchMode == .recipes {
                         if searchText.isEmpty && viewModel.selectedCategories.isEmpty {
                             // Show categories when not searching and no filters
@@ -290,7 +290,7 @@ struct SearchTabView: View {
     }
     
     private var recipeSearchResultsView: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+        LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             let results = viewModel.displayedRecipeResults
 
             if viewModel.recipeSearchResults.isEmpty {
@@ -396,7 +396,7 @@ struct SearchTabView: View {
     }
     
     private var peopleSearchView: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+        LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if searchText.isEmpty {
                 // Recommendations only (no friends list)
                 if !viewModel.recommendedUsers.isEmpty {

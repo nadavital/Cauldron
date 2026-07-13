@@ -307,7 +307,9 @@ struct CollectionCardView: View {
         if let image = await loader.loadCollectionCoverImage(for: collection, dependencies: dependencies) {
             guard !Task.isCancelled else { return }
             if let currentImage = customCoverImage {
-                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
+                // customCoverTaskID identifies the source; never compare full image
+                // buffers on the main actor just to avoid a state assignment.
+                if image !== currentImage {
                     customCoverImage = image
                 }
             } else {

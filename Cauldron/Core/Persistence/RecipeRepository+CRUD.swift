@@ -502,6 +502,80 @@ extension RecipeRepository {
             }
         }
     }
+
+    /// Atomically promotes a deferred import image without replacing any other
+    /// recipe fields. The timestamp/source checks prevent a concurrent edit from
+    /// being overwritten by the background image task.
+    func promoteImportedImageIfCurrent(
+        recipeId: UUID,
+        ownerId: UUID,
+        expectedUpdatedAt: Date,
+        expectedImageURL: URL?,
+        localizedImageURL: URL
+    ) async throws -> Bool {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<RecipeModel>(
+            predicate: #Predicate { $0.id == recipeId && $0.ownerId == ownerId }
+        )
+        guard let model = try context.fetch(descriptor).first,
+              model.updatedAt == expectedUpdatedAt,
+              model.imageURL == expectedImageURL?.lastPathComponent else {
+            return false
+        }
+
+        let oldRecipe = try model.toDomain()
+        model.imageURL = localizedImageURL.lastPathComponent
+        model.updatedAt = Date()
+        try context.save()
+
+        guard !RuntimeEnvironment.isRunningTests else { return true }
+
+        Task.detached { [weak self, oldRecipe, cloudKitCore, recipeCloudService] in
+            guard let self else { return }
+
+            // The initial create owns the entity's coalesced queue entry. Wait for
+            // that detached sync to finish (success or failure) before enqueueing
+            // image promotion, so stale create completion cannot erase this retry.
+            while let operation = await self.operationQueueService.getOperation(
+                for: recipeId,
+                entityType: .recipe
+            ), operation.status != .failed {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+
+            guard let latestRecipe = try? await self.fetch(id: recipeId, preferredOwnerId: ownerId) else {
+                return
+            }
+            await self.operationQueueService.addOperation(
+                type: .update,
+                entityType: .recipe,
+                entityId: recipeId
+            )
+            await self.operationQueueService.markInProgress(operationId: recipeId)
+            let didSyncPrivate = await self.syncRecipeToCloudKit(
+                latestRecipe,
+                cloudKitCore: cloudKitCore,
+                recipeCloudService: recipeCloudService
+            )
+            let publicResult = await self.syncRecipeToPublicDatabase(
+                latestRecipe,
+                cloudKitCore: cloudKitCore,
+                recipeCloudService: recipeCloudService
+            )
+            _ = try? await self.syncImageChanges(oldRecipe: oldRecipe, newRecipe: latestRecipe)
+
+            if didSyncPrivate, publicResult.isSuccess {
+                await self.operationQueueService.markCompleted(entityId: recipeId, entityType: .recipe)
+            } else {
+                await self.operationQueueService.markFailed(
+                    operationId: recipeId,
+                    error: "CloudKit sync incomplete for imported image promotion"
+                )
+            }
+        }
+        return true
+    }
     
     /// Update recipe in local database only (no CloudKit sync)
     /// - Parameters:

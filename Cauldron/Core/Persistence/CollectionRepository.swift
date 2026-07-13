@@ -70,7 +70,6 @@ actor CollectionRepository {
 
     // Track collections pending sync
     private var pendingSyncCollections = Set<UUID>()
-    private var syncRetryTask: Task<Void, Never>?
     private var operationQueueReplayTask: Task<Void, Never>?
 
     struct CollectionDeletePayload: Codable, Sendable {
@@ -96,7 +95,6 @@ actor CollectionRepository {
         if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
             // Start retry mechanism for failed syncs after actor initialization completes
             Task {
-                await self.startSyncRetryTask()
                 await self.startOperationQueueReplayTask()
             }
         }
@@ -342,10 +340,18 @@ actor CollectionRepository {
 
         // Capture old state for change detection. Use membership-overlaid recipe IDs
         // because the legacy recipeIds blob may be stale after multi-device sync.
-        let oldCollection = try applyMembershipOverlay(
-            to: [existingModel.toDomain()],
-            context: context
-        ).first ?? existingModel.toDomain()
+        let storedCollection = try existingModel.toDomain()
+        let oldCollection: Collection
+        if updateMembershipEdges {
+            oldCollection = try applyMembershipOverlay(
+                to: [storedCollection],
+                context: context
+            ).first ?? storedCollection
+        } else {
+            // Metadata-only cloud merges do not inspect or mutate membership.
+            // Avoid loading the entire local edge table for every collection.
+            oldCollection = storedCollection
+        }
         let oldVisibility = RecipeVisibility(rawValue: existingModel.visibility) ?? .publicRecipe
         let oldRecipeIds = oldCollection.recipeIds
         let oldName = existingModel.name
@@ -1074,22 +1080,6 @@ actor CollectionRepository {
         pendingSyncCollections.contains(collectionId)
     }
 
-    /// Start background task to retry failed syncs
-    private func startSyncRetryTask() {
-        syncRetryTask?.cancel()
-        syncRetryTask = Task {
-            while !Task.isCancelled {
-                // Wait 2 minutes between retry attempts
-                try? await Task.sleep(nanoseconds: 120_000_000_000)
-
-                guard !Task.isCancelled else { break }
-
-                // Retry pending syncs
-                await retryPendingSyncs()
-            }
-        }
-    }
-
     private func startOperationQueueReplayTask() {
         operationQueueReplayTask?.cancel()
         operationQueueReplayTask = Task {
@@ -1191,45 +1181,6 @@ actor CollectionRepository {
         }
     }
 
-    /// Retry syncing collections that failed previously
-    private func retryPendingSyncs() async {
-        guard !self.pendingSyncCollections.isEmpty else { return }
-
-        // Retrying sync for pending collections
-        let isAvailable = await cloudKitCore.isAvailable()
-        guard isAvailable else {
-            // CloudKit still not available - will retry later
-            return
-        }
-
-        let collectionsToRetry = Array(self.pendingSyncCollections)
-
-        for collectionId in collectionsToRetry {
-            guard !Task.isCancelled else { break }
-
-            do {
-                guard let collection = try await fetch(id: collectionId) else {
-                    // Collection was deleted, remove from pending
-                    self.pendingSyncCollections.remove(collectionId)
-                    continue
-                }
-
-                await syncCollectionToCloudKit(collection)
-                guard !pendingSyncCollections.contains(collectionId) else {
-                    continue
-                }
-
-                let membershipSynced = await syncPendingMembershipEdgesToCloudKit(collectionId: collectionId)
-                if membershipSynced {
-                    self.pendingSyncCollections.remove(collectionId)
-                    // Retry successful for collection
-                }
-            } catch {
-                logger.error("❌ Retry failed for collection: \(error.localizedDescription)")
-            }
-        }
-    }
-
     // MARK: - Recipe Visibility Change Handling
 
     /// Handle recipe visibility changes and update affected collections
@@ -1279,10 +1230,53 @@ actor CollectionRepository {
         }
 
         do {
-            let remoteDeletedCollections = try await collectionCloudService.fetchDeletedCollectionTombstones(ownerId: userId)
-            let cloudCollections = try await collectionCloudService.fetchCollections(forUserId: userId)
-            let cloudMembershipEdges = try await collectionCloudService.fetchMembershipEdges(forUserId: userId)
+            let snapshot = try await collectionCloudService.fetchSyncSnapshot(forUserId: userId)
+            let remoteDeletedCollections = snapshot.deletedCollections
+            let cloudCollections = snapshot.collections
+            let cloudMembershipEdges = snapshot.membershipEdges
             let context = ModelContext(modelContainer)
+            let localCollectionModels = try context.fetch(
+                FetchDescriptor<CollectionModel>(predicate: #Predicate { $0.userId == userId })
+            )
+            let localMembershipsByCollectionId = Dictionary(
+                grouping: try context.fetch(
+                    FetchDescriptor<CollectionMembershipModel>(
+                        predicate: #Predicate { $0.ownerId == userId }
+                    )
+                ).map { $0.toDomain() },
+                by: \.collectionId
+            )
+            var localCollectionsById: [UUID: Collection] = [:]
+            let localModelsById = Dictionary(grouping: localCollectionModels) { (model: CollectionModel) in
+                model.id
+            }
+            var removedDuplicateCollection = false
+            for models in localModelsById.values {
+                guard let model = models.max(by: { $0.updatedAt < $1.updatedAt }) else { continue }
+                for duplicate in models where duplicate !== model {
+                    context.delete(duplicate)
+                    removedDuplicateCollection = true
+                }
+                let stored = try model.toDomain()
+                let overlaid: Collection
+                if let edges = localMembershipsByCollectionId[stored.id], !edges.isEmpty {
+                    overlaid = collectionWithRecipeIds(
+                        stored,
+                        CollectionMembershipProjection.activeRecipeIds(from: edges)
+                    )
+                } else {
+                    overlaid = stored
+                }
+
+                if let existing = localCollectionsById[stored.id],
+                   existing.updatedAt >= overlaid.updatedAt {
+                    continue
+                }
+                localCollectionsById[stored.id] = overlaid
+            }
+            if removedDuplicateCollection {
+                try context.save()
+            }
             for tombstone in remoteDeletedCollections {
                 try upsertLocalDeletedCollectionTombstone(tombstone, context: context)
                 try removeLocalCollectionSuppressedByTombstone(tombstone, context: context)
@@ -1334,7 +1328,7 @@ actor CollectionRepository {
                     continue
                 }
 
-                let localCollection = try await fetch(id: cloudCollection.id)
+                let localCollection = localCollectionsById[cloudCollection.id]
 
                 if let local = localCollection {
                     // Update if cloud version is newer (don't update timestamp - sync operation)

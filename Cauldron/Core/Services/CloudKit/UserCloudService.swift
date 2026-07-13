@@ -65,6 +65,7 @@ actor UserCloudService {
             }
         } catch {
             logger.warning("Error fetching user by custom ID: \(error.localizedDescription)")
+            throw error
         }
 
         // Fallback: Try the old system record ID
@@ -80,6 +81,7 @@ actor UserCloudService {
             // Not found
         } catch {
             logger.warning("Error fetching user by system ID: \(error.localizedDescription)")
+            throw error
         }
 
         logger.info("No existing user profile found in CloudKit PUBLIC database")

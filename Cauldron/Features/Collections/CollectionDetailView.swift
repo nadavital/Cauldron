@@ -156,7 +156,7 @@ struct CollectionDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 CollectionCoverView(
                     collection: collection,
                     recipes: recipes,
@@ -842,21 +842,23 @@ struct CollectionDetailView: View {
 
     @ViewBuilder
     private var recipesCompactContent: some View {
-        ForEach(visibleRecipes) { recipe in
-            NavigationLink {
-                recipeDestination(for: recipe)
-            } label: {
-                RecipeRowView(recipe: recipe, dependencies: dependencies)
-            }
-            .buttonStyle(PressableScaleStyle())
-            .contextMenu {
-                if isOwned {
-                    Button(role: .destructive) {
-                        Task {
-                            await removeRecipe(recipe)
+        LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            ForEach(visibleRecipes) { recipe in
+                NavigationLink {
+                    recipeDestination(for: recipe)
+                } label: {
+                    RecipeRowView(recipe: recipe, dependencies: dependencies)
+                }
+                .buttonStyle(PressableScaleStyle())
+                .contextMenu {
+                    if isOwned {
+                        Button(role: .destructive) {
+                            Task {
+                                await removeRecipe(recipe)
+                            }
+                        } label: {
+                            Label("Remove", systemImage: "trash")
                         }
-                    } label: {
-                        Label("Remove", systemImage: "trash")
                     }
                 }
             }

@@ -58,10 +58,6 @@ private enum RecipeImageLoadingPipeline {
         return ImageCache.shared.get(cacheKey)
     }
 
-    static func areImagesEqual(_ lhs: UIImage, _ rhs: UIImage) -> Bool {
-        ImageLoadingPipeline.areImagesEqual(lhs, rhs)
-    }
-
     static func loadImage(
         with service: RecipeImageService,
         recipeId: UUID?,
@@ -90,7 +86,9 @@ private enum RecipeImageLoadingPipeline {
         imageOpacity: inout Double
     ) {
         if let currentImage = loadedImage {
-            if !areImagesEqual(image, currentImage) {
+            // The load task is already keyed by recipe, URL, and cache variant.
+            // Avoid a full pixel-buffer comparison on the main actor here.
+            if image !== currentImage {
                 loadedImage = image
                 withAnimation(.easeOut(duration: 0.3)) {
                     imageOpacity = 1.0

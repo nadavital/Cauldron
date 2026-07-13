@@ -335,14 +335,52 @@ struct RecipeImportPreviewView: View {
                 return
             }
 
-            let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
-                from: editedRecipe,
-                userId: userId,
-                imageManager: dependencies.imageManager
-            )
+            let recipeToSave = ImportedRecipeSaveBuilder.recipeForSave(from: editedRecipe, userId: userId)
 
             // Save to repository (CloudKit sync happens automatically)
             try await dependencies.recipeRepository.create(recipeToSave)
+            Task {
+                guard let stagedImage = await ImportedRecipeSaveBuilder.stageRemoteImage(
+                    for: recipeToSave,
+                    imageManager: dependencies.imageManager
+                ), stagedImage.expectedModificationDate == nil else { return }
+                guard CurrentUserSession.shared.userId == userId else { return }
+                guard let savedImage = try? await dependencies.imageManager.saveDownloadedImageDataWithToken(
+                    stagedImage.data,
+                    recipeId: recipeToSave.id,
+                    expectedModificationDate: stagedImage.expectedModificationDate
+                ) else { return }
+                let localizedImageURL = await dependencies.imageManager.imageURL(for: savedImage.filename)
+                let promotedModificationDate = savedImage.modificationDate
+                guard CurrentUserSession.shared.userId == userId else {
+                    await dependencies.imageManager.deleteImageIfUnchanged(
+                        recipeId: recipeToSave.id,
+                        modificationDate: promotedModificationDate
+                    )
+                    return
+                }
+                do {
+                    let promoted = try await dependencies.recipeRepository.promoteImportedImageIfCurrent(
+                        recipeId: recipeToSave.id,
+                        ownerId: userId,
+                        expectedUpdatedAt: recipeToSave.updatedAt,
+                        expectedImageURL: recipeToSave.imageURL,
+                        localizedImageURL: localizedImageURL
+                    )
+                    guard promoted else {
+                        await dependencies.imageManager.deleteImageIfUnchanged(
+                            recipeId: recipeToSave.id,
+                            modificationDate: promotedModificationDate
+                        )
+                        return
+                    }
+                } catch {
+                    await dependencies.imageManager.deleteImageIfUnchanged(
+                        recipeId: recipeToSave.id,
+                        modificationDate: promotedModificationDate
+                    )
+                }
+            }
             AppLogger.parsing.info("Successfully saved imported recipe: \(recipeToSave.title)")
             NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
 

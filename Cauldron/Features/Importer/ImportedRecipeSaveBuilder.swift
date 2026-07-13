@@ -8,6 +8,10 @@
 import Foundation
 
 enum ImportedRecipeSaveBuilder {
+    struct StagedRemoteImage: Sendable {
+        let data: Data
+        let expectedModificationDate: Date?
+    }
     static func recipeForSave(from recipe: Recipe, userId: UUID?) -> Recipe {
         let resolvedNotes = buildNotes(for: recipe)
 
@@ -88,5 +92,20 @@ enum ImportedRecipeSaveBuilder {
         }
 
         return recipeToSave
+    }
+
+    static func stageRemoteImage(
+        for recipe: Recipe,
+        imageManager: RecipeImageManager
+    ) async -> StagedRemoteImage? {
+        guard let imageURL = recipe.imageURL, !imageURL.isFileURL else { return nil }
+        do {
+            let expectedModificationDate = await imageManager.getImageModificationDate(recipeId: recipe.id)
+            let data = try await imageManager.downloadOptimizedImageData(from: imageURL, recipeId: recipe.id)
+            return StagedRemoteImage(data: data, expectedModificationDate: expectedModificationDate)
+        } catch {
+            AppLogger.parsing.warning("Deferred import image staging failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 }

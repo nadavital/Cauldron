@@ -6,6 +6,8 @@ enum ShareExtensionImportContract {
     static let pendingRecipeURLKey = "shareExtension.pendingRecipeURL"
     static let pendingRecipeTextKey = "shareExtension.pendingRecipeText"
     static let preparedRecipePayloadKey = "shareExtension.preparedRecipePayload"
+    static let inboxKey = "shareExtension.inbox.v1"
+    static let maximumInboxItemCount = 20
 
     static func firstHTTPURL(in text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -89,6 +91,83 @@ enum ShareExtensionImportContract {
     private static func isHTTPURL(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
+    }
+}
+
+/// One atomic share handoff. Keeping URL/text/prepared data together prevents
+/// separate UserDefaults keys from being mixed when shares arrive quickly.
+struct ShareExtensionInboxItem: Codable, Sendable, Equatable, Identifiable {
+    let id: UUID
+    let createdAt: Date
+    let urlString: String?
+    let text: String?
+    let preparedPayload: Data?
+
+    nonisolated init(
+        id: UUID = UUID(),
+        createdAt: Date = Date(),
+        urlString: String? = nil,
+        text: String? = nil,
+        preparedPayload: Data? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.urlString = urlString
+        self.text = text
+        self.preparedPayload = preparedPayload
+    }
+}
+
+/// Cross-process-safe inbox storage. Each share is an independent atomic file,
+/// so extension appends cannot overwrite one another or race app acknowledgements.
+enum ShareExtensionInboxFiles {
+    private static let directoryName = "ShareExtensionInbox-v1"
+
+    static func enqueue(_ item: ShareExtensionInboxItem) throws {
+        guard let directory = directoryURL() else { return }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent(item.id.uuidString).appendingPathExtension("json")
+        try JSONEncoder().encode(item).write(to: destination, options: .atomic)
+
+        let overflow = items().dropLast(ShareExtensionImportContract.maximumInboxItemCount)
+        for entry in overflow {
+            try? FileManager.default.removeItem(at: entry.url)
+        }
+    }
+
+    static func items() -> [(url: URL, item: ShareExtensionInboxItem)] {
+        guard let directory = directoryURL(),
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else { return [] }
+
+        return urls.compactMap { url in
+            guard let data = try? Data(contentsOf: url),
+                  let item = try? JSONDecoder().decode(ShareExtensionInboxItem.self, from: data) else {
+                try? FileManager.default.removeItem(at: url)
+                return nil
+            }
+            return (url, item)
+        }.sorted {
+            if $0.item.createdAt == $1.item.createdAt {
+                return $0.item.id.uuidString < $1.item.id.uuidString
+            }
+            return $0.item.createdAt < $1.item.createdAt
+        }
+    }
+
+    static func remove(id: UUID) {
+        guard let directory = directoryURL() else { return }
+        let url = directory.appendingPathComponent(id.uuidString).appendingPathExtension("json")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func directoryURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ShareExtensionImportContract.appGroupID)?
+            .appendingPathComponent(directoryName, isDirectory: true)
     }
 }
 

@@ -31,6 +31,7 @@ actor RecipeOCRService {
     }
 
     func extractText(from image: UIImage) async throws -> String {
+        try Task.checkCancellation()
         guard let (cgImage, orientation) = normalizedCGImage(from: image) else {
             throw RecipeOCRError.unsupportedImage
         }
@@ -43,6 +44,7 @@ actor RecipeOCRService {
 
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation)
         try handler.perform([request])
+        try Task.checkCancellation()
 
         guard let observations = request.results, !observations.isEmpty else {
             throw RecipeOCRError.noTextFound
@@ -136,7 +138,18 @@ actor RecipeOCRService {
 
     private func normalizedCGImage(from image: UIImage) -> (CGImage, CGImagePropertyOrientation)? {
         if let cgImage = image.cgImage {
-            return (cgImage, CGImagePropertyOrientation(image.imageOrientation))
+            let maximumPixelSize = 2_500
+            guard max(cgImage.width, cgImage.height) > maximumPixelSize else {
+                return (cgImage, CGImagePropertyOrientation(image.imageOrientation))
+            }
+            guard let data = image.jpegData(compressionQuality: 0.9),
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+                  ] as CFDictionary) else { return nil }
+            return (thumbnail, .up)
         }
 
         if let ciImage = image.ciImage {

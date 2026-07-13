@@ -133,7 +133,9 @@ enum RecipeSortOrder: String, CaseIterable, Identifiable {
     private let recipeSearchSubject = PassthroughSubject<(String, Set<RecipeCategory>, Int), Never>()
 
     var currentUserId: UUID {
-        CurrentUserSession.shared.userId ?? UUID()
+        // ConnectionManager owns a stable fallback for test/transition states.
+        // Creating a UUID on every access made relationship filtering inconsistent.
+        dependencies.connectionManager.currentUserId
     }
 
     init(dependencies: DependencyContainer) {

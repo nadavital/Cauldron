@@ -2,6 +2,7 @@ import Foundation
 
 enum SharedRecipePreprocessor {
     private static let extractor = RecipeWebExtractionCore()
+    private static let maximumHTMLBytes = 3_000_000
 
     static func prepareRecipePayload(from url: URL) async -> PreparedShareRecipePayload? {
         guard let html = await fetchHTML(from: url),
@@ -39,10 +40,18 @@ enum SharedRecipePreprocessor {
         )
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
+                  (200...299).contains(httpResponse.statusCode),
+                  httpResponse.mimeType == nil || httpResponse.mimeType == "text/html" || httpResponse.mimeType == "application/xhtml+xml",
+                  httpResponse.expectedContentLength <= Int64(maximumHTMLBytes) || httpResponse.expectedContentLength < 0 else {
                 return nil
+            }
+            var data = Data()
+            data.reserveCapacity(min(max(Int(httpResponse.expectedContentLength), 0), maximumHTMLBytes))
+            for try await byte in bytes {
+                guard data.count < maximumHTMLBytes else { return nil }
+                data.append(byte)
             }
 
             if let html = String(data: data, encoding: .utf8) {

@@ -112,7 +112,9 @@ struct ProfileAvatar: View {
 
         if let image = result.image {
             if let currentImage = profileImage {
-                if !ImageLoadingPipeline.areImagesEqual(image, currentImage) {
+                // Loading is keyed by the user's image metadata; reference identity
+                // is sufficient to suppress cache hits without comparing pixels.
+                if image !== currentImage {
                     profileImage = image
                 }
             } else {

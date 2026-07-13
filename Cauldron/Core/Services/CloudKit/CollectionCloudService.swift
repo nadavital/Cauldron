@@ -36,6 +36,12 @@ struct DeletedCollectionTombstone: Sendable, Equatable {
     }
 }
 
+struct CollectionSyncSnapshot: Sendable {
+    let collections: [Collection]
+    let membershipEdges: [CollectionMembershipEdge]
+    let deletedCollections: [DeletedCollectionTombstone]
+}
+
 /// CloudKit service for collection-related operations.
 ///
 /// Handles:
@@ -118,6 +124,29 @@ actor CollectionCloudService {
     func fetchCollections(forUserId userId: UUID) async throws -> [Collection] {
         logger.info("📥 Fetching collections for user: \(userId)")
 
+        let collections = try await fetchCollectionsWithoutOverlay(forUserId: userId)
+        let collectionsWithMemberships = await applyMembershipOverlay(to: collections)
+        logger.info("✅ Fetched \(collectionsWithMemberships.count) collections")
+        return collectionsWithMemberships
+    }
+
+    /// Fetches all collection state needed by the repository in one logical pass.
+    /// Unlike `fetchCollections`, this deliberately avoids the membership/tombstone
+    /// overlay because the repository merges those same records into its durable store.
+    func fetchSyncSnapshot(forUserId userId: UUID) async throws -> CollectionSyncSnapshot {
+        async let collections = fetchCollectionsWithoutOverlay(forUserId: userId)
+        async let membershipEdges = fetchMembershipEdges(forUserId: userId)
+        async let deletedCollections = fetchDeletedCollectionTombstones(ownerId: userId)
+
+        return try await CollectionSyncSnapshot(
+            collections: collections,
+            membershipEdges: membershipEdges,
+            deletedCollections: deletedCollections
+        )
+    }
+
+    private func fetchCollectionsWithoutOverlay(forUserId userId: UUID) async throws -> [Collection] {
+
         let db = try await core.getPublicDatabase()
         let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
         let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
@@ -152,9 +181,7 @@ actor CollectionCloudService {
             throw error
         }
 
-        let collectionsWithMemberships = await applyMembershipOverlay(to: collections)
-        logger.info("✅ Fetched \(collectionsWithMemberships.count) collections")
-        return collectionsWithMemberships
+        return collections
     }
 
     /// Fetch shared collections from friends
@@ -397,8 +424,47 @@ actor CollectionCloudService {
     }
 
     func saveMembershipEdges(_ edges: [CollectionMembershipEdge]) async throws {
-        for edge in edges {
-            try await saveMembershipEdge(edge)
+        guard !edges.isEmpty else { return }
+
+        let db = try await core.getPublicDatabase()
+        for (ownerId, ownerEdges) in Dictionary(grouping: edges, by: \.ownerId) {
+            let existingRecords = try await fetchMembershipRecords(forUserId: ownerId, in: db)
+            let existingByID = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.recordID, $0) })
+            let records = ownerEdges.compactMap { edge -> CKRecord? in
+                let recordID = Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+                let record = existingByID[recordID]
+                    ?? CKRecord(recordType: CloudKitCore.RecordType.collectionMembership, recordID: recordID)
+                if let serverEdge = try? membershipEdge(from: record), serverEdge.updatedAt > edge.updatedAt {
+                    return nil
+                }
+                populateMembershipRecord(record, from: edge)
+                return record
+            }
+
+            for chunk in Self.chunked(records, size: 200) {
+                do {
+                    try await saveMembershipRecords(chunk, in: db)
+                } catch {
+                    // Preserve conflict semantics when another device changes an edge
+                    // between the owner query and the batch modify operation.
+                    for edge in ownerEdges where chunk.contains(where: {
+                        $0.recordID == Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+                    }) {
+                        try await saveMembershipEdge(edge)
+                    }
+                }
+            }
+        }
+    }
+
+    func membershipRecords(for edges: [CollectionMembershipEdge]) -> [CKRecord] {
+        edges.map { edge in
+            let record = CKRecord(
+                recordType: CloudKitCore.RecordType.collectionMembership,
+                recordID: Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+            )
+            populateMembershipRecord(record, from: edge)
+            return record
         }
     }
 
@@ -611,6 +677,27 @@ actor CollectionCloudService {
             operation.database = db
             operation.start()
         }
+    }
+
+    private func saveMembershipRecords(_ records: [CKRecord], in db: CKDatabase) async throws {
+        guard !records.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
+            operation.savePolicy = .ifServerRecordUnchanged
+            operation.isAtomic = false
+            operation.modifyRecordsResultBlock = { result in
+                continuation.resume(with: result)
+            }
+            operation.database = db
+            operation.start()
+        }
+    }
+
+    private func fetchMembershipRecords(forUserId userId: UUID, in db: CKDatabase) async throws -> [CKRecord] {
+        let predicate = NSPredicate(format: "ownerId == %@", userId.uuidString)
+        let query = CKQuery(recordType: CloudKitCore.RecordType.collectionMembership, predicate: predicate)
+        return try await fetchAllRecords(matching: query, in: db)
     }
 
     private func deduplicatedAndSortedCollections(_ collections: [Collection]) -> [Collection] {

@@ -19,17 +19,7 @@ actor CloudImageMigration {
     private let logger = Logger(subsystem: "com.cauldron", category: "CloudImageMigration")
 
     private var migrationTask: Task<Void, Never>?
-    private var migrationStatus: MigrationStatus = .notStarted {
-        didSet {
-            // Emit event when status changes
-            Task {
-                await imageSyncManager.events.first { _ in
-                    // Yield the event
-                    return false
-                }
-            }
-        }
-    }
+    private var migrationStatus: MigrationStatus = .notStarted
 
     // UserDefaults keys for persistence
     private let migrationCompletedKey = "com.cauldron.imageMigrationCompleted_v2" // v2 = re-upload to PRIVATE custom zone

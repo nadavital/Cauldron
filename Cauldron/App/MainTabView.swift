@@ -407,7 +407,10 @@ struct MainTabView: View {
 
     @MainActor
     private func autoSavePreparedSharedRecipe(_ pending: ShareExtensionImportStore.PendingPreparedSharedRecipe) async {
-        defer { isSavingPreparedSharedRecipe = false }
+        defer {
+            isSavingPreparedSharedRecipe = false
+            scheduleNextPendingImport()
+        }
         let prepared = pending.preparedRecipe
 
         let recipeForImport: Recipe
@@ -430,14 +433,52 @@ struct MainTabView: View {
             return
         }
 
-        let recipeToSave = await ImportedRecipeSaveBuilder.recipeForSave(
-            from: recipeForImport,
-            userId: userId,
-            imageManager: dependencies.imageManager
-        )
+        let recipeToSave = ImportedRecipeSaveBuilder.recipeForSave(from: recipeForImport, userId: userId)
 
         do {
             try await dependencies.recipeRepository.create(recipeToSave)
+            Task {
+                guard let stagedImage = await ImportedRecipeSaveBuilder.stageRemoteImage(
+                    for: recipeToSave,
+                    imageManager: dependencies.imageManager
+                ), stagedImage.expectedModificationDate == nil else { return }
+                guard CurrentUserSession.shared.userId == userId else { return }
+                guard let savedImage = try? await dependencies.imageManager.saveDownloadedImageDataWithToken(
+                    stagedImage.data,
+                    recipeId: recipeToSave.id,
+                    expectedModificationDate: stagedImage.expectedModificationDate
+                ) else { return }
+                let localizedImageURL = await dependencies.imageManager.imageURL(for: savedImage.filename)
+                let promotedModificationDate = savedImage.modificationDate
+                guard CurrentUserSession.shared.userId == userId else {
+                    await dependencies.imageManager.deleteImageIfUnchanged(
+                        recipeId: recipeToSave.id,
+                        modificationDate: promotedModificationDate
+                    )
+                    return
+                }
+                do {
+                    let promoted = try await dependencies.recipeRepository.promoteImportedImageIfCurrent(
+                        recipeId: recipeToSave.id,
+                        ownerId: userId,
+                        expectedUpdatedAt: recipeToSave.updatedAt,
+                        expectedImageURL: recipeToSave.imageURL,
+                        localizedImageURL: localizedImageURL
+                    )
+                    guard promoted else {
+                        await dependencies.imageManager.deleteImageIfUnchanged(
+                            recipeId: recipeToSave.id,
+                            modificationDate: promotedModificationDate
+                        )
+                        return
+                    }
+                } catch {
+                    await dependencies.imageManager.deleteImageIfUnchanged(
+                        recipeId: recipeToSave.id,
+                        modificationDate: promotedModificationDate
+                    )
+                }
+            }
             AppLogger.general.info("✅ Auto-saved prepared share recipe: \(recipeToSave.title)")
             ShareExtensionImportStore.acknowledgePreparedRecipe(matching: pending.payloadData)
             NotificationCenter.default.post(name: .recipeAdded, object: recipeToSave.id)
@@ -468,6 +509,14 @@ struct MainTabView: View {
         }
 
         activeShareImportAcknowledgement = nil
+        scheduleNextPendingImport()
+    }
+
+    private func scheduleNextPendingImport() {
+        Task { @MainActor in
+            await Task.yield()
+            openPendingImporterIfNeeded()
+        }
     }
 
     @MainActor

@@ -37,6 +37,8 @@ struct ContentView: View {
     @State private var preloadedData: PreloadedRecipeData?
     @State private var loadedUserId: UUID?
     @State private var sessionReloadTask: Task<Void, Never>?
+    @State private var backgroundMaintenanceTask: Task<Void, Never>?
+    @State private var backgroundWarmupTask: Task<Void, Never>?
     @State private var sharedContentWrapper: SharedContentWrapper?
     @State private var isLoadingShare = false
     @State private var showShareError = false
@@ -262,6 +264,10 @@ struct ContentView: View {
 
     @MainActor
     private func resetSessionScopedState() {
+        backgroundMaintenanceTask?.cancel()
+        backgroundMaintenanceTask = nil
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = nil
         isDataReady = false
         preloadedData = nil
         loadedUserId = nil
@@ -382,57 +388,9 @@ struct ContentView: View {
             let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
 
             if !hasLaunchedBefore {
-                // First launch - sync from CloudKit FIRST to download images
-                AppLogger.general.info("🚀 First launch detected - syncing from CloudKit before showing UI...")
-
-                // Run one-time migration to fix recipe ownership from old reference system
-                do {
-                    try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
-                } catch {
-                    AppLogger.general.warning("Recipe ownership migration failed (continuing): \(error.localizedDescription)")
-                }
-
-                // Perform sync (this will download images)
-                if userSession.isCloudSyncAvailable {
-                    do {
-                        try await dependencies.recipeSyncService.performFullSync(for: userId)
-                        AppLogger.general.info("✅ Initial CloudKit sync completed with images")
-                    } catch {
-                        AppLogger.general.warning("Initial sync failed (continuing): \(error.localizedDescription)")
-                    }
-                }
-
-                // Mark as launched
+                // The launch marker controls one-time presentation only. CloudKit
+                // hydration and repair work happens after local content is visible.
                 UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
-            }
-
-            // Clean up any duplicate recipes that may have been created
-            do {
-                let removedCount = try await dependencies.recipeRepository.removeDuplicateRecipes()
-                if removedCount > 0 {
-                    AppLogger.general.info("🧹 Cleaned up \(removedCount) duplicate recipes")
-                }
-                let removedSelfCopyCount = try await dependencies.recipeRepository.removeSelfSavedRecipeCopies(
-                    currentUserId: userId
-                )
-                if removedSelfCopyCount > 0 {
-                    AppLogger.general.info("🧹 Cleaned up \(removedSelfCopyCount) self-saved recipe copies")
-                }
-            } catch {
-                AppLogger.general.warning("Failed to remove duplicate recipes: \(error.localizedDescription)")
-            }
-
-            // Run one-time migrations (for existing users)
-            if hasLaunchedBefore {
-                do {
-                    // Fix recipe ownership from old reference system
-                    try await dependencies.recipeRepository.migrateRecipeOwnership(currentUserId: userId)
-
-                    // Fix corrupted image filenames (CloudKit version suffixes)
-                    try await dependencies.recipeRepository.fixCorruptedImageFilenames()
-                } catch {
-                    AppLogger.general.warning("Migration failed (continuing): \(error.localizedDescription)")
-                }
             }
 
             // OPTIMIZATION: Parallelize independent data fetches using async let
@@ -449,41 +407,61 @@ struct ContentView: View {
             let collections = try await localCollections
             // Data preloaded successfully (don't log routine operations)
 
-            // Run migration to ensure public recipes are in the public database.
-            // This is safe on both first launch and subsequent launches because the
-            // repository only marks the migration complete after every eligible
-            // public recipe has actually been backfilled.
-            Task.detached(priority: .utility) {
-                guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
-                    return
-                }
-                await dependencies.recipeRepository.migratePublicRecipesToPublicDatabase()
-                await dependencies.recipeRepository.migratePublicRecipeSearchMetadata()
-            }
-
-            // OPTIMIZATION: For subsequent launches, start background sync AFTER UI is shown
-            // This keeps the UI responsive while CloudKit syncs in the background
-            if hasLaunchedBefore, userSession.isCloudSyncAvailable {
-                Task.detached(priority: .utility) {
-                    guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
-                        return
-                    }
-
-                    do {
-                        try await dependencies.recipeSyncService.performFullSync(for: userId)
-                        // Background sync completed (don't log routine operations)
-                    } catch {
-                        AppLogger.general.warning("Background sync failed: \(error.localizedDescription)")
-                    }
-                }
-            }
-
+            scheduleBackgroundMaintenance(for: userId)
             scheduleBackgroundWarmup(for: userId)
 
             return PreloadedRecipeData(allRecipes: allRecipes, recentlyCookedIds: recentlyCookedIds, collections: collections)
         } catch {
             AppLogger.general.warning("Data preload failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    private func scheduleBackgroundMaintenance(for userId: UUID) {
+        let recipeRepository = dependencies.recipeRepository
+        let recipeSyncService = dependencies.recipeSyncService
+
+        backgroundMaintenanceTask?.cancel()
+        backgroundMaintenanceTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+
+            guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                return
+            }
+
+            // Repair passes are deliberately off the readiness path. They are
+            // idempotent and run serially to avoid competing SwiftData contexts.
+            do {
+                try await recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+                try await recipeRepository.fixCorruptedImageFilenames()
+                _ = try await recipeRepository.removeDuplicateRecipes()
+                _ = try await recipeRepository.removeSelfSavedRecipeCopies(currentUserId: userId)
+            } catch {
+                AppLogger.general.warning("Background library maintenance failed: \(error.localizedDescription)")
+            }
+
+            guard !Task.isCancelled,
+                  await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
+                return
+            }
+
+            await recipeRepository.migratePublicRecipesToPublicDatabase()
+            await recipeRepository.migratePublicRecipeSearchMetadata()
+
+            guard !Task.isCancelled,
+                  await MainActor.run(body: {
+                      CurrentUserSession.shared.userId == userId &&
+                      CurrentUserSession.shared.isCloudSyncAvailable
+                  }) else {
+                return
+            }
+
+            do {
+                try await recipeSyncService.performFullSync(for: userId)
+            } catch {
+                AppLogger.general.warning("Background sync failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -494,7 +472,13 @@ struct ContentView: View {
         let sharingRepository = dependencies.sharingRepository
         let profileImageManager = dependencies.profileImageManager
 
-        Task.detached(priority: .utility) {
+        backgroundWarmupTask?.cancel()
+        backgroundWarmupTask = Task.detached(priority: .background) {
+            // Let the local UI settle and give higher-priority sync/maintenance
+            // work the first opportunity to finish before speculative prefetch.
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+
             guard await MainActor.run(body: { CurrentUserSession.shared.userId == userId }) else {
                 return
             }

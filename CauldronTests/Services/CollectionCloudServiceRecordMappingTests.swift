@@ -186,4 +186,35 @@ final class CollectionCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertEqual(record["sourceDeviceId"] as? String, "device-b")
         XCTAssertEqual((record["schemaVersion"] as? NSNumber)?.intValue, 3)
     }
+
+    func testMembershipRecordsBuildsBatchWithoutLosingEdgeIdentity() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionId = UUID()
+        let ownerId = UUID()
+        let edges = (0..<3).map { sortOrder in
+            CollectionMembershipEdge(
+                collectionId: collectionId,
+                recipeId: UUID(),
+                ownerId: ownerId,
+                status: sortOrder == 2 ? .removed : .active,
+                updatedAt: Date(timeIntervalSince1970: 1_800_000_000 + Double(sortOrder)),
+                sortOrder: sortOrder,
+                sourceDeviceId: "batch-device"
+            )
+        }
+
+        let records = await service.membershipRecords(for: edges)
+
+        XCTAssertEqual(records.count, edges.count)
+        for (record, edge) in zip(records, edges) {
+            XCTAssertEqual(
+                record.recordID,
+                CollectionCloudService.membershipRecordID(
+                    collectionId: edge.collectionId,
+                    recipeId: edge.recipeId
+                )
+            )
+            XCTAssertEqual(try await service.membershipEdge(from: record), edge)
+        }
+    }
 }

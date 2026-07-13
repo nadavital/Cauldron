@@ -98,14 +98,6 @@ struct ProfileEditView: View {
                                     .scaledToFill()
                                     .frame(width: 100, height: 100)
                                     .clipShape(Circle())
-                            } else if let profileImageURL = currentUser.profileImageURL,
-                                      let imageData = try? Data(contentsOf: profileImageURL),
-                                      let image = UIImage(data: imageData) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 100, height: 100)
-                                    .clipShape(Circle())
                             } else {
                                 Circle()
                                     .fill(Color.appSurface)
