@@ -8,16 +8,13 @@
 #if DEBUG
 import Foundation
 import SwiftData
-#if canImport(UIKit)
-import UIKit
-#endif
 
 @MainActor
 enum SimulatorQASeed {
     static let currentUser = User(
         id: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
-        username: "nadavqa",
-        displayName: "Nadav QA",
+        username: "nadav_cooks",
+        displayName: "Nadav Avital",
         referralCode: "QA2026",
         profileEmoji: "🍳",
         profileColor: "#FF9933"
@@ -67,6 +64,7 @@ enum SimulatorQASeed {
         let context = ModelContext(dependencies.modelContainer)
 
         do {
+            ImageCache.shared.clear()
             try clearSeededState(in: context)
             try seedUsers(in: context)
             let recipes = try seedRecipes(in: context)
@@ -87,7 +85,13 @@ enum SimulatorQASeed {
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3")!,
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4")!,
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5")!,
-            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6")!
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11")!,
+            UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12")!
         ]
         let collectionIds = [
             UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
@@ -147,48 +151,52 @@ enum SimulatorQASeed {
         let recipes = [
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
-                title: "Lemon Herb Chicken",
-                ingredients: ["2 chicken breasts", "1 lemon", "2 tbsp olive oil", "1 tsp thyme"],
-                steps: ["Season chicken with salt and thyme.", "Sear until golden.", "Finish with lemon juice."],
-                tags: ["Dinner", "Weeknight", "Chicken"],
+                title: "Pot Roast",
+                ingredients: ["3 lb chuck roast", "3 carrots", "2 onions", "2 cups beef stock", "2 tbsp tomato paste", "Fresh thyme"],
+                steps: ["Brown the roast deeply on all sides.", "Add vegetables, stock, tomato paste, and thyme.", "Braise until the meat is tender and the sauce is glossy."],
+                tags: ["Dinner", "Slow Cooked", "Comfort"],
                 ownerId: currentUser.id,
                 visibility: .publicRecipe,
                 updatedAt: now,
-                imageURL: imageURLs.lemonChicken
+                imageURL: imageURLs.potRoast,
+                totalMinutes: 210
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
-                title: "Offline Pantry Pasta",
-                ingredients: ["8 oz pasta", "1 can tomatoes", "2 cloves garlic", "Parmesan"],
-                steps: ["Boil pasta.", "Simmer tomatoes with garlic.", "Toss pasta with sauce."],
-                tags: ["Dinner", "Pasta", "Offline"],
+                title: "Mac and Cheese",
+                ingredients: ["1 lb macaroni", "3 cups sharp cheddar", "1 cup Gruyere", "3 cups milk", "3 tbsp butter", "Panko crumbs"],
+                steps: ["Boil macaroni until just shy of tender.", "Whisk a creamy cheese sauce and fold in the pasta.", "Bake until bubbling with a browned top."],
+                tags: ["Dinner", "Pasta", "Comfort"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-3_600),
-                imageURL: imageURLs.pantryPasta
+                imageURL: imageURLs.macAndCheese,
+                totalMinutes: 55
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
-                title: "Shared Cardamom Buns",
-                ingredients: ["3 cups flour", "1 cup milk", "2 tsp cardamom", "1 packet yeast"],
-                steps: ["Mix dough.", "Proof until doubled.", "Shape buns.", "Bake until golden."],
-                tags: ["Baking", "Dessert", "Brunch"],
+                title: "Chocolate Babka",
+                ingredients: ["Enriched dough", "Chocolate filling", "Cocoa powder", "Butter", "Sugar syrup"],
+                steps: ["Roll dough around the chocolate filling.", "Twist into loaves and let rise.", "Bake until glossy, then brush with syrup."],
+                tags: ["Dessert", "Baking", "Shared"],
                 ownerId: friendA.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-7_200),
-                imageURL: imageURLs.cardamomBuns,
+                imageURL: imageURLs.babka,
+                totalMinutes: 180,
                 isPreview: true
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
-                title: "Saved Cardamom Buns",
-                ingredients: ["3 cups flour", "1 cup milk", "2 tsp cardamom", "1 packet yeast"],
-                steps: ["Mix dough.", "Proof until doubled.", "Shape buns.", "Bake until golden."],
-                tags: ["Baking", "Dessert", "Saved"],
+                title: "Maya's Babka",
+                ingredients: ["Enriched dough", "Chocolate filling", "Cocoa powder", "Butter", "Sugar syrup"],
+                steps: ["Roll dough around the chocolate filling.", "Twist into loaves and let rise.", "Bake until glossy, then brush with syrup."],
+                tags: ["Dessert", "Baking", "Saved"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
                 updatedAt: now.addingTimeInterval(-1_800),
-                imageURL: imageURLs.savedBuns,
+                imageURL: imageURLs.babkaSaved,
+                totalMinutes: 180,
                 originalRecipeId: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
                 originalCreatorId: friendA.id,
                 originalCreatorName: friendA.displayName,
@@ -196,25 +204,101 @@ enum SimulatorQASeed {
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
-                title: "Miso Mushroom Ramen",
-                ingredients: ["4 cups stock", "2 tbsp miso", "6 oz mushrooms", "2 packs noodles"],
-                steps: ["Simmer mushrooms in stock.", "Whisk in miso.", "Cook noodles and assemble bowls."],
-                tags: ["Dinner", "Soup", "Vegetarian"],
+                title: "Schnitzel Plate",
+                ingredients: ["4 chicken cutlets", "1 cup breadcrumbs", "2 eggs", "Flour", "Lemon", "Mashed potatoes"],
+                steps: ["Pound chicken cutlets thin.", "Dredge in flour, egg, and breadcrumbs.", "Fry until crisp and serve with lemon."],
+                tags: ["Dinner", "Chicken", "Crispy"],
                 ownerId: friendB.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-5_400),
-                imageURL: imageURLs.ramen,
+                imageURL: imageURLs.schnitzel,
                 isPreview: true
             ),
             recipe(
                 id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
-                title: "No-Image Picnic Notes",
-                ingredients: ["1 loaf bread", "Seasonal fruit", "Soft cheese", "Olives"],
-                steps: ["Pack everything cold.", "Slice bread at the table.", "Serve family style."],
-                tags: ["Snack", "Picnic", "No Image"],
+                title: "Mixed Salsas",
+                ingredients: ["Tomatoes", "Corn", "Avocado", "Lime", "Cilantro", "Jalapeno"],
+                steps: ["Dice vegetables into separate bowls.", "Season each salsa with lime, salt, and cilantro.", "Serve with chips or grilled meat."],
+                tags: ["Snack", "Party", "Fresh"],
                 ownerId: currentUser.id,
                 visibility: .privateRecipe,
-                updatedAt: now.addingTimeInterval(-9_000)
+                updatedAt: now.addingTimeInterval(-9_000),
+                imageURL: imageURLs.mixedSalsas,
+                totalMinutes: 25
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7",
+                title: "Grilled Steak",
+                ingredients: ["2 ribeye steaks", "Kosher salt", "Black pepper", "Garlic butter", "Rosemary"],
+                steps: ["Season steaks generously.", "Sear over high heat until deeply browned.", "Rest with garlic butter before slicing."],
+                tags: ["Dinner", "Grill", "Steak"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-10_800),
+                imageURL: imageURLs.steak,
+                totalMinutes: 35
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8",
+                title: "Grandma's Challah",
+                ingredients: ["Bread flour", "Eggs", "Honey", "Yeast", "Sesame seeds"],
+                steps: ["Knead dough until smooth.", "Braid and proof until puffy.", "Brush with egg wash and bake."],
+                tags: ["Bread", "Baking", "Family"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-12_600),
+                imageURL: imageURLs.challah,
+                totalMinutes: 165
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9",
+                title: "Apple Crisp",
+                ingredients: ["Apples", "Brown sugar", "Oats", "Cinnamon", "Butter"],
+                steps: ["Slice apples into a baking dish.", "Scatter oat crumble over the top.", "Bake until bubbling and golden."],
+                tags: ["Dessert", "Fruit", "Baking"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-14_400),
+                imageURL: imageURLs.appleCrisp,
+                totalMinutes: 60
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10",
+                title: "Blood Orange Cake",
+                ingredients: ["Blood oranges", "Flour", "Sugar", "Eggs", "Olive oil", "Vanilla"],
+                steps: ["Layer sliced oranges in the pan.", "Pour olive oil cake batter over the fruit.", "Bake and invert while warm."],
+                tags: ["Dessert", "Cake", "Citrus"],
+                ownerId: friendA.id,
+                visibility: .publicRecipe,
+                updatedAt: now.addingTimeInterval(-16_200),
+                imageURL: imageURLs.bloodOrangeCake,
+                totalMinutes: 75,
+                isPreview: true
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11",
+                title: "Friday Pizza",
+                ingredients: ["Pizza dough", "Tomato sauce", "Mozzarella", "Basil", "Ricotta"],
+                steps: ["Stretch dough onto a hot pan.", "Top with sauce, mozzarella, and basil.", "Bake until the crust is blistered."],
+                tags: ["Dinner", "Pizza", "Weekend"],
+                ownerId: currentUser.id,
+                visibility: .privateRecipe,
+                updatedAt: now.addingTimeInterval(-18_000),
+                imageURL: imageURLs.pizza,
+                totalMinutes: 40
+            ),
+            recipe(
+                id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa12",
+                title: "Moroccan Donuts",
+                ingredients: ["Flour", "Yeast", "Sugar", "Warm water", "Cinnamon sugar"],
+                steps: ["Mix a sticky dough and let it rise.", "Shape into rings with wet hands.", "Fry and toss in cinnamon sugar."],
+                tags: ["Dessert", "Fried", "Holiday"],
+                ownerId: friendB.id,
+                visibility: .publicRecipe,
+                updatedAt: now.addingTimeInterval(-19_800),
+                imageURL: imageURLs.moroccanDonuts,
+                totalMinutes: 90,
+                isPreview: true
             )
         ]
 
@@ -229,33 +313,35 @@ enum SimulatorQASeed {
         let recipeByTitle = recipes.reduce(into: [String: UUID]()) { result, recipe in
             result[recipe.title] = recipe.id
         }
-        let ownRecipeIds = recipes
-            .filter { $0.ownerId == currentUser.id && !$0.isPreview }
-            .map(\.id)
         let sharedRecipeIds = recipes
             .filter { $0.ownerId != currentUser.id }
             .map(\.id)
         let imageRecipeIds = [
-            recipeByTitle["Lemon Herb Chicken"],
-            recipeByTitle["Offline Pantry Pasta"],
-            recipeByTitle["Saved Cardamom Buns"],
-            recipeByTitle["Miso Mushroom Ramen"]
+            recipeByTitle["Pot Roast"],
+            recipeByTitle["Mac and Cheese"],
+            recipeByTitle["Maya's Babka"],
+            recipeByTitle["Schnitzel Plate"]
         ].compactMap { $0 }
 
         let collections = [
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1")!,
-                name: "Weeknight Wins",
-                description: "Three owned recipes for local collection checks.",
+                name: "Family Dinners",
+                description: "Comfort food for slow Sundays and weeknights.",
                 userId: currentUser.id,
-                recipeIds: Array(ownRecipeIds.prefix(3)),
+                recipeIds: [
+                    recipeByTitle["Pot Roast"],
+                    recipeByTitle["Mac and Cheese"],
+                    recipeByTitle["Grilled Steak"],
+                    recipeByTitle["Friday Pizza"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "fork.knife",
                 color: "#FF9933"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2")!,
-                name: "Friends' Favorites",
+                name: "Saved From Friends",
                 description: "Go-to dishes shared by friends.",
                 userId: friendA.id,
                 recipeIds: sharedRecipeIds,
@@ -265,38 +351,52 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3")!,
-                name: "QA One Image",
-                description: "One recipe image for single-photo cover checks.",
+                name: "Desserts",
+                description: "Cakes, crisps, donuts, and bakes.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(1)),
+                recipeIds: [
+                    recipeByTitle["Maya's Babka"],
+                    recipeByTitle["Apple Crisp"],
+                    recipeByTitle["Blood Orange Cake"],
+                    recipeByTitle["Moroccan Donuts"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "photo",
                 color: "#F06449"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4")!,
-                name: "QA Two Images",
-                description: "Two recipe images for split cover checks.",
+                name: "Bakes",
+                description: "Breads and sweets worth sharing.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(2)),
+                recipeIds: [
+                    recipeByTitle["Grandma's Challah"],
+                    recipeByTitle["Maya's Babka"],
+                    recipeByTitle["Apple Crisp"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.2x1",
                 color: "#5B8DEF"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5")!,
-                name: "QA Three Images",
-                description: "Three recipe images for asymmetrical collage checks.",
+                name: "Dinner Party",
+                description: "Low-stress dishes for feeding friends.",
                 userId: currentUser.id,
-                recipeIds: Array(imageRecipeIds.prefix(3)),
+                recipeIds: [
+                    recipeByTitle["Mixed Salsas"],
+                    recipeByTitle["Pot Roast"],
+                    recipeByTitle["Grilled Steak"],
+                    recipeByTitle["Blood Orange Cake"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "rectangle.split.3x1",
                 color: "#7B61FF"
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6")!,
-                name: "QA Four Images",
-                description: "Four recipe images for collage and swipe checks.",
+                name: "Family Favorites",
+                description: "Recipes everyone asks for again.",
                 userId: currentUser.id,
                 recipeIds: Array(imageRecipeIds.prefix(4)),
                 visibility: .privateRecipe,
@@ -305,10 +405,14 @@ enum SimulatorQASeed {
             ),
             Collection(
                 id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7")!,
-                name: "QA No Images",
-                description: "No recipe images so the fallback gradient stays testable.",
+                name: "Party Snacks",
+                description: "Small plates for people hovering near the table.",
                 userId: currentUser.id,
-                recipeIds: [recipeByTitle["No-Image Picnic Notes"]].compactMap { $0 },
+                recipeIds: [
+                    recipeByTitle["Mixed Salsas"],
+                    recipeByTitle["Friday Pizza"],
+                    recipeByTitle["Moroccan Donuts"]
+                ].compactMap { $0 },
                 visibility: .privateRecipe,
                 symbolName: "sparkles",
                 color: "#2E8B57"
@@ -381,6 +485,7 @@ enum SimulatorQASeed {
         visibility: RecipeVisibility,
         updatedAt: Date,
         imageURL: URL? = nil,
+        totalMinutes: Int = 30,
         isPreview: Bool = false,
         originalRecipeId: UUID? = nil,
         originalCreatorId: UUID? = nil,
@@ -393,7 +498,7 @@ enum SimulatorQASeed {
             ingredients: ingredients.map { Ingredient(name: $0) },
             steps: steps.enumerated().map { CookStep(index: $0.offset, text: $0.element) },
             yields: "4 servings",
-            totalMinutes: 30,
+            totalMinutes: totalMinutes,
             tags: tags.map { Tag(name: $0) },
             imageURL: imageURL,
             visibility: visibility,
@@ -414,117 +519,96 @@ enum SimulatorQASeed {
     }
 
     private struct SeededRecipeImageURLs {
-        let lemonChicken: URL
-        let pantryPasta: URL
-        let cardamomBuns: URL
-        let savedBuns: URL
-        let ramen: URL
+        let appleCrisp: URL
+        let babka: URL
+        let babkaSaved: URL
+        let bloodOrangeCake: URL
+        let challah: URL
+        let macAndCheese: URL
+        let mixedSalsas: URL
+        let moroccanDonuts: URL
+        let pizza: URL
+        let potRoast: URL
+        let schnitzel: URL
+        let steak: URL
     }
 
     private static func seedRecipeImages() throws -> SeededRecipeImageURLs {
         SeededRecipeImageURLs(
-            lemonChicken: try writeRecipeImage(
-                filename: "qa-lemon-herb-chicken.png",
-                title: "Lemon Herb Chicken",
-                symbolName: "leaf.fill",
-                colors: [
-                    UIColor(red: 0.18, green: 0.52, blue: 0.34, alpha: 1),
-                    UIColor(red: 0.95, green: 0.78, blue: 0.28, alpha: 1)
-                ]
+            appleCrisp: try copyBundledRecipeImage(
+                resourceName: "apple crisp",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA9.jpg"
             ),
-            pantryPasta: try writeRecipeImage(
-                filename: "qa-pantry-pasta.png",
-                title: "Pantry Pasta",
-                symbolName: "fork.knife",
-                colors: [
-                    UIColor(red: 0.73, green: 0.19, blue: 0.14, alpha: 1),
-                    UIColor(red: 0.96, green: 0.58, blue: 0.22, alpha: 1)
-                ]
+            babka: try copyBundledRecipeImage(
+                resourceName: "babka",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA3.jpg"
             ),
-            cardamomBuns: try writeRecipeImage(
-                filename: "qa-cardamom-buns.png",
-                title: "Cardamom Buns",
-                symbolName: "birthday.cake.fill",
-                colors: [
-                    UIColor(red: 0.75, green: 0.45, blue: 0.22, alpha: 1),
-                    UIColor(red: 0.98, green: 0.75, blue: 0.48, alpha: 1)
-                ]
+            babkaSaved: try copyBundledRecipeImage(
+                resourceName: "babka",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA4.jpg"
             ),
-            savedBuns: try writeRecipeImage(
-                filename: "qa-saved-cardamom-buns.png",
-                title: "Saved Buns",
-                symbolName: "heart.fill",
-                colors: [
-                    UIColor(red: 0.62, green: 0.31, blue: 0.72, alpha: 1),
-                    UIColor(red: 0.96, green: 0.68, blue: 0.78, alpha: 1)
-                ]
+            bloodOrangeCake: try copyBundledRecipeImage(
+                resourceName: "blood orange upside down cake",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA10.jpg"
             ),
-            ramen: try writeRecipeImage(
-                filename: "qa-miso-ramen.png",
-                title: "Miso Ramen",
-                symbolName: "takeoutbag.and.cup.and.straw.fill",
-                colors: [
-                    UIColor(red: 0.13, green: 0.32, blue: 0.64, alpha: 1),
-                    UIColor(red: 0.44, green: 0.78, blue: 0.84, alpha: 1)
-                ]
+            challah: try copyBundledRecipeImage(
+                resourceName: "challah",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA8.jpg"
+            ),
+            macAndCheese: try copyBundledRecipeImage(
+                resourceName: "mac n cheese",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA2.jpg"
+            ),
+            mixedSalsas: try copyBundledRecipeImage(
+                resourceName: "mixed salsas",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA6.jpg"
+            ),
+            moroccanDonuts: try copyBundledRecipeImage(
+                resourceName: "moroccan donuts",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA12.jpg"
+            ),
+            pizza: try copyBundledRecipeImage(
+                resourceName: "pizza",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAA11.jpg"
+            ),
+            potRoast: try copyBundledRecipeImage(
+                resourceName: "pot roast",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1.jpg"
+            ),
+            schnitzel: try copyBundledRecipeImage(
+                resourceName: "schnitzel",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA5.jpg"
+            ),
+            steak: try copyBundledRecipeImage(
+                resourceName: "steak",
+                filename: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA7.jpg"
             )
         )
     }
 
-    private static func writeRecipeImage(
-        filename: String,
-        title: String,
-        symbolName: String,
-        colors: [UIColor]
-    ) throws -> URL {
+    private static func copyBundledRecipeImage(resourceName: String, filename: String) throws -> URL {
         let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("RecipeImages", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent(filename)
 
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900))
-        let image = renderer.image { context in
-            let rect = CGRect(x: 0, y: 0, width: 1200, height: 900)
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let cgColors = colors.map(\.cgColor) as CFArray
-            let locations: [CGFloat] = [0, 1]
-
-            if let gradient = CGGradient(colorsSpace: colorSpace, colors: cgColors, locations: locations) {
-                context.cgContext.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: rect.minX, y: rect.minY),
-                    end: CGPoint(x: rect.maxX, y: rect.maxY),
-                    options: []
-                )
-            }
-
-            UIColor.white.withAlphaComponent(0.16).setFill()
-            UIBezierPath(ovalIn: CGRect(x: 330, y: 190, width: 540, height: 540)).fill()
-
-            UIColor.white.withAlphaComponent(0.32).setStroke()
-            let platePath = UIBezierPath(ovalIn: CGRect(x: 300, y: 160, width: 600, height: 600))
-            platePath.lineWidth = 18
-            platePath.stroke()
-
-            if let symbol = UIImage(systemName: symbolName) {
-                let symbolRect = CGRect(x: 450, y: 280, width: 300, height: 300)
-                symbol.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: symbolRect)
-            }
-
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .center
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 54, weight: .semibold),
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: paragraphStyle
-            ]
-            title.draw(in: CGRect(x: 140, y: 720, width: 920, height: 80), withAttributes: attributes)
+        guard let sourceURL = Bundle.main.url(
+            forResource: resourceName,
+            withExtension: "jpeg",
+            subdirectory: "ScreenshotSeedImages"
+        ) ?? Bundle.main.url(
+            forResource: resourceName,
+            withExtension: "jpg",
+            subdirectory: "ScreenshotSeedImages"
+        ) ?? Bundle.main.url(forResource: resourceName, withExtension: "jpeg")
+            ?? Bundle.main.url(forResource: resourceName, withExtension: "jpg") else {
+            throw CocoaError(.fileNoSuchFile)
         }
 
-        guard let data = image.pngData() else {
-            throw CocoaError(.fileWriteUnknown)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
         }
-        try data.write(to: url, options: .atomic)
+        try FileManager.default.copyItem(at: sourceURL, to: url)
         return url
     }
 }

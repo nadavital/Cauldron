@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from functools import lru_cache
 import os
 from pathlib import Path
 
@@ -24,12 +25,52 @@ IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '1.3'
 MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '1.3'
 
 BG_MOBILE = ROOT / 'background.png'
-BG_MAC = ROOT / 'macoswallpaper.jpeg'
+BG_MAC = ROOT / 'mac wallpaper'
 ICON_PATH = ROOT / 'cauldroniconpng.png'
 
-IPHONE_FRAME = Path('/Volumes/Bezel-iPhone-17/PNG/iPhone 17 Pro Max/iPhone 17 Pro Max - Silver - Portrait.png')
-IPAD_FRAME = Path('/Volumes/Bezel-iPad-Pro-M4/PNG/iPad Pro 11 - M4 - Silver - Portrait.png')
-MAC_FRAME = Path('/Volumes/Bezel-MacBook-Pro-M4/PNG/MacBook Pro M4 14-inch Silver.png')
+def first_existing_path(env_name: str, candidates: tuple[str, ...]) -> Path:
+    if env_value := os.environ.get(env_name):
+        return Path(env_value).expanduser()
+
+    for pattern in candidates:
+        matches = sorted(Path('/').glob(pattern.lstrip('/')))
+        if matches:
+            return matches[0]
+
+    return Path(candidates[0])
+
+
+IPHONE_FRAME = first_existing_path(
+    'CAULDRON_IPHONE_FRAME',
+    (
+        '/Volumes/Bezel-iPhone-17/PNG/iPhone 17 Pro Max/iPhone 17 Pro Max - Silver - Portrait.png',
+        '/Volumes/Bezel-iPhone-17/PNG/iPhone 17 Pro Max/*Silver*Portrait.png',
+        '/Volumes/Bezel-iPhone-17/PNG/iPhone 17 Pro Max/*Portrait.png',
+    ),
+)
+IPAD_FRAME = first_existing_path(
+    'CAULDRON_IPAD_FRAME',
+    (
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13" - Silver - Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13"*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 13"*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 11"*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-(M5)/PNG/iPad Pro (M5) 11"*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13 - M5 - Silver - Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 13*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 11*Silver*Portrait.png',
+        '/Volumes/Bezel-iPad-Pro-M5/PNG/iPad Pro 11*Portrait.png',
+    ),
+)
+MAC_FRAME = first_existing_path(
+    'CAULDRON_MAC_FRAME',
+    (
+        '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro M5 14-inch Silver.png',
+        '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro*14*Silver.png',
+        '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro*.png',
+    ),
+)
 IPHONE_FRAME_TEMPLATE = Path(
     os.environ.get(
         'CAULDRON_IPHONE_FRAME_TEMPLATE',
@@ -227,6 +268,49 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
+def compose_generated_mobile_frame(screenshot_path: Path, screen_corner_radius: int, pad: int = 54) -> Image.Image:
+    shot = Image.open(screenshot_path).convert('RGB')
+    shell = Image.new('RGBA', (shot.width + pad * 2, shot.height + pad * 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(shell)
+    radius = screen_corner_radius + pad
+    draw.rounded_rectangle(
+        (0, 0, shell.width - 1, shell.height - 1),
+        radius=radius,
+        fill=(24, 24, 24, 255),
+    )
+    draw.rounded_rectangle(
+        (pad - 8, pad - 8, shell.width - pad + 7, shell.height - pad + 7),
+        radius=screen_corner_radius + 8,
+        fill=(6, 6, 6, 255),
+    )
+    screen = shot.convert('RGBA')
+    mask = rounded_mask(shot.size, screen_corner_radius)
+    shell.paste(screen, (pad, pad), mask)
+    return shell
+
+
+def compose_generated_mac_frame(screenshot_path: Path, corner_radius: int) -> Image.Image:
+    shot = crop_black_border(Image.open(screenshot_path).convert('RGB')).convert('RGBA')
+    pad = 42
+    title_h = 56
+    frame = Image.new('RGBA', (shot.width + pad * 2, shot.height + pad * 2 + title_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(frame)
+    outer = (0, 0, frame.width - 1, frame.height - 1)
+    draw.rounded_rectangle(outer, radius=corner_radius + 28, fill=(232, 228, 219, 255))
+    draw.rounded_rectangle(
+        (pad, pad + title_h, pad + shot.width, pad + title_h + shot.height),
+        radius=corner_radius,
+        fill=(255, 255, 255, 255),
+    )
+    for i, color in enumerate(((255, 95, 87), (255, 189, 46), (40, 201, 64))):
+        x = pad + 22 + i * 34
+        y = pad + 25
+        draw.ellipse((x, y, x + 16, y + 16), fill=color + (255,))
+    mask = rounded_mask(shot.size, corner_radius)
+    frame.paste(shot, (pad, pad + title_h), mask)
+    return frame
+
+
 def crop_to_visible_alpha(img: Image.Image, threshold: int = 10) -> Image.Image:
     a = img.split()[-1].point(lambda px: 255 if px > threshold else 0)
     bbox = a.getbbox()
@@ -282,7 +366,9 @@ def compose_template_iphone(screenshot_path: Path) -> Image.Image:
 
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
-        return compose_template_iphone(screenshot_path)
+        if frame_path == IPHONE_FRAME and IPHONE_FRAME_TEMPLATE.exists():
+            return compose_template_iphone(screenshot_path)
+        return compose_generated_mobile_frame(screenshot_path, screen_corner_radius)
 
     frame = Image.open(frame_path).convert('RGBA')
     shot = Image.open(screenshot_path).convert('RGB')
@@ -300,29 +386,76 @@ def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_
     return crop_to_visible_alpha(out)
 
 
-def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image, corner_radius: int) -> Image.Image:
+@lru_cache(maxsize=4)
+def make_generated_mac_wallpaper(size: tuple[int, int]) -> Image.Image:
+    w, h = size
+    column = Image.new('RGB', (1, h))
+    px = column.load()
+    top = (247, 236, 216)
+    mid = (238, 169, 92)
+    bottom = (89, 78, 67)
+    for y in range(h):
+        t = y / max(1, h - 1)
+        if t < 0.60:
+            u = t / 0.60
+            color = tuple(round(top[i] * (1 - u) + mid[i] * u) for i in range(3))
+        else:
+            u = (t - 0.60) / 0.40
+            color = tuple(round(mid[i] * (1 - u) + bottom[i] * u) for i in range(3))
+        px[0, y] = color
+    bg = column.resize(size, Image.Resampling.BICUBIC)
+
+    overlay = Image.new('RGBA', size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    draw.polygon(
+        [(-w * 0.08, h * 0.90), (w * 0.40, h * 0.22), (w * 0.68, h * 0.54), (w * 0.14, h * 1.08)],
+        fill=(255, 244, 203, 118),
+    )
+    draw.polygon(
+        [(w * 0.30, -h * 0.08), (w * 1.10, h * 0.44), (w * 0.92, h * 0.78), (w * 0.10, h * 0.26)],
+        fill=(255, 184, 93, 92),
+    )
+    draw.polygon(
+        [(w * 0.62, -h * 0.04), (w * 1.08, h * 0.14), (w * 0.82, h * 0.92), (w * 0.48, h * 0.70)],
+        fill=(72, 66, 61, 82),
+    )
+    return Image.alpha_composite(bg.convert('RGBA'), overlay.filter(ImageFilter.GaussianBlur(18))).convert('RGB')
+
+
+def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image | None, corner_radius: int) -> Image.Image:
+    if not frame_path.exists():
+        return compose_generated_mac_frame(screenshot_path, corner_radius)
+
     frame = Image.open(frame_path).convert('RGBA')
     shot = crop_black_border(Image.open(screenshot_path).convert('RGB'))
     x0, y0, x1, y1 = find_screen_bbox(frame)
     sw, sh = x1 - x0 + 1, y1 - y0 + 1
 
-    screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
+    if wallpaper is None:
+        screen_bg = make_generated_mac_wallpaper((sw, sh)).convert('RGBA')
+    else:
+        screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
 
     # Floating app window on top of wallpaper inside the Mac screen.
-    window_w = int(round(sw * 0.86))
+    window_w = int(round(sw * 0.78))
     window_h = int(round(window_w * shot.height / shot.width))
-    if window_h > int(sh * 0.80):
-        window_h = int(sh * 0.80)
+    if window_h > int(sh * 0.70):
+        window_h = int(sh * 0.70)
         window_w = int(round(window_h * shot.width / shot.height))
 
     window_img = fit_cover(shot, (window_w, window_h)).convert('RGBA')
     window_mask = rounded_mask((window_w, window_h), corner_radius)
     window = Image.new('RGBA', (window_w, window_h), (0, 0, 0, 0))
     window.paste(window_img, (0, 0), window_mask)
+    shadow = Image.new('RGBA', (window_w + 80, window_h + 80), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle((40, 40, 40 + window_w, 40 + window_h), radius=corner_radius, fill=(0, 0, 0, 105))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(28))
 
     sx = (sw - window_w) // 2
-    sy = int(round((sh - window_h) * 0.53))
+    sy = int(round((sh - window_h) * 0.48))
 
+    screen_bg.paste(shadow, (sx - 40, sy - 34), shadow)
     screen_bg.paste(window, (sx, sy), window)
 
     base = Image.new('RGBA', frame.size, (0, 0, 0, 0))
@@ -429,7 +562,7 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
     bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
 
-    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' else None
+    mac_wall = Image.open(BG_MAC).convert('RGB') if spec.name == 'Mac' and BG_MAC.exists() else None
 
     for i, shot in enumerate(spec.shots, start=1):
         x0 = (i - 1) * spec.canvas_size[0]
@@ -437,7 +570,6 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
 
         shot_path = source_path(spec, shot.key)
         if spec.name == 'Mac':
-            assert mac_wall is not None
             device = compose_macbook_frame(spec.frame_path, shot_path, mac_wall, spec.screen_corner_radius)
         else:
             device = compose_mobile_frame(spec.frame_path, shot_path, spec.screen_corner_radius)
