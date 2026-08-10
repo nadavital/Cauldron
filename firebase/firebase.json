@@ -70,5 +70,11 @@
                 ]
             }
         ]
+    },
+    "emulators": {
+        "firestore": {
+            "port": 8088
+        },
+        "singleProjectMode": true
     }
 }

@@ -77,6 +77,24 @@ signed queries for both `User.userId` and `User.referralCode`. A deploy
 fails closed if those environment variables, records, schema permissions, or
 credentials are unavailable.
 
+The production dependency gate fails on high or critical advisories. As of
+2026-08-10, Firebase Admin 14.2.0 retains seven moderate npm advisories through
+Google Cloud Storage's `uuid` 9.0.1 dependency. The advisory affects the
+optional output-buffer path in UUID v3/v5/v6; the installed Google clients call
+UUID v4 without an output buffer. Keep this exception under review on every
+dependency update and remove it when the upstream Google package refreshes the
+dependency. Do not force npm's suggested downgrade to Firebase Admin 10.3.0.
+
+Run Firestore rules tests with Java 21 or newer:
+
+```sh
+cd functions && npm run test:rules && cd ..
+```
+
+The suite proves that anonymous and authenticated clients cannot read or write
+public snapshots, mutation state, privacy epochs, revocations, or rate-limit
+records; only the Admin SDK path bypasses these rules.
+
 Treat this as a bounded security cutoff, not a compatibility window. Firebase
 updates functions independently, so first deploy and verify HTTP 426 for all
 seven retained legacy mutation names. Only then deploy the authenticated V2 and

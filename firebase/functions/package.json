@@ -4,9 +4,12 @@
         "build": "tsc",
         "build:watch": "tsc --watch",
         "test:sanitizer": "npm run build && node --test --test-force-exit test/sharePreviewSanitizer.test.mjs",
+        "test:rules": "firebase emulators:exec --config ../firebase.json --project demo-cauldron-rules --only firestore \"node --test --test-force-exit test/firestoreRules.test.mjs\"",
+        "test": "npm run test:sanitizer && npm run test:rules",
+        "audit:production": "npm audit --omit=dev --audit-level=high",
         "verify:cloudkit": "node tools/verifyCloudKitPreflight.mjs",
         "scrub:legacy-web-snapshots": "node tools/scrubLegacyRecipeSnapshots.mjs",
-        "preflight:production": "npm run test:sanitizer && npm run verify:cloudkit",
+        "preflight:production": "npm test && npm run audit:production && npm run verify:cloudkit",
         "serve": "npm run build && firebase emulators:start --only functions",
         "shell": "npm run build && firebase functions:shell",
         "start": "npm run shell",
@@ -18,12 +21,14 @@
     },
     "main": "lib/index.js",
     "dependencies": {
-        "firebase-admin": "^11.8.0",
-        "firebase-functions": "^4.3.1"
+        "firebase-admin": "^14.2.0",
+        "firebase-functions": "^7.3.2"
     },
     "devDependencies": {
-        "typescript": "^5.0.0",
-        "firebase-functions-test": "^3.1.0"
+        "@firebase/rules-unit-testing": "^5.0.1",
+        "firebase": "^12.17.1",
+        "firebase-tools": "^15.26.0",
+        "typescript": "^5.0.0"
     },
     "private": true
 }

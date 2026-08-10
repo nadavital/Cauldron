@@ -8,6 +8,8 @@ functions/node_modules/
 functions/lib/
 functions/.env
 functions/tsconfig.tsbuildinfo
+functions/firebase-debug.log
+functions/firebase-debug.*.log
+functions/firestore-debug.log
 
 # Hosting
-

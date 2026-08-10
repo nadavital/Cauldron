@@ -15,6 +15,7 @@ import {
     generatePreviewHtml,
     isValidUUID,
     isCurrentResourceMutationGeneration,
+    publicSecurityHeaders,
     resourceMutationCannotSupersede,
     safeImageURL,
     sanitizeAccountUnshareInput,
@@ -30,6 +31,17 @@ import {
     retiredCapabilityCannotSupersedeRestoration,
     sanitizeRecipeUnshareInput,
 } from "../lib/index.js";
+
+test("public responses use browser defense-in-depth headers", () => {
+    const headers = publicSecurityHeaders();
+    assert.match(headers["Content-Security-Policy"], /default-src 'none'/);
+    assert.match(headers["Content-Security-Policy"], /frame-ancestors 'none'/);
+    assert.equal(headers["Cross-Origin-Opener-Policy"], "same-origin");
+    assert.equal(headers["Permissions-Policy"], "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    assert.equal(headers["Referrer-Policy"], "no-referrer");
+    assert.equal(headers["X-Content-Type-Options"], "nosniff");
+    assert.equal(headers["X-Frame-Options"], "DENY");
+});
 
 test("escapeHtml escapes preview metadata", () => {
     assert.equal(

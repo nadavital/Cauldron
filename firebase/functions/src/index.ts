@@ -1,11 +1,20 @@
 import { onRequest, Request } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import * as admin from "firebase-admin";
+import { initializeApp } from "firebase-admin/app";
+import {
+    DocumentReference,
+    DocumentSnapshot,
+    FieldValue,
+    getFirestore,
+    Query,
+    QueryDocumentSnapshot,
+    Timestamp,
+} from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { createHash, createSign, timingSafeEqual } from "node:crypto";
 
-admin.initializeApp();
-const db = admin.firestore();
+initializeApp();
+const db = getFirestore();
 const cloudKitServerKeyID = defineSecret("CLOUDKIT_SERVER_KEY_ID");
 const cloudKitServerPrivateKey = defineSecret("CLOUDKIT_SERVER_PRIVATE_KEY");
 const CLOUDKIT_CONTAINER = "iCloud.Nadav.Cauldron";
@@ -25,6 +34,29 @@ const WEB_RECIPE_CARD_QUERY_LIMIT = MAX_WEB_RECIPE_CARDS + 1;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const usernamePattern = /^[A-Za-z0-9_]{3,20}$/;
 const capabilityPattern = /^[A-Za-z0-9_-]{43,128}$/;
+
+export function publicSecurityHeaders(): Readonly<Record<string, string>> {
+    return {
+        "Content-Security-Policy": [
+            "default-src 'none'",
+            "base-uri 'none'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "form-action 'none'",
+            "img-src 'self' https: data:",
+            "font-src 'self' data:",
+            "style-src 'self' 'unsafe-inline'",
+            "script-src 'self' 'unsafe-inline'",
+            "connect-src 'none'",
+            "upgrade-insecure-requests",
+        ].join("; "),
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+    };
+}
 
 type ValidationResult<T> =
     | { ok: true; value: T }
@@ -1112,7 +1144,7 @@ export function sanitizeCollectionUnshareInput(
 class ShareAuthorizationError extends Error {}
 class StaleShareMutationError extends Error {}
 
-function shareRevocationRef(ownerId: string): FirebaseFirestore.DocumentReference {
+function shareRevocationRef(ownerId: string): DocumentReference {
     return db.collection('share_revocations').doc(ownerId);
 }
 
@@ -1125,7 +1157,7 @@ async function isShareRevoked(ownerId: unknown): Promise<boolean> {
 }
 
 function revocationBlocksCapability(
-    revocation: FirebaseFirestore.DocumentSnapshot,
+    revocation: DocumentSnapshot,
     suppliedHash: string
 ): boolean {
     if (!revocation.exists) {
@@ -1134,7 +1166,7 @@ function revocationBlocksCapability(
     return revocation.data()?.restoredCapabilityHash !== suppliedHash;
 }
 
-function accountMutationRef(ownerId: string): FirebaseFirestore.DocumentReference {
+function accountMutationRef(ownerId: string): DocumentReference {
     return db.collection("share_account_mutation_states").doc(ownerId);
 }
 
@@ -1172,7 +1204,7 @@ async function beginAccountMutation(
             generation,
             intent,
             capabilityHash: suppliedHash,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         });
         return generation;
     });
@@ -1197,7 +1229,7 @@ async function deleteAllSnapshotsForOwnerAtGeneration(ownerId: string, generatio
     }
 }
 
-function resourceMutationRef(kind: "recipe" | "profile" | "collection", id: string): FirebaseFirestore.DocumentReference {
+function resourceMutationRef(kind: "recipe" | "profile" | "collection", id: string): DocumentReference {
     return db.collection('share_mutation_states').doc(`${kind}_${id}`);
 }
 
@@ -1205,7 +1237,7 @@ function resourcePrivacyRef(
     kind: "recipe" | "profile" | "collection",
     id: string,
     suppliedHash: string
-): FirebaseFirestore.DocumentReference {
+): DocumentReference {
     // Keep one immutable denial record per retired capability. A later share
     // must not erase the evidence needed to stop an older, already-authorized
     // request that resumes after capability rotation.
@@ -1218,12 +1250,12 @@ function resourcePrivacyRef(
 function resourcePrivacyRootRef(
     kind: "recipe" | "profile" | "collection",
     id: string
-): FirebaseFirestore.DocumentReference {
+): DocumentReference {
     return db.collection("share_privacy_epochs").doc(`${kind}_${id}`);
 }
 
 function privacyEpochBlocksCapability(
-    epoch: FirebaseFirestore.DocumentSnapshot
+    epoch: DocumentSnapshot
 ): boolean {
     return epoch.exists;
 }
@@ -1260,7 +1292,7 @@ async function beginResourceMutation(
             generation,
             intent,
             capabilityHash: suppliedHash,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         });
         return generation;
     });
@@ -1299,7 +1331,7 @@ export function isCurrentResourceMutationGeneration(
 }
 
 function requireCurrentResourceMutation(
-    state: FirebaseFirestore.DocumentSnapshot,
+    state: DocumentSnapshot,
     generation: number
 ): void {
     if (!isCurrentResourceMutationGeneration(state.data(), generation)) {
@@ -1324,7 +1356,7 @@ async function enforceMutationRateLimit(req: Request): Promise<boolean> {
             : { startedAt, count: count + 1 };
         transaction.set(limitRef, {
             ...next,
-            expiresAt: admin.firestore.Timestamp.fromMillis(now + 86_400_000),
+            expiresAt: Timestamp.fromMillis(now + 86_400_000),
         });
         return next.count <= 300;
     });
@@ -1346,7 +1378,7 @@ async function enforcePublicReadRateLimit(req: Request): Promise<boolean> {
             : { startedAt, count: count + 1 };
         transaction.set(limitRef, {
             ...next,
-            expiresAt: admin.firestore.Timestamp.fromMillis(now + 86_400_000),
+            expiresAt: Timestamp.fromMillis(now + 86_400_000),
         });
         return next.count <= 120;
     });
@@ -1421,6 +1453,7 @@ const legacyMutationHTTPOptions = {
 };
 
 const upgradeRequired = onRequest(legacyMutationHTTPOptions, async (_req, res) => {
+    res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     res.status(426).json({
         error: "This version of Cauldron can no longer publish web shares. Update the app to continue.",
@@ -1484,7 +1517,7 @@ export const shareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, r
             title: share.title,
             totalMinutes: share.totalMinutes,
             tags: share.tags,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
         };
 
         const docRef = db.collection('shared_recipes').doc(shareId);
@@ -1518,21 +1551,21 @@ export const shareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, r
                 // not a browser copy of the recipe. Delete legacy rich fields
                 // whenever an older snapshot is refreshed.
                 ...(existing.exists ? {
-                    imageURL: admin.firestore.FieldValue.delete(),
-                    ingredientCount: admin.firestore.FieldValue.delete(),
-                    yields: admin.firestore.FieldValue.delete(),
-                    notes: admin.firestore.FieldValue.delete(),
-                    sourceTitle: admin.firestore.FieldValue.delete(),
-                    sourceURL: admin.firestore.FieldValue.delete(),
-                    authorName: admin.firestore.FieldValue.delete(),
-                    originalCreatorName: admin.firestore.FieldValue.delete(),
-                    ingredients: admin.firestore.FieldValue.delete(),
-                    steps: admin.firestore.FieldValue.delete(),
+                    imageURL: FieldValue.delete(),
+                    ingredientCount: FieldValue.delete(),
+                    yields: FieldValue.delete(),
+                    notes: FieldValue.delete(),
+                    sourceTitle: FieldValue.delete(),
+                    sourceURL: FieldValue.delete(),
+                    authorName: FieldValue.delete(),
+                    originalCreatorName: FieldValue.delete(),
+                    ingredients: FieldValue.delete(),
+                    steps: FieldValue.delete(),
                 } : {}),
-                ...(!existing.exists ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
+                ...(!existing.exists ? { createdAt: FieldValue.serverTimestamp() } : {}),
             }, { merge: true });
             if (privacyRoot.data()?.blocked === true) {
-                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: FieldValue.serverTimestamp() }, { merge: true });
             }
             return true;
         });
@@ -1606,12 +1639,12 @@ export const unshareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req,
             transaction.set(privacyEpochRef, {
                 ownerId,
                 revokedCapabilityHash: suppliedHash,
-                revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+                revokedAt: FieldValue.serverTimestamp(),
             });
             transaction.set(privacyRootRef, {
                 ownerId,
                 blocked: true,
-                blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                blockedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
         });
         res.set('Cache-Control', 'no-store');
@@ -1716,19 +1749,19 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
             transaction.set(docRef, {
                 ...shareData,
                 capabilityHash: suppliedHash,
-                ...(existing.exists ? { profileImageURL: admin.firestore.FieldValue.delete() } : {}),
-                ...(!existing.exists ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                ...(existing.exists ? { profileImageURL: FieldValue.delete() } : {}),
+                ...(!existing.exists ? { createdAt: FieldValue.serverTimestamp() } : {}),
+                updatedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
             transaction.set(usernameAliasRef, {
                 ownerId: share.userId,
                 userId: share.userId,
                 redirectShareId: shareId,
                 usernameClaimCreatedAt,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
             });
             if (privacyRoot.data()?.blocked === true) {
-                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: FieldValue.serverTimestamp() }, { merge: true });
             }
             return true;
         });
@@ -1819,12 +1852,12 @@ export const unshareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req
             transaction.set(resourcePrivacyRef("profile", userId, suppliedHash), {
                 ownerId: userId,
                 revokedCapabilityHash: suppliedHash,
-                revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+                revokedAt: FieldValue.serverTimestamp(),
             });
             transaction.set(resourcePrivacyRootRef("profile", userId), {
                 ownerId: userId,
                 blocked: true,
-                blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                blockedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
         });
         const ownerProfiles = await db.collection('shared_profiles').where('ownerId', '==', userId).get();
@@ -1887,7 +1920,7 @@ export const unshareAccountV2 = onRequest(cloudAuthorizedHTTPOptions, async (req
             transaction.set(shareRevocationRef(userId), {
                 ownerId: userId,
                 revokedCapabilityHash: suppliedHash,
-                revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+                revokedAt: FieldValue.serverTimestamp(),
             });
         });
         await deleteAllSnapshotsForOwnerAtGeneration(userId, accountGeneration);
@@ -1945,7 +1978,7 @@ export const restoreAccountSharingV2 = onRequest(cloudAuthorizedHTTPOptions, asy
                 ownerId: userId,
                 revokedCapabilityHash: revokedHash,
                 restoredCapabilityHash: suppliedHash,
-                restoredAt: admin.firestore.FieldValue.serverTimestamp(),
+                restoredAt: FieldValue.serverTimestamp(),
             });
         });
         res.set('Cache-Control', 'no-store');
@@ -2032,12 +2065,12 @@ export const shareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (re
             transaction.set(docRef, {
                 ...shareData,
                 capabilityHash: suppliedHash,
-                ...(existing.exists ? { coverImageURL: admin.firestore.FieldValue.delete() } : {}),
-                ...(!existing.exists ? { createdAt: admin.firestore.FieldValue.serverTimestamp() } : {}),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                ...(existing.exists ? { coverImageURL: FieldValue.delete() } : {}),
+                ...(!existing.exists ? { createdAt: FieldValue.serverTimestamp() } : {}),
+                updatedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
             if (privacyRoot.data()?.blocked === true) {
-                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+                transaction.set(privacyRoot.ref, { blocked: false, reopenedAt: FieldValue.serverTimestamp() }, { merge: true });
             }
             return true;
         });
@@ -2102,12 +2135,12 @@ export const unshareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (
             transaction.set(privacyEpochRef, {
                 ownerId,
                 revokedCapabilityHash: suppliedHash,
-                revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+                revokedAt: FieldValue.serverTimestamp(),
             });
             transaction.set(privacyRootRef, {
                 ownerId,
                 blocked: true,
-                blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                blockedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
         });
         res.set('Cache-Control', 'no-store');
@@ -2128,6 +2161,7 @@ export const unshareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (
 
 // Generic Data Fetcher
 export const api = onRequest(publicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
         rejectRateLimitedRead(res);
@@ -3010,6 +3044,7 @@ function generateInvitePreviewHtml(inviteCode: string | null): string {
 }
 
 export const previewInvite = onRequest(cloudAuthorizedHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
     if (!await enforcePublicReadRateLimit(req)) {
         rejectRateLimitedRead(res);
         return;
@@ -3027,6 +3062,7 @@ export const previewInvite = onRequest(cloudAuthorizedHTTPOptions, async (req, r
 });
 
 export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
     if (!await enforcePublicReadRateLimit(req)) {
         rejectRateLimitedRead(res);
         return;
@@ -3093,7 +3129,7 @@ export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (
 });
 
 async function browsableRecipes(
-    documents: FirebaseFirestore.DocumentSnapshot[],
+    documents: DocumentSnapshot[],
     expectedOwnerId: string | null = null
 ): Promise<SanitizedRecipeShare[]> {
     const sanitized = documents.flatMap((document) => {
@@ -3127,6 +3163,7 @@ async function browsableRecipes(
 }
 
 export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
         rejectRateLimitedRead(res);
@@ -3172,9 +3209,9 @@ export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) 
         }
         const data = sanitized.value;
         const browsable: SanitizedRecipeShare[] = [];
-        let profileCursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+        let profileCursor: QueryDocumentSnapshot | null = null;
         for (let page = 0; page < 4 && browsable.length < WEB_RECIPE_CARD_QUERY_LIMIT; page += 1) {
-            let recipeQuery: FirebaseFirestore.Query = db.collection('shared_recipes')
+            let recipeQuery: Query = db.collection('shared_recipes')
                 .where('ownerId', '==', data.userId)
                 .limit(25);
             if (profileCursor) {
@@ -3217,6 +3254,7 @@ export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) 
 });
 
 export const previewCollection = onRequest(publicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
         rejectRateLimitedRead(res);
