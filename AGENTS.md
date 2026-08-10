@@ -25,6 +25,10 @@ Guidance for coding agents working in this repository.
   - `xcodebuild test -scheme Cauldron -destination 'platform=iOS Simulator,name=iPhone 17' -configuration Debug CODE_SIGNING_ALLOWED=NO`
 - Mac Catalyst tests:
   - `xcodebuild test -scheme Cauldron -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac' -configuration Debug CODE_SIGNING_ALLOWED=NO`
+- Firebase functions and Firestore rules tests (Node 22 + Java 21):
+  - `cd firebase/functions && npm ci && npm test`
+- Firebase production dependency audit:
+  - `cd firebase/functions && npm run audit:production`
 - Simulator QA mode:
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
 
@@ -52,6 +56,7 @@ Guidance for coding agents working in this repository.
   - Operation queue + CloudKit sync paths should not be bypassed without a clear migration plan.
   - Deleted recipes are represented by durable private CloudKit `DeletedRecipe` tombstones; deletion wins over stale active recipe records.
   - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
+  - If the local SwiftData store cannot open, preserve it and its sidecars under `Cauldron Store Backups` before creating a clean store. Keep the committed 1.5 store fixture opening in current-schema tests.
 - Cook Mode state shared with Live Activities and App Intents is persisted through `CookSessionSharedStore`; app and widget navigation must use the shared reducer rather than independent defaults mutations.
 - Update-surface behavior matters:
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.

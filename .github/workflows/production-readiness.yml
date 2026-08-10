@@ -1,0 +1,82 @@
+name: Production Readiness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  firebase:
+    name: Firebase security and web tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firebase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm test
+      - run: npm run audit:production
+
+  ios:
+    name: iOS 27 build and tests
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Run iOS tests
+        run: >-
+          xcodebuild test
+          -scheme Cauldron
+          -destination 'platform=iOS Simulator,name=iPhone 17'
+          -configuration Debug
+          CODE_SIGNING_ALLOWED=NO
+      - name: Build unsigned iOS release
+        run: >-
+          xcodebuild build
+          -scheme Cauldron
+          -destination 'generic/platform=iOS'
+          -configuration Release
+          CODE_SIGNING_ALLOWED=NO
+
+  catalyst:
+    name: Mac Catalyst build and tests
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Run Mac Catalyst tests
+        run: >-
+          xcodebuild test
+          -scheme Cauldron
+          -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac'
+          -configuration Debug
+          CODE_SIGNING_ALLOWED=NO
+      - name: Build unsigned Mac Catalyst release
+        run: >-
+          xcodebuild build
+          -scheme Cauldron
+          -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac'
+          -configuration Release
+          CODE_SIGNING_ALLOWED=NO
