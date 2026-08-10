@@ -733,10 +733,18 @@ final class CollectionRepositoryTests: XCTestCase {
     }
 
     func testLegacyStoreFixtureOpensWithCurrentLocalSchema() throws {
+        let committedFixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/LegacyStoreV1_5/default.store")
         let fixturePath = ProcessInfo.processInfo.environment["CAULDRON_LEGACY_STORE_FIXTURE"]
-            ?? "/private/tmp/cauldron-default.store"
+            ?? committedFixture.path
         let sourceURL = URL(fileURLWithPath: fixturePath)
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: sourceURL.path), "Legacy store fixture unavailable")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: sourceURL.path),
+            "Legacy store fixture unavailable at \(sourceURL.path)"
+        )
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else { return }
 
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("CauldronStoreOpen-\(UUID().uuidString)", isDirectory: true)

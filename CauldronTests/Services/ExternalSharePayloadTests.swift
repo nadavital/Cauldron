@@ -1,6 +1,7 @@
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class ExternalSharePayloadTests: XCTestCase {
     func testUnshareSuccessResponseMatchesBackendContract() throws {
         let response = try JSONDecoder().decode(

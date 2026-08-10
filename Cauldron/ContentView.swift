@@ -49,6 +49,7 @@ struct ContentView: View {
     @State private var shareErrorMessage = ""
     @State private var activeShareURL: URL?
     @State private var suppressLaunchSheetsForIncomingLink = false
+    @State private var showPersistenceRecovery = false
 
     // Splash screen state
     @AppStorage("whatsNewLastSeenContentVersion") private var whatsNewLastSeenContentVersion = ""
@@ -160,6 +161,14 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(shareErrorMessage)
+            }
+            .alert("Local Library Recovered", isPresented: $showPersistenceRecovery) {
+                Button("Continue", role: .cancel) { }
+            } message: {
+                Text("Cauldron preserved the unreadable local database and created a clean one. Synced recipes will return from iCloud; recent offline changes remain in the recovery backup.")
+            }
+            .onAppear {
+                showPersistenceRecovery = dependencies.persistenceRecoveryReport != nil
             }
             .sheet(isPresented: $showWhatsNew) {
                 WhatsNewView {

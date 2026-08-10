@@ -9,6 +9,7 @@ import Foundation
 import SwiftData
 import SwiftUI
 import Combine
+import os
 
 /// Dependency injection container
 ///
@@ -52,6 +53,7 @@ class DependencyContainer: ObservableObject {
     }
 
     let modelContainer: ModelContainer
+    let persistenceRecoveryReport: PersistenceRecoveryReport?
 
     // MARK: - Layer 1: Infrastructure
 
@@ -148,9 +150,11 @@ class DependencyContainer: ObservableObject {
 
     init(
         modelContainer: ModelContainer,
-        recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore()
+        recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore(),
+        persistenceRecoveryReport: PersistenceRecoveryReport? = nil
     ) {
         self.modelContainer = modelContainer
+        self.persistenceRecoveryReport = persistenceRecoveryReport
 
         // ============================================================
         // LAYER 1: Infrastructure
@@ -427,9 +431,29 @@ class DependencyContainer: ObservableObject {
             groupContainer: .identifier("group.Nadav.Cauldron"),
             cloudKitDatabase: .none
         )
-        let container = try ModelContainer(for: schema, configurations: [config])
+        do {
+            let container = try ModelContainer(for: schema, configurations: [config])
+            return DependencyContainer(modelContainer: container)
+        } catch let initialError {
+            let report: PersistenceRecoveryReport
+            do {
+                report = try PersistenceStoreRecovery.quarantineStore(at: config.url)
+            } catch {
+                AppLogger.persistence.fault(
+                    "Persistent store could not open and could not be backed up: \(error.localizedDescription, privacy: .public)"
+                )
+                throw initialError
+            }
 
-        return DependencyContainer(modelContainer: container)
+            AppLogger.persistence.fault(
+                "Persistent store could not open and was preserved at \(report.backupDirectory.path, privacy: .private(mask: .hash))"
+            )
+            let recoveredContainer = try ModelContainer(for: schema, configurations: [config])
+            return DependencyContainer(
+                modelContainer: recoveredContainer,
+                persistenceRecoveryReport: report
+            )
+        }
     }
 }
 
