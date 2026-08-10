@@ -139,4 +139,174 @@ final class PreparedSharedRecipeBridgeTests: XCTestCase {
 
         XCTAssertNil(ShareExtensionImportStore.preparedRecipe(from: data))
     }
+
+    func testPreparedPayloadCanonicalizationMatchesTextEntryAndPreservesSourceMetadata() async throws {
+        let payload = PreparedShareRecipePayload(
+            title: "Skillet Flatbread",
+            ingredients: [
+                "Dough:",
+                "1 cup flour",
+                "1 teaspoon salt",
+                "Topping:",
+                "2 tablespoons olive oil"
+            ],
+            steps: [
+                "Dough:",
+                "Mix the flour and salt.",
+                "Topping:",
+                "Heat the olive oil for 5 minutes."
+            ],
+            yields: "2 servings",
+            totalMinutes: 25,
+            sourceURL: "https://example.com/skillet-flatbread",
+            sourceTitle: "Example Kitchen",
+            imageURL: "https://example.com/flatbread.jpg",
+            tagNames: ["Dinner", "Bread"],
+            notes: "Keep covered until serving."
+        )
+        let payloadData = try JSONEncoder().encode(payload)
+        let prepared = try XCTUnwrap(ShareExtensionImportStore.preparedRecipe(from: payloadData))
+        let parser = TextRecipeParser()
+
+        let textEntry = try await parser.parse(from: prepared.recipeParserInputText())
+        let canonical = await prepared.canonicalized(using: parser)
+
+        XCTAssertEqual(canonical.recipe.title, textEntry.title)
+        XCTAssertEqual(canonical.recipe.yields, textEntry.yields)
+        XCTAssertEqual(canonical.recipe.totalMinutes, textEntry.totalMinutes)
+        XCTAssertEqual(canonical.recipe.ingredients.map(ingredientSignature), textEntry.ingredients.map(ingredientSignature))
+        XCTAssertEqual(canonical.recipe.steps.map(stepSignature), textEntry.steps.map(stepSignature))
+        XCTAssertEqual(canonical.recipe.notes, textEntry.notes)
+
+        let flour = try XCTUnwrap(canonical.recipe.ingredients.first(where: { $0.name == "flour" }))
+        XCTAssertEqual(flour.quantity?.value, 1)
+        XCTAssertEqual(flour.quantity?.unit, .cup)
+        XCTAssertEqual(flour.section, "Dough")
+        XCTAssertFalse(canonical.recipe.ingredients.contains(where: { $0.name == "1 cup flour" }))
+
+        let timedStep = try XCTUnwrap(canonical.recipe.steps.first(where: { $0.text.contains("olive oil") }))
+        XCTAssertEqual(timedStep.section, "Topping")
+        XCTAssertEqual(timedStep.timers.map(\.seconds), [300])
+
+        XCTAssertEqual(canonical.recipe.sourceURL?.absoluteString, payload.sourceURL)
+        XCTAssertEqual(canonical.recipe.sourceTitle, payload.sourceTitle)
+        XCTAssertEqual(canonical.recipe.imageURL?.absoluteString, payload.imageURL)
+        XCTAssertEqual(canonical.recipe.tags.map(\.name), payload.tagNames)
+        XCTAssertEqual(canonical.sourceInfo, "Imported from https://example.com/skillet-flatbread")
+        XCTAssertNil(textEntry.sourceURL)
+        XCTAssertNil(textEntry.sourceTitle)
+        XCTAssertNil(textEntry.imageURL)
+    }
+
+    func testPreparedPayloadNotesRoundTripWithoutTags() throws {
+        let payload = PreparedShareRecipePayload(
+            title: "Simple Soup",
+            ingredients: ["1 cup stock"],
+            steps: ["Simmer for 5 minutes"],
+            notes: "Freeze for up to one month."
+        )
+
+        let data = try JSONEncoder().encode(payload)
+        let decoded = try JSONDecoder().decode(PreparedShareRecipePayload.self, from: data)
+
+        XCTAssertTrue(decoded.tagNames.isEmpty)
+        XCTAssertEqual(decoded.notes, payload.notes)
+        XCTAssertEqual(
+            ShareExtensionImportStore.preparedRecipe(from: data)?.recipe.notes,
+            payload.notes
+        )
+    }
+
+    func testJSONLDHowToSectionNumericTitleSurvivesPreparedCanonicalization() async throws {
+        let html = """
+        <html>
+          <head>
+            <script type="application/ld+json">
+            {
+              "@context": "https://schema.org",
+              "@type": "Recipe",
+              "name": "Two Day Bread",
+              "recipeIngredient": ["1 cup flour", "1 teaspoon salt"],
+              "recipeInstructions": [
+                {
+                  "@type": "HowToSection",
+                  "name": "Day 1",
+                  "itemListElement": [
+                    {"@type": "HowToStep", "text": "Mix the dough."}
+                  ]
+                },
+                {
+                  "@type": "HowToSection",
+                  "name": "Stage 3",
+                  "itemListElement": [
+                    {"@type": "HowToStep", "text": "Bake for 30 minutes."}
+                  ]
+                }
+              ]
+            }
+            </script>
+          </head>
+        </html>
+        """
+        let extraction = try XCTUnwrap(RecipeWebExtractionCore().extract(fromHTML: html))
+        XCTAssertEqual(
+            extraction.stepLines,
+            ["Day 1:", "Mix the dough.", "Stage 3:", "Bake for 30 minutes."]
+        )
+
+        let payload = PreparedShareRecipePayload(
+            title: try XCTUnwrap(extraction.title),
+            ingredients: extraction.ingredientLines,
+            steps: extraction.stepLines
+        )
+        let prepared = try XCTUnwrap(
+            ShareExtensionImportStore.preparedRecipe(from: JSONEncoder().encode(payload))
+        )
+        let canonical = await prepared.canonicalized(using: TextRecipeParser())
+
+        XCTAssertEqual(canonical.recipe.steps.map(\.section), ["Day 1", "Stage 3"])
+        XCTAssertFalse(canonical.recipe.steps.contains(where: {
+            $0.text == "Day 1:" || $0.text == "Stage 3:"
+        }))
+        XCTAssertEqual(
+            canonical.recipe.steps.last?.timers.map(\.seconds),
+            [1_800]
+        )
+    }
+
+    func testQuantityAndNumberedStepLabelsAreNotDiscardedAsNumericSections() throws {
+        let payload = PreparedShareRecipePayload(
+            title: "Colon Content",
+            ingredients: ["1 cup flour:", "2 teaspoons salt"],
+            steps: ["Step 1:", "Mix everything"]
+        )
+
+        let prepared = try XCTUnwrap(
+            ShareExtensionImportStore.preparedRecipe(from: JSONEncoder().encode(payload))
+        )
+
+        XCTAssertEqual(prepared.recipe.ingredients.first?.name, "1 cup flour:")
+        XCTAssertEqual(prepared.recipe.steps.first?.text, "Step 1:")
+        XCTAssertNil(prepared.recipe.ingredients.first?.section)
+        XCTAssertNil(prepared.recipe.steps.first?.section)
+    }
+
+    private func ingredientSignature(_ ingredient: Ingredient) -> String {
+        [
+            ingredient.name,
+            ingredient.quantity.map { String($0.value) } ?? "",
+            ingredient.quantity?.unit.rawValue ?? "",
+            ingredient.section ?? "",
+            ingredient.note ?? ""
+        ].joined(separator: "|")
+    }
+
+    private func stepSignature(_ step: CookStep) -> String {
+        [
+            String(step.index),
+            step.text,
+            step.section ?? "",
+            step.timers.map { "\($0.seconds):\($0.label)" }.joined(separator: ",")
+        ].joined(separator: "|")
+    }
 }

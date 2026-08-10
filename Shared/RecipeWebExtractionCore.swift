@@ -1,5 +1,110 @@
 import Foundation
 
+/// Shared, bounded HTML transport used by app and Share Extension imports.
+/// Keeping response policy here prevents website imports from accidentally
+/// accepting payloads that the social/share paths would reject.
+nonisolated enum RecipeHTTPDocumentLoader {
+    enum LoaderError: Error, LocalizedError, Equatable {
+        case invalidResponse
+        case unacceptableStatus(Int)
+        case unsupportedContentType(String?)
+        case responseTooLarge(maximumBytes: Int)
+        case undecodableContent
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "The recipe server returned an invalid response."
+            case .unacceptableStatus(let statusCode):
+                return "The recipe server returned HTTP \(statusCode)."
+            case .unsupportedContentType:
+                return "The link did not return an HTML document."
+            case .responseTooLarge(let maximumBytes):
+                return "The recipe page exceeded the \(maximumBytes)-byte import limit."
+            case .undecodableContent:
+                return "The recipe page text could not be decoded."
+            }
+        }
+    }
+
+    static let defaultMaximumBytes = 3_000_000
+    private static let acceptedMIMETypes: Set<String> = [
+        "text/html",
+        "application/xhtml+xml"
+    ]
+
+    static func htmlRequest(for url: URL, timeout: TimeInterval = 12) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        return request
+    }
+
+    static func loadHTML(
+        from url: URL,
+        session: URLSession = .shared,
+        maximumBytes: Int = defaultMaximumBytes
+    ) async throws -> String {
+        try await loadHTML(
+            for: htmlRequest(for: url),
+            session: session,
+            maximumBytes: maximumBytes
+        )
+    }
+
+    static func loadHTML(
+        for request: URLRequest,
+        session: URLSession = .shared,
+        maximumBytes: Int = defaultMaximumBytes
+    ) async throws -> String {
+        precondition(maximumBytes > 0)
+        try Task.checkCancellation()
+
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            try Task.checkCancellation()
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw LoaderError.invalidResponse
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw LoaderError.unacceptableStatus(httpResponse.statusCode)
+            }
+            if let mimeType = httpResponse.mimeType?.lowercased(),
+               !acceptedMIMETypes.contains(mimeType) {
+                throw LoaderError.unsupportedContentType(httpResponse.mimeType)
+            }
+            if httpResponse.expectedContentLength > Int64(maximumBytes) {
+                throw LoaderError.responseTooLarge(maximumBytes: maximumBytes)
+            }
+
+            var data = Data()
+            if httpResponse.expectedContentLength > 0 {
+                data.reserveCapacity(min(Int(httpResponse.expectedContentLength), maximumBytes))
+            }
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard data.count < maximumBytes else {
+                    throw LoaderError.responseTooLarge(maximumBytes: maximumBytes)
+                }
+                data.append(byte)
+            }
+            try Task.checkCancellation()
+
+            if let html = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1) {
+                return html
+            }
+            throw LoaderError.undecodableContent
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        }
+    }
+}
+
 /// Shared HTML/JSON-LD extraction core used by app import and Share Extension paths.
 struct RecipeWebExtractionCore: Sendable {
     struct Extraction: Sendable {
@@ -40,17 +145,25 @@ struct RecipeWebExtractionCore: Sendable {
             }
         }
 
-        guard !recipes.isEmpty else { return nil }
-        let recipe = recipes.max(by: { recipeScore($0) < recipeScore($1) }) ?? recipes[0]
+        // Score only candidates that can actually produce a structured recipe.
+        // Some publishers emit a large, metadata-rich Recipe node with only
+        // ingredients or instructions alongside a smaller complete node. If the
+        // incomplete node wins first, the later completeness guard masks the
+        // usable candidate and incorrectly falls back to visible page text.
+        let completeRecipes = recipes.filter {
+            !extractIngredients(from: $0).isEmpty
+                && !extractInstructionLines(from: $0).isEmpty
+        }
+        guard let recipe = completeRecipes.max(by: { recipeScore($0) < recipeScore($1) }) else {
+            return nil
+        }
 
         let titleText = cleanText(stringValue(recipe["name"]))
         let title = titleText.isEmpty ? nil : titleText
         let pageTitle = extractTitle(from: html)
         let ingredientLines = extractIngredients(from: recipe)
         let stepLines = extractInstructionLines(from: recipe)
-        guard !ingredientLines.isEmpty, !stepLines.isEmpty else {
-            return nil
-        }
+        // Eligibility above guarantees both collections are populated.
 
         var lines: [String] = []
         if let title {

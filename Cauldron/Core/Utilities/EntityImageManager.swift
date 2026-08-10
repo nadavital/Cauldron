@@ -19,7 +19,28 @@ import os
 struct SavedImageFile: Sendable {
     let filename: String
     let modificationDate: Date
+    let generation: UUID
 }
+
+struct SavedImageReplacement: Sendable {
+    let url: URL
+    let file: SavedImageFile
+    fileprivate let previousData: Data?
+    fileprivate let previousGeneration: UUID?
+}
+
+struct StagedImageReplacement: Sendable {
+    let url: URL
+    let generation: UUID
+}
+
+enum GenerationBoundUploadOutcome: Sendable {
+    case staleBeforeUpload
+    case uploaded(recordName: String)
+    case staleAfterUpload(recordName: String)
+}
+
+typealias CloudImageMutationAuthorization = @Sendable () async -> Bool
 
 // MARK: - ImageManageable Protocol
 
@@ -48,6 +69,7 @@ protocol ImageManageable: Sendable {
 actor EntityImageManager<Entity: ImageManageable> {
     private let imageDirectoryURL: URL
     private let directoryName: String
+    private let removesDirectoryOnDeinit: Bool
     private let maxDimension: CGFloat
     private let targetSizeBytes: Int
     private let logger: Logger
@@ -56,7 +78,7 @@ actor EntityImageManager<Entity: ImageManageable> {
     private let cacheKeyGenerator: ((UUID) -> String)?
 
     /// Track in-flight downloads to prevent duplicate requests
-    private var inFlightDownloads: [UUID: Task<URL?, Error>] = [:]
+    private var inFlightDownloads: [UUID: Task<SavedImageFile?, Error>] = [:]
 
     /// Track in-flight database-aware downloads. Private keys include the
     /// effective CloudKit record name so UUID misses do not poison legacy names.
@@ -65,6 +87,9 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// Cache for "not found" results to avoid repeated CloudKit lookups
     /// Key matches `databaseDownloadCacheKey`, Value: timestamp when cached
     private var notFoundCache: [String: Date] = [:]
+    private var localFileGenerations: [UUID: UUID] = [:]
+    private var isUploadingToCloud = false
+    private var cloudUploadWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// How long to cache "not found" results (5 minutes)
     private let notFoundCacheDuration: TimeInterval = 300
@@ -84,6 +109,8 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// Initialize with configuration
     /// - Parameters:
     ///   - directoryName: Name of directory to store images (e.g., "ProfileImages")
+    ///   - baseDirectoryURL: Optional storage root, intended for isolated test fixtures.
+    ///   - removesDirectoryOnDeinit: Removes an injected fixture directory when released.
     ///   - maxDimension: Maximum width/height for image resizing
     ///   - targetSizeBytes: Target file size for compression
     ///   - cacheKeyGenerator: Optional closure to generate cache keys for ImageCache
@@ -94,6 +121,8 @@ actor EntityImageManager<Entity: ImageManageable> {
     ///   - downloadFromCloudWithDatabase: Optional closure for database-aware downloads (recipes)
     init(
         directoryName: String,
+        baseDirectoryURL: URL? = nil,
+        removesDirectoryOnDeinit: Bool = false,
         maxDimension: CGFloat = 800,
         targetSizeBytes: Int = 1_000_000,
         cacheKeyGenerator: ((UUID) -> String)? = nil,
@@ -104,6 +133,8 @@ actor EntityImageManager<Entity: ImageManageable> {
         downloadFromCloudWithDatabase: ((UUID, Bool, String?) async throws -> Data?)? = nil
     ) {
         self.directoryName = directoryName
+        // Never allow lifecycle cleanup to remove a production Documents directory.
+        self.removesDirectoryOnDeinit = removesDirectoryOnDeinit && baseDirectoryURL != nil
         self.maxDimension = maxDimension
         self.targetSizeBytes = targetSizeBytes
         self.cacheKeyGenerator = cacheKeyGenerator
@@ -114,20 +145,27 @@ actor EntityImageManager<Entity: ImageManageable> {
         self.downloadFromCloudWithDatabase = downloadFromCloudWithDatabase
         self.logger = Logger(subsystem: "com.cauldron", category: "EntityImageManager-\(directoryName)")
 
-        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        if let baseDirectoryURL {
+            self.imageDirectoryURL = baseDirectoryURL.appendingPathComponent(directoryName, isDirectory: true)
+        } else if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            self.imageDirectoryURL = documentsURL.appendingPathComponent(directoryName, isDirectory: true)
+        } else {
             // Use a fallback instead of fatalError for robustness
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(directoryName, isDirectory: true)
             self.imageDirectoryURL = tempURL
             self.logger.error("Unable to access documents directory, using temp: \(tempURL.path)")
-            return
         }
-        self.imageDirectoryURL = documentsURL.appendingPathComponent(directoryName, isDirectory: true)
 
         // Ensure directory exists
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: imageDirectoryURL.path) {
             try? fileManager.createDirectory(at: imageDirectoryURL, withIntermediateDirectories: true)
         }
+    }
+
+    deinit {
+        guard removesDirectoryOnDeinit else { return }
+        try? FileManager.default.removeItem(at: imageDirectoryURL)
     }
 
     // MARK: - Local Storage
@@ -139,21 +177,172 @@ actor EntityImageManager<Entity: ImageManageable> {
 
     /// Save image locally by entity ID and return URL
     func saveImage(_ image: UIImage, entityId: UUID) throws -> URL {
+        try saveImageWithToken(image, entityId: entityId).url
+    }
+
+    /// Saves and returns the exact file revision created by this write so a
+    /// later rollback cannot accidentally delete a newer replacement.
+    func saveImageWithToken(_ image: UIImage, entityId: UUID) throws -> (url: URL, file: SavedImageFile) {
+        let preparedData = try prepareImageData(image)
+        let replacement = try commitPreparedImageData(preparedData, entityId: entityId)
+        return (replacement.url, replacement.file)
+    }
+
+    /// Performs all image transformation before a logical profile mutation is
+    /// superseded. This has no shared-file side effects.
+    func prepareImageData(_ image: UIImage) throws -> Data {
+        try optimizeImageForUpload(image)
+    }
+
+    func stagePreparedImageData(_ data: Data, entityId: UUID) throws -> StagedImageReplacement {
+        let fileManager = FileManager.default
+        if !fileManager.fileExists(atPath: imageDirectoryURL.path) {
+            try fileManager.createDirectory(at: imageDirectoryURL, withIntermediateDirectories: true)
+        }
+        let generation = UUID()
+        let url = imageDirectoryURL.appendingPathComponent(
+            ".pending-\(entityId.uuidString)-\(generation.uuidString).jpg"
+        )
+        try data.write(to: url, options: .atomic)
+        return StagedImageReplacement(url: url, generation: generation)
+    }
+
+    func promoteStagedImage(
+        _ staged: StagedImageReplacement,
+        entityId: UUID,
+        knownPreviousGeneration: UUID?
+    ) throws -> SavedImageReplacement {
+        let data = try Data(contentsOf: staged.url)
+        return try commitPreparedImageData(
+            data,
+            entityId: entityId,
+            knownPreviousGeneration: knownPreviousGeneration,
+            requiresKnownBaseline: true,
+            replacementGeneration: staged.generation
+        )
+    }
+
+    func deleteStagedImage(_ staged: StagedImageReplacement) {
+        deleteStagedImage(at: staged.url)
+    }
+
+    func deleteStagedImage(at url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        guard standardizedURL.deletingLastPathComponent() == imageDirectoryURL.standardizedFileURL,
+              standardizedURL.lastPathComponent.hasPrefix(".pending-") else {
+            logger.error("Refusing to delete an invalid staged-image URL")
+            return
+        }
+        try? FileManager.default.removeItem(at: standardizedURL)
+    }
+
+    /// Atomically installs prepared bytes and keeps enough state to roll the
+    /// replacement back if a newer UI mutation wins before it is committed.
+    func commitPreparedImageData(
+        _ preparedData: Data,
+        entityId: UUID,
+        knownPreviousGeneration: UUID? = nil,
+        requiresKnownBaseline: Bool = false,
+        replacementGeneration: UUID? = nil
+    ) throws -> SavedImageReplacement {
         // Ensure directory exists (in case it was deleted)
         let fileManager = FileManager.default
         if !fileManager.fileExists(atPath: imageDirectoryURL.path) {
             try fileManager.createDirectory(at: imageDirectoryURL, withIntermediateDirectories: true)
         }
 
-        // Optimize and compress image
-        let optimizedData = try optimizeImageForUpload(image)
-
         let filename = "\(entityId.uuidString).jpg"
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
+        if requiresKnownBaseline {
+            if localFileGenerations[entityId] == nil,
+               let knownPreviousGeneration,
+               fileManager.fileExists(atPath: fileURL.path) {
+                localFileGenerations[entityId] = knownPreviousGeneration
+            }
+            guard localFileGenerations[entityId] == knownPreviousGeneration else {
+                throw EntityImageError.saveFailed
+            }
+        }
+        let previousData: Data?
+        if fileManager.fileExists(atPath: fileURL.path) {
+            previousData = try Data(contentsOf: fileURL)
+        } else {
+            previousData = nil
+        }
+        let previousGeneration = localFileGenerations[entityId] ?? knownPreviousGeneration
 
-        try optimizedData.write(to: fileURL)
+        do {
+            try preparedData.write(to: fileURL, options: .atomic)
+            guard let modificationDate = getImageModificationDate(entityId: entityId) else {
+                throw EntityImageError.saveFailed
+            }
+            let generation = replacementGeneration ?? UUID()
+            localFileGenerations[entityId] = generation
+            removeCacheEntry(entityId: entityId)
+            return SavedImageReplacement(
+                url: fileURL,
+                file: SavedImageFile(
+                    filename: filename,
+                    modificationDate: modificationDate,
+                    generation: generation
+                ),
+                previousData: previousData,
+                previousGeneration: previousGeneration
+            )
+        } catch {
+            restoreImageData(
+                previousData,
+                previousGeneration: previousGeneration,
+                entityId: entityId,
+                fileURL: fileURL
+            )
+            throw error
+        }
+    }
+
+    func rollbackImageReplacementIfUnchanged(
+        _ replacement: SavedImageReplacement,
+        entityId: UUID
+    ) {
+        guard localFileGenerations[entityId] == replacement.file.generation else { return }
+        restoreImageData(
+            replacement.previousData,
+            previousGeneration: replacement.previousGeneration,
+            entityId: entityId,
+            fileURL: replacement.url
+        )
         removeCacheEntry(entityId: entityId)
-        return fileURL
+    }
+
+    func registerKnownLocalGeneration(_ generation: UUID, entityId: UUID) {
+        let fileURL = imageDirectoryURL.appendingPathComponent("\(entityId.uuidString).jpg")
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        localFileGenerations[entityId] = generation
+    }
+
+    private func restoreImageData(
+        _ data: Data?,
+        previousGeneration: UUID?,
+        entityId: UUID,
+        fileURL: URL
+    ) {
+        do {
+            if let data {
+                try data.write(to: fileURL, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+            if let previousGeneration {
+                localFileGenerations[entityId] = previousGeneration
+            } else {
+                localFileGenerations.removeValue(forKey: entityId)
+            }
+        } catch {
+            // Never associate unknown bytes with the prior generation: doing so
+            // could authorize a stale upload after a failed rollback.
+            localFileGenerations.removeValue(forKey: entityId)
+            logger.error("Unable to restore prior image bytes for \(entityId): \(error.localizedDescription)")
+        }
     }
 
     /// Save image locally by entity ID and return filename (for recipe compatibility)
@@ -188,12 +377,18 @@ actor EntityImageManager<Entity: ImageManageable> {
         let filename = "\(entityId.uuidString).jpg"
         let fileURL = imageDirectoryURL.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: fileURL)
+        localFileGenerations.removeValue(forKey: entityId)
 
         removeCacheEntry(entityId: entityId)
     }
 
     func deleteImageIfUnchanged(entityId: UUID, modificationDate: Date) {
         guard getImageModificationDate(entityId: entityId) == modificationDate else { return }
+        deleteImage(entityId: entityId)
+    }
+
+    func deleteImageIfUnchanged(entityId: UUID, savedFile: SavedImageFile) {
+        guard localFileGenerations[entityId] == savedFile.generation else { return }
         deleteImage(entityId: entityId)
     }
 
@@ -333,7 +528,13 @@ actor EntityImageManager<Entity: ImageManageable> {
         guard let modificationDate = getImageModificationDate(entityId: entityId) else {
             throw EntityImageError.downloadFailed
         }
-        return SavedImageFile(filename: filename, modificationDate: modificationDate)
+        let generation = UUID()
+        localFileGenerations[entityId] = generation
+        return SavedImageFile(
+            filename: filename,
+            modificationDate: modificationDate,
+            generation: generation
+        )
     }
 
     /// Copy image from one entity to another
@@ -358,6 +559,7 @@ actor EntityImageManager<Entity: ImageManageable> {
         }
 
         try FileManager.default.copyItem(at: sourceURL, to: targetURL)
+        localFileGenerations[targetId] = UUID()
         removeCacheEntry(entityId: targetId)
         return targetFilename
     }
@@ -367,7 +569,13 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// Upload image to CloudKit
     /// - Parameter entityId: The entity ID this image belongs to
     /// - Returns: The CloudKit record name for the uploaded asset
-    func uploadImageToCloud(entityId: UUID) async throws -> String {
+    func uploadImageToCloud(
+        entityId: UUID,
+        authorization: CloudImageMutationAuthorization? = nil
+    ) async throws -> String {
+        await acquireCloudUploadLock()
+        defer { releaseCloudUploadLock() }
+        guard await authorization?() ?? true else { throw CancellationError() }
         guard let uploadToCloud = uploadToCloud else {
             throw EntityImageError.cloudNotConfigured
         }
@@ -383,12 +591,61 @@ actor EntityImageManager<Entity: ImageManageable> {
         return try await uploadToCloud(entityId, imageData)
     }
 
+    /// Prevents an older logical avatar sync from reading bytes installed by a
+    /// newer local photo mutation while the actor is re-entrant.
+    func uploadImageToCloud(
+        entityId: UUID,
+        expectedGeneration: UUID,
+        authorization: CloudImageMutationAuthorization? = nil
+    ) async throws -> GenerationBoundUploadOutcome {
+        await acquireCloudUploadLock()
+        defer { releaseCloudUploadLock() }
+        guard await authorization?() ?? true else { throw CancellationError() }
+        guard localFileGenerations[entityId] == expectedGeneration else {
+            return .staleBeforeUpload
+        }
+        guard let uploadToCloud else { throw EntityImageError.cloudNotConfigured }
+        let fileURL = imageDirectoryURL.appendingPathComponent("\(entityId.uuidString).jpg")
+        guard let imageData = try? Data(contentsOf: fileURL),
+              localFileGenerations[entityId] == expectedGeneration else {
+            return .staleBeforeUpload
+        }
+        let recordName = try await uploadToCloud(entityId, imageData)
+        guard localFileGenerations[entityId] == expectedGeneration else {
+            return .staleAfterUpload(recordName: recordName)
+        }
+        return .uploaded(recordName: recordName)
+    }
+
+    private func acquireCloudUploadLock() async {
+        guard isUploadingToCloud else {
+            isUploadingToCloud = true
+            return
+        }
+        await withCheckedContinuation { cloudUploadWaiters.append($0) }
+    }
+
+    private func releaseCloudUploadLock() {
+        guard !cloudUploadWaiters.isEmpty else {
+            isUploadingToCloud = false
+            return
+        }
+        cloudUploadWaiters.removeFirst().resume()
+    }
+
     /// Upload image to CloudKit with database selection (for recipes)
     /// - Parameters:
     ///   - entityId: The entity ID this image belongs to
     ///   - toPublic: Whether to upload to public database
     /// - Returns: The CloudKit record name for the uploaded asset
-    func uploadImageToCloud(entityId: UUID, toPublic: Bool) async throws -> String {
+    func uploadImageToCloud(
+        entityId: UUID,
+        toPublic: Bool,
+        authorization: CloudImageMutationAuthorization? = nil
+    ) async throws -> String {
+        await acquireCloudUploadLock()
+        defer { releaseCloudUploadLock() }
+        guard await authorization?() ?? true else { throw CancellationError() }
         guard let uploadToCloudWithDatabase = uploadToCloudWithDatabase else {
             throw EntityImageError.cloudNotConfigured
         }
@@ -412,6 +669,16 @@ actor EntityImageManager<Entity: ImageManageable> {
     /// is already in progress, new requests will await that instead of starting
     /// a duplicate download.
     func downloadImageFromCloud(entityId: UUID) async throws -> URL? {
+        guard let savedFile = try await downloadImageFromCloudWithToken(entityId: entityId) else {
+            return nil
+        }
+        return imageURL(for: savedFile.filename)
+    }
+
+    /// Downloads without overwriting a local edit that lands while CloudKit is
+    /// suspended. The returned modification token also lets session code undo
+    /// the download if a non-file avatar edit invalidated its cloud snapshot.
+    func downloadImageFromCloudWithToken(entityId: UUID) async throws -> SavedImageFile? {
         let cacheKey = "\(entityId.uuidString)-default"
 
         // Check "not found" cache first
@@ -435,7 +702,8 @@ actor EntityImageManager<Entity: ImageManageable> {
         }
 
         // Create and store the task IMMEDIATELY to prevent race conditions
-        let downloadTask = Task<URL?, Error> { [cacheKey] in
+        let expectedModificationDate = getImageModificationDate(entityId: entityId)
+        let downloadTask = Task<SavedImageFile?, Error> { [cacheKey] in
             guard let imageData = try await downloadFromCloud(entityId) else {
                 self.notFoundCache[cacheKey] = Date()
                 return nil
@@ -445,8 +713,12 @@ actor EntityImageManager<Entity: ImageManageable> {
                 throw EntityImageError.invalidImageData
             }
 
-            let fileURL = try self.saveImage(image, entityId: entityId)
-            return fileURL
+            let optimizedData = try self.optimizeImageForUpload(image)
+            return try self.saveDownloadedImageDataWithToken(
+                optimizedData,
+                entityId: entityId,
+                expectedModificationDate: expectedModificationDate
+            )
         }
 
         // Store immediately after creation, before awaiting
@@ -555,7 +827,13 @@ actor EntityImageManager<Entity: ImageManageable> {
     }
 
     /// Delete image from CloudKit
-    func deleteImageFromCloud(entityId: UUID) async throws {
+    func deleteImageFromCloud(
+        entityId: UUID,
+        authorization: CloudImageMutationAuthorization? = nil
+    ) async throws {
+        await acquireCloudUploadLock()
+        defer { releaseCloudUploadLock() }
+        guard await authorization?() ?? true else { throw CancellationError() }
         guard let deleteFromCloud = deleteFromCloud else {
             throw EntityImageError.cloudNotConfigured
         }
@@ -809,6 +1087,58 @@ extension ProfileImageManagerV2 {
         try saveImage(image, entityId: userId)
     }
 
+    func saveImageWithToken(_ image: UIImage, userId: UUID) throws -> (url: URL, file: SavedImageFile) {
+        try saveImageWithToken(image, entityId: userId)
+    }
+
+    func commitPreparedImageData(
+        _ data: Data,
+        userId: UUID,
+        knownPreviousGeneration: UUID?
+    ) throws -> SavedImageReplacement {
+        try commitPreparedImageData(
+            data,
+            entityId: userId,
+            knownPreviousGeneration: knownPreviousGeneration,
+            requiresKnownBaseline: true
+        )
+    }
+
+    func stagePreparedImageData(_ data: Data, userId: UUID) throws -> StagedImageReplacement {
+        try stagePreparedImageData(data, entityId: userId)
+    }
+
+    func promoteStagedImage(
+        _ staged: StagedImageReplacement,
+        userId: UUID,
+        knownPreviousGeneration: UUID?
+    ) throws -> SavedImageReplacement {
+        try promoteStagedImage(
+            staged,
+            entityId: userId,
+            knownPreviousGeneration: knownPreviousGeneration
+        )
+    }
+
+    func deleteStagedImage(_ staged: StagedImageReplacement, userId: UUID) {
+        deleteStagedImage(staged)
+    }
+
+    func deleteStagedImage(at url: URL, userId: UUID) {
+        deleteStagedImage(at: url)
+    }
+
+    func rollbackImageReplacementIfUnchanged(
+        _ replacement: SavedImageReplacement,
+        userId: UUID
+    ) {
+        rollbackImageReplacementIfUnchanged(replacement, entityId: userId)
+    }
+
+    func registerKnownLocalGeneration(_ generation: UUID, userId: UUID) {
+        registerKnownLocalGeneration(generation, entityId: userId)
+    }
+
     /// Load image by user ID
     func loadImage(userId: UUID) -> UIImage? {
         loadImage(entityId: userId)
@@ -817,6 +1147,14 @@ extension ProfileImageManagerV2 {
     /// Delete image by user ID
     func deleteImage(userId: UUID) {
         deleteImage(entityId: userId)
+    }
+
+    func deleteImageIfUnchanged(userId: UUID, modificationDate: Date) {
+        deleteImageIfUnchanged(entityId: userId, modificationDate: modificationDate)
+    }
+
+    func deleteImageIfUnchanged(userId: UUID, savedFile: SavedImageFile) {
+        deleteImageIfUnchanged(entityId: userId, savedFile: savedFile)
     }
 
     /// Get image URL for user
@@ -835,8 +1173,23 @@ extension ProfileImageManagerV2 {
     }
 
     /// Upload image to CloudKit for user
-    func uploadImageToCloud(userId: UUID) async throws -> String {
-        try await uploadImageToCloud(entityId: userId)
+    func uploadImageToCloud(
+        userId: UUID,
+        authorization: @escaping CloudImageMutationAuthorization
+    ) async throws -> String {
+        try await uploadImageToCloud(entityId: userId, authorization: authorization)
+    }
+
+    func uploadImageToCloud(
+        userId: UUID,
+        expectedGeneration: UUID,
+        authorization: @escaping CloudImageMutationAuthorization
+    ) async throws -> GenerationBoundUploadOutcome {
+        try await uploadImageToCloud(
+            entityId: userId,
+            expectedGeneration: expectedGeneration,
+            authorization: authorization
+        )
     }
 
     /// Download image from CloudKit for user
@@ -844,9 +1197,19 @@ extension ProfileImageManagerV2 {
         try await downloadImageFromCloud(entityId: userId)
     }
 
+    func downloadImageFromCloudWithToken(userId: UUID) async throws -> (url: URL, file: SavedImageFile)? {
+        guard let file = try await downloadImageFromCloudWithToken(entityId: userId) else {
+            return nil
+        }
+        return (imageURL(for: file.filename), file)
+    }
+
     /// Delete image from CloudKit for user
-    func deleteImageFromCloud(userId: UUID) async throws {
-        try await deleteImageFromCloud(entityId: userId)
+    func deleteImageFromCloud(
+        userId: UUID,
+        authorization: @escaping CloudImageMutationAuthorization
+    ) async throws {
+        try await deleteImageFromCloud(entityId: userId, authorization: authorization)
     }
 }
 

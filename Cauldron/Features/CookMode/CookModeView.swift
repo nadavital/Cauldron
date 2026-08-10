@@ -5,6 +5,7 @@
 //  Created by Nadav Avital on 10/2/25.
 //
 
+import AppIntents
 import SwiftUI
 import AudioToolbox
 
@@ -16,12 +17,18 @@ struct CookModeView: View {
 
     @ObservedObject private var timerManager: TimerManager
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
     @State private var showingEndSessionAlert = false
     @State private var checkedIngredientIDs: Set<UUID> = []
-    @State private var scaleFactor: Double = 1.0
-    @State private var unitSystem: UnitSystem = .original
+    @State private var experiencePreferences: ExperiencePreferences
+
+    private var scaleFactor: Double { experiencePreferences.recipeScaleFactor }
+    private var unitSystem: UnitSystem { experiencePreferences.recipeUnitSystem }
+    private var shouldReduceMotion: Bool {
+        accessibilityReduceMotion || experiencePreferences.reduceMotion
+    }
 
     /// Ingredients adjusted for the current scale factor and unit system.
     /// Ingredient ids are preserved by both transforms, so check-off state
@@ -46,6 +53,7 @@ struct CookModeView: View {
         self.coordinator = coordinator
         self.dependencies = dependencies
         _timerManager = ObservedObject(wrappedValue: dependencies.timerManager)
+        _experiencePreferences = State(initialValue: .shared)
     }
 
     var body: some View {
@@ -61,6 +69,10 @@ struct CookModeView: View {
             }
         }
         .background(Color.appBackground.ignoresSafeArea())
+        .modifier(RecipeEntityContextModifier(
+            recipeID: recipe.id,
+            isResolvable: recipe.ownerId == CurrentUserSession.shared.userId && !recipe.isPreview
+        ))
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -84,7 +96,10 @@ struct CookModeView: View {
                     }
 
                     // Scale servings live
-                    Picker("Scale Servings", selection: $scaleFactor) {
+                    Picker("Scale Servings", selection: Binding(
+                        get: { experiencePreferences.recipeScaleFactor },
+                        set: { experiencePreferences.recipeScaleFactor = $0 }
+                    )) {
                         Text("½×").tag(0.5)
                         Text("1×").tag(1.0)
                         Text("2×").tag(2.0)
@@ -92,7 +107,10 @@ struct CookModeView: View {
                     }
 
                     // Convert units
-                    Picker("Units", selection: $unitSystem) {
+                    Picker("Units", selection: Binding(
+                        get: { experiencePreferences.recipeUnitSystem },
+                        set: { experiencePreferences.recipeUnitSystem = $0 }
+                    )) {
                         ForEach(UnitSystem.allCases) { system in
                             Text(system.label).tag(system)
                         }
@@ -104,6 +122,8 @@ struct CookModeView: View {
                     } label: {
                         Label("All Timers (\(timerManager.activeTimers.count))", systemImage: "timer")
                     }
+
+                    cookModeSettingsMenu
 
                     Divider()
 
@@ -269,7 +289,7 @@ struct CookModeView: View {
         Group {
             if let currentStep = coordinator.currentStep {
                 Text(currentStep.text)
-                    .font(.title3)
+                    .font(experiencePreferences.largerStepText ? .title : .title3)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(20)
@@ -324,6 +344,7 @@ struct CookModeView: View {
                                         stepIndex: coordinator.currentStepIndex,
                                         recipeName: recipe.title
                                     )
+                                    Task { await RecipeIntentDonation.recordTimerStarted(timerSpec) }
                                 } label: {
                                     HStack {
                                         VStack(alignment: .leading) {
@@ -463,6 +484,7 @@ struct CookModeView: View {
                             stepIndex: coordinator.currentStepIndex,
                             recipeName: recipe.title
                         )
+                        Task { await RecipeIntentDonation.recordTimerStarted(timerSpec) }
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -533,7 +555,9 @@ struct CookModeView: View {
 
                 Button {
                     if coordinator.isLastStep {
-                        Haptics.success()
+                        if experiencePreferences.timerHaptics {
+                            Haptics.success()
+                        }
                         coordinator.endSession()
                     } else {
                         coordinator.nextStep()
@@ -552,6 +576,38 @@ struct CookModeView: View {
             }
         }
         .padding()
+        .animation(
+            shouldReduceMotion ? nil : Theme.Animation.snappy,
+            value: coordinator.currentStepIndex
+        )
+    }
+
+    private var cookModeSettingsMenu: some View {
+        Menu("Cook Mode Settings", systemImage: "gearshape") {
+            Toggle("Keep Screen Awake", isOn: Binding(
+                get: { experiencePreferences.keepScreenAwake },
+                set: { experiencePreferences.keepScreenAwake = $0 }
+            ))
+            Toggle("Larger Step Text", isOn: Binding(
+                get: { experiencePreferences.largerStepText },
+                set: { experiencePreferences.largerStepText = $0 }
+            ))
+            Toggle("Reduce Motion", isOn: Binding(
+                get: { experiencePreferences.reduceMotion },
+                set: { experiencePreferences.reduceMotion = $0 }
+            ))
+
+            Section("Timer Feedback") {
+                Toggle("Haptics", isOn: Binding(
+                    get: { experiencePreferences.timerHaptics },
+                    set: { experiencePreferences.timerHaptics = $0 }
+                ))
+                Toggle("Sounds", isOn: Binding(
+                    get: { experiencePreferences.timerSounds },
+                    set: { experiencePreferences.timerSounds = $0 }
+                ))
+            }
+        }
     }
 }
 

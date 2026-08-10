@@ -7,6 +7,16 @@
 
 import SwiftUI
 
+enum ProfileEditChangePolicy {
+    nonisolated static func didEditBasicInfo(
+        initialUser: User?,
+        username: String,
+        displayName: String
+    ) -> Bool {
+        username != initialUser?.username || displayName != initialUser?.displayName
+    }
+}
+
 struct ProfileEditView: View {
     let dependencies: DependencyContainer
 
@@ -18,6 +28,7 @@ struct ProfileEditView: View {
     @State private var profileColor: String?
     @State private var profileImage: UIImage?
     @State private var selectedAvatarType: AvatarType
+    @State private var isAvatarDirty = false
 
     @State private var showingAvatarPicker = false
     @State private var showingImagePicker = false
@@ -61,12 +72,10 @@ struct ProfileEditView: View {
     }
 
     var hasChanges: Bool {
-        guard let currentUser = currentUser else { return false }
-        return username != currentUser.username ||
-        displayName != currentUser.displayName ||
-        profileEmoji != currentUser.profileEmoji ||
-        profileColor != currentUser.profileColor ||
-        profileImage != nil
+        guard let initialUser else { return false }
+        return username != initialUser.username ||
+            displayName != initialUser.displayName ||
+            isAvatarDirty
     }
 
     var body: some View {
@@ -157,6 +166,7 @@ struct ProfileEditView: View {
                                 Button(role: .destructive) {
                                     profileImage = nil
                                     selectedAvatarType = .emoji
+                                    isAvatarDirty = true
                                 } label: {
                                     Label("Remove Photo", systemImage: "trash")
                                 }
@@ -319,9 +329,20 @@ struct ProfileEditView: View {
             }
             // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
             .fullScreenCover(isPresented: $showingImagePicker) {
-                ImagePicker(image: $profileImage, sourceType: imagePickerSourceType)
+                ImagePicker(
+                    image: Binding(
+                        get: { profileImage },
+                        set: { image in
+                            profileImage = image
+                            isAvatarDirty = true
+                        }
+                    ),
+                    sourceType: imagePickerSourceType
+                )
                     .ignoresSafeArea()
             }
+            .onChange(of: profileEmoji) { _, _ in isAvatarDirty = true }
+            .onChange(of: profileColor) { _, _ in isAvatarDirty = true }
             .task {
                 // Load existing profile image if available
                 if selectedAvatarType == .photo,
@@ -347,6 +368,10 @@ struct ProfileEditView: View {
             dismiss()
             return
         }
+        guard let mutationContext = userSession.verifiedMutationContext(ownerID: currentUser.id) else {
+            dismiss()
+            return
+        }
 
         isSaving = true
         defer { isSaving = false }
@@ -355,64 +380,214 @@ struct ProfileEditView: View {
             // Normalize inputs: trim whitespace and lowercase username
             let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
             let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
-
-            // Handle avatar update
-            if selectedAvatarType == .photo, let image = profileImage {
-                // OPTIMISTIC UI: Save image locally and update UI immediately
-                let profileImageURL = try await dependencies.profileImageManager.saveImage(image, userId: currentUser.id)
-
-                // Create optimistic user update (without cloud sync yet)
-                let optimisticUser = currentUser.updatedProfile(
-                    profileEmoji: nil,
-                    profileColor: nil,
-                    profileImageURL: profileImageURL,
-                    cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName, // Keep existing for now
-                    profileImageModifiedAt: currentUser.profileImageModifiedAt
+            let didEditBasicInfo = ProfileEditChangePolicy.didEditBasicInfo(
+                initialUser: initialUser,
+                username: normalizedUsername,
+                displayName: normalizedDisplayName
+            )
+            if didEditBasicInfo, normalizedUsername != currentUser.username.lowercased() {
+                try await dependencies.userCloudService.prepareUsernameChange(
+                    normalizedUsername,
+                    for: currentUser.id
                 )
-
-                // Update UI immediately
-                CurrentUserSession.shared.currentUser = optimisticUser
-                Self.saveUserToDefaults(optimisticUser)
+            }
+            // Handle avatar update
+            if isAvatarDirty, selectedAvatarType == .photo, let image = profileImage {
+                let avatarIntent = ProfileMutationCoordinator.shared.reserveAvatarIntent()
+                let basicIntent = didEditBasicInfo
+                    ? ProfileMutationCoordinator.shared.reserveBasicIntent()
+                    : nil
+                let preparedImageData = try await dependencies.profileImageManager
+                    .prepareImageData(image)
+                let stagedImage = try await dependencies.profileImageManager
+                    .stagePreparedImageData(preparedImageData, userId: currentUser.id)
+                guard ProfileMutationCoordinator.shared.isCurrentAvatarIntent(avatarIntent) else {
+                    await dependencies.profileImageManager.deleteStagedImage(
+                        stagedImage,
+                        userId: currentUser.id
+                    )
+                    return
+                }
+                // Compression and staging do not mutate shared profile state.
+                // The avatar intent reserved above preserves action ordering;
+                // basic-info commits use an independent latest-wins stream.
+                guard let commitResult = try await ProfileMutationCoordinator.shared.performCommit(
+                    avatarIntent: avatarIntent,
+                    operation: { () async throws -> (SavedImageReplacement, StagedImageReplacement, ProfileAvatarMutationToken, ProfileBasicInfoMutationToken?, User, User, UUID)? in
+                    guard let commitBaseUser = userSession.currentUser,
+                          commitBaseUser.id == mutationContext.ownerID else { return nil }
+                    let profileImageURL = await dependencies.profileImageManager.imageURL(for: currentUser.id)
+                    guard ProfileMutationCoordinator.shared.beginAvatarPublication(avatarIntent) else {
+                        return nil
+                    }
+                    let shouldCommitBasicInfo = basicIntent.map {
+                        ProfileMutationCoordinator.shared.isCurrentBasicIntent($0)
+                    } ?? false
+                    guard let pendingCommit = userSession.prepareAuthorizedAvatarPendingSync(
+                        context: mutationContext,
+                        replacing: commitBaseUser,
+                        profileImageURL: profileImageURL,
+                        profileImageLocalRevision: stagedImage.generation,
+                        stagedImageURL: stagedImage.url,
+                        username: shouldCommitBasicInfo ? normalizedUsername : nil,
+                        displayName: shouldCommitBasicInfo ? normalizedDisplayName : nil
+                    ) else {
+                        await dependencies.profileImageManager.deleteStagedImage(stagedImage, userId: currentUser.id)
+                        return nil
+                    }
+                    let savedImage = try await dependencies.profileImageManager
+                        .promoteStagedImage(
+                            stagedImage,
+                            userId: currentUser.id,
+                            knownPreviousGeneration: commitBaseUser.profileImageLocalRevision
+                        )
+                    guard let avatarToken = userSession.reserveProfileAvatarMutation(
+                        context: mutationContext,
+                        replacing: commitBaseUser
+                    ) else {
+                        // The durable marker and staged bytes intentionally remain
+                        // queued for the owning account to reconcile on next launch.
+                        throw CancellationError()
+                    }
+                    // Do not supersede a valid earlier basic-info save until the
+                    // fallible local image write has succeeded. If a newer window
+                    // edited the name while this write was suspended, its edit wins.
+                    let basicInfoToken = shouldCommitBasicInfo
+                        ? userSession.reserveProfileBasicInfoMutation(
+                            context: mutationContext,
+                            replacing: commitBaseUser
+                        )
+                        : nil
+                    guard let optimisticUser = userSession.publishAuthorizedAvatarPendingSync(
+                        transactionID: pendingCommit.transactionID,
+                        context: mutationContext,
+                        token: avatarToken,
+                        whileAvatarMatches: commitBaseUser,
+                        profileImageURL: savedImage.url,
+                        profileImageLocalRevision: savedImage.file.generation,
+                        basicInfoToken: basicInfoToken,
+                        username: shouldCommitBasicInfo ? normalizedUsername : nil,
+                        displayName: shouldCommitBasicInfo ? normalizedDisplayName : nil
+                    ) else {
+                        throw CancellationError()
+                    }
+                    if let supersededURL = pendingCommit.supersededStagedImageURL {
+                        await dependencies.profileImageManager.deleteStagedImage(
+                            at: supersededURL,
+                            userId: currentUser.id
+                        )
+                    }
+                        return (
+                            savedImage,
+                            stagedImage,
+                            avatarToken,
+                            basicInfoToken,
+                            commitBaseUser,
+                            optimisticUser,
+                            pendingCommit.transactionID
+                        )
+                    }
+                ) else {
+                    await dependencies.profileImageManager.deleteStagedImage(stagedImage, userId: currentUser.id)
+                    return
+                }
+                let (savedImage, _, avatarToken, basicInfoToken, commitBaseUser, optimisticUser, pendingProfileSync) = commitResult
+                let profileImageURL = savedImage.url
                 AppLogger.general.info("✅ Updated profile locally (optimistic)")
 
                 // Dismiss sheet immediately for snappy UX
                 dismiss()
 
                 // Background sync to CloudKit
-                Task.detached { [dependencies, currentUser] in
+                ProfileEditSyncCoordinator.shared.enqueue { [dependencies, currentUser = commitBaseUser, mutationContext, avatarToken] in
                     do {
-                        let localModified = await dependencies.profileImageManager.getImageModificationDate(userId: currentUser.id)
-                        let needsUpload = currentUser.needsProfileImageUpload(localImageModified: localModified)
-
-                        var cloudProfileImageRecordName = currentUser.cloudProfileImageRecordName
-                        var profileImageModifiedAt = currentUser.profileImageModifiedAt
-
-                        if needsUpload {
-                            cloudProfileImageRecordName = try await dependencies.profileImageManager.uploadImageToCloud(userId: currentUser.id)
-                            profileImageModifiedAt = Date()
-                            AppLogger.general.info("☁️ Uploaded profile image to CloudKit in background")
-
-                            // Update with cloud record name after successful upload
-                            let finalUser = optimisticUser.updatedProfile(
-                                profileEmoji: nil,
-                                profileColor: nil,
-                                profileImageURL: profileImageURL,
-                                cloudProfileImageRecordName: cloudProfileImageRecordName,
-                                profileImageModifiedAt: profileImageModifiedAt
-                            )
-
-                            try await dependencies.userCloudService.saveUser(finalUser)
-
-                            // Update session with cloud-synced version
-                            await MainActor.run {
-                                CurrentUserSession.shared.currentUser = finalUser
-                                Self.saveUserToDefaults(finalUser)
+                        guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                            avatarToken,
+                            context: mutationContext,
+                            whileAvatarMatches: optimisticUser
+                        ) else { return }
+                        let uploadOutcome = try await dependencies.profileImageManager.uploadImageToCloud(
+                            userId: currentUser.id,
+                            expectedGeneration: savedImage.file.generation,
+                            authorization: {
+                                await CurrentUserSession.shared.permitsProfileAvatarMutation(
+                                    avatarToken,
+                                    context: mutationContext,
+                                    whileAvatarMatches: optimisticUser
+                                )
                             }
-                        } else {
-                            // Still save user record to CloudKit even if image didn't need upload
-                            try await dependencies.userCloudService.saveUser(optimisticUser)
-                            AppLogger.general.info("☁️ Synced user profile to CloudKit (image already up-to-date)")
+                        )
+                        let cloudProfileImageRecordName: String
+                        switch uploadOutcome {
+                        case .staleBeforeUpload, .staleAfterUpload:
+                            // The durable pending transaction (or its successor)
+                            // owns retrying the deterministic profile-image record.
+                            return
+                        case .uploaded(let recordName):
+                            cloudProfileImageRecordName = recordName
                         }
+                        guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                            avatarToken,
+                            context: mutationContext,
+                            whileAvatarMatches: optimisticUser
+                        ) else {
+                                await Self.retryStaleProfileAssetCleanup(
+                                    userID: currentUser.id,
+                                    dependencies: dependencies,
+                                    mutationContext: mutationContext
+                            )
+                            return
+                        }
+                        let profileImageModifiedAt = Date()
+                        AppLogger.general.info("☁️ Uploaded profile image to CloudKit in background")
+
+                        guard let finalUser = CurrentUserSession.shared.userByMergingAuthorizedAvatar(
+                            context: mutationContext,
+                            token: avatarToken,
+                            whileAvatarMatches: optimisticUser,
+                            profileEmoji: nil,
+                            profileColor: nil,
+                            profileImageURL: profileImageURL,
+                            cloudProfileImageRecordName: cloudProfileImageRecordName,
+                            profileImageModifiedAt: profileImageModifiedAt,
+                            profileImageLocalRevision: savedImage.file.generation,
+                            basicInfoToken: basicInfoToken,
+                            username: didEditBasicInfo ? normalizedUsername : nil,
+                            displayName: didEditBasicInfo ? normalizedDisplayName : nil
+                        ) else { return }
+
+                        try await dependencies.userCloudService.saveUser(finalUser)
+                        let didUpdateWebSnapshot = await dependencies.externalShareService.updateProfileShareMetadata(
+                            for: finalUser
+                        )
+                        guard didUpdateWebSnapshot else { return }
+                        guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                            avatarToken,
+                            context: mutationContext,
+                            whileAvatarMatches: optimisticUser
+                        ) else { return }
+
+                        CurrentUserSession.shared.commitAuthorizedAvatar(
+                            context: mutationContext,
+                            token: avatarToken,
+                            whileAvatarMatches: optimisticUser,
+                            profileEmoji: nil,
+                            profileColor: nil,
+                            profileImageURL: profileImageURL,
+                            cloudProfileImageRecordName: cloudProfileImageRecordName,
+                            profileImageModifiedAt: profileImageModifiedAt,
+                            profileImageLocalRevision: savedImage.file.generation,
+                            basicInfoToken: basicInfoToken,
+                            username: didEditBasicInfo ? normalizedUsername : nil,
+                            displayName: didEditBasicInfo ? normalizedDisplayName : nil
+                        )
+                        CurrentUserSession.shared.clearPendingProfileSync(
+                            transactionID: pendingProfileSync
+                        )
+                        await dependencies.profileImageManager.deleteStagedImage(
+                            stagedImage,
+                            userId: currentUser.id
+                        )
                     } catch {
                         AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
                         // Note: UI already updated optimistically, so user doesn't see this error
@@ -420,79 +595,172 @@ struct ProfileEditView: View {
                     }
                 }
 
-            } else if selectedAvatarType == .emoji {
-                // OPTIMISTIC UI: Update locally first
-                let updatedUser = User(
-                    id: currentUser.id,
-                    username: normalizedUsername,
-                    displayName: normalizedDisplayName,
-                    email: currentUser.email,
-                    cloudRecordName: currentUser.cloudRecordName,
-                    createdAt: currentUser.createdAt,
-                    profileEmoji: profileEmoji,
-                    profileColor: profileColor,
-                    profileImageURL: nil,
-                    cloudProfileImageRecordName: nil,
-                    profileImageModifiedAt: nil
-                )
-
-                // Update UI immediately
-                CurrentUserSession.shared.currentUser = updatedUser
-                Self.saveUserToDefaults(updatedUser)
+            } else if isAvatarDirty, selectedAvatarType == .emoji {
+                let avatarIntent = ProfileMutationCoordinator.shared.reserveAvatarIntent()
+                let basicIntent = didEditBasicInfo
+                    ? ProfileMutationCoordinator.shared.reserveBasicIntent()
+                    : nil
+                guard let commitResult = await ProfileMutationCoordinator.shared.performCommit(
+                    avatarIntent: avatarIntent,
+                    operation: { () async -> (ProfileBasicInfoMutationToken?, ProfileAvatarMutationToken, User, User, UUID, URL?)? in
+                    guard let commitBaseUser = userSession.currentUser,
+                          commitBaseUser.id == mutationContext.ownerID,
+                          ProfileMutationCoordinator.shared.beginAvatarPublication(avatarIntent) else {
+                        return nil
+                    }
+                    let shouldCommitBasicInfo = basicIntent.map {
+                        ProfileMutationCoordinator.shared.isCurrentBasicIntent($0)
+                    } ?? false
+                    let basicInfoToken = shouldCommitBasicInfo
+                        ? userSession.reserveProfileBasicInfoMutation(
+                        context: mutationContext,
+                        replacing: commitBaseUser
+                    )
+                        : nil
+                    guard !shouldCommitBasicInfo || basicInfoToken != nil,
+                          let avatarToken = userSession.reserveProfileAvatarMutation(
+                            context: mutationContext,
+                            replacing: commitBaseUser
+                          ),
+                          let optimisticCommit = userSession.commitAuthorizedAvatarWithPendingSync(
+                            context: mutationContext,
+                            token: avatarToken,
+                            whileAvatarMatches: commitBaseUser,
+                            profileEmoji: profileEmoji,
+                            profileColor: profileColor,
+                            profileImageURL: nil,
+                            cloudProfileImageRecordName: nil,
+                            profileImageModifiedAt: nil,
+                            profileImageLocalRevision: nil,
+                            basicInfoToken: basicInfoToken,
+                            username: shouldCommitBasicInfo ? normalizedUsername : nil,
+                            displayName: shouldCommitBasicInfo ? normalizedDisplayName : nil
+                          ) else { return nil }
+                    return (
+                        basicInfoToken,
+                        avatarToken,
+                        commitBaseUser,
+                        optimisticCommit.user,
+                        optimisticCommit.transactionID,
+                        optimisticCommit.supersededStagedImageURL
+                    )
+                    }
+                ) else { return }
+                let (basicInfoToken, avatarToken, commitBaseUser, updatedUser, pendingProfileSync, supersededStagedImageURL) = commitResult
+                if let supersededStagedImageURL {
+                    await dependencies.profileImageManager.deleteStagedImage(
+                        at: supersededStagedImageURL,
+                        userId: currentUser.id
+                    )
+                }
                 AppLogger.general.info("✅ Updated profile locally with emoji (optimistic)")
 
                 // Dismiss immediately
                 dismiss()
 
                 // Background sync
-                Task.detached { [dependencies, currentUser] in
+                ProfileEditSyncCoordinator.shared.enqueue { [dependencies, currentUser = commitBaseUser, mutationContext, avatarToken] in
+                    guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                        avatarToken,
+                        context: mutationContext,
+                        whileAvatarMatches: updatedUser
+                    ) else { return }
                     // Clear existing profile image
                     await dependencies.profileImageManager.deleteImage(userId: currentUser.id)
+                    guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                        avatarToken,
+                        context: mutationContext,
+                        whileAvatarMatches: updatedUser
+                    ) else { return }
 
                     do {
                         // Delete from CloudKit if exists
-                        if currentUser.cloudProfileImageRecordName != nil {
-                            try await dependencies.profileImageManager.deleteImageFromCloud(userId: currentUser.id)
+                        if currentUser.cloudProfileImageRecordName != nil || currentUser.profileImageURL != nil {
+                            guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                                avatarToken,
+                                context: mutationContext,
+                                whileAvatarMatches: updatedUser
+                            ) else { return }
+                            try await dependencies.profileImageManager.deleteImageFromCloud(
+                                userId: currentUser.id,
+                                authorization: {
+                                    await CurrentUserSession.shared.permitsProfileAvatarMutation(
+                                        avatarToken,
+                                        context: mutationContext,
+                                        whileAvatarMatches: updatedUser
+                                    )
+                                }
+                            )
+                            guard CurrentUserSession.shared.permitsProfileAvatarMutation(
+                                avatarToken,
+                                context: mutationContext,
+                                whileAvatarMatches: updatedUser
+                            ) else { return }
                         }
 
                         // Save updated user to CloudKit
-                        try await dependencies.userCloudService.saveUser(updatedUser)
+                        guard let latestUser = CurrentUserSession.shared.userByMergingAuthorizedAvatar(
+                            context: mutationContext,
+                            token: avatarToken,
+                            whileAvatarMatches: updatedUser,
+                            profileEmoji: updatedUser.profileEmoji,
+                            profileColor: updatedUser.profileColor,
+                            profileImageURL: nil,
+                            cloudProfileImageRecordName: nil,
+                            profileImageModifiedAt: nil,
+                            profileImageLocalRevision: nil,
+                            basicInfoToken: basicInfoToken,
+                            username: didEditBasicInfo ? normalizedUsername : nil,
+                            displayName: didEditBasicInfo ? normalizedDisplayName : nil
+                        ) else { return }
+                        try await dependencies.userCloudService.saveUser(latestUser)
+                        let didUpdateWebSnapshot = await dependencies.externalShareService.updateProfileShareMetadata(
+                            for: latestUser
+                        )
+                        guard didUpdateWebSnapshot else { return }
+                        CurrentUserSession.shared.clearPendingProfileSync(
+                            transactionID: pendingProfileSync
+                        )
                         AppLogger.general.info("☁️ Synced emoji profile to CloudKit in background")
                     } catch {
                         AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
                     }
                 }
 
-            } else if normalizedUsername != currentUser.username || normalizedDisplayName != currentUser.displayName {
-                // OPTIMISTIC UI: Update basic info immediately
-                let updatedUser = User(
-                    id: currentUser.id,
-                    username: normalizedUsername,
-                    displayName: normalizedDisplayName,
-                    email: currentUser.email,
-                    cloudRecordName: currentUser.cloudRecordName,
-                    createdAt: currentUser.createdAt,
-                    profileEmoji: currentUser.profileEmoji,
-                    profileColor: currentUser.profileColor,
-                    profileImageURL: currentUser.profileImageURL,
-                    cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
-                    profileImageModifiedAt: currentUser.profileImageModifiedAt
-                )
-
-                CurrentUserSession.shared.currentUser = updatedUser
-                Self.saveUserToDefaults(updatedUser)
+            } else if didEditBasicInfo {
+                let basicIntent = ProfileMutationCoordinator.shared.reserveBasicIntent()
+                guard let commitResult = await ProfileMutationCoordinator.shared.performCommit(
+                    basicIntent: basicIntent,
+                    operation: { () async -> (ProfileBasicInfoMutationToken, UUID)? in
+                    guard let commitBaseUser = userSession.currentUser,
+                          commitBaseUser.id == mutationContext.ownerID else { return nil }
+                    guard let basicInfoToken = userSession.reserveProfileBasicInfoMutation(
+                        context: mutationContext,
+                        replacing: commitBaseUser
+                    ), let optimisticCommit = userSession.commitAuthorizedBasicInfoWithPendingSync(
+                        context: mutationContext,
+                        token: basicInfoToken,
+                        username: normalizedUsername,
+                        displayName: normalizedDisplayName
+                    ) else { return nil }
+                    return (basicInfoToken, optimisticCommit.transactionID)
+                    }
+                ) else { return }
+                let (basicInfoToken, pendingProfileSync) = commitResult
                 AppLogger.general.info("✅ Updated basic profile info locally (optimistic)")
 
                 dismiss()
 
                 // Background sync
-                Task.detached { [dependencies] in
-                    do {
-                        try await dependencies.userCloudService.saveUser(updatedUser)
-                        AppLogger.general.info("☁️ Synced basic profile to CloudKit in background")
-                    } catch {
-                        AppLogger.general.error("❌ Background CloudKit sync failed: \(error.localizedDescription)")
-                    }
+                ProfileEditSyncCoordinator.shared.enqueue { [dependencies, mutationContext] in
+                    guard CurrentUserSession.shared.permitsProfileBasicInfoMutation(
+                        basicInfoToken,
+                        context: mutationContext
+                    ) else { return }
+                    await CurrentUserSession.shared.reconcilePendingProfileSync(
+                        transactionID: pendingProfileSync,
+                        dependencies: dependencies
+                    )
                 }
             }
 
@@ -503,13 +771,160 @@ struct ProfileEditView: View {
         }
     }
 
-    private static func saveUserToDefaults(_ user: User) {
-        let defaults = UserDefaults.standard
-        defaults.set(user.id.uuidString, forKey: "currentUserId")
-        defaults.set(user.username, forKey: "currentUsername")
-        defaults.set(user.displayName, forKey: "currentDisplayName")
-        defaults.set(user.profileEmoji, forKey: "currentProfileEmoji")
-        defaults.set(user.profileColor, forKey: "currentProfileColor")
+    private static func retryStaleProfileAssetCleanup(
+        userID: UUID,
+        dependencies: DependencyContainer,
+        mutationContext: VerifiedAccountMutationContext
+    ) async {
+        for attempt in 0..<3 {
+            do {
+                try await dependencies.profileImageManager.deleteImageFromCloud(
+                    userId: userID,
+                    authorization: {
+                        await CurrentUserSession.shared.permitsMutation(mutationContext)
+                    }
+                )
+                return
+            } catch {
+                guard attempt < 2 else {
+                    AppLogger.general.error("Unable to clean up superseded profile asset: \(error.localizedDescription)")
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250 * (attempt + 1)))
+            }
+        }
+    }
+
+}
+
+/// Serializes profile CloudKit writes so a newer same-account edit always runs
+/// after any already-started older write. Snapshot guards skip queued stale
+/// work before it can touch local images or remote profile metadata.
+@MainActor
+private final class ProfileEditSyncCoordinator {
+    static let shared = ProfileEditSyncCoordinator()
+
+    private var tail: Task<Void, Never>?
+
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) {
+        let previous = tail
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        tail = task
+    }
+}
+
+/// Orders local profile commits without superseding the logical avatar until
+/// image preparation and any transactional local replacement have succeeded.
+struct ProfileMutationOrderingGate {
+    private var avatarIntentRevision: UInt64 = 0
+    private var basicIntentRevision: UInt64 = 0
+    private var publishingAvatarIntent: UInt64?
+
+    mutating func reserveAvatarIntent() -> UInt64 {
+        avatarIntentRevision &+= 1
+        return avatarIntentRevision
+    }
+
+    mutating func reserveBasicIntent() -> UInt64 {
+        basicIntentRevision &+= 1
+        return basicIntentRevision
+    }
+
+    func permitsCommit(avatarIntent: UInt64?, basicIntent: UInt64?) -> Bool {
+        if let avatarIntent {
+            return isCurrentAvatarIntent(avatarIntent)
+        }
+        if let basicIntent {
+            return isCurrentBasicIntent(basicIntent)
+        }
+        return true
+    }
+
+    func isCurrentAvatarIntent(_ intent: UInt64) -> Bool {
+        intent == avatarIntentRevision
+    }
+
+    func isCurrentBasicIntent(_ intent: UInt64) -> Bool {
+        intent == basicIntentRevision
+    }
+
+    mutating func beginAvatarPublication(_ intent: UInt64) -> Bool {
+        guard publishingAvatarIntent == nil,
+              isCurrentAvatarIntent(intent) else { return false }
+        publishingAvatarIntent = intent
+        return true
+    }
+
+    mutating func endAvatarPublication(_ intent: UInt64) {
+        guard publishingAvatarIntent == intent else { return }
+        publishingAvatarIntent = nil
+    }
+}
+
+@MainActor
+private final class ProfileMutationCoordinator {
+    static let shared = ProfileMutationCoordinator()
+
+    private var orderingGate = ProfileMutationOrderingGate()
+    private var isCommitting = false
+    private var commitWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func reserveAvatarIntent() -> UInt64 {
+        orderingGate.reserveAvatarIntent()
+    }
+
+    func isCurrentAvatarIntent(_ intent: UInt64) -> Bool {
+        orderingGate.isCurrentAvatarIntent(intent)
+    }
+
+    func reserveBasicIntent() -> UInt64 {
+        orderingGate.reserveBasicIntent()
+    }
+
+    func isCurrentBasicIntent(_ intent: UInt64) -> Bool {
+        orderingGate.isCurrentBasicIntent(intent)
+    }
+
+    func beginAvatarPublication(_ intent: UInt64) -> Bool {
+        orderingGate.beginAvatarPublication(intent)
+    }
+
+    func performCommit<Result>(
+        avatarIntent: UInt64? = nil,
+        basicIntent: UInt64? = nil,
+        operation: @escaping @MainActor () async throws -> Result?
+    ) async rethrows -> Result? {
+        await acquireCommitLock()
+        defer {
+            if let avatarIntent {
+                orderingGate.endAvatarPublication(avatarIntent)
+            }
+            releaseCommitLock()
+        }
+        guard orderingGate.permitsCommit(
+            avatarIntent: avatarIntent,
+            basicIntent: basicIntent
+        ) else { return nil }
+        return try await operation()
+    }
+
+    private func acquireCommitLock() async {
+        guard isCommitting else {
+            isCommitting = true
+            return
+        }
+        await withCheckedContinuation { commitWaiters.append($0) }
+    }
+
+    private func releaseCommitLock() {
+        guard !commitWaiters.isEmpty else {
+            isCommitting = false
+            return
+        }
+        commitWaiters.removeFirst().resume()
     }
 }
 

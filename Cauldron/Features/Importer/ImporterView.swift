@@ -50,18 +50,19 @@ struct ImporterView: View {
             viewModel.preloadImportedRecipe(preparedRecipe, sourceInfo: preparedSourceInfo)
         }
         self.autoImportFromInitialURL = initialURL != nil
-        self.autoImportFromInitialText = initialText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        self.autoImportFromInitialText =
+            initialText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         self.hasPreparedRecipe = preparedRecipe != nil
         self.destinationRecipeID = destinationRecipeID
         self.onSuccessfulSave = onSuccessfulSave
         _viewModel = State(initialValue: viewModel)
     }
-    
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    VStack(spacing: 24) {
+                    VStack(spacing: Theme.Spacing.xl) {
                         headerSection
 
                         importTypePicker
@@ -83,19 +84,21 @@ struct ImporterView: View {
                             errorSection(error)
                         }
                     }
-                    .padding(.vertical, 32)
-                    .padding(.horizontal, 20)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.xxl)
+                    .padding(.horizontal, Theme.Spacing.md)
                     .padding(.bottom, 110)
                 }
-                .background(Color.cauldronBackground.ignoresSafeArea())
+                .warmCanvas()
 
                 if viewModel.canImport || viewModel.isLoading {
                     generateActionButton
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.spring(), value: viewModel.canImport)
-            .animation(.spring(), value: viewModel.isLoading)
+            .animation(Theme.Animation.spring, value: viewModel.canImport)
+            .animation(Theme.Animation.spring, value: viewModel.isLoading)
             .navigationTitle("Import Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -118,10 +121,14 @@ struct ImporterView: View {
                 )
             }
             .fullScreenCover(isPresented: $showingOCRPicker) {
-                ImagePicker(image: $viewModel.selectedOCRImage, sourceType: ocrSourceType, allowsEditing: false)
-                    .ignoresSafeArea()
+                ImagePicker(
+                    image: $viewModel.selectedOCRImage, sourceType: ocrSourceType, allowsEditing: false
+                )
+                .ignoresSafeArea()
             }
-            .confirmationDialog("Import from Image", isPresented: $showingOCRSourceDialog, titleVisibility: .visible) {
+            .confirmationDialog(
+                "Import from Image", isPresented: $showingOCRSourceDialog, titleVisibility: .visible
+            ) {
                 Button("Photo Library") {
                     ocrSourceType = .photoLibrary
                     showingOCRPicker = true
@@ -140,30 +147,17 @@ struct ImporterView: View {
     }
 
     private var generateActionButton: some View {
-        Button {
+        PrimaryActionButton(
+            verbatimTitle: viewModel.isLoading ? generateLoadingTitle : generateActionTitle,
+            systemImage: generateActionIcon,
+            isBusy: viewModel.isLoading,
+            isDisabled: !viewModel.canImport
+        ) {
             Task { await performImport() }
-        } label: {
-            HStack(spacing: 12) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                    Text(generateLoadingTitle)
-                        .font(.headline)
-                } else {
-                    Image(systemName: generateActionIcon)
-                        .font(.headline)
-                    Text(generateActionTitle)
-                        .font(.headline)
-                }
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .background(Color.cauldronOrange, in: Capsule())
         }
-        .disabled(viewModel.isLoading || !viewModel.canImport)
-        .padding(.bottom, 32)
+        .frame(maxWidth: 520)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.bottom, Theme.Spacing.xxl)
     }
 
     private var generateActionTitle: String {
@@ -186,104 +180,95 @@ struct ImporterView: View {
         }
         return "Importing..."
     }
-    
+
     private var headerSection: some View {
-        HStack(alignment: .center, spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.cauldronOrange.opacity(0.8),
-                                Color.cauldronOrange
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 64, height: 64)
+        AppCard(style: .elevated) {
+            HStack(alignment: .center, spacing: Theme.Spacing.md) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                        .fill(Color.cauldronWarmGradient)
+                        .frame(width: 64, height: 64)
 
-                Image(systemName: "square.and.arrow.down.on.square")
-                    .font(.system(size: 28))
-                    .foregroundColor(.white)
-            }
+                    Image(systemName: "square.and.arrow.down.on.square")
+                        .font(.system(size: Theme.IconSize.large))
+                        .foregroundColor(.white)
+                }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Import a Recipe")
-                    .font(.title3)
-                    .fontWeight(.semibold)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text("Import a Recipe")
+                        .font(Theme.Typography.sectionTitle)
 
-                Text(headerDescription)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(headerDescription)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .cardStyle()
     }
 
     private var importTypePicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import Method")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
+        AppCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Label("Import Method", systemImage: "arrow.triangle.branch")
+                    .font(.headline)
 
-            Picker("Import Type", selection: $viewModel.importType) {
-                Label("URL", systemImage: "link").tag(ImportType.url)
-                Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
-                Label("Image", systemImage: "photo.on.rectangle").tag(ImportType.image)
+                Picker("Import Type", selection: $viewModel.importType) {
+                    Label("URL", systemImage: "link").tag(ImportType.url)
+                    Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
+                    Label("Image", systemImage: "photo.on.rectangle").tag(ImportType.image)
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
         }
-        .padding(16)
-        .cardStyle()
     }
 
     private var urlSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("Recipe Link", systemImage: "link")
-                .font(.headline)
+        AppCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                Label("Recipe Link", systemImage: "link")
+                    .font(Theme.Typography.cardTitle)
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    TextField("https://example.com/recipe", text: $viewModel.urlString)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled(true)
-                        .padding(12)
-                        .background(Color.appSurface)
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(isValidURL ? Color.green.opacity(0.4) : Color.secondary.opacity(0.15), lineWidth: 1.5)
-                        )
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        TextField("https://example.com/recipe", text: $viewModel.urlString)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
+                            .padding(Theme.Spacing.sm)
+                            .background(Color.appSurfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
+                                    .stroke(
+                                        isValidURL ? Color.green.opacity(0.4) : Color.secondary.opacity(0.15),
+                                        lineWidth: 1.5)
+                            )
 
-                    if isValidURL {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.title3)
+                        if isValidURL {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.title3)
+                        }
                     }
-                }
 
-                Text("Paste a link to the recipe and we'll import the details.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    Text("Paste a link to the recipe and we'll import the details.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
-                Button {
-                    pasteURLFromClipboard()
-                } label: {
-                    Label("Paste URL from Clipboard", systemImage: "doc.on.clipboard")
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        pasteURLFromClipboard()
+                    } label: {
+                        Label("Paste URL from Clipboard", systemImage: "doc.on.clipboard")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.cauldronOrange)
+                    .controlSize(.large)
+                    .frame(minHeight: Theme.HitTarget.minimum)
                 }
-                .buttonStyle(.bordered)
-                .tint(.cauldronOrange)
             }
         }
-        .padding(16)
-        .cardStyle()
     }
 
     private var isValidURL: Bool {
@@ -291,88 +276,95 @@ struct ImporterView: View {
     }
 
     private var textSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label("Recipe Text", systemImage: "text.justifyleft")
-                    .font(.headline)
+        AppCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                HStack {
+                    Label("Recipe Text", systemImage: "text.justifyleft")
+                        .font(Theme.Typography.cardTitle)
 
-                Spacer()
+                    Spacer()
 
-                if !viewModel.textInput.isEmpty {
-                    Text("\(viewModel.textInput.count) characters")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if !viewModel.textInput.isEmpty {
+                        Text("\(viewModel.textInput.count) characters")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-            }
 
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $viewModel.textInput)
-                    .frame(minHeight: 220)
-                    .padding(12)
-                    .background(Color.appSurface)
-                    .cornerRadius(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1.5)
-                    )
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $viewModel.textInput)
+                        .frame(minHeight: 220)
+                        .padding(Theme.Spacing.sm)
+                        .background(Color.appSurfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.15), lineWidth: 1.5)
+                        )
 
-                if viewModel.textInput.isEmpty {
-                    Text("Paste your recipe here...\n\nExample:\n\nChocolate Chip Cookies\n\nIngredients:\n- 2 cups flour\n- 1 cup sugar\n...\n\nSteps:\n1. Mix dry ingredients\n2. Add wet ingredients\n...")
+                    if viewModel.textInput.isEmpty {
+                        Text(
+                            "Paste your recipe here...\n\nExample:\n\nChocolate Chip Cookies\n\nIngredients:\n- 2 cups flour\n- 1 cup sugar\n...\n\nSteps:\n1. Mix dry ingredients\n2. Add wet ingredients\n..."
+                        )
                         .foregroundColor(.secondary.opacity(0.5))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 20)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.lg)
                         .allowsHitTesting(false)
+                    }
                 }
-            }
 
-            Text("Include the title, ingredients, and steps for the most accurate import.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                Text("Include the title, ingredients, and steps for the most accurate import.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-            Button {
-                pasteTextFromClipboard()
-            } label: {
-                Label("Paste Text from Clipboard", systemImage: "doc.on.clipboard")
-                    .frame(maxWidth: .infinity)
+                Button {
+                    pasteTextFromClipboard()
+                } label: {
+                    Label("Paste Text from Clipboard", systemImage: "doc.on.clipboard")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cauldronOrange)
+                .controlSize(.large)
+                .frame(minHeight: Theme.HitTarget.minimum)
             }
-            .buttonStyle(.bordered)
-            .tint(.cauldronOrange)
         }
-        .padding(16)
-        .cardStyle()
     }
 
     private var imageSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Recipe Image", systemImage: "photo.on.rectangle")
-                .font(.headline)
+        AppCard {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Label("Recipe Image", systemImage: "photo.on.rectangle")
+                    .font(Theme.Typography.cardTitle)
 
-            if let selectedImage = viewModel.selectedOCRImage {
-                Image(uiImage: selectedImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
+                if let selectedImage = viewModel.selectedOCRImage {
+                    Image(uiImage: selectedImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                }
 
-            Button {
-                showingOCRSourceDialog = true
-            } label: {
-                Label(imageSourceButtonTitle, systemImage: "photo.badge.plus")
-                    .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.cauldronOrange.opacity(0.12))
-                .foregroundColor(.cauldronOrange)
-                .cornerRadius(Theme.Radius.card)
-            }
+                Button {
+                    showingOCRSourceDialog = true
+                } label: {
+                    Label(imageSourceButtonTitle, systemImage: "photo.badge.plus")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Theme.Spacing.sm)
+                        .background(Color.cauldronOrange.opacity(0.12))
+                        .foregroundColor(.cauldronOrange)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                        .frame(minHeight: Theme.HitTarget.minimum)
+                }
 
-            Text("When you tap Import Recipe, Cauldron reads the image and tries to build a complete recipe.")
+                Text(
+                    "When you tap Import Recipe, Cauldron reads the image and tries to build a complete recipe."
+                )
                 .font(.caption)
                 .foregroundColor(.secondary)
+            }
         }
-        .padding(16)
-        .cardStyle()
     }
 
     private var imageSourceButtonTitle: String {
@@ -390,19 +382,22 @@ struct ImporterView: View {
     }
 
     private func errorSection(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundColor(.red)
+        AppCard {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundColor(.red)
 
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(.red)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
         }
-        .padding(16)
-        .background(Color.red.opacity(0.1))
-        .cornerRadius(Theme.Radius.card)
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .stroke(Color.red.opacity(0.35), lineWidth: 1)
+        }
     }
 
     private func pasteURLFromClipboard() {
@@ -418,24 +413,27 @@ struct ImporterView: View {
     private func performImport() async {
         await viewModel.importRecipe()
         if let recipe = viewModel.importedRecipe,
-           let source = viewModel.sourceInfo {
+            let source = viewModel.sourceInfo
+        {
             previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
         }
     }
 
     private func autoImportIfNeeded() async {
         if hasPreparedRecipe,
-           !hasPresentedPreparedPreview,
-           let recipe = viewModel.importedRecipe,
-           let source = viewModel.sourceInfo {
+            !hasPresentedPreparedPreview,
+            let recipe = viewModel.importedRecipe,
+            let source = viewModel.sourceInfo
+        {
             hasPresentedPreparedPreview = true
             previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
             return
         }
 
         guard autoImportFromInitialURL || autoImportFromInitialText,
-              !hasTriggeredAutoImport,
-              viewModel.canImport else {
+            !hasTriggeredAutoImport,
+            viewModel.canImport
+        else {
             return
         }
 

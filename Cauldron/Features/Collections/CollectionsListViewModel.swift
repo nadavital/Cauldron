@@ -19,7 +19,8 @@ private struct RemovedCollectionSnapshot {
 final class CollectionsListViewModel {
     var ownedCollections: [Collection] = []
     var savedCollections: [Collection] = []
-    var isLoading = false
+    var isLoading = true
+    private(set) var hasLoadedOnce = false
     var searchText = ""
     var showingCreateSheet = false
     var errorMessage: String?
@@ -152,7 +153,10 @@ final class CollectionsListViewModel {
     /// Load all collections
     func loadCollections() async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasLoadedOnce = true
+        }
 
         do {
             async let fetchedCollections = loadCollectionsIncludingSavedReferences()

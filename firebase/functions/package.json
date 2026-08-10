@@ -3,7 +3,10 @@
     "scripts": {
         "build": "tsc",
         "build:watch": "tsc --watch",
-        "test:sanitizer": "npm run build && node --test test/sharePreviewSanitizer.test.mjs",
+        "test:sanitizer": "npm run build && node --test --test-force-exit test/sharePreviewSanitizer.test.mjs",
+        "verify:cloudkit": "node tools/verifyCloudKitPreflight.mjs",
+        "scrub:legacy-web-snapshots": "node tools/scrubLegacyRecipeSnapshots.mjs",
+        "preflight:production": "npm run test:sanitizer && npm run verify:cloudkit",
         "serve": "npm run build && firebase emulators:start --only functions",
         "shell": "npm run build && firebase functions:shell",
         "start": "npm run shell",

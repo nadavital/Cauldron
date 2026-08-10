@@ -149,12 +149,7 @@ struct PeopleSearchSheet: View {
     private var searchResultsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             if viewModel.isLoading {
-                HStack {
-                    Spacer()
-                    ProgressView("Searching...")
-                    Spacer()
-                }
-                .padding(.vertical, 40)
+                UserRowSkeletonList()
             } else if viewModel.searchResults.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "person.2.slash")

@@ -10,6 +10,7 @@ import Darwin
 
 nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
     var recipeID: UUID
+    var ownerID: UUID?
     var stepIndex: Int
     var totalSteps: Int
     var sessionStartTime: Date
@@ -19,6 +20,7 @@ nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
 
     nonisolated init(
         recipeID: UUID,
+        ownerID: UUID? = nil,
         stepIndex: Int,
         totalSteps: Int,
         sessionStartTime: Date,
@@ -27,12 +29,17 @@ nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
         stepInstructions: [String]? = nil
     ) {
         self.recipeID = recipeID
+        self.ownerID = ownerID
         self.stepIndex = stepIndex
         self.totalSteps = totalSteps
         self.sessionStartTime = sessionStartTime
         self.revision = revision
         self.updatedAt = updatedAt
         self.stepInstructions = stepInstructions
+    }
+
+    nonisolated func belongs(to userID: UUID) -> Bool {
+        ownerID == userID
     }
 }
 
@@ -69,6 +76,7 @@ enum CookSessionSharedStore {
     @discardableResult
     nonisolated static func synchronizeSession(
         recipeID: UUID,
+        ownerID: UUID?,
         preferredStep: Int,
         totalSteps: Int,
         sessionStartTime: Date,
@@ -79,13 +87,17 @@ enum CookSessionSharedStore {
         guard totalSteps > 0 else { return nil }
         return withExclusiveLock {
             let existing = readUnlocked(defaults: defaults, usesFileAuthority: true)
-            let step = existing?.recipeID == recipeID ? existing?.stepIndex ?? preferredStep : preferredStep
-            let revision = existing?.recipeID == recipeID ? existing?.revision ?? 0 : 0
+            let isSameSession = existing?.recipeID == recipeID
+                && existing?.ownerID == ownerID
+                && existing?.sessionStartTime == sessionStartTime
+            let step = isSameSession ? existing?.stepIndex ?? preferredStep : preferredStep
+            let revision = isSameSession ? existing?.revision ?? 0 : 0
             let snapshot = CookSessionSharedSnapshot(
                 recipeID: recipeID,
+                ownerID: ownerID,
                 stepIndex: min(max(step, 0), totalSteps - 1),
                 totalSteps: totalSteps,
-                sessionStartTime: existing?.recipeID == recipeID
+                sessionStartTime: isSameSession
                     ? existing?.sessionStartTime ?? sessionStartTime
                     : sessionStartTime,
                 revision: revision,
@@ -113,31 +125,54 @@ enum CookSessionSharedStore {
     @discardableResult
     nonisolated static func move(
         by delta: Int,
+        expected: CookSessionSharedSnapshot? = nil,
         defaults: UserDefaults? = UserDefaults(suiteName: appGroupID),
         now: Date = Date()
     ) -> CookSessionSharedSnapshot? {
         withExclusiveLock {
-            moveUnlocked(by: delta, defaults: defaults, usesFileAuthority: true, now: now)
+            moveUnlocked(
+                by: delta,
+                expected: expected,
+                defaults: defaults,
+                usesFileAuthority: true,
+                now: now
+            )
         }
     }
 
     nonisolated static func moveForTesting(
         by delta: Int,
+        expected: CookSessionSharedSnapshot? = nil,
         defaults: UserDefaults?,
         now: Date = Date()
     ) -> CookSessionSharedSnapshot? {
         withExclusiveLock {
-            moveUnlocked(by: delta, defaults: defaults, usesFileAuthority: false, now: now)
+            moveUnlocked(
+                by: delta,
+                expected: expected,
+                defaults: defaults,
+                usesFileAuthority: false,
+                now: now
+            )
         }
     }
 
     nonisolated private static func moveUnlocked(
         by delta: Int,
+        expected: CookSessionSharedSnapshot?,
         defaults: UserDefaults?,
         usesFileAuthority: Bool,
         now: Date
     ) -> CookSessionSharedSnapshot? {
         guard var snapshot = readUnlocked(defaults: defaults, usesFileAuthority: usesFileAuthority) else { return nil }
+        if let expected {
+            guard snapshot.recipeID == expected.recipeID,
+                  snapshot.ownerID == expected.ownerID,
+                  snapshot.revision == expected.revision,
+                  snapshot.sessionStartTime == expected.sessionStartTime else {
+                return nil
+            }
+        }
         let next: Int
         if delta > 0 {
             next = snapshot.stepIndex >= snapshot.totalSteps - 1 ? snapshot.stepIndex : snapshot.stepIndex + 1
@@ -167,6 +202,13 @@ enum CookSessionSharedStore {
         guard let data,
               let snapshot = try? JSONDecoder().decode(CookSessionSharedSnapshot.self, from: data),
               snapshot.totalSteps > 0 else { return nil }
+        guard snapshot.ownerID != nil else {
+            if usesFileAuthority, let snapshotURL = snapshotFileURL() {
+                try? FileManager.default.removeItem(at: snapshotURL)
+            }
+            defaults?.removeObject(forKey: snapshotKey)
+            return nil
+        }
         return normalized(snapshot)
     }
 
@@ -176,6 +218,7 @@ enum CookSessionSharedStore {
         usesFileAuthority: Bool
     ) {
         guard snapshot.totalSteps > 0,
+              snapshot.ownerID != nil,
               let data = try? JSONEncoder().encode(normalized(snapshot)) else { return }
         if usesFileAuthority, let snapshotURL = snapshotFileURL() {
             try? data.write(to: snapshotURL, options: [.atomic, .completeFileProtectionUnlessOpen])
@@ -266,22 +309,37 @@ nonisolated struct CookModeActivityAttributes: ActivityAttributes {
 
 enum CookSessionLiveActivityUpdater {
     static func update(from snapshot: CookSessionSharedSnapshot) async {
-        let snapshot = CookSessionSharedStore.read()
-            .flatMap { $0.recipeID == snapshot.recipeID ? $0 : nil }
-            ?? snapshot
-        guard let activity = Activity<CookModeActivityAttributes>.activities.first(where: {
-            $0.attributes.recipeId == snapshot.recipeID.uuidString
-        }) else { return }
-        var state = activity.content.state
-        state.currentStep = snapshot.stepIndex
-        state.totalSteps = snapshot.totalSteps
-        if let instructions = snapshot.stepInstructions,
-           instructions.indices.contains(snapshot.stepIndex) {
-            state.stepInstruction = instructions[snapshot.stepIndex]
+        while true {
+            guard let candidate = CookSessionSharedStore.read(),
+                  candidate.recipeID == snapshot.recipeID,
+                  candidate.ownerID == snapshot.ownerID,
+                  candidate.sessionStartTime == snapshot.sessionStartTime,
+                  let activity = Activity<CookModeActivityAttributes>.activities.first(where: {
+                $0.attributes.recipeId == candidate.recipeID.uuidString
+                    && $0.attributes.sessionStartTime == candidate.sessionStartTime
+            }) else { return }
+
+            var state = activity.content.state
+            state.currentStep = candidate.stepIndex
+            state.totalSteps = candidate.totalSteps
+            if let instructions = candidate.stepInstructions,
+               instructions.indices.contains(candidate.stepIndex) {
+                state.stepInstruction = instructions[candidate.stepIndex]
+            }
+            state.progressPercentage = Double(candidate.stepIndex + 1) / Double(candidate.totalSteps)
+            state.lastUpdated = candidate.updatedAt
+            await activity.update(.init(state: state, staleDate: nil))
+
+            guard let latest = CookSessionSharedStore.read(),
+                  latest.recipeID == candidate.recipeID,
+                  latest.ownerID == candidate.ownerID,
+                  latest.sessionStartTime == candidate.sessionStartTime else {
+                return
+            }
+            if latest == candidate {
+                return
+            }
         }
-        state.progressPercentage = Double(snapshot.stepIndex + 1) / Double(snapshot.totalSteps)
-        state.lastUpdated = snapshot.updatedAt
-        await activity.update(.init(state: state, staleDate: nil))
     }
 }
 #endif

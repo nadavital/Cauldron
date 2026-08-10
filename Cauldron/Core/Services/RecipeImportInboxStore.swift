@@ -1,10 +1,29 @@
 import Foundation
 
 actor RecipeImportInboxStore {
+    struct EnqueueIfAbsentResult: Sendable, Equatable {
+        enum Disposition: Sendable, Equatable {
+            case enqueued
+            case alreadyQueued
+            case retried
+        }
+
+        let job: RecipeImportJob
+        let disposition: Disposition
+    }
+
     enum StoreError: Error, Equatable {
         case jobNotFound
         case invalidTransition
+        case payloadTooLarge(maximumBytes: Int)
+        case jobFileTooLarge(maximumBytes: Int)
     }
+
+    /// Import jobs store already-extracted recipe data rather than source HTML.
+    /// These generous limits reject pathological handoffs without affecting
+    /// normal or legacy schema-v1 jobs.
+    nonisolated static let maximumPayloadBytes = 1_000_000
+    nonisolated static let maximumJobFileBytes = 2_000_000
 
     private let directoryURL: URL
     private let quarantineURL: URL
@@ -30,7 +49,44 @@ actor RecipeImportInboxStore {
     func enqueue(source: RecipeImportJob.Source, now: Date = Date()) throws -> RecipeImportJob {
         let job = RecipeImportJob(createdAt: now, source: source)
         try persist(job)
+        notifyChange()
         return job
+    }
+
+    /// Enqueues user-provided URL or text imports once while an equivalent job
+    /// is still pending. This makes Siri and Shortcuts retries safe without
+    /// preventing a user from importing the same recipe again after completion.
+    @discardableResult
+    func enqueueIfAbsent(source: RecipeImportJob.Source, now: Date = Date()) throws -> RecipeImportJob {
+        try enqueueIfAbsentWithDisposition(source: source, now: now).job
+    }
+
+    /// Atomically deduplicates an import while also reporting whether the
+    /// request created, reused, or retried a durable inbox job.
+    @discardableResult
+    func enqueueIfAbsentWithDisposition(
+        source: RecipeImportJob.Source,
+        now: Date = Date()
+    ) throws -> EnqueueIfAbsentResult {
+        if let sourceKey = Self.idempotencyKey(for: source),
+           var existing = try jobs().first(where: {
+               $0.state != .completed && Self.idempotencyKey(for: $0.source) == sourceKey
+           }) {
+            if existing.state == .failed {
+                existing.state = .received
+                existing.updatedAt = now
+                existing.processingStartedAt = nil
+                existing.lastErrorCategory = nil
+                try persist(existing)
+                notifyChange()
+                return EnqueueIfAbsentResult(job: existing, disposition: .retried)
+            }
+            return EnqueueIfAbsentResult(job: existing, disposition: .alreadyQueued)
+        }
+        return EnqueueIfAbsentResult(
+            job: try enqueue(source: source, now: now),
+            disposition: .enqueued
+        )
     }
 
     @discardableResult
@@ -58,8 +114,7 @@ actor RecipeImportInboxStore {
         decoded.reserveCapacity(urls.count)
         for url in urls {
             do {
-                let data = try Data(contentsOf: url)
-                decoded.append(try decoder.decode(RecipeImportJob.self, from: data))
+                decoded.append(try decodeJob(at: url))
             } catch let error as RecipeImportJobCodingError {
                 if case .unsupportedSchema = error {
                     quarantine(url, destinationDirectory: unsupportedURL)
@@ -80,7 +135,7 @@ actor RecipeImportInboxStore {
         let url = fileURL(for: id)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
         do {
-            return try decoder.decode(RecipeImportJob.self, from: Data(contentsOf: url))
+            return try decodeJob(at: url)
         } catch let error as RecipeImportJobCodingError {
             if case .unsupportedSchema = error {
                 quarantine(url, destinationDirectory: unsupportedURL)
@@ -90,6 +145,15 @@ actor RecipeImportInboxStore {
             quarantine(url, destinationDirectory: quarantineURL)
             return nil
         }
+    }
+
+    /// Removes every durable import handoff, including quarantined payloads.
+    /// Cauldron is single-account per installation, so account deletion must
+    /// not leave recipe content received under the deleted account on disk.
+    func removeAll() throws {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+        try fileManager.removeItem(at: directoryURL)
+        notifyChange()
     }
 
     @discardableResult
@@ -105,6 +169,7 @@ actor RecipeImportInboxStore {
         job.processingStartedAt = now
         job.lastErrorCategory = nil
         try persist(job)
+        notifyChange()
         return job
     }
 
@@ -126,6 +191,7 @@ actor RecipeImportInboxStore {
             job.processingStartedAt = nil
         }
         try persist(job)
+        notifyChange()
         return job
     }
 
@@ -140,6 +206,9 @@ actor RecipeImportInboxStore {
             try persist(job)
             recovered += 1
         }
+        if recovered > 0 {
+            notifyChange()
+        }
         return recovered
     }
 
@@ -147,6 +216,7 @@ actor RecipeImportInboxStore {
         let url = fileURL(for: id)
         guard fileManager.fileExists(atPath: url.path) else { return }
         try fileManager.removeItem(at: url)
+        notifyChange()
     }
 
     /// Persists completion before cleanup. If deletion fails, the durable
@@ -160,11 +230,41 @@ actor RecipeImportInboxStore {
     private func persist(_ job: RecipeImportJob) throws {
         try ensureDirectory()
         let url = fileURL(for: job.id)
-        try encoder.encode(job).write(to: url, options: [.atomic])
+        guard Self.payloadByteCount(for: job.source) <= Self.maximumPayloadBytes else {
+            throw StoreError.payloadTooLarge(maximumBytes: Self.maximumPayloadBytes)
+        }
+        let data = try encoder.encode(job)
+        guard data.count <= Self.maximumJobFileBytes else {
+            throw StoreError.jobFileTooLarge(maximumBytes: Self.maximumJobFileBytes)
+        }
+        try data.write(to: url, options: [.atomic])
         try? fileManager.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: url.path
         )
+    }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(name: .recipeImportInboxChanged, object: nil)
+    }
+
+    private func decodeJob(at url: URL) throws -> RecipeImportJob {
+        let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard resourceValues.isRegularFile != false else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        if let fileSize = resourceValues.fileSize,
+           fileSize > Self.maximumJobFileBytes {
+            throw StoreError.jobFileTooLarge(maximumBytes: Self.maximumJobFileBytes)
+        }
+
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard data.count <= Self.maximumJobFileBytes else {
+            // Recheck after opening to close the gap if another process replaced
+            // or enlarged the file after its metadata was read.
+            throw StoreError.jobFileTooLarge(maximumBytes: Self.maximumJobFileBytes)
+        }
+        return try decoder.decode(RecipeImportJob.self, from: data)
     }
 
     private func ensureDirectory() throws {
@@ -239,5 +339,54 @@ actor RecipeImportInboxStore {
         default:
             return current == next
         }
+    }
+
+    nonisolated private static func idempotencyKey(for source: RecipeImportJob.Source) -> String? {
+        switch source {
+        case .url(let value):
+            return "url:\(canonicalURLString(value))"
+        case .text(let value):
+            return "text:\(normalizedText(value))"
+        case .prepared, .shareTransport:
+            return nil
+        }
+    }
+
+    nonisolated private static func payloadByteCount(for source: RecipeImportJob.Source) -> Int {
+        switch source {
+        case .url(let value), .text(let value):
+            return value.utf8.count
+        case .prepared(let data):
+            return data.count
+        case .shareTransport(let item):
+            return (item.urlString?.utf8.count ?? 0)
+                + (item.text?.utf8.count ?? 0)
+                + (item.preparedPayload?.count ?? 0)
+        }
+    }
+
+    nonisolated private static func canonicalURLString(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased() else {
+            return trimmed
+        }
+
+        components.scheme = scheme
+        components.host = host
+        components.fragment = nil
+        if (scheme == "http" && components.port == 80)
+            || (scheme == "https" && components.port == 443) {
+            components.port = nil
+        }
+        return components.string ?? trimmed
+    }
+
+    nonisolated private static func normalizedText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

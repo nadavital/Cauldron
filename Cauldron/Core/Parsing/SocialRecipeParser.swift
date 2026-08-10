@@ -88,31 +88,14 @@ actor SocialRecipeParser: RecipeParser {
     }
 
     nonisolated private static func defaultHTMLFetcher(for url: URL) async throws -> String {
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 12
-        request.setValue(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-            forHTTPHeaderField: "User-Agent"
-        )
-
         do {
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode),
-                  httpResponse.mimeType == nil || httpResponse.mimeType == "text/html" || httpResponse.mimeType == "application/xhtml+xml",
-                  httpResponse.expectedContentLength <= 3_000_000 || httpResponse.expectedContentLength < 0 else {
-                throw ParsingError.invalidSource
-            }
-            var data = Data()
-            data.reserveCapacity(min(max(Int(httpResponse.expectedContentLength), 0), 3_000_000))
-            for try await byte in bytes {
-                guard data.count < 3_000_000 else { throw ParsingError.invalidSource }
-                data.append(byte)
-            }
-            if let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
-                return html
-            }
+            return try await RecipeHTTPDocumentLoader.loadHTML(from: url)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch RecipeHTTPDocumentLoader.LoaderError.undecodableContent {
             throw ParsingError.invalidHTML
+        } catch is RecipeHTTPDocumentLoader.LoaderError {
+            throw ParsingError.invalidSource
         } catch let error as ParsingError {
             throw error
         } catch {

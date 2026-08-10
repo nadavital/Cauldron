@@ -67,6 +67,11 @@ actor ConnectionCloudService {
 
     /// Save connection to CloudKit PUBLIC database
     func saveConnection(_ connection: Connection) async throws {
+        let publicationLeases = try await acquirePublicationLeases(
+            ownerIDs: [connection.fromUserId, connection.toUserId]
+        )
+        defer { releasePublicationLeases(publicationLeases) }
+
         let recordID = CKRecord.ID(recordName: connection.id.uuidString)
         let db = try await core.getPublicDatabase()
 
@@ -74,7 +79,7 @@ actor ConnectionCloudService {
         do {
             record = try await db.record(for: recordID)
             logger.info("Updating existing connection: \(connection.id)")
-        } catch let error as CKError where error.code == .unknownItem {
+        } catch where Self.deletionIsSatisfied(by: error) {
             record = CKRecord(recordType: CloudKitCore.RecordType.connection, recordID: recordID)
             logger.info("Creating new connection: \(connection.id)")
         }
@@ -253,8 +258,19 @@ actor ConnectionCloudService {
         let recordID = CKRecord.ID(recordName: connection.id.uuidString)
         let db = try await core.getPublicDatabase()
 
-        try await db.deleteRecord(withID: recordID)
+        do {
+            try await db.deleteRecord(withID: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            // Deletes are replayed after crashes/account switches. Missing already
+            // means the durable rejection/unfriend intent has been satisfied.
+            logger.info("Connection already absent from PUBLIC database: \(connection.id)")
+            return
+        }
         logger.info("Deleted connection from PUBLIC database: \(connection.id)")
+    }
+
+    nonisolated static func deletionIsSatisfied(by error: Error) -> Bool {
+        (error as? CKError)?.code == .unknownItem
     }
 
     /// Delete all connections involving a user from CloudKit PUBLIC database
@@ -297,6 +313,9 @@ actor ConnectionCloudService {
         newUserUsername: String?,
         newUserDisplayName: String?
     ) async throws {
+        let publicationLeases = try await acquirePublicationLeases(ownerIDs: [referrerId, newUserId])
+        defer { releasePublicationLeases(publicationLeases) }
+
         guard referrerId != newUserId else {
             logger.warning("Skipping auto-friend connection for self referral: \(referrerId)")
             return
@@ -337,6 +356,28 @@ actor ConnectionCloudService {
 
         _ = try await db.save(record)
         logger.info("✅ Created auto-friend connection between referrer \(referrerId) and new user \(newUserId)")
+    }
+
+    private func acquirePublicationLeases(ownerIDs: [UUID]) async throws -> [AccountDeletionGate.PublicationLease] {
+        var leases: [AccountDeletionGate.PublicationLease] = []
+        for ownerID in Set(ownerIDs).sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let lease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerID) else {
+                for acquired in leases {
+                    await AccountDeletionGate.shared.releasePublicationLease(acquired)
+                }
+                throw CancellationError()
+            }
+            leases.append(lease)
+        }
+        return leases
+    }
+
+    private func releasePublicationLeases(_ leases: [AccountDeletionGate.PublicationLease]) {
+        Task {
+            for lease in leases {
+                await AccountDeletionGate.shared.releasePublicationLease(lease)
+            }
+        }
     }
 
     // MARK: - Push Notifications

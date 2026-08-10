@@ -11,6 +11,25 @@ import AudioToolbox
 import os
 import Combine
 
+nonisolated struct TimerFeedbackDecision: Equatable, Sendable {
+    let playsHaptic: Bool
+    let playsSound: Bool
+    let notificationIncludesSound: Bool
+}
+
+nonisolated enum TimerFeedbackPolicy {
+    static func decision(
+        hapticsEnabled: Bool,
+        soundsEnabled: Bool
+    ) -> TimerFeedbackDecision {
+        TimerFeedbackDecision(
+            playsHaptic: hapticsEnabled,
+            playsSound: soundsEnabled,
+            notificationIncludesSound: soundsEnabled
+        )
+    }
+}
+
 @MainActor
 protocol TimerNotificationScheduling: AnyObject {
     func schedule(_ request: UNNotificationRequest)
@@ -131,7 +150,7 @@ struct ActiveTimer: Identifiable, Codable, Sendable {
     }
 
     /// Calculate remaining seconds (for UI and pause logic)
-    func remainingSeconds(at date: Date = Date()) -> Int {
+    nonisolated func remainingSeconds(at date: Date = Date()) -> Int {
         if isPaused, let remaining = pausedRemainingSeconds {
             return remaining
         } else {
@@ -151,7 +170,17 @@ class TimerManager: ObservableObject {
     private let sharedDefaults: UserDefaults?
     private let schedulesNotifications: Bool
     private let notificationScheduler: any TimerNotificationScheduling
+    private let experiencePreferences: ExperiencePreferences
+    private var experiencePreferencesObserver: AnyCancellable?
+    private var notificationSoundEnabled: Bool
     private var didRestorePersistedTimers = false
+
+    var feedbackDecision: TimerFeedbackDecision {
+        TimerFeedbackPolicy.decision(
+            hapticsEnabled: experiencePreferences.timerHaptics,
+            soundsEnabled: experiencePreferences.timerSounds
+        )
+    }
 
     /// Callback for when timers change (used by CookModeCoordinator)
     var onTimersChanged: (() -> Void)?
@@ -160,12 +189,18 @@ class TimerManager: ObservableObject {
         sharedDefaults: UserDefaults? = UserDefaults(suiteName: CookSessionSharedStore.appGroupID),
         requestNotificationPermission: Bool = true,
         schedulesNotifications: Bool = true,
-        notificationScheduler: (any TimerNotificationScheduling)? = nil
+        notificationScheduler: (any TimerNotificationScheduling)? = nil,
+        experiencePreferences: ExperiencePreferences? = nil
     ) {
         self.sharedDefaults = sharedDefaults
         self.schedulesNotifications = schedulesNotifications
         self.notificationScheduler = notificationScheduler ?? SystemTimerNotificationScheduler()
-        if requestNotificationPermission {
+        self.experiencePreferences = experiencePreferences ?? .shared
+        self.notificationSoundEnabled = self.experiencePreferences.timerSounds
+        observeExperiencePreferences()
+        if requestNotificationPermission &&
+            !RuntimeEnvironment.isRunningTests &&
+            !RuntimeEnvironment.isSimulatorQAMode {
             requestNotificationPermissions()
         }
         restorePersistedTimers()
@@ -300,6 +335,31 @@ class TimerManager: ObservableObject {
         sharedDefaults?.set(data, forKey: Self.storageKey)
     }
 
+    private func observeExperiencePreferences() {
+        let observedPreferences = experiencePreferences
+        experiencePreferencesObserver = NotificationCenter.default.publisher(
+            for: .experiencePreferencesChanged
+        ).sink { [weak self, weak observedPreferences] notification in
+            guard notification.object as AnyObject? === observedPreferences else { return }
+            Task { @MainActor [weak self] in
+                self?.refreshNotificationSoundIfNeeded()
+            }
+        }
+    }
+
+    private func refreshNotificationSoundIfNeeded() {
+        let soundEnabled = experiencePreferences.timerSounds
+        guard soundEnabled != notificationSoundEnabled else { return }
+        notificationSoundEnabled = soundEnabled
+        guard schedulesNotifications else { return }
+
+        let runningTimers = activeTimers.filter { !$0.isPaused }
+        notificationScheduler.cancel(ids: runningTimers.map(\.id))
+        for timer in runningTimers {
+            scheduleNotification(for: timer)
+        }
+    }
+
     func restorePersistedTimers(now: Date = Date()) {
         guard !didRestorePersistedTimers else { return }
         didRestorePersistedTimers = true
@@ -356,9 +416,13 @@ class TimerManager: ObservableObject {
         
         AppLogger.general.info("Timer completed: \(timer.spec.label)")
         
-        // Play haptic feedback and sound
-        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-        AudioServicesPlaySystemSound(1315) // Timer completion sound
+        let feedback = feedbackDecision
+        if feedback.playsHaptic {
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        }
+        if feedback.playsSound {
+            AudioServicesPlaySystemSound(1315) // Timer completion sound
+        }
         
         // Remove timer
         stopTimer(id: id)
@@ -369,7 +433,7 @@ class TimerManager: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = "Timer Complete!"
         content.body = "\(timer.spec.label) - \(timer.recipeName)"
-        content.sound = .default
+        content.sound = feedbackDecision.notificationIncludesSound ? .default : nil
         content.interruptionLevel = .timeSensitive
 
         let remaining = timer.remainingSeconds()

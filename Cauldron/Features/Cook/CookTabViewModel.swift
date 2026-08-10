@@ -153,7 +153,7 @@ private struct CookTabDerivedSections {
     var isLoading = false
 
     let dependencies: DependencyContainer
-    private var hasLoadedInitially = false
+    private(set) var hasLoadedInitially = false
     @ObservationIgnored private var notificationObserver: (any NSObjectProtocol)?
     @ObservationIgnored private var smartRecommendationsTask: Task<Void, Never>?
     private var recipeImageURLsById: [UUID: URL?] = [:]
@@ -219,7 +219,9 @@ private struct CookTabDerivedSections {
             }
         } else {
             // Fallback: Load data if not preloaded (e.g., in previews or when returning from onboarding)
-            // This will show empty state briefly, but that's acceptable for these edge cases
+            // Keep the view in a cold-loading phase until the local library has
+            // resolved so a genuine new-user state is never shown prematurely.
+            isLoading = true
             Task { @MainActor in
                 await loadDataSilently()
             }
@@ -234,13 +236,24 @@ private struct CookTabDerivedSections {
 
     /// Load data without showing loading state changes (for initial load)
     private func loadDataSilently() async {
+        defer {
+            isLoading = false
+            hasLoadedInitially = true
+        }
         do {
             try await reloadLocalLibrary(loadCollections: true)
             await loadSocialRecipes()
-            hasLoadedInitially = true
         } catch {
             AppLogger.general.error("Failed to silently load cook tab data: \(error.localizedDescription)")
         }
+    }
+
+    var isColdLoading: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoading,
+            hasResolvedOnce: hasLoadedInitially,
+            hasContent: !allRecipes.isEmpty || !collections.isEmpty || !savedCollections.isEmpty
+        )
     }
 
     /// Setup observer for collection metadata changes to update UI immediately

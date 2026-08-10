@@ -104,6 +104,10 @@ actor RecipeCloudService {
         populateRecipeRecord(record, from: recipe, ownerId: ownerId)
 
         do {
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+                throw CloudKitError.invalidRecord
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
             _ = try await db.save(record)
         } catch let error as CKError {
             logger.error("❌ CloudKit save failed for '\(recipe.title)': \(error.localizedDescription)")
@@ -117,6 +121,7 @@ actor RecipeCloudService {
         let query = CKQuery(recordType: CloudKitCore.RecordType.recipe, predicate: predicate)
 
         let db = try await core.getPrivateDatabase()
+        let zoneID = try await core.getCustomZoneID()
         var recipes: [Recipe] = []
         var cursor: CKQueryOperation.Cursor?
 
@@ -125,14 +130,12 @@ actor RecipeCloudService {
             if let cursor {
                 results = try await db.records(continuingMatchFrom: cursor, resultsLimit: 500)
             } else {
-                results = try await db.records(matching: query, resultsLimit: 500)
+                results = try await db.records(matching: query, inZoneWith: zoneID, resultsLimit: 500)
             }
 
             for (_, result) in results.matchResults {
-                if let record = try? result.get(),
-                   let recipe = try? recipeFromRecord(record) {
-                    recipes.append(recipe)
-                }
+                let record = try result.get()
+                recipes.append(try recipeFromRecord(record))
             }
 
             cursor = results.queryCursor
@@ -208,6 +211,20 @@ actor RecipeCloudService {
                 return
             }
             throw error
+        }
+    }
+
+    /// Deletes a private recipe by its durable CloudKit record name. Account
+    /// deletion uses this to resume cleanup when a prior attempt saved the
+    /// tombstone but stopped before deleting the active record.
+    func deletePrivateRecipeRecord(named cloudRecordName: String) async throws {
+        let zoneID = try await core.getCustomZoneID()
+        let recordID = Self.privateRecipeRecordID(recordName: cloudRecordName, zoneID: zoneID)
+        let database = try await core.getPrivateDatabase()
+        do {
+            _ = try await database.deleteRecord(withID: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return
         }
     }
 
@@ -316,6 +333,10 @@ actor RecipeCloudService {
 
         populateRecipeRecord(record, from: recipe, ownerId: ownerId, includesUserPrivateState: false)
 
+        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+            throw CloudKitError.invalidRecord
+        }
+        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")
     }
@@ -754,6 +775,42 @@ actor RecipeCloudService {
         } catch let error as CKError where error.code == .unknownItem {
             logger.info("Recipe not found in PUBLIC database (already deleted or was private)")
         }
+    }
+
+    /// Removes every public recipe record created by the signed-in iCloud
+    /// identity for this app owner, including records absent from this device.
+    func deleteAllPublicRecipesOwnedByCurrentUser(ownerId: UUID) async throws {
+        let db = try await core.getPublicDatabase()
+        let currentIdentity = try await core.getCurrentUserRecordID()
+        let query = CKQuery(
+            recordType: CloudKitCore.RecordType.sharedRecipe,
+            predicate: NSPredicate(format: "ownerId == %@", ownerId.uuidString)
+        )
+        var cursor: CKQueryOperation.Cursor?
+        repeat {
+            let page: (
+                matchResults: [(CKRecord.ID, Result<CKRecord, Error>)],
+                queryCursor: CKQueryOperation.Cursor?
+            )
+            if let cursor {
+                page = try await db.records(continuingMatchFrom: cursor, resultsLimit: 200)
+            } else {
+                page = try await db.records(matching: query, resultsLimit: 200)
+            }
+            for (_, result) in page.matchResults {
+                let record = try result.get()
+                guard record.creatorUserRecordID == currentIdentity else {
+                    logger.warning("Skipping public recipe whose ownerId was spoofed by another CloudKit creator")
+                    continue
+                }
+                do {
+                    try await db.deleteRecord(withID: record.recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    continue
+                }
+            }
+            cursor = page.queryCursor
+        } while cursor != nil
     }
 
     /// Batch fetch public recipe counts for multiple owner IDs

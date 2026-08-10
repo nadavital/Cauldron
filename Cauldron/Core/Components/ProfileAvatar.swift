@@ -13,7 +13,6 @@ struct ProfileAvatar: View {
     let size: CGFloat
     let dependencies: DependencyContainer?
     @State private var profileImage: UIImage?
-    @State private var isLoadingImage = false
     @ObservedObject private var currentUserSession = CurrentUserSession.shared
 
     init(user: User, size: CGFloat, dependencies: DependencyContainer? = nil) {
@@ -85,30 +84,28 @@ struct ProfileAvatar: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(displayUser.displayName), profile picture")
-        .task {
-            await loadProfileImage()
-        }
-        .onChange(of: displayUser.profileImageURL) { oldValue, newValue in
-            // If user switched from image to emoji (profileImageURL became nil), clear local image
-            if newValue == nil && oldValue != nil {
+        .task(id: ProfileAvatarState(user: displayUser)) {
+            if displayUser.profileImageURL == nil {
                 profileImage = nil
             }
-            // If profileImageURL changed, reload the image
-            if newValue != oldValue {
-                Task {
-                    await loadProfileImage()
-                }
-            }
+            await loadProfileImage()
         }
     }
 
     private func loadProfileImage() async {
-        guard !isLoadingImage else { return }
-        isLoadingImage = true
-        defer { isLoadingImage = false }
-
+        let requestedUser = displayUser
         let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
-        let result = await loader.loadProfileImage(for: displayUser, dependencies: dependencies)
+        let result = await loader.loadProfileImage(for: requestedUser, dependencies: dependencies)
+
+        guard !Task.isCancelled,
+              displayUser.id == requestedUser.id,
+              displayUser.profileEmoji == requestedUser.profileEmoji,
+              displayUser.profileColor == requestedUser.profileColor,
+              displayUser.profileImageURL == requestedUser.profileImageURL,
+              displayUser.cloudProfileImageRecordName == requestedUser.cloudProfileImageRecordName,
+              displayUser.profileImageModifiedAt == requestedUser.profileImageModifiedAt else {
+            return
+        }
 
         if let image = result.image {
             if let currentImage = profileImage {
@@ -122,21 +119,8 @@ struct ProfileAvatar: View {
             }
         }
 
-        if let downloadedURL = result.downloadedURL,
-           let currentUser = CurrentUserSession.shared.currentUser,
-           currentUser.id == displayUser.id,
-           currentUser.profileImageURL != downloadedURL {
-            let updatedUser = currentUser.updatedProfile(
-                profileEmoji: currentUser.profileEmoji,
-                profileColor: currentUser.profileColor,
-                profileImageURL: downloadedURL,
-                cloudProfileImageRecordName: currentUser.cloudProfileImageRecordName,
-                profileImageModifiedAt: currentUser.profileImageModifiedAt
-            )
-            await MainActor.run {
-                CurrentUserSession.shared.replaceCurrentUserIfChanged(updatedUser)
-            }
-        }
+        // Session metadata is owned by CurrentUserSession's verified download
+        // merge. A reusable avatar view must never mutate account state.
     }
 }
 

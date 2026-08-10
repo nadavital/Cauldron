@@ -14,12 +14,18 @@ struct GroceriesView: View {
     @ObservedObject private var currentUserSession = CurrentUserSession.shared
     @State private var showingAddItem = false
     @State private var showingProfileSheet = false
-    @State private var viewMode: GroceryGroupingType = .recipe  // Default to grouped by recipe
+    @State private var experiencePreferences: ExperiencePreferences
     @State private var collapsedGroups: Set<String> = []  // Track which groups are collapsed
     @State private var isAIAvailable = false
+    @FocusState private var isQuickAddFocused: Bool
 
     init(dependencies: DependencyContainer) {
         _viewModel = State(initialValue: GroceriesViewModel(dependencies: dependencies))
+        _experiencePreferences = State(initialValue: .shared)
+    }
+
+    private var viewMode: GroceryGroupingType {
+        experiencePreferences.groceryGrouping
     }
 
     var body: some View {
@@ -41,7 +47,10 @@ struct GroceriesView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Picker("Sort By", selection: $viewMode) {
+                        Picker("Sort By", selection: Binding(
+                            get: { experiencePreferences.groceryGrouping },
+                            set: { experiencePreferences.groceryGrouping = $0 }
+                        )) {
                             Label("Sorted by Recipe", systemImage: "list.bullet.rectangle")
                                 .tag(GroceryGroupingType.recipe)
                             if isAIAvailable {
@@ -59,7 +68,7 @@ struct GroceriesView: View {
                 if viewModel.hasCheckedItems {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(role: .destructive) {
-                            Task { await viewModel.deleteCheckedItems() }
+                            Task { await viewModel.requestDeleteCheckedItems() }
                         } label: {
                             Label("Clear Checked", systemImage: "checkmark.circle.badge.xmark")
                                 .labelStyle(.iconOnly)
@@ -111,6 +120,78 @@ struct GroceriesView: View {
             }
             .onChange(of: viewMode) { _, newMode in
                 viewModel.updateGroups(for: newMode)
+            }
+            .safeAreaInset(edge: .bottom, spacing: Theme.Spacing.xs) {
+                VStack(spacing: Theme.Spacing.xs) {
+                    if let transaction = viewModel.undoCoordinator.visibleTransaction {
+                        undoBar(transaction)
+                    }
+                    quickAddBar
+                }
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xs)
+            }
+            .alert("Unable to Update Groceries", isPresented: Binding(
+                get: { viewModel.operationErrorMessage != nil },
+                set: { if !$0 { viewModel.operationErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(viewModel.operationErrorMessage ?? "Please try again.")
+            }
+        }
+    }
+
+    private var quickAddBar: some View {
+        AppSurface(style: .elevated) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(Color.cauldronOrange)
+                    .accessibilityHidden(true)
+
+                TextField("Quick add grocery item", text: $viewModel.inlineItemName)
+                    .focused($isQuickAddFocused)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit { submitQuickItem() }
+
+                Button("Details", systemImage: "slider.horizontal.3") {
+                    showingAddItem = true
+                }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
+                .accessibilityHint("Opens quantity and unit options")
+            }
+            .padding(.horizontal, Theme.Spacing.sm)
+        }
+    }
+
+    private func undoBar(_ transaction: UndoTransactionCoordinator.VisibleTransaction) -> some View {
+        AppSurface(style: .elevated) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Text(transaction.message)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                Spacer(minLength: Theme.Spacing.xs)
+                Button(transaction.actionTitle) {
+                    withAnimation(Theme.Animation.snappy) {
+                        viewModel.undoCoordinator.undo()
+                    }
+                }
+                .font(.headline)
+                .foregroundStyle(Color.cauldronOrange)
+            }
+            .padding(.horizontal, Theme.Spacing.md)
+            .frame(minHeight: Theme.HitTarget.minimum)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func submitQuickItem() {
+        Task {
+            let added = await viewModel.addQuickItem()
+            if added {
+                isQuickAddFocused = true
             }
         }
     }
@@ -239,21 +320,17 @@ struct GroceriesView: View {
     // MARK: - Delete Operations
 
     private func deleteItems(at offsets: IndexSet) {
-        Task {
-            for index in offsets {
-                let item = viewModel.sortedItems[index]
-                await viewModel.deleteItem(id: item.id)
-            }
+        let ids = offsets.compactMap { index in
+            viewModel.sortedItems.indices.contains(index) ? viewModel.sortedItems[index].id : nil
         }
+        Task { await viewModel.requestDeleteItems(ids: ids) }
     }
 
     private func deleteItemsFromGroup(group: GroceryGroup, at offsets: IndexSet) {
-        Task {
-            for index in offsets {
-                let item = group.items[index]
-                await viewModel.deleteItem(id: item.id)
-            }
+        let ids = offsets.compactMap { index in
+            group.items.indices.contains(index) ? group.items[index].id : nil
         }
+        Task { await viewModel.requestDeleteItems(ids: ids) }
     }
 }
 
@@ -268,6 +345,7 @@ struct AddGroceryItemView: View {
     @State private var hasQuantity = false
     @State private var quantityValue: Double = 1.0
     @State private var selectedUnit: UnitKind = .cup
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -310,21 +388,33 @@ struct AddGroceryItemView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", systemImage: "checkmark") {
                         Task {
-                            let quantity = hasQuantity ? Quantity(value: quantityValue, unit: selectedUnit) : nil
-                            let listId = try? await dependencies.groceryRepository.getOrCreateDefaultList()
-                            if let listId = listId {
-                                try? await dependencies.groceryRepository.addItem(
+                            do {
+                                let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmedName.isEmpty else { return }
+                                let quantity = hasQuantity ? Quantity(value: quantityValue, unit: selectedUnit) : nil
+                                let listId = try await dependencies.groceryRepository.getOrCreateDefaultList()
+                                try await dependencies.groceryRepository.addItem(
                                     listId: listId,
-                                    name: name,
+                                    name: trimmedName,
                                     quantity: quantity
                                 )
+                                await onAdd()
+                                dismiss()
+                            } catch {
+                                errorMessage = "Cauldron couldn't add this item. Your entry is still here."
                             }
-                            await onAdd()
-                            dismiss()
                         }
                     }
                     .disabled(name.isEmpty)
                 }
+            }
+            .alert("Unable to Add Item", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "Please try again.")
             }
         }
     }
@@ -338,29 +428,112 @@ final class GroceriesViewModel {
     var items: [GroceryItemDisplay] = []
     var groups: [GroceryGroup] = []
     var sortedItems: [GroceryItemDisplay] = []
+    var inlineItemName = ""
+    var operationErrorMessage: String?
 
     let dependencies: DependencyContainer
+    let undoCoordinator: UndoTransactionCoordinator
     private var currentViewMode: GroceryGroupingType = .recipe
     @ObservationIgnored private var categorizationTask: Task<Void, Never>?
     @ObservationIgnored private var needsAnotherCategorizationPass = false
+    @ObservationIgnored private var pendingDeleteIDs: Set<UUID> = []
+    @ObservationIgnored private var itemsRevision = 0
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private static let maximumLoadAttempts = 3
+    @ObservationIgnored private var deferredReloadTask: Task<Void, Never>?
+    @ObservationIgnored private var deferredReloadGeneration = 0
+    @ObservationIgnored private let loadItemsAction: @MainActor () async throws -> [GroceryItemDisplay]
+    @ObservationIgnored private let addItemAction: @MainActor (String) async throws -> Void
+    @ObservationIgnored private let toggleItemAction: @MainActor (UUID) async throws -> Void
+    @ObservationIgnored private let deleteItemsAction: @MainActor (Set<UUID>) async throws -> Void
 
     var hasCheckedItems: Bool {
         items.contains { $0.isChecked }
     }
 
-    init(dependencies: DependencyContainer) {
+    init(
+        dependencies: DependencyContainer,
+        undoCoordinator: UndoTransactionCoordinator? = nil,
+        loadItemsAction: (@MainActor () async throws -> [GroceryItemDisplay])? = nil,
+        addItemAction: (@MainActor (String) async throws -> Void)? = nil,
+        toggleItemAction: (@MainActor (UUID) async throws -> Void)? = nil,
+        deleteItemsAction: (@MainActor (Set<UUID>) async throws -> Void)? = nil
+    ) {
         self.dependencies = dependencies
+        self.undoCoordinator = undoCoordinator ?? UndoTransactionCoordinator()
+        self.loadItemsAction = loadItemsAction ?? { [repository = dependencies.groceryRepository] in
+            try await repository.fetchAllItemsForDisplay()
+        }
+        self.addItemAction = addItemAction ?? { [repository = dependencies.groceryRepository] name in
+            let listID = try await repository.getOrCreateDefaultList()
+            try await repository.addItem(listId: listID, name: name)
+        }
+        self.toggleItemAction = toggleItemAction ?? { [repository = dependencies.groceryRepository] id in
+            try await repository.toggleItem(id: id)
+        }
+        self.deleteItemsAction = deleteItemsAction ?? { [repository = dependencies.groceryRepository] ids in
+            try await repository.deleteItems(ids: ids)
+        }
     }
 
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {}
 
     func loadItems(viewMode: GroceryGroupingType? = nil, animated: Bool = false) async {
+        deferredReloadTask?.cancel()
+        deferredReloadTask = nil
+        deferredReloadGeneration &+= 1
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        await performLoad(
+            viewMode: viewMode,
+            animated: animated,
+            allowsDeferredRetry: true,
+            generation: generation
+        )
+    }
+
+    private func performLoad(
+        viewMode: GroceryGroupingType?,
+        animated: Bool,
+        allowsDeferredRetry: Bool,
+        generation: Int
+    ) async {
         if let viewMode = viewMode {
             currentViewMode = viewMode
         }
         do {
-            items = try await dependencies.groceryRepository.fetchAllItemsForDisplay()
+            var loadedItems: [GroceryItemDisplay]?
+            for attempt in 1...Self.maximumLoadAttempts {
+                guard !Task.isCancelled else { return }
+                let requestedRevision = itemsRevision
+                let candidateItems = try await loadItemsAction()
+                guard !Task.isCancelled else { return }
+                guard generation == loadGeneration else { return }
+                guard requestedRevision == itemsRevision else {
+                    if attempt == Self.maximumLoadAttempts {
+                        AppLogger.persistence.notice(
+                            "Grocery items changed during \(Self.maximumLoadAttempts) consecutive loads"
+                        )
+                    }
+                    continue
+                }
+
+                loadedItems = candidateItems
+                break
+            }
+
+            guard let loadedItems else {
+                if allowsDeferredRetry {
+                    scheduleDeferredReload(animated: animated, generation: generation)
+                } else {
+                    AppLogger.persistence.notice(
+                        "Grocery items kept changing during the deferred reload; keeping the current view state"
+                    )
+                }
+                return
+            }
+            items = loadedItems.filter { !pendingDeleteIDs.contains($0.id) }
 
             if animated {
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -373,8 +546,39 @@ final class GroceriesViewModel {
             }
 
             scheduleCategorizationIfNeeded()
+        } catch is CancellationError {
+            return
         } catch {
+            guard generation == loadGeneration else { return }
             AppLogger.persistence.error("Failed to load grocery items: \(error.localizedDescription)")
+        }
+    }
+
+    private func scheduleDeferredReload(animated: Bool, generation requestGeneration: Int) {
+        guard requestGeneration == loadGeneration,
+              deferredReloadTask == nil else { return }
+
+        deferredReloadGeneration &+= 1
+        let deferredGeneration = deferredReloadGeneration
+        deferredReloadTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, let self,
+                  self.loadGeneration == requestGeneration,
+                  self.deferredReloadGeneration == deferredGeneration else { return }
+
+            await self.performLoad(
+                viewMode: self.currentViewMode,
+                animated: animated,
+                allowsDeferredRetry: false,
+                generation: requestGeneration
+            )
+
+            guard self.deferredReloadGeneration == deferredGeneration else { return }
+            self.deferredReloadTask = nil
         }
     }
 
@@ -414,24 +618,31 @@ final class GroceriesViewModel {
                 try await dependencies.groceryRepository.updateCategory(itemId: itemId, category: category)
             }
 
-            items = items.map { item in
-                guard let category = results[item.id] else { return item }
-                return GroceryItemDisplay(
-                    id: item.id,
-                    name: item.name,
-                    quantity: item.quantity,
-                    isChecked: item.isChecked,
-                    recipeID: item.recipeID,
-                    recipeName: item.recipeName,
-                    addedOrder: item.addedOrder,
-                    aiCategory: category
-                )
-            }
-            updateSortedItems()
-            updateGroups(for: currentViewMode)
+            applyCategorizationResults(results)
         } catch {
             AppLogger.persistence.error("Failed to categorize items: \(error.localizedDescription)")
         }
+    }
+
+    func applyCategorizationResults(_ results: [UUID: String]) {
+        guard !results.isEmpty else { return }
+        itemsRevision &+= 1
+
+        items = items.map { item in
+            guard let category = results[item.id] else { return item }
+            return GroceryItemDisplay(
+                id: item.id,
+                name: item.name,
+                quantity: item.quantity,
+                isChecked: item.isChecked,
+                recipeID: item.recipeID,
+                recipeName: item.recipeName,
+                addedOrder: item.addedOrder,
+                aiCategory: category
+            )
+        }
+        updateSortedItems()
+        updateGroups(for: currentViewMode)
     }
 
     func updateGroups(for mode: GroceryGroupingType) {
@@ -454,14 +665,32 @@ final class GroceriesViewModel {
         return await dependencies.groceryCategorizer.isAvailable
     }
 
+    @discardableResult
+    func addQuickItem() async -> Bool {
+        let trimmedName = inlineItemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return false }
+
+        do {
+            try await addItemAction(trimmedName)
+            inlineItemName = ""
+            operationErrorMessage = nil
+            await loadItems(viewMode: currentViewMode)
+            return true
+        } catch {
+            operationErrorMessage = "Cauldron couldn't add \"\(trimmedName)\". Your entry is still here."
+            return false
+        }
+    }
+
     func toggleItem(id: UUID) async {
         do {
-            try await dependencies.groceryRepository.toggleItem(id: id)
+            try await toggleItemAction(id)
             guard let index = items.firstIndex(where: { $0.id == id }) else {
                 await loadItems(animated: true)
                 return
             }
 
+            itemsRevision &+= 1
             items[index].isChecked.toggle()
             withAnimation(.easeInOut(duration: 0.3)) {
                 updateSortedItems()
@@ -506,6 +735,7 @@ final class GroceriesViewModel {
             }
 
             let idsToToggle = Set(itemsToToggle.map(\.id))
+            itemsRevision &+= 1
             items = items.map { item in
                 guard idsToToggle.contains(item.id) else { return item }
                 var updatedItem = item
@@ -539,28 +769,72 @@ final class GroceriesViewModel {
         }
     }
 
-    func deleteItem(id: UUID) async {
-        do {
-            try await dependencies.groceryRepository.deleteItem(id: id)
-            items.removeAll { $0.id == id }
-            updateSortedItems()
-            updateGroups(for: currentViewMode)
-        } catch {
-            AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
+    func requestDeleteItems(ids: [UUID]) async {
+        let requestedIDs = Set(ids)
+        guard !requestedIDs.isEmpty else { return }
+
+        // Resolve the previous optimistic transaction before snapshotting this
+        // one. Its commit failure may restore items that must be represented in
+        // the replacement transaction's snapshot.
+        await undoCoordinator.commitNow()
+
+        let exactIDs = requestedIDs.intersection(items.map(\.id))
+        guard !exactIDs.isEmpty else { return }
+
+        let deletedSnapshots = items.enumerated().compactMap { index, item in
+            exactIDs.contains(item.id) ? DeletedItemSnapshot(item: item, originalIndex: index) : nil
         }
+        pendingDeleteIDs.formUnion(exactIDs)
+        itemsRevision &+= 1
+        items.removeAll { exactIDs.contains($0.id) }
+        updateSortedItems()
+        updateGroups(for: currentViewMode)
+
+        let count = exactIDs.count
+        await undoCoordinator.schedule(
+            message: count == 1 ? "Grocery item removed" : "\(count) grocery items removed",
+            commit: { [weak self, deleteItemsAction] in
+                try await deleteItemsAction(exactIDs)
+                self?.finishDelete(ids: exactIDs)
+            },
+            undo: { [weak self] in
+                self?.restoreDeletedItems(deletedSnapshots, ids: exactIDs)
+            },
+            onFailure: { [weak self] error in
+                self?.restoreDeletedItems(deletedSnapshots, ids: exactIDs)
+                self?.operationErrorMessage = "Cauldron couldn't remove the selected groceries. Nothing was lost."
+                AppLogger.persistence.error("Failed to delete grocery items: \(error.localizedDescription)")
+            }
+        )
     }
 
-    func deleteCheckedItems() async {
-        let checkedItemIds = items.filter { $0.isChecked }.map { $0.id }
-        for id in checkedItemIds {
-            do {
-                try await dependencies.groceryRepository.deleteItem(id: id)
-            } catch {
-                AppLogger.persistence.error("Failed to delete item: \(error.localizedDescription)")
-            }
+    func requestDeleteCheckedItems() async {
+        await requestDeleteItems(ids: items.filter(\.isChecked).map(\.id))
+    }
+
+    private struct DeletedItemSnapshot {
+        let item: GroceryItemDisplay
+        let originalIndex: Int
+    }
+
+    private func finishDelete(ids: Set<UUID>) {
+        pendingDeleteIDs.subtract(ids)
+        itemsRevision &+= 1
+        items.removeAll { ids.contains($0.id) }
+        updateSortedItems()
+        updateGroups(for: currentViewMode)
+    }
+
+    private func restoreDeletedItems(_ snapshots: [DeletedItemSnapshot], ids: Set<UUID>) {
+        pendingDeleteIDs.subtract(ids)
+        itemsRevision &+= 1
+
+        var currentIDs = Set(items.map(\.id))
+        for snapshot in snapshots.sorted(by: { $0.originalIndex < $1.originalIndex })
+            where !currentIDs.contains(snapshot.item.id) {
+            items.insert(snapshot.item, at: min(snapshot.originalIndex, items.endIndex))
+            currentIDs.insert(snapshot.item.id)
         }
-        let checkedIdSet = Set(checkedItemIds)
-        items.removeAll { checkedIdSet.contains($0.id) }
         updateSortedItems()
         updateGroups(for: currentViewMode)
     }

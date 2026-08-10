@@ -194,18 +194,18 @@ struct CollectionCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             coverContent
                 .aspectRatio(1, contentMode: .fit)
-                .clipShape(.rect(cornerRadius: 12))
+                .clipShape(.rect(cornerRadius: Theme.Radius.card))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.card)
                         .stroke(collectionColor.opacity(0.2), lineWidth: 1)
                 )
                 .overlay(alignment: .topLeading) {
                     if let owner, let dependencies {
-                        GlassEffectContainer(spacing: 2) {
-                            HStack(spacing: 6) {
+                        GlassEffectContainer(spacing: Theme.Spacing.xxs) {
+                            HStack(spacing: Theme.Spacing.xs) {
                                 ProfileAvatar(user: owner, size: 22, dependencies: dependencies)
                                 Text(owner.displayName)
                                     .font(.caption2)
@@ -213,28 +213,27 @@ struct CollectionCardView: View {
                                     .lineLimit(1)
                                     .foregroundStyle(overlayPrefersDarkText ? .black : .white)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, Theme.Spacing.xs)
+                            .padding(.vertical, Theme.Spacing.xxs)
                             .glassEffect(.clear, in: Capsule())
                         }
-                        .padding(8)
+                        .padding(Theme.Spacing.xs)
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: collectionSymbolName)
                         .font(.subheadline)
                         .foregroundStyle(collectionColor)
 
                     Text(collection.name)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                        .font(Theme.Typography.cardTitle)
                         .lineLimit(1)
                 }
 
                 Text("\(collection.recipeCount) recipe\(collection.recipeCount == 1 ? "" : "s")")
-                    .font(.caption)
+                    .font(Theme.Typography.metadata)
                     .foregroundStyle(.secondary)
             }
         }

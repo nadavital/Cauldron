@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Shared contract between Share Extension and app target for recipe import handoff.
 nonisolated enum ShareExtensionImportContract {
@@ -120,41 +121,286 @@ nonisolated struct ShareExtensionInboxItem: Codable, Sendable, Equatable, Identi
 
 /// Cross-process-safe inbox storage. Each share is an independent atomic file,
 /// so extension appends cannot overwrite one another or race app acknowledgements.
-enum ShareExtensionInboxFiles {
-    private static let directoryName = "ShareExtensionInbox-v1"
+nonisolated enum ShareExtensionInboxFiles {
+    enum PublicationMethod: Equatable {
+        case atomicFile
+        case defaultsInboxFallback
+    }
 
-    static func enqueue(_ item: ShareExtensionInboxItem) throws {
-        guard let directory = directoryURL() else { return }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appendingPathComponent(item.id.uuidString).appendingPathExtension("json")
-        try JSONEncoder().encode(item).write(to: destination, options: .atomic)
+    enum InboxError: Error, LocalizedError, Equatable {
+        case unavailableContainer
+        case inboxFull(maximumItemCount: Int)
+        case fallbackPersistenceFailed
+        case fallbackLockUnavailable
+        case fallbackInboxCorrupt
 
-        let overflow = items().dropLast(ShareExtensionImportContract.maximumInboxItemCount)
-        for entry in overflow {
-            try? FileManager.default.removeItem(at: entry.url)
+        var errorDescription: String? {
+            switch self {
+            case .unavailableContainer:
+                return "Cauldron couldn't access its shared storage."
+            case .inboxFull(let maximumItemCount):
+                return "Your Import Inbox already contains \(maximumItemCount) recipes."
+            case .fallbackPersistenceFailed:
+                return "Cauldron couldn't persist the shared recipe fallback."
+            case .fallbackLockUnavailable:
+                return "Cauldron couldn't safely coordinate shared recipe storage."
+            case .fallbackInboxCorrupt:
+                return "Cauldron's shared recipe storage is unreadable."
+            }
         }
     }
 
-    static func items() -> [(url: URL, item: ShareExtensionInboxItem)] {
-        guard let directory = directoryURL(),
-              let urls = try? FileManager.default.contentsOfDirectory(
+    /// A missing payload is a confirmed empty inbox. Invalid bytes are kept
+    /// distinct so callers never mistake corruption for permission to consult
+    /// or mutate the older single-value mirrors.
+    enum FallbackInboxState: Equatable {
+        case empty
+        case items([ShareExtensionInboxItem])
+        case corrupt
+    }
+
+    /// The atomic transport must distinguish a genuinely empty directory from
+    /// an unreadable entry. Treating corruption as emptiness can expose an
+    /// older defaults/legacy payload and import the wrong recipe.
+    enum AtomicInboxState {
+        case unavailable
+        case empty
+        case items([(url: URL, item: ShareExtensionInboxItem)])
+        case corrupt([URL])
+    }
+
+    private static let directoryName = "ShareExtensionInbox-v1"
+    private static let fallbackLockFileName = ".ShareExtensionInboxFallback-v1.lock"
+    private static let fallbackProcessLock = NSLock()
+
+    static func enqueue(
+        _ item: ShareExtensionInboxItem,
+        directoryURL providedDirectoryURL: URL? = directoryURL()
+    ) throws {
+        guard let directory = providedDirectoryURL else {
+            throw InboxError.unavailableContainer
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent(item.id.uuidString).appendingPathExtension("json")
+
+        // Retrying the same handoff remains safe even when the inbox is full.
+        // New handoffs fail closed instead of deleting an older, unsaved recipe.
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            let pendingItemCount = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+            ).lazy.filter { $0.pathExtension == "json" }.count
+            guard pendingItemCount < ShareExtensionImportContract.maximumInboxItemCount else {
+                throw InboxError.inboxFull(
+                    maximumItemCount: ShareExtensionImportContract.maximumInboxItemCount
+                )
+            }
+        }
+
+        try JSONEncoder().encode(item).write(to: destination, options: .atomic)
+    }
+
+    /// Publishes through exactly one authoritative transport. Atomic files are
+    /// preferred; the defaults inbox exists only as a compatibility fallback
+    /// when shared-file storage itself is unavailable. No legacy mirrors are
+    /// written after the atomic commit, so an app acknowledgement cannot race a
+    /// later mirror publication and resurrect a completed share.
+    @discardableResult
+    static func publish(
+        _ item: ShareExtensionInboxItem,
+        directoryURL providedDirectoryURL: URL? = directoryURL(),
+        fallbackDefaults: UserDefaults? = UserDefaults(
+            suiteName: ShareExtensionImportContract.appGroupID
+        ),
+        fallbackLockURL providedFallbackLockURL: URL? = fallbackLockURL(),
+        afterFallbackInboxRead: () -> Void = {},
+        afterAtomicEnqueue: () -> Void = {}
+    ) throws -> PublicationMethod {
+        do {
+            try enqueue(item, directoryURL: providedDirectoryURL)
+            afterAtomicEnqueue()
+            return .atomicFile
+        } catch let error as InboxError {
+            if case .inboxFull = error {
+                // Never bypass the durable inbox capacity through a fallback.
+                throw error
+            }
+        } catch {
+            // A filesystem failure may still leave the app-group defaults
+            // transport available for compatibility with older installations.
+        }
+
+        guard let fallbackDefaults else {
+            throw InboxError.unavailableContainer
+        }
+
+        return try withFallbackInboxLock(at: providedFallbackLockURL) {
+            var fallbackItems: [ShareExtensionInboxItem]
+            switch fallbackInboxState(in: fallbackDefaults) {
+            case .empty:
+                fallbackItems = []
+            case .items(let items):
+                fallbackItems = items
+            case .corrupt:
+                throw InboxError.fallbackInboxCorrupt
+            }
+            afterFallbackInboxRead()
+            if !fallbackItems.contains(where: { $0.id == item.id }) {
+                guard fallbackItems.count < ShareExtensionImportContract.maximumInboxItemCount else {
+                    throw InboxError.inboxFull(
+                        maximumItemCount: ShareExtensionImportContract.maximumInboxItemCount
+                    )
+                }
+                fallbackItems.append(item)
+            }
+
+            try persistFallbackInbox(fallbackItems, in: fallbackDefaults)
+            return .defaultsInboxFallback
+        }
+    }
+
+    static func fallbackLockURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ShareExtensionImportContract.appGroupID)?
+            .appendingPathComponent(fallbackLockFileName)
+    }
+
+    static func withFallbackInboxLock<Result>(
+        at providedLockURL: URL? = fallbackLockURL(),
+        _ operation: () throws -> Result
+    ) throws -> Result {
+        guard let lockURL = providedLockURL else {
+            throw InboxError.fallbackLockUnavailable
+        }
+
+        // POSIX record locks coordinate separate processes. The in-process
+        // lock supplies the equivalent exclusion between threads because
+        // fcntl locks are owned by the process rather than an individual fd.
+        fallbackProcessLock.lock()
+        defer { fallbackProcessLock.unlock() }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: lockURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw InboxError.fallbackLockUnavailable
+        }
+
+        let descriptor = lockURL.path.withCString {
+            Darwin.open($0, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        }
+        guard descriptor >= 0 else {
+            throw InboxError.fallbackLockUnavailable
+        }
+        defer { Darwin.close(descriptor) }
+
+        var lock = Darwin.flock()
+        lock.l_type = Int16(F_WRLCK)
+        lock.l_whence = Int16(SEEK_SET)
+        guard Darwin.fcntl(descriptor, F_SETLKW, &lock) == 0 else {
+            throw InboxError.fallbackLockUnavailable
+        }
+        defer {
+            lock.l_type = Int16(F_UNLCK)
+            _ = Darwin.fcntl(descriptor, F_SETLK, &lock)
+        }
+
+        return try operation()
+    }
+
+    static func fallbackInboxState(in defaults: UserDefaults) -> FallbackInboxState {
+        guard let data = defaults.data(forKey: ShareExtensionImportContract.inboxKey) else {
+            return .empty
+        }
+        guard let items = try? JSONDecoder().decode([ShareExtensionInboxItem].self, from: data) else {
+            return .corrupt
+        }
+        return items.isEmpty ? .empty : .items(items.sorted(by: inboxOrder))
+    }
+
+    static func persistFallbackInbox(
+        _ items: [ShareExtensionInboxItem],
+        in defaults: UserDefaults
+    ) throws {
+        if items.isEmpty {
+            defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
+            guard defaults.data(forKey: ShareExtensionImportContract.inboxKey) == nil else {
+                throw InboxError.fallbackPersistenceFailed
+            }
+            return
+        }
+
+        let encoded = try JSONEncoder().encode(items.sorted(by: inboxOrder))
+        defaults.set(encoded, forKey: ShareExtensionImportContract.inboxKey)
+        guard defaults.data(forKey: ShareExtensionImportContract.inboxKey) == encoded else {
+            throw InboxError.fallbackPersistenceFailed
+        }
+    }
+
+    private static func inboxOrder(
+        _ lhs: ShareExtensionInboxItem,
+        _ rhs: ShareExtensionInboxItem
+    ) -> Bool {
+        if lhs.createdAt == rhs.createdAt {
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        return lhs.createdAt < rhs.createdAt
+    }
+
+    static func atomicInboxState(
+        directoryURL providedDirectoryURL: URL? = directoryURL()
+    ) -> AtomicInboxState {
+        guard let directory = providedDirectoryURL else { return .unavailable }
+        guard FileManager.default.fileExists(atPath: directory.path) else { return .empty }
+        guard let urls = try? FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
-              ) else { return [] }
+              ) else {
+            // The container exists, so a read failure may hide authoritative
+            // items. It is not equivalent to an unavailable app-group path.
+            return .corrupt([directory])
+        }
 
-        return urls.compactMap { url in
+        let inboxURLs = urls.filter { $0.pathExtension == "json" }
+        guard !inboxURLs.isEmpty else { return .empty }
+
+        var decoded: [(url: URL, item: ShareExtensionInboxItem)] = []
+        var corrupt: [URL] = []
+        for url in inboxURLs {
             guard let data = try? Data(contentsOf: url),
                   let item = try? JSONDecoder().decode(ShareExtensionInboxItem.self, from: data) else {
-                try? FileManager.default.removeItem(at: url)
-                return nil
+                corrupt.append(url)
+                continue
             }
-            return (url, item)
-        }.sorted {
+            decoded.append((url, item))
+        }
+
+        // Preserve unreadable handoffs for recovery/support. We cannot safely
+        // skip them because their creation timestamp and FIFO position are not
+        // trustworthy, so the entire authoritative queue fails closed.
+        guard corrupt.isEmpty else { return .corrupt(corrupt) }
+
+        decoded.sort {
             if $0.item.createdAt == $1.item.createdAt {
                 return $0.item.id.uuidString < $1.item.id.uuidString
             }
             return $0.item.createdAt < $1.item.createdAt
+        }
+        return decoded.isEmpty ? .empty : .items(decoded)
+    }
+
+    static func items(
+        directoryURL providedDirectoryURL: URL? = directoryURL()
+    ) -> [(url: URL, item: ShareExtensionInboxItem)] {
+        switch atomicInboxState(directoryURL: providedDirectoryURL) {
+        case .items(let items):
+            return items
+        case .unavailable, .empty, .corrupt:
+            return []
         }
     }
 
@@ -164,7 +410,7 @@ enum ShareExtensionInboxFiles {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private static func directoryURL() -> URL? {
+    static func directoryURL() -> URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: ShareExtensionImportContract.appGroupID)?
             .appendingPathComponent(directoryName, isDirectory: true)
@@ -182,6 +428,7 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
     let sourceTitle: String?
     let imageURL: String?
     let tagNames: [String]
+    let notes: String?
 
     private enum CodingKeys: String, CodingKey {
         case title
@@ -193,6 +440,7 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
         case sourceTitle
         case imageURL
         case tagNames
+        case notes
     }
 
     nonisolated init(
@@ -204,7 +452,8 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
         sourceURL: String? = nil,
         sourceTitle: String? = nil,
         imageURL: String? = nil,
-        tagNames: [String] = []
+        tagNames: [String] = [],
+        notes: String? = nil
     ) {
         self.title = title
         self.ingredients = ingredients
@@ -215,6 +464,7 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
         self.sourceTitle = sourceTitle
         self.imageURL = imageURL
         self.tagNames = tagNames
+        self.notes = notes
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -228,6 +478,7 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
         self.sourceTitle = try container.decodeIfPresent(String.self, forKey: .sourceTitle)
         self.imageURL = try container.decodeIfPresent(String.self, forKey: .imageURL)
         self.tagNames = try container.decodeIfPresent([String].self, forKey: .tagNames) ?? []
+        self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -243,5 +494,6 @@ nonisolated struct PreparedShareRecipePayload: Codable, Sendable {
         if !tagNames.isEmpty {
             try container.encode(tagNames, forKey: .tagNames)
         }
+        try container.encodeIfPresent(notes, forKey: .notes)
     }
 }

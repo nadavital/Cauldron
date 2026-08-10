@@ -15,6 +15,7 @@ struct SearchTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
+    @State private var searchHistory: SearchHistoryStore
     @State private var showingProfileSheet = false
     @Namespace private var recipeTransition
 
@@ -27,6 +28,7 @@ struct SearchTabView: View {
 
     init(dependencies: DependencyContainer, navigationPath: Binding<NavigationPath>) {
         _viewModel = State(initialValue: SearchTabViewModel(dependencies: dependencies))
+        _searchHistory = State(initialValue: SearchHistoryStore(ownerID: CurrentUserSession.shared.userId))
         _navigationPath = navigationPath
     }
 
@@ -55,7 +57,11 @@ struct SearchTabView: View {
             }
         }
         .task {
+            searchHistory.selectOwner(currentUserSession.userId)
             await viewModel.loadDataIfNeeded()
+        }
+        .onChange(of: currentUserSession.userId) { _, userID in
+            searchHistory.selectOwner(userID)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             viewModel.scheduleRecipeLibraryRefresh()
@@ -82,6 +88,9 @@ struct SearchTabView: View {
             // Clear search when switching modes
             searchText = ""
         }
+        .onSubmit(of: .search) {
+            recordCurrentRecipeSearch()
+        }
     }
 
     private var compactView: some View {
@@ -105,6 +114,9 @@ struct SearchTabView: View {
                 }
                 .navigationDestination(for: Tag.self) { tag in
                     ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
+                }
+                .navigationDestination(for: VisualRecipeSearchRoute.self) { route in
+                    VisualRecipeSearchResultsView(route: route, dependencies: viewModel.dependencies)
                 }
         }
         #if !targetEnvironment(macCatalyst)
@@ -136,6 +148,9 @@ struct SearchTabView: View {
                     }
                     .navigationDestination(for: Tag.self) { tag in
                         ExploreTagView(tag: tag, dependencies: viewModel.dependencies)
+                    }
+                    .navigationDestination(for: VisualRecipeSearchRoute.self) { route in
+                        VisualRecipeSearchResultsView(route: route, dependencies: viewModel.dependencies)
                     }
             }
         }
@@ -197,18 +212,16 @@ struct SearchTabView: View {
     }
 
     private var splitDetailPlaceholder: some View {
-        VStack(spacing: Theme.Spacing.md) {
-            Image(systemName: searchMode == .recipes ? "fork.knife" : "person.2")
-                .font(.system(size: 44))
-                .foregroundStyle(.secondary)
-
-            Text(searchMode == .recipes ? "Select a recipe to view details" : "Select a person to view profile")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.cauldronBackground.ignoresSafeArea())
+        AppStateView(
+            kind: .empty(systemImage: searchMode == .recipes ? "fork.knife" : "person.2"),
+            titleText: .verbatim(
+                searchMode == .recipes ? "Select a Recipe" : "Select a Person"
+            ),
+            messageText: .verbatim(
+                searchMode == .recipes ? "Choose a recipe to view its details." : "Choose a person to view their profile."
+            )
+        )
+        .warmCanvas()
     }
 
     @ToolbarContentBuilder
@@ -226,6 +239,15 @@ struct SearchTabView: View {
     
     private var categoriesView: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            if !searchHistory.entries.isEmpty {
+                RecentRecipeSearchesSection(
+                    entries: searchHistory.entries,
+                    select: selectRecentRecipeSearch,
+                    remove: searchHistory.remove,
+                    clear: searchHistory.clear
+                )
+            }
+
             // Active Filters (if any)
             if !viewModel.selectedCategories.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -248,8 +270,7 @@ struct SearchTabView: View {
             ForEach(RecipeCategory.Section.allCases, id: \.self) { section in
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     Text(section.rawValue)
-                        .font(.title3)
-                        .fontWeight(.bold)
+                        .font(Theme.Typography.sectionTitle)
 
                     GlassEffectContainer(spacing: 2) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
@@ -293,7 +314,9 @@ struct SearchTabView: View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             let results = viewModel.displayedRecipeResults
 
-            if viewModel.recipeSearchResults.isEmpty {
+            if RuntimeEnvironment.forceSkeletonLoading || (viewModel.isLoading && viewModel.recipeSearchResults.isEmpty) {
+                RecipeRowSkeletonList()
+            } else if viewModel.recipeSearchResults.isEmpty {
                 EmptyStateView(
                     title: "No Recipes Found",
                     message: "Try searching for different keywords.",
@@ -327,6 +350,7 @@ struct SearchTabView: View {
 
                     ForEach(results) { group in
                         Button {
+                            recordCurrentRecipeSearch()
                             navigationPath.append(group.primaryRecipe)
                         } label: {
                             SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
@@ -339,49 +363,61 @@ struct SearchTabView: View {
         }
     }
 
+    private func recordCurrentRecipeSearch() {
+        guard searchMode == .recipes else { return }
+        searchHistory.record(searchText)
+    }
+
+    private func selectRecentRecipeSearch(_ query: String) {
+        searchMode = .recipes
+        searchText = query
+        searchHistory.record(query)
+    }
+
     /// Time filter + sort controls shown above recipe results.
     private var refinementBar: some View {
         GlassEffectContainer(spacing: Theme.Spacing.sm) {
             HStack(spacing: Theme.Spacing.sm) {
-            Menu {
-                Picker("Time", selection: $viewModel.timeFilter) {
-                    ForEach(RecipeTimeFilter.allCases) { filter in
-                        Text(filter.label).tag(filter)
+                Menu {
+                    Picker("Time", selection: $viewModel.timeFilter) {
+                        ForEach(RecipeTimeFilter.allCases) { filter in
+                            Text(filter.label).tag(filter)
+                        }
                     }
-                }
-            } label: {
-                refinementChip(
-                    title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
-                    systemImage: "clock",
-                    isActive: viewModel.timeFilter != .any
-                )
-            }
-
-            Menu {
-                Picker("Sort", selection: $viewModel.sortOrder) {
-                    ForEach(RecipeSortOrder.allCases) { order in
-                        Text(order.label).tag(order)
-                    }
-                }
-            } label: {
-                refinementChip(
-                    title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
-                    systemImage: "arrow.up.arrow.down",
-                    isActive: viewModel.sortOrder != .relevance
-                )
-            }
-
-            if viewModel.hasActiveRefinements {
-                Button {
-                    withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                    refinementChip(
+                        title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
+                        systemImage: "clock",
+                        isActive: viewModel.timeFilter != .any
+                    )
                 }
-                .accessibilityLabel("Clear filters")
-            }
 
-            Spacer()
+                Menu {
+                    Picker("Sort", selection: $viewModel.sortOrder) {
+                        ForEach(RecipeSortOrder.allCases) { order in
+                            Text(order.label).tag(order)
+                        }
+                    }
+                } label: {
+                    refinementChip(
+                        title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
+                        systemImage: "arrow.up.arrow.down",
+                        isActive: viewModel.sortOrder != .relevance
+                    )
+                }
+
+                if viewModel.hasActiveRefinements {
+                    IconActionButton(
+                        "Clear filters",
+                        systemImage: "xmark",
+                        style: .glass,
+                        tint: .secondary
+                    ) {
+                        withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
+                    }
+                }
+
+                Spacer()
             }
         }
     }
@@ -425,40 +461,22 @@ struct SearchTabView: View {
                         .buttonStyle(PressableScaleStyle())
                     }
                 } else {
-                    VStack(spacing: Theme.Spacing.md) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-
-                        Text("Search for People")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-
-                        Text("Find friends to share recipes with")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+                    AppStateView(
+                        kind: .empty(systemImage: "person.2"),
+                        title: "Search for People",
+                        message: "Find friends to share recipes with."
+                    )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
                 }
-            } else if viewModel.isLoadingPeople && viewModel.peopleSearchResults.isEmpty {
-                ProgressView("Searching...")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
+            } else if RuntimeEnvironment.forceSkeletonLoading || (viewModel.isLoadingPeople && viewModel.peopleSearchResults.isEmpty) {
+                UserRowSkeletonList()
             } else if viewModel.peopleSearchResults.isEmpty {
-                VStack(spacing: Theme.Spacing.md) {
-                    Image(systemName: "person.2.slash")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary)
-                    
-                    Text("No matching users")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        
-                    Text("Try searching for a different name")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
+                AppStateView(
+                    kind: .empty(systemImage: "person.2.slash"),
+                    title: "No Matching People",
+                    message: "Try searching for a different name."
+                )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
             } else {
@@ -497,6 +515,48 @@ struct SearchTabView: View {
         )
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Spacing.xxl)
+    }
+}
+
+private struct RecentRecipeSearchesSection: View {
+    let entries: [String]
+    let select: (String) -> Void
+    let remove: (String) -> Void
+    let clear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack {
+                Text("Recent Searches")
+                    .font(Theme.Typography.sectionTitle)
+                Spacer()
+                Button("Clear", action: clear)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.cauldronOrange)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    ForEach(entries, id: \.self) { query in
+                        Button {
+                            select(query)
+                        } label: {
+                            Label(query, systemImage: "clock.arrow.circlepath")
+                                .font(.subheadline)
+                                .padding(.horizontal, Theme.Spacing.sm)
+                                .frame(minHeight: Theme.HitTarget.minimum)
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Remove from Recents", systemImage: "trash", role: .destructive) {
+                                remove(query)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

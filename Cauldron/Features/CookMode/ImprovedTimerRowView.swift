@@ -218,5 +218,6 @@ struct QuickTimerButton: View {
             label: label
         )
         timerManager.startTimer(spec: spec, stepIndex: stepIndex, recipeName: recipeName)
+        Task { await RecipeIntentDonation.recordTimerStarted(spec) }
     }
 }

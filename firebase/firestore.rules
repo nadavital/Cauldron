@@ -1,22 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper function to check if user is authenticated
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
     // Shared Recipes
     match /shared_recipes/{shareId} {
-      allow read: if true; // Publicly readable
+      // Public pages and import APIs are rendered by validated Cloud Functions.
+      // Raw documents also contain a non-reversible management capability hash.
+      allow read: if false;
       allow create: if false; // Writes must go through validated Cloud Functions
-      allow update: if false; // Immutable once shared
+      allow update: if false;
       allow delete: if false;
     }
 
     // Shared Profiles
     match /shared_profiles/{shareId} {
-      allow read: if true;
+      // Public profile previews and imports are served through Cloud Functions,
+      // which omit the management hash.
+      allow read: if false;
       allow create: if false;
       allow update: if false;
       allow delete: if false;
@@ -24,7 +23,8 @@ service cloud.firestore {
 
     // Shared Collections
     match /shared_collections/{shareId} {
-      allow read: if true;
+      // Collections use the same validated API/preview boundary as recipes.
+      allow read: if false;
       allow create: if false;
       allow update: if false;
       allow delete: if false;

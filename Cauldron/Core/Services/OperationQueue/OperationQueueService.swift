@@ -18,7 +18,7 @@ enum OperationQueueEvent {
     case queueEmpty
 }
 
-struct DeadLetteredSyncOperation: Codable, Equatable, Sendable {
+nonisolated struct DeadLetteredSyncOperation: Codable, Equatable, Sendable {
     let operationId: String
     let errorDescription: String
     let capturedAt: Date
@@ -61,10 +61,16 @@ actor OperationQueueService {
         self.eventContinuation = continuation
 
         if !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode {
-            // Load persisted operations
+            // Hydrate synchronously before the actor is published so an immediate
+            // mutation can never overwrite durable operations that are still decoding.
+            var recoveredDeadLetters: [DeadLetteredSyncOperation] = []
+            if let data = UserDefaults.standard.data(forKey: persistenceKey) {
+                let decoded = Self.decodePersistedOperations(data)
+                self.operations = decoded.operations
+                recoveredDeadLetters = decoded.deadLetters
+            }
             Task {
-                await self.loadPersistedOperations()
-                await self.startRetryLoop()
+                await self.finishStartup(deadLetters: recoveredDeadLetters)
             }
         }
     }
@@ -72,22 +78,23 @@ actor OperationQueueService {
     // MARK: - Public API
 
     /// Add a new operation to the queue
+    @discardableResult
     func addOperation(
         type: SyncOperationType,
         entityType: EntityType,
         entityId: UUID,
         payload: Data? = nil
-    ) {
+    ) -> UUID {
         // Check if there's already a pending operation for this entity
-        if let existingOp = operations.values.first(where: {
+        let matchingOperations = operations.values.filter {
             $0.entityId == entityId && $0.entityType == entityType && $0.status != .completed
-        }) {
-            // If there's already a pending operation, update it instead of adding a new one
+        }
+        // Coalesce into an existing successor when one is waiting. An in-flight
+        // operation remains immutable and will be followed by the latest intent.
+        if let existingOp = matchingOperations.first(where: { $0.status != .inProgress }) {
             AppLogger.general.info("Updating existing pending operation for \(entityType) \(entityId)")
-
-            // For updates, just reset the type to update
             let updated = SyncOperation(
-                id: existingOp.id,
+                id: UUID(),
                 type: type,
                 entityType: entityType,
                 entityId: entityId,
@@ -96,10 +103,28 @@ actor OperationQueueService {
                 attempts: 0,
                 createdAt: existingOp.createdAt
             )
+            operations.removeValue(forKey: existingOp.id)
             operations[updated.id] = updated
             persistOperations()
             eventContinuation.yield(.operationAdded(updated))
-            return
+            return updated.id
+        }
+
+        if let existingOp = matchingOperations.first {
+            // An in-flight mutation cannot be cancelled. Preserve it and queue a
+            // distinct successor so completion of the old intent cannot erase the
+            // newer one. Consumers serialize successors per entity.
+            let successor = SyncOperation(
+                type: type,
+                entityType: entityType,
+                entityId: entityId,
+                payload: payload
+            )
+            operations[successor.id] = successor
+            persistOperations()
+            eventContinuation.yield(.operationAdded(successor))
+            AppLogger.general.info("Queued successor after in-progress operation \(existingOp.id)")
+            return successor.id
         }
 
         // Create new operation
@@ -115,25 +140,24 @@ actor OperationQueueService {
         eventContinuation.yield(.operationAdded(operation))
 
         AppLogger.general.info("📝 Added operation to queue: \(operation.displayDescription) for entity \(entityId)")
+        return operation.id
     }
 
     /// Mark an operation as in progress
     func markInProgress(operationId: UUID) {
-        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
-              let operation = operations[resolvedID] else { return }
+        guard let operation = operations[operationId] else { return }
         let updated = operation.markInProgress()
-        operations[resolvedID] = updated
+        operations[operationId] = updated
         persistOperations()
         eventContinuation.yield(.operationStarted(updated))
     }
 
     /// Mark an operation as completed
     func markCompleted(operationId: UUID) {
-        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
-              let operation = operations[resolvedID] else { return }
-        operations.removeValue(forKey: resolvedID)
+        guard let operation = operations[operationId] else { return }
+        operations.removeValue(forKey: operationId)
         persistOperations()
-        eventContinuation.yield(.operationCompleted(resolvedID))
+        eventContinuation.yield(.operationCompleted(operationId))
 
         AppLogger.general.info("✅ Completed operation: \(operation.displayDescription)")
 
@@ -151,12 +175,31 @@ actor OperationQueueService {
         }
     }
 
+    /// Remove every queued intent for an entity. Destructive account cleanup
+    /// uses this instead of single-operation completion because an immutable
+    /// in-flight operation may coexist with a pending successor.
+    func removeAllOperations(entityId: UUID, entityType: EntityType) {
+        let operationIds = operations.values.compactMap { operation in
+            operation.entityId == entityId && operation.entityType == entityType
+                ? operation.id
+                : nil
+        }
+        guard !operationIds.isEmpty else { return }
+        for operationId in operationIds {
+            operations.removeValue(forKey: operationId)
+            eventContinuation.yield(.operationCompleted(operationId))
+        }
+        persistOperations()
+        if operations.isEmpty {
+            eventContinuation.yield(.queueEmpty)
+        }
+    }
+
     /// Mark an operation as failed and schedule for retry
     func markFailed(operationId: UUID, error: String) {
-        guard let resolvedID = resolveOperationID(operationIdOrEntityId: operationId),
-              let operation = operations[resolvedID] else { return }
+        guard let operation = operations[operationId] else { return }
         let updated = operation.withRetry(error: error)
-        operations[resolvedID] = updated
+        operations[operationId] = updated
         persistOperations()
         eventContinuation.yield(.operationFailed(updated))
 
@@ -258,6 +301,12 @@ actor OperationQueueService {
         persistOperations()
     }
 
+    func removeAllOperations() {
+        operations.removeAll()
+        persistOperations()
+        eventContinuation.yield(.queueEmpty)
+    }
+
     /// Remove a specific operation (useful for user-initiated cancellation)
     func removeOperation(operationId: UUID) {
         operations.removeValue(forKey: operationId)
@@ -267,33 +316,17 @@ actor OperationQueueService {
 
     // MARK: - Private Methods
 
-    /// Load operations from UserDefaults
-    private func loadPersistedOperations() async {
-        guard !RuntimeEnvironment.isRunningTests else {
-            operations.removeAll()
-            return
-        }
-
-        guard let data = UserDefaults.standard.data(forKey: persistenceKey) else {
-            // No persisted operations found (routine)
-            return
-        }
-
-        let decoded = await Self.decodePersistedOperations(data)
-        operations = decoded.operations
-        if !decoded.deadLetters.isEmpty {
-            persistDeadLetteredOperations(decoded.deadLetters)
+    private func finishStartup(deadLetters: [DeadLetteredSyncOperation]) {
+        if !deadLetters.isEmpty {
+            persistDeadLetteredOperations(deadLetters)
             persistOperations()
-            AppLogger.general.warning("Recovered \(decoded.operations.count) sync operations and dead-lettered \(decoded.deadLetters.count) invalid persisted operations")
+            AppLogger.general.warning("Recovered \(operations.count) sync operations and dead-lettered \(deadLetters.count) invalid persisted operations")
         }
-        // Loaded persisted operations (don't log routine operations)
-
-        // Recover any stalled operations (e.g., app was killed during sync)
         recoverStalledOperations()
+        startRetryLoop()
     }
 
-    @MainActor
-    static func decodePersistedOperations(
+    nonisolated static func decodePersistedOperations(
         _ data: Data,
         capturedAt: Date = Date()
     ) -> (operations: [UUID: SyncOperation], deadLetters: [DeadLetteredSyncOperation]) {
@@ -368,6 +401,7 @@ actor OperationQueueService {
                     createdAt: operation.createdAt
                 )
                 operations[operation.id] = recovered
+                eventContinuation.yield(.operationRetrying(recovered))
                 recoveredCount += 1
                 AppLogger.general.info("🔄 Recovered stalled operation: \(operation.displayDescription)")
             }
@@ -419,6 +453,10 @@ actor OperationQueueService {
 
         retryTask = Task {
             while !Task.isCancelled {
+                // An operation may become stale after startup, so recovery must
+                // run continuously rather than only during initial hydration.
+                recoverStalledOperations()
+
                 // Process operations that are ready for retry
                 processReadyOperations()
 
@@ -462,14 +500,6 @@ actor OperationQueueService {
     func stop() {
         retryTask?.cancel()
         retryTask = nil
-    }
-
-    private func resolveOperationID(operationIdOrEntityId: UUID) -> UUID? {
-        if operations[operationIdOrEntityId] != nil {
-            return operationIdOrEntityId
-        }
-
-        return operations.values.first(where: { $0.entityId == operationIdOrEntityId })?.id
     }
 
     deinit {

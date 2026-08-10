@@ -96,6 +96,9 @@ extension RecipeRepository {
     /// Visibility only controls who else can see the recipe, not whether it syncs.
     @discardableResult
     func syncRecipeToCloudKit(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> Bool {
+        guard await AccountDeletionGate.shared.permitsWrite(ownerID: recipe.ownerId) else {
+            return false
+        }
         if await isMarkedDeleted(recipeId: recipe.id) {
             logger.info("Skipping private recipe sync because recipe is tombstoned: \(recipe.title)")
             pendingSyncRecipes.remove(recipe.id)
@@ -197,6 +200,9 @@ extension RecipeRepository {
     /// Sync recipe to PUBLIC database for sharing (if visibility != private)
     @discardableResult
     func syncRecipeToPublicDatabase(_ recipe: Recipe, cloudKitCore: CloudKitCore, recipeCloudService: RecipeCloudService) async -> PublicRecipeSyncResult {
+        guard await AccountDeletionGate.shared.permitsWrite(ownerID: recipe.ownerId) else {
+            return .retryNeeded
+        }
         if await isMarkedDeleted(recipeId: recipe.id) {
             logger.info("Skipping PUBLIC recipe sync because recipe is tombstoned: \(recipe.title)")
             let didDeletePublicRecipe = await deleteRecipeFromPublicDatabase(
@@ -225,12 +231,6 @@ extension RecipeRepository {
 
         // Only sync if visibility is public
         guard recipe.visibility != .privateRecipe else {
-            let isAvailable = await cloudKitCore.isAvailable()
-            guard isAvailable else {
-                logger.warning("CloudKit not available - cannot update PUBLIC visibility for recipe: \(recipe.title)")
-                return .retryNeeded
-            }
-
             // If recipe was made private, delete from PUBLIC database (including image)
             let didDeletePublicRecipe = await deleteRecipeFromPublicDatabase(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
             // Delete image from public database
@@ -254,7 +254,10 @@ extension RecipeRepository {
 
             // Update share metadata for persistent links
             // This ensures logic is triggered automatically whenever a recipe is made public or updated while public
-            await externalShareService.updateShareMetadata(for: recipe)
+            guard await externalShareService.updateShareMetadata(for: recipe) else {
+                logger.warning("Public recipe synced to CloudKit, but its web snapshot needs a retry: \(recipe.title)")
+                return .retryNeeded
+            }
 
             // Upload image to PUBLIC database only if it needs to be uploaded
             // Check if image exists and if it's been modified since last upload
@@ -286,16 +289,25 @@ extension RecipeRepository {
             return true
         }
 
-        // Only try to delete if CloudKit is available
-        let isAvailable = await cloudKitCore.isAvailable()
-        guard isAvailable else {
-            logger.warning("CloudKit not available - cannot delete recipe from PUBLIC database: \(recipe.title)")
-            return false
-        }
-
         guard recipe.ownerId != nil else {
             logger.warning("Cannot delete from PUBLIC database - missing ownerId: \(recipe.title)")
             return true
+        }
+
+        // Remove the web-readable snapshot independently of CloudKit. A user
+        // with Firebase connectivity but unavailable iCloud must still be able
+        // to make a recipe private immediately.
+        do {
+            try await externalShareService.removeShareMetadata(for: recipe)
+        } catch {
+            logger.error("❌ Web recipe unpublish failed for '\(recipe.title)': \(error.localizedDescription)")
+            return false
+        }
+
+        let isAvailable = await cloudKitCore.isAvailable()
+        guard isAvailable else {
+            logger.warning("Web recipe unpublished; CloudKit public delete will retry: \(recipe.title)")
+            return false
         }
 
         do {
@@ -474,12 +486,6 @@ extension RecipeRepository {
 
         guard !operations.isEmpty else { return }
 
-        let isAvailable = await cloudKitCore.isAvailable()
-        guard isAvailable else {
-            logger.info("CloudKit still not available - recipe operation replay will retry later")
-            return
-        }
-
         for operation in operations {
             guard !Task.isCancelled else { break }
             await replayRecipeOperation(operation)
@@ -507,9 +513,9 @@ extension RecipeRepository {
             guard let recipe = try await fetch(id: operation.entityId) else {
                 if try await deletedRecipeRepository.isDeleted(recipeId: operation.entityId) {
                     logger.info("Completing stale recipe upsert suppressed by deletion tombstone: \(operation.entityId)")
-                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                    await operationQueueService.markCompleted(operationId: operation.id)
                 } else {
-                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                    await operationQueueService.markCompleted(operationId: operation.id)
                 }
                 return
             }
@@ -524,7 +530,7 @@ extension RecipeRepository {
 
             guard recipe.canMutateCloudState(for: currentUserId) else {
                 logger.warning("Dropping queued recipe upsert for recipe not owned by the current user: \(operation.entityId)")
-                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                await operationQueueService.markCompleted(operationId: operation.id)
                 return
             }
 
@@ -540,7 +546,7 @@ extension RecipeRepository {
             )
 
             if didSyncPrivate, publicSyncResult.isSuccess {
-                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .recipe)
+                await operationQueueService.markCompleted(operationId: operation.id)
             } else {
                 await operationQueueService.markFailed(
                     operationId: operation.id,
@@ -605,7 +611,7 @@ extension RecipeRepository {
 
         guard !payload.wasPreview else {
             logger.info("Completing queued delete for local-only preview recipe: \(payload.recipeId)")
-            await operationQueueService.markCompleted(entityId: payload.recipeId, entityType: .recipe)
+            await operationQueueService.markCompleted(operationId: operation.id)
             return
         }
 
@@ -628,6 +634,20 @@ extension RecipeRepository {
         var privateDeleteSucceeded = true
         var publicDeleteSucceeded = true
         var tombstoneSaveError: Error?
+
+        let deletionRecipe = Recipe(
+            id: payload.recipeId,
+            title: "Deleted Recipe",
+            ingredients: [],
+            steps: [],
+            visibility: .publicRecipe,
+            ownerId: ownerId
+        )
+        do {
+            try await externalShareService.removeShareMetadata(for: deletionRecipe)
+        } catch {
+            publicDeleteSucceeded = false
+        }
 
         do {
             try await recipeCloudService.saveDeletedRecipeTombstone(
@@ -669,7 +689,7 @@ extension RecipeRepository {
         }
 
         if privateDeleteSucceeded, publicDeleteSucceeded {
-            await operationQueueService.markCompleted(entityId: payload.recipeId, entityType: .recipe)
+            await operationQueueService.markCompleted(operationId: operation.id)
         } else {
             await operationQueueService.markFailed(
                 operationId: operation.id,

@@ -30,11 +30,10 @@ struct RecipeHeaderSection: View {
     let onUpdateRecipe: () async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                 Text(recipe.title.recipeDetailLineBreakFriendly())
-                    .font(.largeTitle.bold())
-                    .fontDesign(.serif)
+                    .font(Theme.Typography.screenTitle)
                     .multilineTextAlignment(.leading)
                     .lineLimit(4)
                     .foregroundStyle(.primary)
@@ -44,7 +43,7 @@ struct RecipeHeaderSection: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Spacing.xs) {
                     if let time = recipe.displayTime {
                         metadataPill(systemImage: "clock", text: time.recipeDetailLineBreakFriendly())
                     }
@@ -58,7 +57,7 @@ struct RecipeHeaderSection: View {
 
             if !recipe.tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Spacing.xs) {
                         ForEach(recipe.tags) { tag in
                             NavigationLink(destination: ExploreTagView(tag: tag, dependencies: dependencies)) {
                                 TagView(tag)
@@ -78,7 +77,7 @@ struct RecipeHeaderSection: View {
                         await onUpdateRecipe()
                     }
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.title3)
                             .foregroundColor(.blue)
@@ -106,19 +105,19 @@ struct RecipeHeaderSection: View {
                                 .foregroundColor(.secondary)
                         }
                     }
-                    .padding(12)
-                    .background(Color.blue.opacity(0.08))
-                    .cornerRadius(10)
+                    .padding(Theme.Spacing.sm)
+                    .appSurface(.resting)
                 }
                 .buttonStyle(.plain)
                 .disabled(isUpdatingRecipe)
+                .accessibilityHint("Updates this saved copy from its original recipe")
             }
 
             // Scaling warnings
             if !scaledResult.warnings.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: Theme.Spacing.xs) {
                     ForEach(scaledResult.warnings) { warning in
-                        HStack(alignment: .top, spacing: 8) {
+                        HStack(alignment: .top, spacing: Theme.Spacing.xs) {
                             Image(systemName: warning.icon)
                                 .foregroundColor(warning.color)
                                 .font(.caption)
@@ -128,13 +127,13 @@ struct RecipeHeaderSection: View {
                                 .foregroundColor(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(8)
+                        .padding(Theme.Spacing.xs)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(warning.color.opacity(0.1))
-                        .cornerRadius(Theme.Radius.small)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, Theme.Spacing.xxs)
             }
         }
         .padding()
@@ -151,7 +150,10 @@ struct RecipeHeaderSection: View {
             } label: {
                 Image(systemName: localIsFavorite ? "star.fill" : "star")
                     .font(.title3.weight(.semibold))
-                    .frame(width: 36, height: 36)
+                    .frame(
+                        minWidth: Theme.HitTarget.minimum,
+                        minHeight: Theme.HitTarget.minimum
+                    )
                     .foregroundStyle(localIsFavorite ? .yellow : .secondary)
                     .glassEffect(.regular, in: Circle())
                     .symbolEffect(.bounce, value: localIsFavorite)
@@ -160,7 +162,10 @@ struct RecipeHeaderSection: View {
         } else if hasOwnedCopy {
             Image(systemName: "checkmark")
                 .font(.title3.weight(.semibold))
-                .frame(width: 36, height: 36)
+                .frame(
+                    minWidth: Theme.HitTarget.minimum,
+                    minHeight: Theme.HitTarget.minimum
+                )
                 .foregroundStyle(.green)
                 .background(Color.green.opacity(0.12), in: Circle())
                 .accessibilityLabel("Saved")
@@ -173,12 +178,18 @@ struct RecipeHeaderSection: View {
                 if isSavingRecipe || isCheckingDuplicates {
                     ProgressView()
                         .controlSize(.small)
-                        .frame(width: 36, height: 36)
+                        .frame(
+                            minWidth: Theme.HitTarget.minimum,
+                            minHeight: Theme.HitTarget.minimum
+                        )
                         .background(Color.cauldronOrange.opacity(0.12), in: Circle())
                 } else {
                     Image(systemName: "plus")
                         .font(.title3.weight(.semibold))
-                        .frame(width: 36, height: 36)
+                        .frame(
+                            minWidth: Theme.HitTarget.minimum,
+                            minHeight: Theme.HitTarget.minimum
+                        )
                         .foregroundStyle(Color.cauldronOrange)
                         .background(Color.cauldronOrange.opacity(0.12), in: Circle())
                 }
@@ -205,7 +216,7 @@ struct RecipeHeaderSection: View {
     }
 
     private func metadataPill(systemImage: String, text: String) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Theme.Spacing.xs) {
             Image(systemName: systemImage)
                 .foregroundColor(.cauldronOrange)
             Text(text)
@@ -213,8 +224,8 @@ struct RecipeHeaderSection: View {
         }
         .font(.subheadline)
         .foregroundColor(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.vertical, Theme.Spacing.xs)
         .glassEffect(.regular, in: Capsule())
     }
 
@@ -222,7 +233,7 @@ struct RecipeHeaderSection: View {
         NavigationLink {
             UserProfileView(user: user, dependencies: dependencies)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: Theme.Spacing.xs) {
                 ProfileAvatar(user: user, size: 20, dependencies: dependencies)
                 Text(text.recipeDetailLineBreakFriendly())
                     .lineLimit(1)
@@ -238,8 +249,8 @@ struct RecipeHeaderSection: View {
             }
             .font(.subheadline)
             .foregroundColor(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.vertical, Theme.Spacing.xs)
             .glassEffect(.regular, in: Capsule())
             .contentShape(Capsule())
         }

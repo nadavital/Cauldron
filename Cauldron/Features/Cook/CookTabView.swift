@@ -19,6 +19,7 @@ struct CookTabView: View {
     @State private var showingCollectionForm = false
     @State private var showingProfileSheet = false
     @State private var showingImportInbox = false
+    @State private var hasPendingImportJobs = true
     @State private var inboxJobToReview: RecipeImportJob?
     @State private var selectedRecipe: Recipe?
     @State private var recipeToDelete: Recipe?
@@ -44,6 +45,9 @@ struct CookTabView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
+                        DashboardSkeletonView()
+                    } else {
                     // New User CTA (if no own recipes) - show social content for new users
                     if viewModel.allRecipes.isEmpty {
                         newUserCTA
@@ -116,6 +120,7 @@ struct CookTabView: View {
                             popularRecipesSection
                         }
                     }
+                    }
                 }
                 .padding(.vertical)
             }
@@ -123,13 +128,15 @@ struct CookTabView: View {
             .navigationTitle("Cook")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingImportInbox = true
-                    } label: {
-                        Label("Import Inbox", systemImage: "tray.full")
+                if hasPendingImportJobs {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            showingImportInbox = true
+                        } label: {
+                            Label("Import Inbox", systemImage: "tray.full")
+                        }
+                        .accessibilityHint("Shows recipe imports waiting for review or retry")
                     }
-                    .accessibilityHint("Shows recipe imports waiting for review or retry")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     AddRecipeMenu(
@@ -209,7 +216,12 @@ struct CookTabView: View {
                 Button("Cancel", role: .cancel) {}
                 Button("End & Start New") {
                     Task {
-                        await viewModel.dependencies.cookModeCoordinator.startPendingRecipe()
+                        let coordinator = viewModel.dependencies.cookModeCoordinator
+                        guard let pendingRecipe = coordinator.pendingRecipe else { return }
+                        let outcome = await coordinator.startPendingRecipe()
+                        if outcome == .started {
+                            await RecipeIntentDonation.recordCookModeStarted(for: pendingRecipe)
+                        }
                     }
                 }
             } message: {
@@ -229,13 +241,18 @@ struct CookTabView: View {
             .task {
                 // Check if Apple Intelligence is available
                 isAIAvailable = await viewModel.dependencies.foundationModelsService.isAvailable
+                await refreshImportInboxAvailability()
             }
             .refreshable {
                 // Force sync when user pulls to refresh
                 await viewModel.loadData(forceSync: true)
+                await refreshImportInboxAvailability()
             }
             .onReceive(NotificationCenter.default.publisher(for: .recipeAdded)) { _ in
                 handleRecipeAdded(proxy: proxy)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .recipeImportInboxChanged)) { _ in
+                Task { await refreshImportInboxAvailability() }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CollectionAdded"))) { _ in
                 Task {
@@ -344,6 +361,18 @@ struct CookTabView: View {
         await viewModel.refreshLocalLibrary()
     }
 
+    @MainActor
+    private func refreshImportInboxAvailability() async {
+        do {
+            hasPendingImportJobs = try await viewModel.dependencies.recipeImportInboxStore.jobs()
+                .contains { $0.state != .completed }
+        } catch {
+            // Keep the recovery surface reachable when the durable inbox cannot
+            // be read. A successful empty read is the only state that hides it.
+            hasPendingImportJobs = true
+        }
+    }
+
     @ViewBuilder
     private func inboxImporter(for job: RecipeImportJob) -> some View {
         switch job.source {
@@ -363,10 +392,9 @@ struct CookTabView: View {
             )
         case .prepared(let data):
             if let prepared = ShareExtensionImportStore.preparedRecipe(from: data) {
-                ImporterView(
+                CanonicalPreparedInboxImporter(
                     dependencies: viewModel.dependencies,
-                    preparedRecipe: prepared.recipe,
-                    preparedSourceInfo: prepared.sourceInfo,
+                    preparedRecipe: prepared,
                     destinationRecipeID: job.id,
                     onSuccessfulSave: { await completeInboxJob(job.id) }
                 )
@@ -376,10 +404,9 @@ struct CookTabView: View {
         case .shareTransport(let item):
             if let data = item.preparedPayload,
                let prepared = ShareExtensionImportStore.preparedRecipe(from: data) {
-                ImporterView(
+                CanonicalPreparedInboxImporter(
                     dependencies: viewModel.dependencies,
-                    preparedRecipe: prepared.recipe,
-                    preparedSourceInfo: prepared.sourceInfo,
+                    preparedRecipe: prepared,
                     destinationRecipeID: job.id,
                     onSuccessfulSave: { await completeInboxJob(job.id) }
                 )
@@ -648,118 +675,90 @@ struct CookTabView: View {
     }
     
     private var emptyState: some View {
-        VStack(spacing: Theme.Spacing.lg) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 60))
-                .foregroundColor(.gray)
+        AppCard(style: .elevated, alignment: .center) {
+            VStack(spacing: Theme.Spacing.lg) {
+                Image(systemName: "book.closed")
+                    .font(.system(size: Theme.IconSize.xLarge))
+                    .foregroundStyle(Color.cauldronOrange)
 
-            Text("No Recipes Yet")
-                .font(.title2)
-                .fontWeight(.semibold)
+                VStack(spacing: Theme.Spacing.xs) {
+                    Text("No Recipes Yet")
+                        .font(Theme.Typography.sectionTitle)
 
-            Text("Add your first recipe to get started")
-                .foregroundColor(.secondary)
-
-            VStack(spacing: Theme.Spacing.sm) {
-                // AI Generation button (if available)
-                if isAIAvailable {
-                    Button {
-                        showingAIGenerator = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "apple.intelligence")
-                            Text("Generate with AI")
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
+                    Text("Add your first recipe to get started")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: Theme.Spacing.md) {
-                    Button {
-                        showCreateRecipeEditor()
-                    } label: {
-                        Label("Create", systemImage: "square.and.pencil")
-                            .frame(maxWidth: .infinity)
+                VStack(spacing: Theme.Spacing.sm) {
+                    if isAIAvailable {
+                        PrimaryActionButton(
+                            "Generate with AI",
+                            systemImage: "apple.intelligence",
+                            tint: .blue
+                        ) {
+                            showingAIGenerator = true
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cauldronOrange)
 
-                    Button {
-                        showingImporter = true
-                    } label: {
-                        Label("Import", systemImage: "arrow.down.doc")
-                            .frame(maxWidth: .infinity)
+                    HStack(spacing: Theme.Spacing.sm) {
+                        PrimaryActionButton("Create", systemImage: "square.and.pencil") {
+                            showCreateRecipeEditor()
+                        }
+
+                        PrimaryActionButton("Import", systemImage: "arrow.down.doc") {
+                            showingImporter = true
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cauldronOrange)
                 }
             }
-            .padding(.horizontal, 40)
         }
-        .padding(.vertical, 40)
+        .frame(maxWidth: 620)
         .padding(.horizontal, Theme.Spacing.md)
     }
 
     // MARK: - New User CTA
 
     private var newUserCTA: some View {
-        VStack(spacing: Theme.Spacing.md) {
-            Image(systemName: "plus.rectangle.on.folder")
-                .font(.system(size: 48))
-                .foregroundColor(.cauldronOrange)
+        AppCard(style: .elevated, alignment: .center) {
+            VStack(spacing: Theme.Spacing.md) {
+                Image(systemName: "plus.rectangle.on.folder")
+                    .font(.system(size: Theme.IconSize.xLarge))
+                    .foregroundStyle(Color.cauldronOrange)
 
-            Text("Start Your Recipe Collection")
-                .font(.title2)
-                .fontWeight(.semibold)
+                VStack(spacing: Theme.Spacing.xs) {
+                    Text("Start Your Recipe Collection")
+                        .font(Theme.Typography.sectionTitle)
 
-            Text("Import from web, YouTube, TikTok, or create your own")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: Theme.Spacing.sm) {
-                Button {
-                    showingImporter = true
-                } label: {
-                    Label("Import", systemImage: "arrow.down.doc")
+                    Text("Import from web, YouTube, TikTok, or create your own")
                         .font(.subheadline)
-                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.cauldronOrange)
 
-                Button {
-                    showCreateRecipeEditor()
-                } label: {
-                    Label("Create", systemImage: "square.and.pencil")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            // AI Generation button (if available)
-            if isAIAvailable {
-                Button {
-                    showingAIGenerator = true
-                } label: {
-                    HStack {
-                        Image(systemName: "apple.intelligence")
-                        Text("Generate with AI")
+                HStack(spacing: Theme.Spacing.sm) {
+                    PrimaryActionButton("Import", systemImage: "arrow.down.doc") {
+                        showingImporter = true
                     }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+
+                    PrimaryActionButton("Create", systemImage: "square.and.pencil") {
+                        showCreateRecipeEditor()
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(.blue)
+
+                if isAIAvailable {
+                    PrimaryActionButton(
+                        "Generate with AI",
+                        systemImage: "apple.intelligence",
+                        tint: .blue
+                    ) {
+                        showingAIGenerator = true
+                    }
+                }
             }
         }
-        .padding(24)
+        .frame(maxWidth: 620)
         .frame(maxWidth: .infinity)
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(Theme.Radius.large)
         .padding(.horizontal, Theme.Spacing.md)
     }
 
@@ -883,7 +882,10 @@ struct CookTabView: View {
         } else {
             // Start cooking
             Task {
-                await viewModel.dependencies.cookModeCoordinator.startCooking(recipe)
+                let outcome = await viewModel.dependencies.cookModeCoordinator.startCooking(recipe)
+                if outcome == .started {
+                    await RecipeIntentDonation.recordCookModeStarted(for: recipe)
+                }
             }
         }
     }
@@ -928,6 +930,35 @@ struct CookTabView: View {
             } catch {
                 AppLogger.general.error("Failed to delete recipe: \(error.localizedDescription)")
             }
+        }
+    }
+}
+
+private struct CanonicalPreparedInboxImporter: View {
+    let dependencies: DependencyContainer
+    let preparedRecipe: PreparedSharedRecipe
+    let destinationRecipeID: UUID
+    let onSuccessfulSave: () async -> Bool
+    @State private var canonicalRecipe: PreparedSharedRecipe?
+
+    var body: some View {
+        Group {
+            if let canonicalRecipe {
+                ImporterView(
+                    dependencies: dependencies,
+                    preparedRecipe: canonicalRecipe.recipe,
+                    preparedSourceInfo: canonicalRecipe.sourceInfo,
+                    destinationRecipeID: destinationRecipeID,
+                    onSuccessfulSave: onSuccessfulSave
+                )
+            } else {
+                ProgressView("Preparing recipe…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.cauldronBackground)
+            }
+        }
+        .task {
+            canonicalRecipe = await preparedRecipe.canonicalized(using: dependencies.textParser)
         }
     }
 }

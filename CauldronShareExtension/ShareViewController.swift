@@ -594,82 +594,54 @@ final class ShareViewController: UIViewController {
         }
 
         setSavingState()
-        persistInboxItem(url: sharedURL, text: preparedPayload == nil ? sharedText : nil, payload: preparedPayload)
-        if let sharedURL {
-            persistPendingURL(sharedURL)
+        do {
+            try publishInboxItem(
+                url: sharedURL,
+                text: preparedPayload == nil ? sharedText : nil,
+                payload: preparedPayload
+            )
+        } catch {
+            setPersistenceFailureState(error)
+            return
         }
-
-        if let preparedPayload {
-            persistPreparedRecipePayload(preparedPayload)
-            clearPendingText()
-        } else if let sharedText {
-            persistPendingText(sharedText)
-            clearPendingURL()
-            clearPreparedRecipePayload()
-        } else {
-            clearPendingText()
-            clearPreparedRecipePayload()
-        }
-
         hasSavedPayload = true
         setSavedState()
     }
 
-    private func persistPendingURL(_ url: URL) {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        defaults.set(url.absoluteString, forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-    }
-
-    private func persistInboxItem(url: URL?, text: String?, payload: PreparedShareRecipePayload?) {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        let payloadData = payload.flatMap { try? JSONEncoder().encode($0) }
+    private func publishInboxItem(
+        url: URL?,
+        text: String?,
+        payload: PreparedShareRecipePayload?
+    ) throws {
+        let payloadData = try payload.map { try JSONEncoder().encode($0) }
         let item = ShareExtensionInboxItem(
             urlString: url?.absoluteString,
             text: text,
             preparedPayload: payloadData
         )
-        try? ShareExtensionInboxFiles.enqueue(item)
-
-        // Keep the defaults representation during migration for older app builds.
-        var items: [ShareExtensionInboxItem] = []
-        if let data = defaults.data(forKey: ShareExtensionImportContract.inboxKey),
-           let decoded = try? JSONDecoder().decode([ShareExtensionInboxItem].self, from: data) {
-            items = decoded
-        }
-        items.append(item)
-        items = Array(items.suffix(ShareExtensionImportContract.maximumInboxItemCount))
-        if let data = try? JSONEncoder().encode(items) {
-            defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
-        }
+        try ShareExtensionInboxFiles.publish(item)
     }
 
-    private func persistPendingText(_ text: String) {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        defaults.set(text, forKey: ShareExtensionImportContract.pendingRecipeTextKey)
-    }
+    private func setPersistenceFailureState(_ error: Error) {
+        activityIndicator.stopAnimating()
+        activityIndicator.isHidden = true
+        shouldPrimaryDismissOnTap = false
 
-    private func persistPreparedRecipePayload(_ payload: PreparedShareRecipePayload) {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
-              let data = try? JSONEncoder().encode(payload) else {
-            return
+        if let inboxError = error as? ShareExtensionInboxFiles.InboxError,
+           case .inboxFull = inboxError {
+            statusLabel.text = "Your Import Inbox is full. Open Cauldron and save or discard an import, then try again."
+        } else if let inboxError = error as? ShareExtensionInboxFiles.InboxError,
+                  case .unavailableContainer = inboxError {
+            statusLabel.text = "Cauldron couldn't access shared storage. Open the app once, then try again."
+        } else {
+            statusLabel.text = "Cauldron couldn't save this import. Check available storage, then try again."
         }
 
-        defaults.set(data, forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-    }
-
-    private func clearPreparedRecipePayload() {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-    }
-
-    private func clearPendingURL() {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-    }
-
-    private func clearPendingText() {
-        guard let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) else { return }
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+        primaryButton.isEnabled = true
+        var primaryConfig = primaryButton.configuration
+        primaryConfig?.title = "Try Again"
+        primaryConfig?.showsActivityIndicator = false
+        primaryButton.configuration = primaryConfig
     }
 
     private func completeRequest(after delay: TimeInterval) {

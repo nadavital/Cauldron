@@ -39,6 +39,10 @@ actor SavedReferenceCloudService {
             recordType: CloudKitCore.RecordType.savedRecipeReference
         )
         populateRecipeReferenceRecord(record, from: reference)
+        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: reference.userId) else {
+            throw CancellationError()
+        }
+        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
         _ = try await db.save(record)
     }
 
@@ -92,6 +96,10 @@ actor SavedReferenceCloudService {
             recordType: CloudKitCore.RecordType.savedCollectionReference
         )
         populateCollectionReferenceRecord(record, from: reference)
+        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: reference.userId) else {
+            throw CancellationError()
+        }
+        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
         _ = try await db.save(record)
     }
 
@@ -126,6 +134,35 @@ actor SavedReferenceCloudService {
         } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
             logger.info("SavedCollectionReference record type not yet in CloudKit schema - returning empty list")
             throw SavedReferenceCloudServiceError.recordTypeUnavailable
+        }
+    }
+
+    /// Fail-closed owner sweep used only for account deletion. It deletes by
+    /// record ID, so malformed legacy payloads cannot disappear from inventory.
+    func deleteAllReferences(for userId: UUID) async throws {
+        let db = try await core.getPrivateDatabase()
+        let zoneID = try await core.getCustomZoneID()
+        for recordType in [
+            CloudKitCore.RecordType.savedRecipeReference,
+            CloudKitCore.RecordType.savedCollectionReference,
+        ] {
+            let query = CKQuery(
+                recordType: recordType,
+                predicate: NSPredicate(format: "userId == %@", userId.uuidString)
+            )
+            let records: [CKRecord]
+            do {
+                records = try await fetchAllRecords(matching: query, in: db, zoneID: zoneID)
+            } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+                continue
+            }
+            for record in records {
+                do {
+                    _ = try await db.deleteRecord(withID: record.recordID)
+                } catch let error as CKError where error.code == .unknownItem {
+                    continue
+                }
+            }
         }
     }
 
@@ -246,9 +283,7 @@ actor SavedReferenceCloudService {
             }
 
             for (_, result) in results.matchResults {
-                if let record = try? result.get() {
-                    records.append(record)
-                }
+                records.append(try result.get())
             }
 
             cursor = results.queryCursor

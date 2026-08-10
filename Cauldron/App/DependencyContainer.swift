@@ -146,7 +146,10 @@ class DependencyContainer: ObservableObject {
     // Background task for image migration (retained to prevent premature cancellation)
     private var migrationTask: Task<Void, Never>?
 
-    init(modelContainer: ModelContainer) {
+    init(
+        modelContainer: ModelContainer,
+        recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore()
+    ) {
         self.modelContainer = modelContainer
 
         // ============================================================
@@ -172,7 +175,7 @@ class DependencyContainer: ObservableObject {
         self.collectionImageManager = createCollectionImageManager(collectionService: collectionCloudService)
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
-        self.recipeImportInboxStore = RecipeImportInboxStore()
+        self.recipeImportInboxStore = recipeImportInboxStore
         self.diagnosticsRecorder = PrivacySafeDiagnosticsRecorder()
 
         // ============================================================
@@ -181,9 +184,13 @@ class DependencyContainer: ObservableObject {
 
         // Temporary references for MainActor-isolated services
         let tempImageManager = imageManager
+        let tempUserCloudService = userCloudService
 
         self.externalShareService = MainActor.assumeIsolated {
-            ExternalShareService(imageManager: tempImageManager)
+            ExternalShareService(
+                imageManager: tempImageManager,
+                userCloudService: tempUserCloudService
+            )
         }
 
         self.deletedRecipeRepository = DeletedRecipeRepository(modelContainer: modelContainer)
@@ -191,7 +198,8 @@ class DependencyContainer: ObservableObject {
             modelContainer: modelContainer,
             cloudKitCore: cloudKitCore,
             collectionCloudService: collectionCloudService,
-            operationQueueService: operationQueueService
+            operationQueueService: operationQueueService,
+            externalShareService: externalShareService
         )
         self.savedReferenceRepository = SavedReferenceRepository(
             modelContainer: modelContainer,
@@ -227,7 +235,7 @@ class DependencyContainer: ObservableObject {
         self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
         self.recipeOCRService = RecipeOCRService()
         self.recipeLineClassificationService = RecipeLineClassificationService()
-        self.timerManager = TimerManager()
+        self.timerManager = TimerManager(experiencePreferences: .shared)
         self.profileCacheManager = ProfileCacheManager()
         self.libraryPresentationStore = LibraryPresentationStore()
 
@@ -321,13 +329,42 @@ class DependencyContainer: ObservableObject {
         }
     }
 
+    /// Removes every account-derived local model and durable queued mutation.
+    /// Cauldron is single-account per installation, so account deletion must
+    /// purge the complete store rather than a hand-picked owner subset.
+    func purgeAllLocalAccountData() async throws {
+        let context = ModelContext(modelContainer)
+        let recipeIDs = try context.fetch(FetchDescriptor<RecipeModel>()).map(\.id)
+        for model in try context.fetch(FetchDescriptor<GroceryItemModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<GroceryListModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<CookingHistoryModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<SavedRecipeReferenceModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<SavedCollectionReferenceModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<CollectionMembershipModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<DeletedRecipeModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<DeletedCollectionModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<RecipeModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<CollectionModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<ConnectionModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<SharedRecipeModel>()) { context.delete(model) }
+        for model in try context.fetch(FetchDescriptor<UserModel>()) { context.delete(model) }
+        try context.save()
+        for recipeID in recipeIDs {
+            await imageManager.deleteImage(recipeId: recipeID)
+            await imageSyncManager.removeAllPendingUploads(recipeID)
+        }
+        await operationQueueService.removeAllOperations()
+        try await recipeImportInboxStore.removeAll()
+        CookSessionSharedStore.clear()
+    }
+
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {
         migrationTask?.cancel()
     }
 
     /// Create container with in-memory storage (for previews/testing)
-    static func preview() -> DependencyContainer {
+    static func preview(recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore()) -> DependencyContainer {
         let schema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
@@ -349,7 +386,10 @@ class DependencyContainer: ObservableObject {
             fatalError("Failed to create preview ModelContainer - this indicates a schema configuration error")
         }
 
-        return DependencyContainer(modelContainer: container)
+        return DependencyContainer(
+            modelContainer: container,
+            recipeImportInboxStore: recipeImportInboxStore
+        )
     }
     
     /// Create container with persistent storage

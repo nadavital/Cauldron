@@ -6,15 +6,17 @@ struct ImportInboxView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var jobs: [RecipeImportJob] = []
     @State private var loadError: String?
+    @State private var isPerformingBulkAction = false
+    @State private var showingDiscardFailedConfirmation = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if jobs.isEmpty {
-                    ContentUnavailableView(
-                        "Import Inbox Empty",
-                        systemImage: "tray",
-                        description: Text("Recipes shared to Cauldron will stay here until you save or discard them.")
+                    AppStateView(
+                        kind: .empty(systemImage: "tray"),
+                        title: "Import Inbox Empty",
+                        message: "Recipes shared to Cauldron will stay here until you save or discard them."
                     )
                 } else {
                     List {
@@ -25,24 +27,38 @@ struct ImportInboxView: View {
                                 ImportInboxRow(job: job)
                             }
                             .buttonStyle(.plain)
-                            .disabled(job.state == .processing)
-                                .swipeActions {
-                                    Button("Discard", role: .destructive) {
-                                        Task { await discard(job) }
-                                    }
-                                    if job.state == .failed {
-                                        Button("Retry") {
-                                            Task { await retry(job) }
-                                        }
-                                        .tint(.cauldronOrange)
-                                    }
+                            .disabled(job.state == .processing || isPerformingBulkAction)
+                            .swipeActions {
+                                Button("Discard", role: .destructive) {
+                                    Task { await discard(job) }
                                 }
+                                if job.state == .failed {
+                                    Button("Retry") {
+                                        Task { await retry(job) }
+                                    }
+                                    .tint(.cauldronOrange)
+                                }
+                            }
                         }
                     }
+                    .scrollContentBackground(.hidden)
                 }
             }
             .navigationTitle("Import Inbox")
             .toolbar {
+                if !failedJobs.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu("Failed Imports", systemImage: "exclamationmark.triangle") {
+                            Button("Retry All", systemImage: "arrow.clockwise") {
+                                Task { await retryAllFailed() }
+                            }
+                            Button("Discard All", systemImage: "trash", role: .destructive) {
+                                showingDiscardFailedConfirmation = true
+                            }
+                        }
+                        .disabled(isPerformingBulkAction)
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
@@ -57,7 +73,23 @@ struct ImportInboxView: View {
             } message: {
                 Text(loadError ?? "Unknown error")
             }
+            .confirmationDialog(
+                "Discard all failed imports?",
+                isPresented: $showingDiscardFailedConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Discard \(failedJobs.count) Failed Imports", role: .destructive) {
+                    Task { await discardAllFailed() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes only imports that failed. Recipes already saved to your library are not affected.")
+            }
         }
+    }
+
+    private var failedJobs: [RecipeImportJob] {
+        jobs.filter { $0.state == .failed }
     }
 
     @MainActor
@@ -91,6 +123,40 @@ struct ImportInboxView: View {
             loadError = "Cauldron couldn't queue this import for retry."
         }
     }
+
+    @MainActor
+    private func retryAllFailed() async {
+        guard !isPerformingBulkAction else { return }
+        isPerformingBulkAction = true
+        defer { isPerformingBulkAction = false }
+
+        do {
+            for job in failedJobs {
+                _ = try await store.transition(id: job.id, to: .received)
+            }
+            await reload()
+        } catch {
+            await reload()
+            loadError = "Some imports couldn't be queued for retry. The remaining failed imports are still in your inbox."
+        }
+    }
+
+    @MainActor
+    private func discardAllFailed() async {
+        guard !isPerformingBulkAction else { return }
+        isPerformingBulkAction = true
+        defer { isPerformingBulkAction = false }
+
+        do {
+            for job in failedJobs {
+                try await store.remove(id: job.id)
+            }
+            await reload()
+        } catch {
+            await reload()
+            loadError = "Some failed imports couldn't be discarded. The remaining imports are still in your inbox."
+        }
+    }
 }
 
 private struct ImportInboxRow: View {
@@ -116,6 +182,7 @@ private struct ImportInboxRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .frame(minHeight: Theme.HitTarget.minimum)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(sourceTitle), \(statusText)")
     }

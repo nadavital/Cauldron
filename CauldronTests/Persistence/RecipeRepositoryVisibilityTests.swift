@@ -38,6 +38,8 @@ final class RecipeRepositoryVisibilityTests: XCTestCase {
         let collectionCloudService = CollectionCloudService(core: cloudKitCore)
         let imageManager = RecipeImageManager(
             directoryName: "RecipeRepositoryVisibilityTests-\(UUID().uuidString)",
+            baseDirectoryURL: FileManager.default.temporaryDirectory,
+            removesDirectoryOnDeinit: true,
             uploadToCloudWithDatabase: nil,
             downloadFromCloudWithDatabase: nil
         )

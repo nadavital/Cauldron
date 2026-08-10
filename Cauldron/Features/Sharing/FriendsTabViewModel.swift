@@ -41,6 +41,14 @@ final class FriendsTabViewModel {
     @ObservationIgnored
     private var loadedUserId: UUID?
 
+    var isColdLoading: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoading,
+            hasResolvedOnce: hasLoadedOnce,
+            hasContent: !sharedRecipes.isEmpty || !sharedCollections.isEmpty
+        )
+    }
+
     private init() {
         // Private init for singleton
     }
@@ -87,6 +95,14 @@ final class FriendsTabViewModel {
             return
         }
 
+        isLoading = true
+        defer {
+            if isCurrentLoadValid(for: currentUserId) {
+                isLoading = false
+                hasLoadedOnce = true
+            }
+        }
+
         // On first load, try to use cached data for instant display
         if !hasLoadedOnce {
             if let cached = await dependencies.sharingService.getCachedSharedRecipes(for: currentUserId) {
@@ -96,21 +112,11 @@ final class FriendsTabViewModel {
                 organizeRecipesIntoSections()
                 await preloadImagesForSharedRecipes()
                 guard isCurrentLoadValid(for: currentUserId) else { return }
-                hasLoadedOnce = true
 
                 // Fetch tiers in background
                 await fetchSharerTiers(for: currentUserId)
                 await loadSharedCollections(for: currentUserId)
                 return
-            }
-            // No cache, show loading indicator
-            isLoading = true
-        }
-
-        defer {
-            if isCurrentLoadValid(for: currentUserId) {
-                isLoading = false
-                hasLoadedOnce = true
             }
         }
 

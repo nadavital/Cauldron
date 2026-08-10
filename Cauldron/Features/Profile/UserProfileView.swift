@@ -65,7 +65,7 @@ struct UserProfileView: View {
                     }
 
                     // Collections Section (only show if user has collections OR still loading the first time)
-                    if !viewModel.userCollections.isEmpty || (viewModel.isLoadingCollections && !hasLoadedInitialData) {
+                    if !viewModel.userCollections.isEmpty || viewModel.isColdLoadingCollections || RuntimeEnvironment.forceSkeletonLoading {
                         collectionsSection
                     }
 
@@ -118,14 +118,32 @@ struct UserProfileView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                // Only allow sharing if it's the current user's profile
                 if viewModel.isCurrentUser {
-                    Button {
-                        shareWithFriends()
+                    Menu {
+                        Button {
+                            Task {
+                                await generateShareLink()
+                            }
+                        } label: {
+                            Label("Share Profile", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(!viewModel.canShareProfile)
+
+                        Button {
+                            shareWithFriends()
+                        } label: {
+                            Label("Invite Friends", systemImage: "gift")
+                        }
                     } label: {
-                        Image(systemName: "gift")
-                            .foregroundColor(.cauldronOrange)
+                        if isGeneratingShareLink {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundColor(.cauldronOrange)
+                        }
                     }
+                    .disabled(isGeneratingShareLink)
+                    .accessibilityLabel("Share")
                 }
             }
         }
@@ -591,13 +609,8 @@ struct UserProfileView: View {
             }
 
             // Content
-            if viewModel.isLoadingCollections && viewModel.userCollections.isEmpty {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                }
-                .padding(.vertical, 40)
+            if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoadingCollections {
+                CollectionCardSkeletonRail(count: 2, horizontalPadding: 0)
             } else if viewModel.userCollections.isEmpty {
                 emptyCollectionsState
             } else {
@@ -699,13 +712,12 @@ struct UserProfileView: View {
             }
 
             // Content
-            if viewModel.isLoadingRecipes && viewModel.filteredRecipes.isEmpty {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
+            if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoadingRecipes {
+                if horizontalSizeClass == .regular {
+                    RecipeCardSkeletonGrid(columns: RecipeLayoutMode.defaultGridColumns, count: 4)
+                } else {
+                    RecipeCardSkeletonRail(count: 2, horizontalPadding: 0)
                 }
-                .padding(.vertical, 40)
             } else if viewModel.filteredRecipes.isEmpty {
                 emptyRecipesState
             } else {
@@ -835,11 +847,15 @@ struct UserProfileView: View {
         defer { isGeneratingShareLink = false }
 
         do {
+            await viewModel.loadUserRecipes(forceRefresh: true)
+            guard viewModel.canShareProfile else {
+                throw ExternalShareError.invalidProfile
+            }
             // Count public recipes
             let publicRecipeCount = viewModel.userRecipes.filter { $0.recipe.visibility == .publicRecipe }.count
             
             let link = try await viewModel.dependencies.externalShareService.shareProfile(
-                user,
+                displayUser,
                 recipeCount: publicRecipeCount
             )
             shareLink = link

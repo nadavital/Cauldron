@@ -19,6 +19,9 @@ extension Notification.Name {
     /// Posted when recipe import URL arrives from Share Extension handoff
     static let openRecipeImportURL = Notification.Name("OpenRecipeImportURL")
 
+    /// Posted whenever the durable recipe import inbox changes.
+    nonisolated static let recipeImportInboxChanged = Notification.Name("RecipeImportInboxChanged")
+
     /// Posted when a referral invite link is opened and a code is extracted
     static let openReferralInvite = Notification.Name("OpenReferralInvite")
 
@@ -31,6 +34,12 @@ extension Notification.Name {
 
     /// Posted when a new recipe is added to the library
     static let recipeAdded = Notification.Name("RecipeAdded")
+
+    /// Posted when an App Intent has persisted a recipe route for the app to consume.
+    nonisolated static let openRecipeFromIntent = Notification.Name("OpenRecipeFromIntent")
+
+    /// Posted when Visual Intelligence has persisted a set of library matches.
+    nonisolated static let openVisualRecipeSearch = Notification.Name("OpenVisualRecipeSearch")
 
     // MARK: - Connection Notifications
 

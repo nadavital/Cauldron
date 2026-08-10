@@ -32,7 +32,7 @@ struct CurrentCookingStepIntent: AppIntent {
     static var description = IntentDescription("Read the current step in your active Cauldron cooking session.")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let snapshot = CookSessionSharedStore.read() else {
+        guard let snapshot = await RecipeIntentProvider.shared.activeCookingSnapshot() else {
             return .result(dialog: "There isn't an active cooking session.")
         }
         guard let instructions = snapshot.stepInstructions,
@@ -51,7 +51,7 @@ struct ResumeCookingIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let snapshot = CookSessionSharedStore.read() else {
+        guard let snapshot = await RecipeIntentProvider.shared.activeCookingSnapshot() else {
             return .result(dialog: "There isn't an active cooking session.")
         }
         guard await RecipeIntentProvider.shared.resumeCooking(expectedRecipeID: snapshot.recipeID) else {
@@ -67,11 +67,18 @@ struct EndCookingIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let expected = CookSessionSharedStore.read() else {
+        guard let expected = await RecipeIntentProvider.shared.activeCookingSnapshot() else {
             return .result(dialog: "There isn't an active cooking session.")
         }
         try await requestConfirmation(
-            result: .result(dialog: "End Cook Mode and stop all active cooking timers?")
+            actionName: .custom(
+                acceptLabel: "End Cooking",
+                acceptAlternatives: ["End", "Stop Cooking"],
+                denyLabel: "Keep Cooking",
+                denyAlternatives: ["Cancel", "Continue Cooking"],
+                destructive: true
+            ),
+            dialog: "End Cook Mode and stop all active cooking timers?"
         )
         if await RecipeIntentProvider.shared.endCooking(expected: expected) {
             return .result(dialog: "Cook Mode ended.")
@@ -111,6 +118,45 @@ struct CauldronAppShortcuts: AppShortcutsProvider {
             phrases: ["End cooking in \(.applicationName)"],
             shortTitle: "End Cooking",
             systemImageName: "stop.fill"
+        )
+        AppShortcut(
+            intent: OpenRecipeIntent(),
+            phrases: [
+                "Open \(\.$target) in \(.applicationName)",
+                "Show me \(\.$target) in \(.applicationName)"
+            ],
+            shortTitle: "Open Recipe",
+            systemImageName: "book.fill"
+        )
+        AppShortcut(
+            intent: NextCookingStepIntent(),
+            phrases: ["Next cooking step in \(.applicationName)"],
+            shortTitle: "Next Step",
+            systemImageName: "chevron.right"
+        )
+        AppShortcut(
+            intent: PreviousCookingStepIntent(),
+            phrases: ["Previous cooking step in \(.applicationName)"],
+            shortTitle: "Previous Step",
+            systemImageName: "chevron.left"
+        )
+        AppShortcut(
+            intent: AddRecipeIngredientsToGroceriesIntent(),
+            phrases: ["Add ingredients from \(\.$recipe) to groceries in \(.applicationName)"],
+            shortTitle: "Add to Groceries",
+            systemImageName: "cart.badge.plus"
+        )
+        AppShortcut(
+            intent: QueueRecipeURLImportIntent(),
+            phrases: ["Import a recipe URL into \(.applicationName)"],
+            shortTitle: "Import Recipe URL",
+            systemImageName: "link.badge.plus"
+        )
+        AppShortcut(
+            intent: StartCookingTimerIntent(),
+            phrases: ["Start a cooking timer in \(.applicationName)"],
+            shortTitle: "Cooking Timer",
+            systemImageName: "timer"
         )
     }
 }

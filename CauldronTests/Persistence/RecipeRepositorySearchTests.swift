@@ -817,6 +817,8 @@ final class RecipeRepositorySearchTests: XCTestCase {
         let recipeCloudService = RecipeCloudService(core: cloudKitCore)
         let imageManager = RecipeImageManager(
             directoryName: "RecipeRepositorySearchTests-\(UUID().uuidString)",
+            baseDirectoryURL: FileManager.default.temporaryDirectory,
+            removesDirectoryOnDeinit: true,
             uploadToCloudWithDatabase: nil,
             downloadFromCloudWithDatabase: nil
         )

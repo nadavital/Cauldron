@@ -90,8 +90,8 @@ actor SavedReferenceRepository {
         let context = ModelContext(modelContainer)
         context.insert(SavedRecipeReferenceModel.from(reference))
         try context.save()
-        await enqueueSavedRecipeReferenceSync(reference, type: .create)
-        syncRecipeReferenceToCloud(reference)
+        let operationID = await enqueueSavedRecipeReferenceSync(reference, type: .create)
+        syncRecipeReferenceToCloud(reference, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "saved", reference: reference)
         logger.info("Saved recipe reference: \(sourceRecipeId)")
         return (reference, false)
@@ -132,8 +132,8 @@ actor SavedReferenceRepository {
         let reference = model.toDomain()
         context.delete(model)
         try context.save()
-        await enqueueSavedRecipeReferenceSync(reference, type: .delete)
-        deleteRecipeReferenceFromCloud(reference)
+        let operationID = await enqueueSavedRecipeReferenceSync(reference, type: .delete)
+        deleteRecipeReferenceFromCloud(reference, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "removed", reference: reference)
         return true
     }
@@ -159,8 +159,8 @@ actor SavedReferenceRepository {
         model.updatedAt = reference.updatedAt
         try context.save()
         let updated = model.toDomain()
-        await enqueueSavedRecipeReferenceSync(updated, type: .update)
-        syncRecipeReferenceToCloud(updated)
+        let operationID = await enqueueSavedRecipeReferenceSync(updated, type: .update)
+        syncRecipeReferenceToCloud(updated, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "saved", reference: updated)
         return updated
     }
@@ -193,8 +193,8 @@ actor SavedReferenceRepository {
         let context = ModelContext(modelContainer)
         context.insert(SavedCollectionReferenceModel.from(reference))
         try context.save()
-        await enqueueSavedCollectionReferenceSync(reference, type: .create)
-        syncCollectionReferenceToCloud(reference)
+        let operationID = await enqueueSavedCollectionReferenceSync(reference, type: .create)
+        syncCollectionReferenceToCloud(reference, operationID: operationID)
         postSavedCollectionReferenceChanged(changeType: "saved", reference: reference, collection: sourceCollection)
         logger.info("Saved collection reference: \(sourceCollectionId)")
         return (reference, false)
@@ -235,8 +235,8 @@ actor SavedReferenceRepository {
         let reference = model.toDomain()
         context.delete(model)
         try context.save()
-        await enqueueSavedCollectionReferenceSync(reference, type: .delete)
-        deleteCollectionReferenceFromCloud(reference)
+        let operationID = await enqueueSavedCollectionReferenceSync(reference, type: .delete)
+        deleteCollectionReferenceFromCloud(reference, operationID: operationID)
         postSavedCollectionReferenceChanged(changeType: "removed", reference: reference)
         return true
     }
@@ -328,15 +328,15 @@ actor SavedReferenceRepository {
     private func enqueueSavedRecipeReferenceSync(
         _ reference: SavedRecipeReference,
         type: SyncOperationType
-    ) async {
+    ) async -> UUID? {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let operationQueueService,
               let payload = try? JSONEncoder().encode(reference) else {
-            return
+            return nil
         }
 
-        await operationQueueService.addOperation(
+        return await operationQueueService.addOperation(
             type: type,
             entityType: .savedRecipeReference,
             entityId: reference.id,
@@ -347,15 +347,15 @@ actor SavedReferenceRepository {
     private func enqueueSavedCollectionReferenceSync(
         _ reference: SavedCollectionReference,
         type: SyncOperationType
-    ) async {
+    ) async -> UUID? {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let operationQueueService,
               let payload = try? JSONEncoder().encode(reference) else {
-            return
+            return nil
         }
 
-        await operationQueueService.addOperation(
+        return await operationQueueService.addOperation(
             type: type,
             entityType: .savedCollectionReference,
             entityId: reference.id,
@@ -427,10 +427,7 @@ actor SavedReferenceRepository {
                 throw SavedReferenceRepositoryError.unsupportedOperation
             }
 
-            await operationQueueService.markCompleted(
-                entityId: operation.entityId,
-                entityType: operation.entityType
-            )
+            await operationQueueService.markCompleted(operationId: operation.id)
         } catch {
             await operationQueueService.markFailed(
                 operationId: operation.id,
@@ -695,24 +692,22 @@ actor SavedReferenceRepository {
         return await operationQueueService.getAllOperations()
     }
 
-    private nonisolated func syncRecipeReferenceToCloud(_ reference: SavedRecipeReference) {
+    private nonisolated func syncRecipeReferenceToCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let savedReferenceCloudService else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference] in
-            await operationQueueService?.markInProgress(operationId: reference.id)
+        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+            guard let operationID else { return }
+            await operationQueueService?.markInProgress(operationId: operationID)
             do {
                 try await savedReferenceCloudService.saveRecipeReference(reference)
-                await operationQueueService?.markCompleted(
-                    entityId: reference.id,
-                    entityType: .savedRecipeReference
-                )
+                await operationQueueService?.markCompleted(operationId: operationID)
             } catch {
                 await operationQueueService?.markFailed(
-                    operationId: reference.id,
+                    operationId: operationID,
                     error: "Saved recipe reference sync failed: \(error.localizedDescription)"
                 )
                 AppLogger.general.error("Failed to sync saved recipe reference: \(error.localizedDescription)")
@@ -720,24 +715,22 @@ actor SavedReferenceRepository {
         }
     }
 
-    private nonisolated func deleteRecipeReferenceFromCloud(_ reference: SavedRecipeReference) {
+    private nonisolated func deleteRecipeReferenceFromCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let savedReferenceCloudService else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference] in
-            await operationQueueService?.markInProgress(operationId: reference.id)
+        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+            guard let operationID else { return }
+            await operationQueueService?.markInProgress(operationId: operationID)
             do {
                 try await savedReferenceCloudService.deleteRecipeReference(reference)
-                await operationQueueService?.markCompleted(
-                    entityId: reference.id,
-                    entityType: .savedRecipeReference
-                )
+                await operationQueueService?.markCompleted(operationId: operationID)
             } catch {
                 await operationQueueService?.markFailed(
-                    operationId: reference.id,
+                    operationId: operationID,
                     error: "Saved recipe reference delete failed: \(error.localizedDescription)"
                 )
                 AppLogger.general.error("Failed to delete saved recipe reference: \(error.localizedDescription)")
@@ -745,24 +738,22 @@ actor SavedReferenceRepository {
         }
     }
 
-    private nonisolated func syncCollectionReferenceToCloud(_ reference: SavedCollectionReference) {
+    private nonisolated func syncCollectionReferenceToCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let savedReferenceCloudService else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference] in
-            await operationQueueService?.markInProgress(operationId: reference.id)
+        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+            guard let operationID else { return }
+            await operationQueueService?.markInProgress(operationId: operationID)
             do {
                 try await savedReferenceCloudService.saveCollectionReference(reference)
-                await operationQueueService?.markCompleted(
-                    entityId: reference.id,
-                    entityType: .savedCollectionReference
-                )
+                await operationQueueService?.markCompleted(operationId: operationID)
             } catch {
                 await operationQueueService?.markFailed(
-                    operationId: reference.id,
+                    operationId: operationID,
                     error: "Saved collection reference sync failed: \(error.localizedDescription)"
                 )
                 AppLogger.general.error("Failed to sync saved collection reference: \(error.localizedDescription)")
@@ -770,24 +761,22 @@ actor SavedReferenceRepository {
         }
     }
 
-    private nonisolated func deleteCollectionReferenceFromCloud(_ reference: SavedCollectionReference) {
+    private nonisolated func deleteCollectionReferenceFromCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
               let savedReferenceCloudService else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference] in
-            await operationQueueService?.markInProgress(operationId: reference.id)
+        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+            guard let operationID else { return }
+            await operationQueueService?.markInProgress(operationId: operationID)
             do {
                 try await savedReferenceCloudService.deleteCollectionReference(reference)
-                await operationQueueService?.markCompleted(
-                    entityId: reference.id,
-                    entityType: .savedCollectionReference
-                )
+                await operationQueueService?.markCompleted(operationId: operationID)
             } catch {
                 await operationQueueService?.markFailed(
-                    operationId: reference.id,
+                    operationId: operationID,
                     error: "Saved collection reference delete failed: \(error.localizedDescription)"
                 )
                 AppLogger.general.error("Failed to delete saved collection reference: \(error.localizedDescription)")

@@ -7,6 +7,7 @@
 
 import Foundation
 import CloudKit
+import CryptoKit
 import os
 
 /// CloudKit service for user-related operations.
@@ -17,6 +18,11 @@ import os
 /// - User search and discovery
 /// - Referral system
 actor UserCloudService {
+    struct WebShareCredential: Sendable, Equatable {
+        let capability: String
+        let generation: Int64
+    }
+
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "UserCloudService")
 
@@ -153,8 +159,10 @@ actor UserCloudService {
 
         let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
         let normalizedDisplayName = displayName.trimmingCharacters(in: .whitespaces)
+        let stableUserID = deterministicUserID(for: systemUserRecordID.recordName)
 
         let provisionalUser = User(
+            id: stableUserID,
             username: normalizedUsername,
             displayName: normalizedDisplayName,
             cloudRecordName: customRecordName,
@@ -164,6 +172,7 @@ actor UserCloudService {
         let referralCode = try await generateUniqueReferralCode(preferred: deriveReferralCodeFromRecordName(for: provisionalUser))
 
         let user = User(
+            id: stableUserID,
             username: normalizedUsername,
             displayName: normalizedDisplayName,
             cloudRecordName: customRecordName,
@@ -180,13 +189,20 @@ actor UserCloudService {
     /// Save user to CloudKit
     func saveUser(_ user: User) async throws {
         let normalizedUsername = user.username.trimmingCharacters(in: .whitespaces).lowercased()
+        guard normalizedUsername.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil else {
+            throw CloudKitError.invalidRecord
+        }
 
+        let systemUserRecordID = try await core.getCurrentUserRecordID()
         let recordName: String
         if let cloudRecordName = user.cloudRecordName {
             recordName = cloudRecordName
         } else {
-            let systemUserRecordID = try await core.getCurrentUserRecordID()
             recordName = "user_\(systemUserRecordID.recordName)"
+        }
+        guard recordName == systemUserRecordID.recordName ||
+                recordName == "user_\(systemUserRecordID.recordName)" else {
+            throw CloudKitError.invalidRecord
         }
 
         let recordID = CKRecord.ID(recordName: recordName)
@@ -197,11 +213,373 @@ actor UserCloudService {
             recordID: recordID,
             recordType: CloudKitCore.RecordType.user
         )
-
         populateUserRecord(record, from: user)
+        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: user.id) else {
+            throw CancellationError()
+        }
+        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
 
-        _ = try await db.save(record)
+        // The public default zone does not support atomic multi-record saves.
+        // Claim first so an unavailable username is never exposed on User.
+        // An interruption can at worst reserve the name for this same stable
+        // account identity, which safely reconciles it on retry.
+        _ = try await ensureUsernameClaim(
+            normalizedUsername,
+            userId: user.id,
+            identityRecordID: systemUserRecordID,
+            in: db,
+            allowDuringAccountDeletion: true
+        )
+        do {
+            _ = try await db.save(record)
+        } catch let saveError {
+            // CloudKit save failures can be delivery-ambiguous. Never release
+            // the claim on an error: onboarding retries derive the same user
+            // UUID from the iCloud identity and safely reconcile it. If the
+            // server committed before the response was lost, accept that
+            // exact durable profile as success.
+            if let confirmed = try? await db.record(for: recordID),
+               confirmed["userId"] as? String == user.id.uuidString,
+               confirmed["username"] as? String == normalizedUsername {
+                logger.info("Confirmed user publication after ambiguous save response")
+            } else {
+                throw saveError
+            }
+        }
+        try await releaseOtherUsernameClaims(
+            keeping: normalizedUsername,
+            userId: user.id,
+            identityRecordID: systemUserRecordID,
+            in: db
+        )
         logger.info("Saved user: \(normalizedUsername) to PUBLIC database")
+    }
+
+    private func usernameClaimRecordID(_ username: String) -> CKRecord.ID {
+        CKRecord.ID(recordName: "username_\(username)")
+    }
+
+    /// Checks a username before an optimistic profile edit without reserving
+    /// it. Definitive ownership is established only after the corresponding
+    /// User record has been durably published.
+    func prepareUsernameChange(_ username: String, for userId: UUID) async throws {
+        let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
+        guard normalizedUsername.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil else {
+            throw CloudKitError.invalidRecord
+        }
+        let identity = try await core.getCurrentUserRecordID()
+        let db = try await core.getPublicDatabase()
+        do {
+            let existing = try await db.record(for: usernameClaimRecordID(normalizedUsername))
+            guard existing.recordType == CloudKitCore.RecordType.usernameClaim,
+                  existing.creatorUserRecordID == identity,
+                  existing["userId"] as? String == userId.uuidString else {
+                throw CloudKitError.usernameUnavailable
+            }
+        } catch let error as CKError where error.code == .unknownItem {
+            return
+        }
+    }
+
+    /// UsernameClaim uses a deterministic record name, so CloudKit's atomic
+    /// create and creator-write protection are the uniqueness authority shared
+    /// by every client and the web backend.
+    private func ensureUsernameClaim(
+        _ username: String,
+        userId: UUID,
+        identityRecordID: CKRecord.ID,
+        in db: CKDatabase,
+        allowDuringAccountDeletion: Bool = false
+    ) async throws -> Bool {
+        let recordID = usernameClaimRecordID(username)
+        do {
+            let existing = try await db.record(for: recordID)
+            guard existing.recordType == CloudKitCore.RecordType.usernameClaim,
+                  existing.creatorUserRecordID == identityRecordID,
+                  existing["userId"] as? String == userId.uuidString,
+                  existing["username"] as? String == username else {
+                throw CloudKitError.usernameUnavailable
+            }
+            return false
+        } catch let error as CKError where error.code == .unknownItem {
+            let claim = CKRecord(recordType: CloudKitCore.RecordType.usernameClaim, recordID: recordID)
+            claim["userId"] = userId.uuidString as CKRecordValue
+            claim["username"] = username as CKRecordValue
+            claim["identityRecordName"] = identityRecordID.recordName as CKRecordValue
+            do {
+                if !allowDuringAccountDeletion {
+                    guard await AccountDeletionGate.shared.permitsWrite(ownerID: userId) else {
+                        throw CancellationError()
+                    }
+                }
+                _ = try await db.save(claim)
+                return true
+            } catch let saveError as CKError where saveError.code == .serverRecordChanged {
+                throw CloudKitError.usernameUnavailable
+            }
+        }
+    }
+
+    private func releaseOtherUsernameClaims(
+        keeping retainedUsername: String?,
+        userId: UUID,
+        identityRecordID: CKRecord.ID,
+        in db: CKDatabase
+    ) async throws {
+        let records = try await fetchRecords(
+            in: db,
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            predicate: NSPredicate(format: "userId == %@", userId.uuidString)
+        )
+        for record in records where record.creatorUserRecordID == identityRecordID {
+            let username = record["username"] as? String
+            guard username != retainedUsername else { continue }
+            do {
+                _ = try await db.deleteRecord(withID: record.recordID)
+            } catch let error as CKError where error.code == .unknownItem {
+                continue
+            }
+        }
+    }
+
+    private func deterministicUserID(for identityRecordName: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("cauldron-user:\(identityRecordName)".utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return bytes.withUnsafeBufferPointer { buffer in
+            NSUUID(uuidBytes: buffer.baseAddress!) as UUID
+        }
+    }
+
+    enum CapabilityRegistrationDecision: Equatable {
+        case accept
+        case alreadyRegistered
+        case stale
+        case conflict
+    }
+
+    static func capabilityRegistrationDecision(
+        registeredGeneration: Int64,
+        registeredHash: String?,
+        incomingGeneration: Int64,
+        incomingHash: String
+    ) -> CapabilityRegistrationDecision {
+        if registeredGeneration > incomingGeneration { return .stale }
+        if registeredGeneration < incomingGeneration { return .accept }
+        guard let registeredHash else { return .accept }
+        return registeredHash == incomingHash ? .alreadyRegistered : .conflict
+    }
+
+    /// Registers the hash that authorizes Firebase web-share mutations. The
+    /// record-name check binds registration to the signed-in iCloud account;
+    /// CloudKit's creator-write protection then prevents another account from
+    /// replacing this value on someone else's public profile.
+    func registerWebShareCapabilityHash(
+        _ credential: WebShareCredential,
+        for user: User,
+        allowDuringAccountDeletion: Bool = false
+    ) async throws -> Bool {
+        let hash = SHA256.hash(data: Data(credential.capability.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard hash.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+            throw CloudKitError.invalidRecord
+        }
+
+        let systemRecordID = try await core.getCurrentUserRecordID()
+        let allowedRecordNames = [
+            systemRecordID.recordName,
+            "user_\(systemRecordID.recordName)",
+        ]
+        guard let recordName = user.cloudRecordName,
+              allowedRecordNames.contains(recordName) else {
+            throw CloudKitError.invalidRecord
+        }
+
+        let publicationLease = try await acquirePublicationLease(
+            ownerID: user.id,
+            allowDuringAccountDeletion: allowDuringAccountDeletion
+        )
+        defer { releasePublicationLease(publicationLease) }
+
+        let db = try await core.getPublicDatabase()
+        _ = try await ensureUsernameClaim(
+            user.username.lowercased(),
+            userId: user.id,
+            identityRecordID: systemRecordID,
+            in: db,
+            allowDuringAccountDeletion: allowDuringAccountDeletion
+        )
+        try await releaseOtherUsernameClaims(
+            keeping: user.username.lowercased(),
+            userId: user.id,
+            identityRecordID: systemRecordID,
+            in: db
+        )
+        let recordID = CKRecord.ID(recordName: recordName)
+        for attempt in 1...3 {
+            let record = try await db.record(for: recordID)
+            guard record["userId"] as? String == user.id.uuidString else {
+                throw CloudKitError.invalidRecord
+            }
+            let registeredGeneration = record["webShareCapabilityGeneration"] as? Int64 ?? 0
+            switch Self.capabilityRegistrationDecision(
+                registeredGeneration: registeredGeneration,
+                registeredHash: record["webShareCapabilityHash"] as? String,
+                incomingGeneration: credential.generation,
+                incomingHash: hash
+            ) {
+            case .stale:
+                return false
+            case .alreadyRegistered:
+                return true
+            case .conflict:
+                throw CloudKitError.syncConflict
+            case .accept:
+                break
+            }
+            record["webShareCapabilityHash"] = hash as CKRecordValue
+            record["webShareCapabilityGeneration"] = credential.generation as CKRecordValue
+            do {
+                _ = try await db.save(record)
+                return true
+            } catch let error as CKError where error.code == .serverRecordChanged && attempt < 3 {
+                continue
+            }
+        }
+        throw CloudKitError.syncConflict
+    }
+
+    /// Resolves one account-wide capability from the user's private custom zone.
+    /// A deterministic record ID makes first creation atomic across devices;
+    /// Keychain is only a local cache, never the consistency authority.
+    func resolveWebShareCapability(
+        for user: User,
+        allowDuringAccountDeletion: Bool = false
+    ) async throws -> WebShareCredential {
+        let publicationLease = try await acquirePublicationLease(
+            ownerID: user.id,
+            allowDuringAccountDeletion: allowDuringAccountDeletion
+        )
+        defer { releasePublicationLease(publicationLease) }
+
+        let db = try await core.getPrivateDatabase()
+        let zoneID = try await core.getCustomZoneID()
+        let recordID = CKRecord.ID(
+            recordName: "webShareCapability_\(user.id.uuidString)",
+            zoneID: zoneID
+        )
+
+        do {
+            let record = try await db.record(for: recordID)
+            guard record.recordType == CloudKitCore.RecordType.webShareCapability,
+                  record["userId"] as? String == user.id.uuidString,
+                  let capability = record["capability"] as? String,
+                  !capability.isEmpty else {
+                throw CloudKitError.invalidRecord
+            }
+            let generation = record["generation"] as? Int64 ?? 1
+            try await MainActor.run {
+                try ShareCapabilityStore.shared.cacheCapability(capability, for: user.id)
+            }
+            return WebShareCredential(capability: capability, generation: generation)
+        } catch let error as CKError where error.code == .unknownItem {
+            let candidate = try await MainActor.run {
+                try ShareCapabilityStore.shared.capability(for: user.id)
+            }
+            let record = CKRecord(
+                recordType: CloudKitCore.RecordType.webShareCapability,
+                recordID: recordID
+            )
+            record["userId"] = user.id.uuidString as CKRecordValue
+            record["capability"] = candidate as CKRecordValue
+            record["generation"] = Int64(1) as CKRecordValue
+            do {
+                _ = try await db.save(record)
+                return WebShareCredential(capability: candidate, generation: 1)
+            } catch let saveError as CKError where saveError.code == .serverRecordChanged {
+                let winner = try await db.record(for: recordID)
+                guard let capability = winner["capability"] as? String,
+                      winner["userId"] as? String == user.id.uuidString else {
+                    throw CloudKitError.invalidRecord
+                }
+                let generation = winner["generation"] as? Int64 ?? 1
+                try await MainActor.run {
+                    try ShareCapabilityStore.shared.cacheCapability(capability, for: user.id)
+                }
+                return WebShareCredential(capability: capability, generation: generation)
+            }
+        }
+    }
+
+    /// Replaces the account-wide web management credential after a sensitive
+    /// lifecycle event. CloudKit remains the cross-device authority and the
+    /// Keychain value is updated only after the private record is durable.
+    func rotateWebShareCapability(
+        for user: User,
+        allowDuringAccountDeletion: Bool = false
+    ) async throws -> WebShareCredential {
+        let publicationLease = try await acquirePublicationLease(
+            ownerID: user.id,
+            allowDuringAccountDeletion: allowDuringAccountDeletion
+        )
+        defer { releasePublicationLease(publicationLease) }
+
+        let db = try await core.getPrivateDatabase()
+        let zoneID = try await core.getCustomZoneID()
+        let recordID = CKRecord.ID(
+            recordName: "webShareCapability_\(user.id.uuidString)",
+            zoneID: zoneID
+        )
+        let replacement = try await MainActor.run {
+            try ShareCapabilityStore.shared.generateCapability()
+        }
+
+        for attempt in 1...3 {
+            var record: CKRecord
+            let nextGeneration: Int64
+            do {
+                record = try await db.record(for: recordID)
+                guard record.recordType == CloudKitCore.RecordType.webShareCapability,
+                      record["userId"] as? String == user.id.uuidString else {
+                    throw CloudKitError.invalidRecord
+                }
+                nextGeneration = (record["generation"] as? Int64 ?? 1) + 1
+            } catch let error as CKError where error.code == .unknownItem {
+                record = CKRecord(
+                    recordType: CloudKitCore.RecordType.webShareCapability,
+                    recordID: recordID
+                )
+                record["userId"] = user.id.uuidString as CKRecordValue
+                nextGeneration = 1
+            }
+            record["capability"] = replacement as CKRecordValue
+            record["generation"] = nextGeneration as CKRecordValue
+            do {
+                _ = try await db.save(record)
+                try await MainActor.run {
+                    try ShareCapabilityStore.shared.cacheCapability(replacement, for: user.id)
+                }
+                return WebShareCredential(capability: replacement, generation: nextGeneration)
+            } catch let error as CKError where error.code == .serverRecordChanged && attempt < 3 {
+                continue
+            }
+        }
+        throw CloudKitError.syncConflict
+    }
+
+    func deleteWebShareCapability(for userId: UUID) async throws {
+        let db = try await core.getPrivateDatabase()
+        let zoneID = try await core.getCustomZoneID()
+        let recordID = CKRecord.ID(
+            recordName: "webShareCapability_\(userId.uuidString)",
+            zoneID: zoneID
+        )
+        do {
+            _ = try await db.deleteRecord(withID: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            return
+        }
     }
 
     /// Search for users by username
@@ -359,17 +737,15 @@ actor UserCloudService {
         logger.info("🗑️ Deleting user profile from CloudKit: \(userId)")
 
         let db = try await core.getPublicDatabase()
+        let systemUserRecordID = try await core.getCurrentUserRecordID()
+        let ownedProfileRecordNames = Set([
+            systemUserRecordID.recordName,
+            "user_\(systemUserRecordID.recordName)",
+        ])
         var profileRecordIDs = Set<CKRecord.ID>()
         var profileImageRecordIDs: Set<CKRecord.ID> = [
             CKRecord.ID(recordName: "profileImage_\(userId.uuidString)")
         ]
-
-        do {
-            let systemUserRecordID = try await core.getCurrentUserRecordID()
-            profileRecordIDs.insert(CKRecord.ID(recordName: "user_\(systemUserRecordID.recordName)"))
-        } catch {
-            logger.warning("Could not resolve current CloudKit user record during profile deletion: \(error.localizedDescription)")
-        }
 
         let userRecords = try await fetchRecords(
             in: db,
@@ -378,16 +754,31 @@ actor UserCloudService {
         )
 
         for record in userRecords {
+            guard record.creatorUserRecordID == systemUserRecordID,
+                  ownedProfileRecordNames.contains(record.recordID.recordName) else {
+                logger.warning("Ignoring non-owned or non-canonical User record during account deletion: \(record.recordID.recordName)")
+                continue
+            }
             profileRecordIDs.insert(record.recordID)
             if let imageRecordName = record["cloudProfileImageRecordName"] as? String {
                 profileImageRecordIDs.insert(CKRecord.ID(recordName: imageRecordName))
             }
         }
 
-        let referralRecordIDs = try await fetchReferralRecordIDs(for: userId, in: db)
+        let referralRecordIDs = try await fetchReferralRecordIDs(
+            for: userId,
+            createdBy: systemUserRecordID,
+            in: db
+        )
 
         try await deleteRecordsIgnoringMissing(profileImageRecordIDs, in: db, label: "profile image")
         try await deleteRecordsIgnoringMissing(referralRecordIDs, in: db, label: "referral")
+        try await releaseOtherUsernameClaims(
+            keeping: nil,
+            userId: userId,
+            identityRecordID: systemUserRecordID,
+            in: db
+        )
         try await deleteRecordsIgnoringMissing(profileRecordIDs, in: db, label: "user profile")
 
         logger.info("✅ Deleted \(profileRecordIDs.count) user profile record(s), \(profileImageRecordIDs.count) profile image record(s), and \(referralRecordIDs.count) referral record(s) from CloudKit")
@@ -428,6 +819,10 @@ actor UserCloudService {
             imageRecord["userId"] = userId.uuidString as CKRecordValue
             imageRecord["modifiedAt"] = Date() as CKRecordValue
 
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: userId) else {
+                throw CancellationError()
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
             let savedImageRecord = try await db.save(imageRecord)
             logger.info("✅ Uploaded profile image to separate record")
 
@@ -514,9 +909,7 @@ actor UserCloudService {
             }
 
             for (_, result) in results.matchResults {
-                if let record = try? result.get() {
-                    records.append(record)
-                }
+                records.append(try result.get())
             }
 
             cursor = results.queryCursor
@@ -525,7 +918,11 @@ actor UserCloudService {
         return records
     }
 
-    private func fetchReferralRecordIDs(for userId: UUID, in db: CKDatabase) async throws -> Set<CKRecord.ID> {
+    private func fetchReferralRecordIDs(
+        for userId: UUID,
+        createdBy systemUserRecordID: CKRecord.ID,
+        in db: CKDatabase
+    ) async throws -> Set<CKRecord.ID> {
         let userIdString = userId.uuidString
         let predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
             NSPredicate(format: "newUserId == %@", userIdString),
@@ -538,9 +935,13 @@ actor UserCloudService {
             predicate: predicate
         )
 
-        var recordIDs = Set(records.map(\.recordID))
-        recordIDs.insert(CKRecord.ID(recordName: "referral_\(userIdString)"))
-        return recordIDs
+        return Set(records.compactMap { record in
+            guard record.creatorUserRecordID == systemUserRecordID else {
+                logger.info("Leaving foreign-created referral record for server-side retention cleanup: \(record.recordID.recordName)")
+                return nil
+            }
+            return record.recordID
+        })
     }
 
     private func deleteRecordsIgnoringMissing(
@@ -620,8 +1021,28 @@ actor UserCloudService {
         record["newUserId"] = newUserId.uuidString as CKRecordValue
         record["createdAt"] = Date() as CKRecordValue
 
+        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: newUserId) else {
+            throw CancellationError()
+        }
+        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
         _ = try await db.save(record)
         logger.info("✅ Recorded referral signup: \(newUserId) referred by \(referrerId)")
+    }
+
+    private func acquirePublicationLease(
+        ownerID: UUID,
+        allowDuringAccountDeletion: Bool
+    ) async throws -> AccountDeletionGate.PublicationLease? {
+        guard !allowDuringAccountDeletion else { return nil }
+        guard let lease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerID) else {
+            throw CancellationError()
+        }
+        return lease
+    }
+
+    private func releasePublicationLease(_ lease: AccountDeletionGate.PublicationLease?) {
+        guard let lease else { return }
+        Task { await AccountDeletionGate.shared.releasePublicationLease(lease) }
     }
 
     /// Fetch a user's referral count from CloudKit
@@ -837,7 +1258,11 @@ actor UserCloudService {
     }
 
     private func isReferralCodeAvailableViaScan(_ normalizedCode: String) async throws -> Bool {
-        return try await lookupUserByReferralCodeViaScan(normalizedCode) == nil
+        let user = try await lookupUserByReferralCodeViaScan(normalizedCode)
+        if case nil = user {
+            return true
+        }
+        return false
     }
 
     private func isReferralSchemaQueryError(_ error: Error) -> Bool {

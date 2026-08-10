@@ -63,6 +63,7 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
     case assetTooLarge
     case compressionFailed
     case userNotFound
+    case usernameUnavailable
 
     nonisolated var errorDescription: String? {
         switch self {
@@ -99,6 +100,8 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
             return "Failed to compress image for upload"
         case .userNotFound:
             return "User not found in CloudKit"
+        case .usernameUnavailable:
+            return "That username is already taken"
         }
     }
 
@@ -131,7 +134,8 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
              (.assetNotFound, .assetNotFound),
              (.assetTooLarge, .assetTooLarge),
              (.compressionFailed, .compressionFailed),
-             (.userNotFound, .userNotFound):
+             (.userNotFound, .userNotFound),
+             (.usernameUnavailable, .usernameUnavailable):
             return true
         case let (.accountNotAvailable(lhsStatus), .accountNotAvailable(rhsStatus)):
             return lhsStatus == rhsStatus

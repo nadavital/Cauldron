@@ -269,15 +269,18 @@ struct FriendsTabView: View {
                 // Friends section
                 GlassEffectContainer(spacing: 2) {
                     ConnectionsInlineView(dependencies: dependencies, onAddFriend: { showingPeopleSearch = true })
-                        .padding(.bottom, 4)
-                        .glassCard(cornerRadius: 16)
+                        .padding(.bottom, Theme.Spacing.xxs)
+                        .glassCard()
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.top, Theme.Spacing.sm)
 
-                if viewModel.isLoading && viewModel.sharedRecipes.isEmpty {
-                    ProgressView("Loading recipes...")
-                        .padding(.vertical, 40)
+                if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        SectionHeaderLabel(title: "Friends' Recipes", systemImage: "book.fill")
+                            .padding(.horizontal, Theme.Spacing.md)
+                        RecipeCardSkeletonRail()
+                    }
                 } else if viewModel.sharedRecipes.isEmpty {
                     emptyRecipesState
                 } else {
@@ -311,50 +314,26 @@ struct FriendsTabView: View {
                 }
             }
         }
-        .background(Color.cauldronBackground.ignoresSafeArea())
+        .warmCanvas()
     }
 
     private var emptyRecipesState: some View {
-        VStack(spacing: 0) {
-            SectionHeader(title: "Friends' Recipes", icon: "book.fill", color: .cauldronOrange)
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            SectionHeaderLabel(title: "Friends' Recipes", systemImage: "book.fill")
 
-            VStack(spacing: Theme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cauldronOrange.opacity(0.2), Color.cauldronOrange.opacity(0.05)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 80, height: 80)
-
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 36))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.7)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+            AppCard(style: .resting) {
+                AppStateView(
+                    kind: .empty(systemImage: "square.and.arrow.up"),
+                    title: "No Friends' Recipes Yet",
+                    message: "Add friends and their shared recipes will appear here.",
+                    actionTitle: "Find People"
+                ) {
+                    showingPeopleSearch = true
                 }
-
-                Text("No Friends' Recipes Yet")
-                    .font(.headline)
-
-                Text("Add friends and their shared recipes\nwill appear here")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                .frame(minHeight: 240)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 50)
         }
-        .background(Color.cauldronSecondaryBackground)
-        .cornerRadius(Theme.Radius.large)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Theme.Spacing.md)
     }
 
     private var recentlyAddedSection: some View {

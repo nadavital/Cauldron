@@ -22,9 +22,12 @@ import os
             rebuildFilteredRecipes()
         }
     }
-    var isLoadingRecipes = false
+    var isLoadingRecipes = true
+    private(set) var hasResolvedRecipes = false
+    private(set) var recipeLoadFailed = false
     var userCollections: [Collection] = []
-    var isLoadingCollections = false
+    var isLoadingCollections = true
+    private(set) var hasResolvedCollections = false
     var connections: [ManagedConnection] = []
     var isLoadingConnections = false
     var usersMap: [UUID: User] = [:]
@@ -51,6 +54,26 @@ import os
 
     var isCurrentUser: Bool {
         user.id == currentUserId
+    }
+
+    var isColdLoadingRecipes: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoadingRecipes,
+            hasResolvedOnce: hasResolvedRecipes,
+            hasContent: !filteredRecipes.isEmpty
+        )
+    }
+
+    var canShareProfile: Bool {
+        isCurrentUser && hasResolvedRecipes && !isLoadingRecipes && !recipeLoadFailed
+    }
+
+    var isColdLoadingCollections: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoadingCollections,
+            hasResolvedOnce: hasResolvedCollections,
+            hasContent: !userCollections.isEmpty
+        )
     }
 
     init(user: User, dependencies: DependencyContainer) {
@@ -216,7 +239,10 @@ import os
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
             }
             await refreshAuthoritativeRecipeCount(forceRefresh: false)
+            recipeLoadFailed = false
             updateTierFromRecipes()
+            isLoadingRecipes = false
+            hasResolvedRecipes = true
             return
         }
 
@@ -225,6 +251,7 @@ import os
 
         do {
             userRecipes = try await fetchUserRecipes()
+            recipeLoadFailed = false
             await refreshAuthoritativeRecipeCount(forceRefresh: forceRefresh)
 
             // Cache the results
@@ -239,12 +266,14 @@ import os
 
             AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
         } catch {
+            recipeLoadFailed = true
             AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
             showError = true
         }
 
         isLoadingRecipes = false
+        hasResolvedRecipes = true
     }
 
     /// Update the user's tier based on their recipe count
@@ -335,6 +364,8 @@ import os
                connectionState: connectionState
            ) {
             userCollections = cachedCollections
+            isLoadingCollections = false
+            hasResolvedCollections = true
             return
         }
 
@@ -358,6 +389,7 @@ import os
         }
 
         isLoadingCollections = false
+        hasResolvedCollections = true
     }
 
     private func fetchUserCollections() async throws -> [Collection] {

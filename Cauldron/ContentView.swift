@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CloudKit
 import os
 
 /// Preloaded data to pass to view models
@@ -29,9 +30,12 @@ struct ContentView: View {
     // This is separate from the build number - the app can have multiple builds without triggering What's New.
     // When you ship a feature update, set this to match that version (e.g., "1.4.1").
     // When you ship a bug fix, leave this unchanged so no splash appears.
-    private static let whatsNewContentVersion = "1.8"
+    /// Independent content gate so material release-note changes can be shown
+    /// even when they ship within the same marketing version.
+    static let whatsNewContentVersion = "1.8.2"
 
     @Environment(\.dependencies) private var dependencies
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var userSession = CurrentUserSession.shared
     @State private var isDataReady = false
     @State private var preloadedData: PreloadedRecipeData?
@@ -43,6 +47,8 @@ struct ContentView: View {
     @State private var isLoadingShare = false
     @State private var showShareError = false
     @State private var shareErrorMessage = ""
+    @State private var activeShareURL: URL?
+    @State private var suppressLaunchSheetsForIncomingLink = false
 
     // Splash screen state
     @AppStorage("whatsNewLastSeenContentVersion") private var whatsNewLastSeenContentVersion = ""
@@ -79,15 +85,24 @@ struct ContentView: View {
                             // Onboarding completed, will trigger view update
                         }
                     } else {
-                        // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
-                        // This data pipeline ensures CookTabViewModel initializes with populated arrays
-                        // instead of empty arrays, preventing the empty state from ever rendering.
-                        MainTabView(
-                            dependencies: dependencies,
-                            preloadedData: preloadedData,
-                            pendingSharedContent: $sharedContentWrapper
-                        )
-                            .id(userSession.userId)
+                        if Self.shouldRenderMainTab(
+                            isInitialized: userSession.isInitialized,
+                            isDataReady: isDataReady,
+                            loadedUserId: loadedUserId,
+                            currentUserId: userSession.userId
+                        ) {
+                            // CRITICAL: Pass preloadedData to MainTabView → CookTabView → CookTabViewModel
+                            // only after its owner matches the currently verified account.
+                            MainTabView(
+                                dependencies: dependencies,
+                                preloadedData: preloadedData,
+                                pendingSharedContent: $sharedContentWrapper
+                            )
+                                .id(userSession.userId)
+                        } else {
+                            Color.appBackground
+                                .ignoresSafeArea()
+                        }
                     }
                 }
             }
@@ -147,15 +162,17 @@ struct ContentView: View {
             AppLogger.general.info("🔔 ContentView: Received OpenExternalShare notification")
             if let url = notification.object as? URL {
                 AppLogger.general.info("🔔 ContentView: Loading share from URL: \(url)")
-                Task {
-                    await loadSharedContent(url: url)
-                }
+                openIncomingShare(url)
             }
         }
         .task {
             // CRITICAL LOADING SEQUENCE:
             // Step 1: Initialize user session (determines which view to show)
-            await userSession.initialize(dependencies: dependencies)
+            await userSession.ensureInitialized(dependencies: dependencies)
+            await RecipeIntentDonation.reconcileAccountBoundary(
+                currentOwnerID: userSession.userId
+            )
+            RecipeSpotlightIndexer.shared.scheduleAccountBoundaryReconciliation()
 
             #if DEBUG
             if RuntimeEnvironment.isSimulatorQAMode {
@@ -180,19 +197,31 @@ struct ContentView: View {
             // Only NOW will the view hierarchy render, and CookTabViewModel will
             // receive preloadedData in its initializer, preventing empty arrays
             isDataReady = true
+            RecipeSpotlightIndexer.shared.scheduleReconciliation(
+                preloadedRecipes: preloadedData?.allRecipes
+            )
 
             // Step 5: Check for pending share URL from PendingShareManager
             // This handles cold-start scenarios where the app was opened via Universal Link
-            if let pendingURL = await PendingShareManager.shared.consumePendingURL() {
+            let pendingURL = await PendingShareManager.shared.peekPendingURL()
+            if let pendingURL {
                 AppLogger.general.info("🔔 ContentView: Found pending share URL from cold start: \(pendingURL)")
-                Task {
-                    await loadSharedContent(url: pendingURL)
-                }
+                openIncomingShare(pendingURL)
             }
 
-            maybeShowSplashScreen()
+            if Self.shouldPresentLaunchSplash(
+                hasPendingExternalShare: pendingURL != nil,
+                isRoutingExternalShare: activeShareURL != nil || suppressLaunchSheetsForIncomingLink
+            ) {
+                maybeShowSplashScreen()
+            }
         }
         .onChange(of: userSession.isInitialized) { _, _ in
+            // A live CloudKit account change locks the session before replacing
+            // its user ID. Those intermediate ID changes are intentionally
+            // ignored; once verification completes, rebuild the preload boundary
+            // for the newly verified account (including the signed-out case).
+            scheduleSessionReloadIfNeeded()
             maybeShowSplashScreen()
         }
         .onChange(of: userSession.userId) { oldUserId, newUserId in
@@ -218,11 +247,21 @@ struct ContentView: View {
         .onChange(of: isDataReady) { _, _ in
             maybeShowSplashScreen()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard Self.shouldRetryPendingShare(
+                scenePhase: newPhase,
+                isDataReady: isDataReady,
+                hasActiveShare: activeShareURL != nil
+            ) else { return }
+            retryPendingShareIfNeeded()
+        }
     }
 
     @MainActor
     private func handleSessionChange(to userId: UUID?) async {
         resetSessionScopedState()
+        await RecipeIntentDonation.reconcileAccountBoundary(currentOwnerID: userId)
+        RecipeSpotlightIndexer.shared.scheduleAccountBoundaryReconciliation()
 
         dependencies.connectionManager.resetSessionState()
         FriendsTabViewModel.shared.resetSessionState()
@@ -242,17 +281,21 @@ struct ContentView: View {
 
         loadedUserId = userId
         isDataReady = true
+        RecipeSpotlightIndexer.shared.scheduleReconciliation(
+            preloadedRecipes: preloadedData?.allRecipes
+        )
         maybeShowSplashScreen()
     }
 
     @MainActor
     private func scheduleSessionReloadIfNeeded() {
-        guard userSession.isInitialized,
-              isDataReady,
-              let userId = userSession.userId,
-              !userSession.needsOnboarding,
-              !userSession.needsiCloudSignIn,
-              loadedUserId != userId else {
+        let userId = userSession.userId
+        guard Self.shouldReloadSession(
+            isInitialized: userSession.isInitialized,
+            isDataReady: isDataReady,
+            loadedUserId: loadedUserId,
+            currentUserId: userId
+        ) else {
             return
         }
 
@@ -262,8 +305,35 @@ struct ContentView: View {
         }
     }
 
+    nonisolated static func shouldReloadSession(
+        isInitialized: Bool,
+        isDataReady: Bool,
+        loadedUserId: UUID?,
+        currentUserId: UUID?
+    ) -> Bool {
+        isInitialized && isDataReady && loadedUserId != currentUserId
+    }
+
+    nonisolated static func shouldRenderMainTab(
+        isInitialized: Bool,
+        isDataReady: Bool,
+        loadedUserId: UUID?,
+        currentUserId: UUID?
+    ) -> Bool {
+        guard isInitialized,
+              isDataReady,
+              let currentUserId else {
+            return false
+        }
+        return loadedUserId == currentUserId
+    }
+
     @MainActor
     private func resetSessionScopedState() {
+        // Cook Mode owns account-scoped recipe data, timers, and a Live
+        // Activity. Tear it down synchronously at the account boundary so the
+        // prior user's session cannot remain visible during the reload.
+        dependencies.cookModeCoordinator.endSession()
         backgroundMaintenanceTask?.cancel()
         backgroundMaintenanceTask = nil
         backgroundWarmupTask?.cancel()
@@ -278,6 +348,10 @@ struct ContentView: View {
     }
 
     private func maybeShowSplashScreen() {
+        guard !suppressLaunchSheetsForIncomingLink,
+              activeShareURL == nil else {
+            return
+        }
         if RuntimeEnvironment.shouldForceWhatsNew,
            userSession.isInitialized,
            isDataReady,
@@ -319,10 +393,30 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
+    private func openIncomingShare(_ url: URL) {
+        suppressLaunchSheetsForIncomingLink = true
+        dismissLaunchSheetsForIncomingLink()
+        guard activeShareURL == nil else { return }
+        activeShareURL = url
+        Task {
+            await loadSharedContent(url: url)
+        }
+    }
+
     private func loadSharedContent(url: URL) async {
-        await PendingShareManager.shared.clearPendingURL(matching: url)
         isLoadingShare = true
-        defer { isLoadingShare = false }
+        defer {
+            isLoadingShare = false
+            activeShareURL = nil
+            Task {
+                guard let nextURL = await PendingShareManager.shared.peekPendingURL(),
+                      nextURL != url else { return }
+                await MainActor.run {
+                    openIncomingShare(nextURL)
+                }
+            }
+        }
         
         do {
             let content = try await dependencies.externalShareService.importFromShareURL(url)
@@ -342,6 +436,7 @@ struct ContentView: View {
                         let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
                         sharedContentWrapper = wrapper
                     }
+                    await PendingShareManager.shared.clearPendingURL(matching: url)
                     return
                 }
 
@@ -355,6 +450,7 @@ struct ContentView: View {
                         let wrapper = SharedContentWrapper(content: .recipe(fullRecipe, originalCreator: owner))
                         sharedContentWrapper = wrapper
                     }
+                    await PendingShareManager.shared.clearPendingURL(matching: url)
                 } else {
                     AppLogger.general.error("❌ ContentView: Recipe not found in public database")
                     // CRITICAL: Do NOT fallback to partial recipe. If it's not in public DB, it's private or deleted.
@@ -362,6 +458,7 @@ struct ContentView: View {
                         shareErrorMessage = "This recipe is no longer available or has been made private."
                         showShareError = true
                     }
+                    await PendingShareManager.shared.clearPendingURL(matching: url)
                 }
             } else {
                 // For profiles and collections, the share data is usually sufficient or handled differently
@@ -369,6 +466,7 @@ struct ContentView: View {
                     let wrapper = SharedContentWrapper(content: content)
                     sharedContentWrapper = wrapper
                 }
+                await PendingShareManager.shared.clearPendingURL(matching: url)
             }
         } catch {
             AppLogger.general.error("❌ ContentView: Failed to load shared content: \(error)")
@@ -376,7 +474,105 @@ struct ContentView: View {
                 shareErrorMessage = "Failed to load shared content. The link may be invalid or expired."
                 showShareError = true
             }
+            if !Self.isTransientShareError(error) {
+                await PendingShareManager.shared.clearPendingURL(matching: url)
+            }
         }
+    }
+
+    nonisolated static func shouldPresentLaunchSplash(
+        hasPendingExternalShare: Bool,
+        isRoutingExternalShare: Bool
+    ) -> Bool {
+        !hasPendingExternalShare && !isRoutingExternalShare
+    }
+
+    nonisolated static func isTransientShareError(_ error: Error) -> Bool {
+        if let shareError = error as? ExternalShareError {
+            switch shareError {
+            case .networkError(let underlyingError):
+                return isTransientNetworkError(underlyingError)
+            case .temporarilyUnavailable:
+                return true
+            default:
+                return false
+            }
+        }
+        if let urlError = error as? URLError {
+            return isTransientURLError(urlError)
+        }
+        guard let cloudError = error as? CKError else { return false }
+        switch cloudError.code {
+        case .networkUnavailable,
+             .networkFailure,
+             .serviceUnavailable,
+             .requestRateLimited,
+             .zoneBusy,
+             .serverResponseLost:
+            return true
+        default:
+            return false
+        }
+    }
+
+    nonisolated static func shouldRetryPendingShare(
+        scenePhase: ScenePhase,
+        isDataReady: Bool,
+        hasActiveShare: Bool
+    ) -> Bool {
+        scenePhase == .active && isDataReady && !hasActiveShare
+    }
+
+    nonisolated private static func isTransientNetworkError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return isTransientURLError(urlError)
+        }
+        if let cloudError = error as? CKError {
+            return isTransientShareError(cloudError)
+        }
+        return false
+    }
+
+    nonisolated private static func isTransientURLError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut,
+             .cannotFindHost,
+             .cannotConnectToHost,
+             .networkConnectionLost,
+             .dnsLookupFailed,
+             .notConnectedToInternet,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed,
+             .resourceUnavailable:
+            return true
+        default:
+            return false
+        }
+    }
+
+    @MainActor
+    private func retryPendingShareIfNeeded() {
+        Task {
+            guard let pendingURL = await PendingShareManager.shared.peekPendingURL() else {
+                return
+            }
+            await MainActor.run {
+                guard Self.shouldRetryPendingShare(
+                    scenePhase: scenePhase,
+                    isDataReady: isDataReady,
+                    hasActiveShare: activeShareURL != nil
+                ) else { return }
+                AppLogger.general.info("🔔 ContentView: Retrying pending share after activation: \(pendingURL)")
+                openIncomingShare(pendingURL)
+            }
+        }
+    }
+
+    @MainActor
+    private func dismissLaunchSheetsForIncomingLink() {
+        showWhatsNew = false
+        showWelcome = false
     }
 
     private func performInitialLoad(for userId: UUID) async -> PreloadedRecipeData? {

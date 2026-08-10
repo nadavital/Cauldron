@@ -16,8 +16,8 @@ struct WhatsNewView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 24) {
-                    Spacer(minLength: 20)
+                VStack(spacing: Theme.Spacing.xl) {
+                    Spacer(minLength: Theme.Spacing.lg)
 
                     Image("BrandMarks/CauldronIcon")
                         .resizable()
@@ -27,58 +27,57 @@ struct WhatsNewView: View {
 
                     VStack(spacing: 8) {
                         Text("What's New")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
+                            .font(Theme.Typography.screenTitle)
 
-                        Text("Imports recover, Cook Mode travels with you, and your library is easier to trust.")
+                        Text("Imports recover, recipes travel farther, and Siri understands more of your kitchen.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
 
-                    VStack(alignment: .leading, spacing: 18) {
-                        FeatureRow(
-                            symbol: "tray.full.fill",
-                            color: .purple,
-                            title: "Import Inbox",
-                            detail: "Shared recipes are saved to a durable inbox first, so an interrupted import can be reviewed or retried later."
-                        )
-                        FeatureRow(
-                            symbol: "magnifyingglass",
-                            color: .blue,
-                            title: "Ingredient Search",
-                            detail: "Require ingredients you have, exclude ingredients you avoid, and sort results by time, name, or recency."
-                        )
-                        FeatureRow(
-                            symbol: "flame.fill",
-                            color: .cauldronOrange,
-                            title: "Cook Mode Everywhere",
-                            detail: "Resume and navigate cooking from Siri, Shortcuts, widgets, and Live Activities—even after Cauldron relaunches."
-                        )
-                        FeatureRow(
-                            symbol: "checkmark.seal.fill",
-                            color: .green,
-                            title: "More Reliable by Design",
-                            detail: "Persistent timers, clearer sync health, safer grocery merging, private diagnostics, and Apple Intelligence fallback make everyday use steadier."
-                        )
+                    AppCard(style: .resting, padding: Theme.Spacing.lg) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                            FeatureRow(
+                                symbol: "tray.full.fill",
+                                color: .purple,
+                                title: "Import Inbox",
+                                detail: "Shared recipes are saved to a durable inbox first, so an interrupted import can be reviewed or retried later."
+                            )
+                            FeatureRow(
+                                symbol: "sparkles",
+                                color: .blue,
+                                title: "Smarter Siri & Visual Search",
+                                detail: "Find and open your recipes, add ingredients, import links or text, control Cook Mode, and discover visual matches with supported Apple Intelligence features."
+                            )
+                            FeatureRow(
+                                symbol: "flame.fill",
+                                color: .cauldronOrange,
+                                title: "Cook Mode Everywhere",
+                                detail: "Resume and navigate cooking from Siri, Shortcuts, widgets, and Live Activities—even after Cauldron relaunches."
+                            )
+                            FeatureRow(
+                                symbol: "safari.fill",
+                                color: .cauldronOrange,
+                                title: "Recipes on the Web",
+                                detail: "Share your profile or a public recipe with anyone. Recipe links now open as complete, readable pages with an easy path back to Cauldron."
+                            )
+                            FeatureRow(
+                                symbol: "checkmark.seal.fill",
+                                color: .green,
+                                title: "More Reliable by Design",
+                                detail: "Persistent timers, clearer sync health, safer grocery merging, private diagnostics, and Apple Intelligence fallback make everyday use steadier."
+                            )
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button {
+                    PrimaryActionButton("Continue") {
                         onClose()
-                    } label: {
-                        Text("Continue")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.cauldronOrange)
-                            .cornerRadius(14)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, Theme.Spacing.xs)
                 }
-                .padding(24)
+                .padding(Theme.Spacing.xl)
                 .frame(maxWidth: .infinity)
+                .frame(maxWidth: 640)
             }
         }
     }
@@ -91,13 +90,13 @@ private struct FeatureRow: View {
     let detail: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             Image(systemName: symbol)
                 .font(.headline)
                 .foregroundColor(color)
                 .frame(width: 20)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(title)
                     .font(.headline)
                     .foregroundColor(.primary)

@@ -68,7 +68,10 @@ private struct ActiveCookWidgetView: View {
                 }
                 Spacer(minLength: 0)
                 HStack {
-                    Button(intent: PreviousStepIntent()) {
+                    Button(intent: PreviousStepIntent(
+                        recipeID: snapshot.recipeID.uuidString,
+                        sessionStartTime: snapshot.sessionStartTime
+                    )) {
                         Label("Previous", systemImage: "chevron.left")
                             .labelStyle(.iconOnly)
                     }
@@ -80,7 +83,10 @@ private struct ActiveCookWidgetView: View {
                     )
                     .frame(maxWidth: family == .systemSmall ? 50 : 150)
                     Spacer()
-                    Button(intent: NextStepIntent()) {
+                    Button(intent: NextStepIntent(
+                        recipeID: snapshot.recipeID.uuidString,
+                        sessionStartTime: snapshot.sessionStartTime
+                    )) {
                         Label("Next", systemImage: "chevron.right")
                             .labelStyle(.iconOnly)
                     }

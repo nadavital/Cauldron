@@ -174,7 +174,19 @@ struct ConnectionsInlineView: View {
             }
 
             // Content
-            if !hasAnyConnectionsActivity {
+            if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    SkeletonGroup {
+                        HStack(spacing: Theme.Spacing.md) {
+                            ForEach(0..<4, id: \.self) { _ in ConnectionAvatarSkeleton() }
+                        }
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xs)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading friends")
+            } else if !hasAnyConnectionsActivity {
                 emptyConnectionsState
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {

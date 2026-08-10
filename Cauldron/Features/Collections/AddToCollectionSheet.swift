@@ -14,7 +14,8 @@ struct AddToCollectionSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var collections: [Collection] = []
-    @State private var isLoading = false
+    @State private var isLoading = true
+    @State private var hasResolvedCollections = false
     @State private var showingCreateSheet = false
     @State private var selectedCollectionIds = Set<UUID>()
     @State private var collectionMembershipRecipeIdsByCollectionId: [UUID: UUID] = [:]
@@ -29,8 +30,15 @@ struct AddToCollectionSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading {
-                    ProgressView("Loading collections...")
+                if SkeletonPresentationPolicy.shouldShow(
+                    isLoading: isLoading,
+                    hasResolvedOnce: hasResolvedCollections,
+                    hasContent: !collections.isEmpty
+                ) {
+                    ScrollView {
+                        CollectionRowSkeletonList()
+                            .padding()
+                    }
                 } else if collections.isEmpty {
                     emptyState
                 } else {
@@ -170,7 +178,10 @@ struct AddToCollectionSheet: View {
 
     private func loadCollections() async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasResolvedCollections = true
+        }
 
         do {
             guard let currentUserId = CurrentUserSession.shared.userId else {

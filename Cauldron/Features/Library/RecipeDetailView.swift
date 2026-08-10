@@ -3,8 +3,10 @@
 //  Cauldron
 //
 
+import AppIntents
 import SwiftUI
 import os
+import UIKit
 
 struct RecipeDetailView: View {
     let initialRecipe: Recipe
@@ -15,10 +17,11 @@ struct RecipeDetailView: View {
     @State var recipe: Recipe
     @State var showingEditSheet = false
     @State var showSessionConflictAlert = false
-    @State var scaleFactor: Double = 1.0
-    @State var unitSystem: UnitSystem = .original
+    @State var experiencePreferences: ExperiencePreferences
     @State var localIsFavorite: Bool
     @State var showingToast = false
+    @State private var showCopyToast = false
+    @State private var copyToastMessage = ""
     @State var recipeWasDeleted = false
     @State private var showDeleteConfirmation = false
     @State var recipeOwner: User?
@@ -74,6 +77,7 @@ struct RecipeDetailView: View {
         self.sharedAt = seededSharedAt
         self.explicitHighlightedStepIndex = highlightedStepIndex
         self._recipe = State(initialValue: seededRecipe)
+        self._experiencePreferences = State(initialValue: .shared)
         self._localIsFavorite = State(initialValue: seededRecipe.isFavorite)
         self._currentVisibility = State(initialValue: seededRecipe.visibility)
         self._hasOwnedCopy = State(initialValue: seededRelation.isSavedOrOwned)
@@ -100,7 +104,7 @@ struct RecipeDetailView: View {
     }
 
     var scaledResult: ScaledRecipe {
-        RecipeScaler.scale(recipe, by: scaleFactor)
+        RecipeScaler.scale(recipe, by: experiencePreferences.recipeScaleFactor)
     }
 
     var scaledRecipe: Recipe {
@@ -109,7 +113,7 @@ struct RecipeDetailView: View {
 
     /// Ingredients after scaling, converted to the chosen measurement system.
     var displayedIngredients: [Ingredient] {
-        UnitConverter.convert(scaledRecipe.ingredients, to: unitSystem)
+        UnitConverter.convert(scaledRecipe.ingredients, to: experiencePreferences.recipeUnitSystem)
     }
 
     private var shouldApplyBackgroundExtensionEffect: Bool {
@@ -308,7 +312,12 @@ struct RecipeDetailView: View {
             Button("Cancel", role: .cancel) {}
             Button("End & Start New") {
                 Task {
-                    await dependencies.cookModeCoordinator.startPendingRecipe()
+                    let coordinator = dependencies.cookModeCoordinator
+                    guard let pendingRecipe = coordinator.pendingRecipe else { return }
+                    let outcome = await coordinator.startPendingRecipe()
+                    if outcome == .started {
+                        await RecipeIntentDonation.recordCookModeStarted(for: pendingRecipe)
+                    }
                 }
             }
         } message: {
@@ -393,9 +402,14 @@ struct RecipeDetailView: View {
             }
         }
         .toast(isShowing: $showingToast, icon: "cart.fill.badge.plus", message: "Added to grocery list")
+        .toast(isShowing: $showCopyToast, icon: "doc.on.doc", message: copyToastMessage)
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
         .toast(isShowing: $showSaveSuccessToast, icon: "checkmark.circle.fill", message: "Saved to your recipes")
         .toast(isShowing: $showUpdateSuccessToast, icon: "arrow.triangle.2.circlepath", message: "Recipe updated successfully")
+        .modifier(RecipeEntityContextModifier(
+            recipeID: recipe.id,
+            isResolvable: recipeLibraryRelation == .owned
+        ))
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { notification in
             if let updatedRecipeId = notification.object as? UUID {
                 if updatedRecipeId == recipe.id {
@@ -487,7 +501,10 @@ struct RecipeDetailView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
             Menu {
-                Picker("Scale", selection: $scaleFactor) {
+                Picker("Scale", selection: Binding(
+                    get: { experiencePreferences.recipeScaleFactor },
+                    set: { experiencePreferences.recipeScaleFactor = $0 }
+                )) {
                     Text("1/2x").tag(0.5)
                     Text("1x").tag(1.0)
                     Text("2x").tag(2.0)
@@ -495,7 +512,10 @@ struct RecipeDetailView: View {
                 }
                 .pickerStyle(.inline)
 
-                Picker("Units", selection: $unitSystem) {
+                Picker("Units", selection: Binding(
+                    get: { experiencePreferences.recipeUnitSystem },
+                    set: { experiencePreferences.recipeUnitSystem = $0 }
+                )) {
                     ForEach(UnitSystem.allCases) { system in
                         Text(system.label).tag(system)
                     }
@@ -528,6 +548,25 @@ struct RecipeDetailView: View {
                     }
                 } label: {
                     Label("Add Ingredients to Groceries", systemImage: "cart.badge.plus")
+                }
+
+                Menu("Copy Recipe", systemImage: "doc.on.doc") {
+                    Button("Copy Ingredients", systemImage: "list.bullet.clipboard") {
+                        copyRecipeText(.ingredients, confirmation: "Ingredients copied")
+                    }
+                    Button("Copy Directions", systemImage: "list.number") {
+                        copyRecipeText(.directions, confirmation: "Directions copied")
+                    }
+                    Button("Copy Full Recipe", systemImage: "doc.plaintext") {
+                        copyRecipeText(.fullRecipe, confirmation: "Recipe copied")
+                    }
+                }
+
+                ShareLink(
+                    item: exportedRecipeText(.fullRecipe),
+                    subject: Text(recipe.title)
+                ) {
+                    Label("Share as Text", systemImage: "text.document")
                 }
 
                 if recipe.isOwnedByCurrentUser() {
@@ -582,6 +621,24 @@ struct RecipeDetailView: View {
         }
     }
 
+    private func copyRecipeText(
+        _ content: RecipePlainTextFormatter.Content,
+        confirmation: String
+    ) {
+        UIPasteboard.general.string = exportedRecipeText(content)
+        copyToastMessage = confirmation
+        showCopyToast = true
+        Haptics.success()
+    }
+
+    private func exportedRecipeText(_ content: RecipePlainTextFormatter.Content) -> String {
+        RecipePlainTextFormatter.format(
+            scaledRecipe,
+            displayedIngredients: displayedIngredients,
+            content: content
+        )
+    }
+
     private var visibilitySelection: Binding<RecipeVisibility> {
         Binding(
             get: { currentVisibility },
@@ -598,6 +655,7 @@ struct RecipeDetailView: View {
     }
 
     private var scaleFactorLabel: String {
+        let scaleFactor = experiencePreferences.recipeScaleFactor
         switch scaleFactor {
         case 0.5:
             return "1/2x"
@@ -617,7 +675,7 @@ private struct RecipeDetailIOS27Chrome: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 27.0, *) {
-            content.toolbarMinimizationBehavior(.onScrollDown, for: .navigationBar)
+            content.toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
         } else {
             content
         }

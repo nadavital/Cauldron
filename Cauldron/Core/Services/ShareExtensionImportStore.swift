@@ -8,6 +8,18 @@
 import Foundation
 
 enum ShareExtensionImportStore {
+    private enum DefaultsInboxAccess {
+        case empty
+        case items([ShareExtensionInboxItem])
+        case unavailable
+    }
+
+    private enum FileInboxAccess {
+        case emptyOrUnavailable
+        case item(ShareExtensionInboxItem)
+        case blocked
+    }
+
     struct PendingPreparedSharedRecipe {
         let preparedRecipe: PreparedSharedRecipe
         let payloadData: Data
@@ -15,8 +27,13 @@ enum ShareExtensionImportStore {
     }
 
     static func pendingRecipeURL() -> URL? {
-        if let item = fileInboxHead() {
+        switch authoritativeInboxAccess() {
+        case .item(let item):
             return item.urlString.flatMap(validInboxURL)
+        case .blocked:
+            return nil
+        case .emptyOrUnavailable:
+            break
         }
         return pendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
@@ -24,26 +41,74 @@ enum ShareExtensionImportStore {
     /// Returns the oldest atomic file handoff without consuming it. The app
     /// persists this into its durable import inbox before acknowledging it.
     static func pendingTransportItem() -> ShareExtensionInboxItem? {
+        pendingTransportItem(
+            directoryURL: ShareExtensionInboxFiles.directoryURL(),
+            defaults: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID),
+            fallbackLockURL: ShareExtensionInboxFiles.fallbackLockURL()
+        )
+    }
+
+    static func pendingTransportItem(
+        directoryURL: URL?,
+        defaults: UserDefaults?,
+        fallbackLockURL: URL?
+    ) -> ShareExtensionInboxItem? {
         // Return the raw transport, including malformed payloads. Validation
         // belongs to the durable inbox so failures remain visible/recoverable.
-        if let item = ShareExtensionInboxFiles.items().first?.item {
+        switch authoritativeInboxAccess(
+            directoryURL: directoryURL,
+            defaults: defaults,
+            fallbackLockURL: fallbackLockURL
+        ) {
+        case .item(let item):
             return item
+        case .blocked:
+            return nil
+        case .emptyOrUnavailable:
+            break
         }
-        return UserDefaults(suiteName: ShareExtensionImportContract.appGroupID)
-            .flatMap { inbox(in: $0).first }
+        return nil
     }
 
     static func acknowledgeTransportItem(id: UUID) {
+        let capturedItem = ShareExtensionInboxFiles.items()
+            .first(where: { $0.item.id == id })?
+            .item
         ShareExtensionInboxFiles.remove(id: id)
         if let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) {
-            _ = removeFirstInboxItem(in: defaults) { $0.id == id }
+            acknowledgeTransportItem(id: id, capturedItem: capturedItem, in: defaults)
         }
     }
 
-    static func pendingRecipeURL(in defaults: UserDefaults?) -> URL? {
+    /// Testable defaults-side acknowledgement. The item is captured before its
+    /// atomic/defaults representation is removed so matching migration mirrors
+    /// can be cleared without touching newer or unrelated legacy values.
+    static func acknowledgeTransportItem(
+        id: UUID,
+        in defaults: UserDefaults,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) {
+        acknowledgeTransportItem(
+            id: id,
+            capturedItem: nil,
+            in: defaults,
+            fallbackLockURL: fallbackLockURL
+        )
+    }
+
+    static func pendingRecipeURL(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> URL? {
         guard let defaults else { return nil }
-        if let item = defaultsInboxHead(in: defaults) {
+        switch defaultsInboxAccess(in: defaults, fallbackLockURL: fallbackLockURL) {
+        case .items(let items):
+            let item = items[0]
             return item.urlString.flatMap(validInboxURL)
+        case .unavailable:
+            return nil
+        case .empty:
+            break
         }
         guard
               let urlString = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) else {
@@ -53,20 +118,36 @@ enum ShareExtensionImportStore {
     }
 
     static func pendingRecipeText() -> String? {
-        if let item = fileInboxHead() {
+        switch authoritativeInboxAccess() {
+        case .item(let item):
             return item.text
+        case .blocked:
+            return nil
+        case .emptyOrUnavailable:
+            break
         }
         return pendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func pendingRecipeText(in defaults: UserDefaults?) -> String? {
+    static func pendingRecipeText(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> String? {
         guard let defaults else { return nil }
-        if let item = defaultsInboxHead(in: defaults) { return item.text }
+        switch defaultsInboxAccess(in: defaults, fallbackLockURL: fallbackLockURL) {
+        case .items(let items):
+            return items[0].text
+        case .unavailable:
+            return nil
+        case .empty:
+            break
+        }
         return defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
     static func pendingPreparedRecipe() -> PendingPreparedSharedRecipe? {
-        if let item = fileInboxHead() {
+        switch authoritativeInboxAccess() {
+        case .item(let item):
             guard let payloadData = item.preparedPayload,
                   let preparedRecipe = preparedRecipe(from: payloadData) else { return nil }
             return PendingPreparedSharedRecipe(
@@ -74,39 +155,95 @@ enum ShareExtensionImportStore {
                 payloadData: payloadData,
                 inboxID: item.id
             )
+        case .blocked:
+            return nil
+        case .emptyOrUnavailable:
+            break
         }
         return pendingPreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    private static func fileInboxHead() -> ShareExtensionInboxItem? {
-        while let item = ShareExtensionInboxFiles.items().first?.item {
-            if !isUsableInboxItem(item) {
-                AppLogger.general.error("Discarding invalid prepared share inbox item: \(item.id)")
-                ShareExtensionInboxFiles.remove(id: item.id)
-                if let defaults = UserDefaults(suiteName: ShareExtensionImportContract.appGroupID) {
-                    _ = removeFirstInboxItem(in: defaults) { $0.id == item.id }
-                }
-                continue
-            }
-            return item
+    private static func authoritativeInboxAccess(
+        directoryURL: URL? = ShareExtensionInboxFiles.directoryURL(),
+        defaults: UserDefaults? = UserDefaults(
+            suiteName: ShareExtensionImportContract.appGroupID
+        ),
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> FileInboxAccess {
+        let atomicState = ShareExtensionInboxFiles.atomicInboxState(directoryURL: directoryURL)
+        if case .corrupt = atomicState { return .blocked }
+
+        let defaultsAccess: DefaultsInboxAccess
+        if let defaults {
+            defaultsAccess = defaultsInboxAccess(
+                in: defaults,
+                fallbackLockURL: fallbackLockURL
+            )
+        } else {
+            defaultsAccess = .empty
         }
-        return nil
+        if case .unavailable = defaultsAccess { return .blocked }
+
+        let atomicHead: ShareExtensionInboxItem?
+        switch atomicState {
+        case .items(let entries):
+            atomicHead = entries.first?.item
+        case .empty, .unavailable:
+            atomicHead = nil
+        case .corrupt:
+            return .blocked
+        }
+        let defaultsHead: ShareExtensionInboxItem?
+        switch defaultsAccess {
+        case .items(let items):
+            defaultsHead = items.first
+        case .empty:
+            defaultsHead = nil
+        case .unavailable:
+            return .blocked
+        }
+
+        switch (atomicHead, defaultsHead) {
+        case (.none, .none):
+            return .emptyOrUnavailable
+        case (.some(let item), .none), (.none, .some(let item)):
+            return .item(item)
+        case (.some(let atomic), .some(let fallback)):
+            return .item(inboxItemPrecedes(atomic, fallback) ? atomic : fallback)
+        }
     }
 
-    private static func defaultsInboxHead(in defaults: UserDefaults) -> ShareExtensionInboxItem? {
-        let items = inbox(in: defaults)
-        var usable: [ShareExtensionInboxItem] = []
-        for item in items where isUsableInboxItem(item) {
-            usable.append(item)
+    private static func inboxItemPrecedes(
+        _ lhs: ShareExtensionInboxItem,
+        _ rhs: ShareExtensionInboxItem
+    ) -> Bool {
+        if lhs.createdAt == rhs.createdAt {
+            return lhs.id.uuidString < rhs.id.uuidString
         }
-        if usable.count != items.count {
-            if usable.isEmpty {
-                defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
-            } else if let data = try? JSONEncoder().encode(usable) {
-                defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
+        return lhs.createdAt < rhs.createdAt
+    }
+
+    private static func defaultsInboxAccess(
+        in defaults: UserDefaults,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> DefaultsInboxAccess {
+        do {
+            return try ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+                switch ShareExtensionInboxFiles.fallbackInboxState(in: defaults) {
+                case .empty:
+                    return .empty
+                case .items(let decodedItems):
+                    // Preserve raw entries and FIFO position. Validation occurs
+                    // after durable ingestion; a read must never rewrite the
+                    // authoritative queue or reveal stale legacy mirrors.
+                    return .items(decodedItems)
+                case .corrupt:
+                    throw ShareExtensionInboxFiles.InboxError.fallbackInboxCorrupt
+                }
             }
+        } catch {
+            return .unavailable
         }
-        return usable.first
     }
 
     nonisolated private static func validInboxURL(_ string: String) -> URL? {
@@ -116,24 +253,21 @@ enum ShareExtensionImportStore {
         return url
     }
 
-    private static func isUsableInboxItem(_ item: ShareExtensionInboxItem) -> Bool {
-        let hasPreparedRecipe: Bool
-        if let payload = item.preparedPayload {
-            hasPreparedRecipe = preparedRecipe(from: payload) != nil
-        } else {
-            hasPreparedRecipe = false
-        }
-        let hasText = item.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasURL = item.urlString.flatMap(validInboxURL) != nil
-        return hasPreparedRecipe || hasText || hasURL
-    }
-
-    static func pendingPreparedRecipe(in defaults: UserDefaults?) -> PendingPreparedSharedRecipe? {
+    static func pendingPreparedRecipe(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> PendingPreparedSharedRecipe? {
         guard let defaults else { return nil }
-        if let item = defaultsInboxHead(in: defaults) {
+        switch defaultsInboxAccess(in: defaults, fallbackLockURL: fallbackLockURL) {
+        case .items(let items):
+            let item = items[0]
             guard let payloadData = item.preparedPayload,
                   let preparedRecipe = preparedRecipe(from: payloadData) else { return nil }
             return PendingPreparedSharedRecipe(preparedRecipe: preparedRecipe, payloadData: payloadData, inboxID: item.id)
+        case .unavailable:
+            return nil
+        case .empty:
+            break
         }
         guard let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
             return nil
@@ -159,50 +293,67 @@ enum ShareExtensionImportStore {
         consumePendingRecipeURL(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func consumePendingRecipeURL(in defaults: UserDefaults?) -> URL? {
-        guard let defaults,
-              let url = pendingRecipeURL(in: defaults) else {
-            return nil
+    static func consumePendingRecipeURL(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> URL? {
+        guard let defaults else { return nil }
+        return try? ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+            guard case .empty = ShareExtensionInboxFiles.fallbackInboxState(in: defaults),
+                  let url = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+                    .flatMap(validInboxURL) else {
+                return nil
+            }
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+            return url
         }
-
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-        return url
     }
 
     static func consumePendingRecipeText() -> String? {
         consumePendingRecipeText(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func consumePendingRecipeText(in defaults: UserDefaults?) -> String? {
-        guard let defaults,
-              let text = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) else {
-            return nil
+    static func consumePendingRecipeText(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> String? {
+        guard let defaults else { return nil }
+        return try? ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+            guard case .empty = ShareExtensionInboxFiles.fallbackInboxState(in: defaults),
+                  let text = defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) else {
+                return nil
+            }
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+            return text
         }
-
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
-        return text
     }
 
     static func consumePreparedRecipe() -> PreparedSharedRecipe? {
         consumePreparedRecipe(in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func consumePreparedRecipe(in defaults: UserDefaults?) -> PreparedSharedRecipe? {
-        guard let defaults,
-              let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
-            return nil
-        }
+    static func consumePreparedRecipe(
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> PreparedSharedRecipe? {
+        guard let defaults else { return nil }
+        return try? ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+            guard case .empty = ShareExtensionInboxFiles.fallbackInboxState(in: defaults),
+                  let payloadData = defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) else {
+                return nil
+            }
 
-        guard let preparedRecipe = preparedRecipe(from: payloadData) else {
+            guard let preparedRecipe = preparedRecipe(from: payloadData) else {
+                defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+                return nil
+            }
+
             defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-            return nil
+            // Prepared payload supersedes a plain pending URL.
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+            return preparedRecipe
         }
-
-        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-        // Prepared payload supersedes a plain pending URL.
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
-        return preparedRecipe
     }
 
     static func acknowledgePendingRecipeURL(matching url: URL? = nil) {
@@ -211,75 +362,62 @@ enum ShareExtensionImportStore {
         acknowledgePendingRecipeURL(matching: url, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func acknowledgePendingRecipeURL(matching url: URL? = nil, in defaults: UserDefaults?) {
+    static func acknowledgePendingRecipeURL(
+        matching url: URL? = nil,
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) {
         guard let defaults else { return }
-        if removeFirstInboxItem(in: defaults, where: { item in
-            guard let value = item.urlString.flatMap(URL.init(string:)) else { return false }
-            return url == nil || value == url
-        }) {
-            if defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) == url?.absoluteString {
+        // Legacy acknowledgement must never consume a durable transport item,
+        // even if a newer share has an identical payload. Durable items are
+        // acknowledged exclusively by their stable transport ID.
+        mutateLegacyMirrorsIfInboxIsEmpty(in: defaults, fallbackLockURL: fallbackLockURL) {
+            if url == nil || defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) == url?.absoluteString {
                 defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
             }
-            return
         }
-        if let url, pendingRecipeURL(in: defaults) != url {
-            return
-        }
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
     }
 
     static func acknowledgePendingRecipeText(matching text: String? = nil) {
-        if let entry = ShareExtensionInboxFiles.items().first,
-           text == nil || entry.item.text == text {
-            ShareExtensionInboxFiles.remove(id: entry.item.id)
-        }
         acknowledgePendingRecipeText(matching: text, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func acknowledgePendingRecipeText(matching text: String? = nil, in defaults: UserDefaults?) {
+    static func acknowledgePendingRecipeText(
+        matching text: String? = nil,
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) {
         guard let defaults else { return }
-        if removeFirstInboxItem(in: defaults, where: { text == nil || $0.text == text }) {
-            if defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) == text {
+        mutateLegacyMirrorsIfInboxIsEmpty(in: defaults, fallbackLockURL: fallbackLockURL) {
+            if text == nil || defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) == text {
                 defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
             }
-            return
         }
-        if let text, pendingRecipeText(in: defaults) != text {
-            return
-        }
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
     static func acknowledgePreparedRecipe(matching payloadData: Data? = nil) {
-        if let entry = ShareExtensionInboxFiles.items().first,
-           payloadData == nil || entry.item.preparedPayload == payloadData {
-            ShareExtensionInboxFiles.remove(id: entry.item.id)
-        }
         acknowledgePreparedRecipe(matching: payloadData, in: UserDefaults(suiteName: ShareExtensionImportContract.appGroupID))
     }
 
-    static func acknowledgePreparedRecipe(matching payloadData: Data? = nil, in defaults: UserDefaults?) {
+    static func acknowledgePreparedRecipe(
+        matching payloadData: Data? = nil,
+        in defaults: UserDefaults?,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) {
         guard let defaults else { return }
-        if removeFirstInboxItem(in: defaults, where: { payloadData == nil || $0.preparedPayload == payloadData }) {
-            if defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) == payloadData {
-                defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+        mutateLegacyMirrorsIfInboxIsEmpty(in: defaults, fallbackLockURL: fallbackLockURL) {
+            guard payloadData == nil ||
+                    defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) == payloadData else {
+                return
             }
-            return
+            defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+            // Prepared payload supersedes a plain pending URL or text from the same share.
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+            defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
         }
-        if let payloadData,
-           defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) != payloadData {
-            return
-        }
-
-        defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
-        // Prepared payload supersedes a plain pending URL or text from the same share.
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
-        defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
     }
 
-    static func preparedRecipe(from payloadData: Data) -> PreparedSharedRecipe? {
+    nonisolated static func preparedRecipe(from payloadData: Data) -> PreparedSharedRecipe? {
         do {
             let payload = try JSONDecoder().decode(PreparedShareRecipePayload.self, from: payloadData)
             return payload.toPreparedRecipe()
@@ -289,36 +427,65 @@ enum ShareExtensionImportStore {
         }
     }
 
-    static func inbox(in defaults: UserDefaults) -> [ShareExtensionInboxItem] {
-        guard let data = defaults.data(forKey: ShareExtensionImportContract.inboxKey) else {
+    static func inbox(
+        in defaults: UserDefaults,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) -> [ShareExtensionInboxItem] {
+        switch defaultsInboxAccess(in: defaults, fallbackLockURL: fallbackLockURL) {
+        case .empty, .unavailable:
             return []
-        }
-        guard let items = try? JSONDecoder().decode([ShareExtensionInboxItem].self, from: data) else {
-            defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
-            return []
-        }
-        return items.sorted {
-            if $0.createdAt == $1.createdAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.createdAt < $1.createdAt
+        case .items(let items):
+            return items
         }
     }
 
-    @discardableResult
-    private static func removeFirstInboxItem(
+    private static func mutateLegacyMirrorsIfInboxIsEmpty(
         in defaults: UserDefaults,
-        where predicate: (ShareExtensionInboxItem) -> Bool
-    ) -> Bool {
-        var items = inbox(in: defaults)
-        guard let index = items.firstIndex(where: predicate) else { return false }
-        items.remove(at: index)
-        if items.isEmpty {
-            defaults.removeObject(forKey: ShareExtensionImportContract.inboxKey)
-        } else if let data = try? JSONEncoder().encode(items) {
-            defaults.set(data, forKey: ShareExtensionImportContract.inboxKey)
+        fallbackLockURL: URL?,
+        _ mutation: () -> Void
+    ) {
+        try? ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+            guard case .empty = ShareExtensionInboxFiles.fallbackInboxState(in: defaults) else {
+                return
+            }
+            mutation()
         }
-        return true
+    }
+
+    private static func acknowledgeTransportItem(
+        id: UUID,
+        capturedItem: ShareExtensionInboxItem?,
+        in defaults: UserDefaults,
+        fallbackLockURL: URL? = ShareExtensionInboxFiles.fallbackLockURL()
+    ) {
+        try? ShareExtensionInboxFiles.withFallbackInboxLock(at: fallbackLockURL) {
+            var items: [ShareExtensionInboxItem]
+            switch ShareExtensionInboxFiles.fallbackInboxState(in: defaults) {
+            case .empty:
+                items = []
+            case .items(let decodedItems):
+                items = decodedItems
+            case .corrupt:
+                throw ShareExtensionInboxFiles.InboxError.fallbackInboxCorrupt
+            }
+            let item = capturedItem ?? items.first(where: { $0.id == id })
+            items.removeAll { $0.id == id }
+            try ShareExtensionInboxFiles.persistFallbackInbox(items, in: defaults)
+            guard let item else { return }
+
+            if let urlString = item.urlString,
+               defaults.string(forKey: ShareExtensionImportContract.pendingRecipeURLKey) == urlString {
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeURLKey)
+            }
+            if let text = item.text,
+               defaults.string(forKey: ShareExtensionImportContract.pendingRecipeTextKey) == text {
+                defaults.removeObject(forKey: ShareExtensionImportContract.pendingRecipeTextKey)
+            }
+            if let payload = item.preparedPayload,
+               defaults.data(forKey: ShareExtensionImportContract.preparedRecipePayloadKey) == payload {
+                defaults.removeObject(forKey: ShareExtensionImportContract.preparedRecipePayloadKey)
+            }
+        }
     }
 
 }
@@ -335,6 +502,24 @@ extension PreparedSharedRecipe {
 
     func recipeMergedWithParsedContent(_ parsedRecipe: Recipe) -> Recipe {
         recipe.mergedWithParsedContent(parsedRecipe)
+    }
+
+    /// Runs every prepared Share Extension payload through the same parser used
+    /// by text imports, then restores metadata that is authoritative to the
+    /// source page (URL, image, tags, nutrition, and source attribution).
+    func canonicalized(using textParser: TextRecipeParser) async -> PreparedSharedRecipe {
+        do {
+            let parsedRecipe = try await textParser.parse(from: recipeParserInputText())
+            return PreparedSharedRecipe(
+                recipe: recipeMergedWithParsedContent(parsedRecipe),
+                sourceInfo: sourceInfo
+            )
+        } catch {
+            AppLogger.general.warning(
+                "Failed to canonicalize prepared share recipe; preserving durable payload: \(error.localizedDescription)"
+            )
+            return self
+        }
     }
 }
 
@@ -448,8 +633,9 @@ extension Recipe {
 }
 
 extension PreparedShareRecipePayload {
-    func toPreparedRecipe() -> PreparedSharedRecipe? {
+    nonisolated func toPreparedRecipe() -> PreparedSharedRecipe? {
         let cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNotes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedIngredients = ingredients
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -465,9 +651,10 @@ extension PreparedShareRecipePayload {
 
         let parsedSourceURL = sourceURL.flatMap { URL(string: $0) }
         let parsedImageURL = imageURL.flatMap { URL(string: $0) }
-        let ingredientModels = cleanedIngredients.map { Ingredient(name: $0) }
-        let stepModels = cleanedSteps.enumerated().map { index, text in
-            CookStep(index: index, text: text)
+        let ingredientModels = sectionedIngredients(from: cleanedIngredients)
+        let stepModels = sectionedSteps(from: cleanedSteps)
+        guard !ingredientModels.isEmpty, !stepModels.isEmpty else {
+            return nil
         }
         let tags = tagNames
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -488,6 +675,7 @@ extension PreparedShareRecipePayload {
             tags: tags,
             sourceURL: parsedSourceURL,
             sourceTitle: sourceTitle,
+            notes: cleanedNotes?.isEmpty == false ? cleanedNotes : nil,
             imageURL: parsedImageURL
         )
 
@@ -500,4 +688,31 @@ extension PreparedShareRecipePayload {
 
         return PreparedSharedRecipe(recipe: recipe, sourceInfo: sourceInfo)
     }
+
+    nonisolated private func sectionedIngredients(from lines: [String]) -> [Ingredient] {
+        var currentSection: String?
+        var ingredients: [Ingredient] = []
+        for line in lines {
+            if let header = RecipeSubsectionHeaderPolicy.title(from: line) {
+                currentSection = header
+            } else {
+                ingredients.append(Ingredient(name: line, section: currentSection))
+            }
+        }
+        return ingredients
+    }
+
+    nonisolated private func sectionedSteps(from lines: [String]) -> [CookStep] {
+        var currentSection: String?
+        var steps: [CookStep] = []
+        for line in lines {
+            if let header = RecipeSubsectionHeaderPolicy.title(from: line) {
+                currentSection = header
+            } else {
+                steps.append(CookStep(index: steps.count, text: line, section: currentSection))
+            }
+        }
+        return steps
+    }
+
 }

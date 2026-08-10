@@ -71,16 +71,14 @@ struct RecipeCardView: View {
         sharedBy != nil
     }
 
-    private var cardWidth: CGFloat {
-        horizontalSizeClass == .regular ? 252 : 240
-    }
+    private var isRegularWidth: Bool { horizontalSizeClass == .regular }
 
-    private var cardHeight: CGFloat {
-        horizontalSizeClass == .regular ? 168 : 160
-    }
+    private var cardWidth: CGFloat { RecipeCardMetrics.width(isRegularWidth: isRegularWidth) }
+
+    private var cardHeight: CGFloat { RecipeCardMetrics.imageHeight(isRegularWidth: isRegularWidth) }
 
     private var metadataTagMaxWidth: CGFloat {
-        horizontalSizeClass == .regular ? 120 : 100
+        RecipeCardMetrics.metadataTagMaxWidth(isRegularWidth: isRegularWidth)
     }
 
     var body: some View {
@@ -115,6 +113,10 @@ struct RecipeCardView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
+        .modifier(RecipeEntityContextModifier(
+            recipeID: recipe.id,
+            isResolvable: !isSharedRecipe && !recipe.isPreview && recipe.isOwnedByCurrentUser()
+        ))
     }
 
     /// Composed VoiceOver description: title, optional creator, time, favorite.

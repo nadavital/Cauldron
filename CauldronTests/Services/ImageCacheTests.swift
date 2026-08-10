@@ -61,6 +61,8 @@ final class ImageCacheTests: XCTestCase {
         ImageCache.shared.set(cacheKey, image: makeImage(color: .systemRed))
         let manager = ProfileImageManagerV2(
             directoryName: "TestProfileImages-\(UUID().uuidString)",
+            baseDirectoryURL: FileManager.default.temporaryDirectory,
+            removesDirectoryOnDeinit: true,
             cacheKeyGenerator: { ImageCache.profileImageKey(userId: $0) }
         )
 
@@ -75,6 +77,8 @@ final class ImageCacheTests: XCTestCase {
         ImageCache.shared.set(cacheKey, image: makeImage(color: .systemRed))
         let manager = CollectionImageManagerV2(
             directoryName: "TestCollectionImages-\(UUID().uuidString)",
+            baseDirectoryURL: FileManager.default.temporaryDirectory,
+            removesDirectoryOnDeinit: true,
             cacheKeyGenerator: { ImageCache.collectionImageKey(collectionId: $0) }
         )
 

@@ -8,8 +8,11 @@
 import Foundation
 import SwiftData
 
-/// Thread-safe repository for Grocery list operations
-actor GroceryRepository {
+/// Main-actor repository for Grocery list operations. SwiftData mutations and
+/// account-generation invalidation share this executor, so an authorized
+/// intent commit cannot interleave with another repository mutation.
+@MainActor
+final class GroceryRepository {
     private let modelContainer: ModelContainer
     
     init(modelContainer: ModelContainer) {
@@ -143,6 +146,108 @@ actor GroceryRepository {
 
         try context.save()
     }
+
+    /// Reconciles a recipe's intended ingredient multiset with its grocery
+    /// group, adding only missing normalized name-and-quantity entries. This
+    /// keeps retries idempotent while restoring ingredients that were removed
+    /// or added to the recipe since an earlier invocation.
+    @discardableResult
+    func addItemsFromRecipeIfAbsent(
+        recipeID: String,
+        recipeName: String,
+        items: [(name: String, quantity: Quantity?)]
+    ) async throws -> Int {
+        try await addItemsFromRecipeIfAbsent(
+            recipeID: recipeID,
+            recipeName: recipeName,
+            items: items,
+            isAuthorizedToCommit: { true }
+        ) ?? 0
+    }
+
+    /// Stages the complete idempotent recipe mutation in one ModelContext and
+    /// commits only if the caller's account generation is still authorized.
+    /// Returning nil guarantees that neither a new list nor any ingredients
+    /// from the expired identity were persisted.
+    func addItemsFromRecipeIfAbsent(
+        recipeID: String,
+        recipeName: String,
+        items: [(name: String, quantity: Quantity?)],
+        isAuthorizedToCommit: @escaping @MainActor @Sendable () -> Bool
+    ) async throws -> Int? {
+        // Account invalidation is also MainActor-isolated. Keeping both
+        // authorization checks and the save in this synchronous, repository-
+        // isolated section makes the commit linearizable with account switches
+        // and every other grocery mutation.
+        guard isAuthorizedToCommit() else { return nil }
+        let context = ModelContext(modelContainer)
+        context.autosaveEnabled = false
+        let listDescriptor = FetchDescriptor<GroceryListModel>(
+            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
+        )
+        let existingLists = try context.fetch(listDescriptor)
+        let list: GroceryListModel
+        let insertedList: Bool
+        if let existingList = existingLists.first {
+            list = existingList
+            insertedList = false
+        } else {
+            list = GroceryListModel(title: "My Grocery List")
+            context.insert(list)
+            insertedList = true
+        }
+        var existingCounts: [RecipeIngredientFingerprint: Int] = [:]
+        for model in (list.items ?? []) where model.recipeID == recipeID {
+            let fingerprint = RecipeIngredientFingerprint(
+                name: model.name,
+                quantity: try model.getQuantity()
+            )
+            existingCounts[fingerprint, default: 0] += 1
+        }
+
+        var currentOrder = (list.items ?? []).map(\.addedOrder).max() ?? -1
+        var addedCount = 0
+        for item in items {
+            let fingerprint = RecipeIngredientFingerprint(name: item.name, quantity: item.quantity)
+            if let existingCount = existingCounts[fingerprint], existingCount > 0 {
+                existingCounts[fingerprint] = existingCount - 1
+                continue
+            }
+            currentOrder += 1
+            let model = try GroceryItemModel.create(
+                name: item.name,
+                quantity: item.quantity,
+                recipeID: recipeID,
+                recipeName: recipeName,
+                addedOrder: currentOrder
+            )
+            model.list = list
+            context.insert(model)
+            addedCount += 1
+        }
+        guard isAuthorizedToCommit() else { return nil }
+        if insertedList || addedCount > 0 {
+            try context.save()
+        }
+        return addedCount
+    }
+
+    private struct RecipeIngredientFingerprint: Hashable {
+        let name: String
+        let quantityValue: UInt64?
+        let quantityUpperValue: UInt64?
+        let quantityUnit: String?
+
+        init(name: String, quantity: Quantity?) {
+            self.name = name
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+            self.quantityValue = quantity?.value.bitPattern
+            self.quantityUpperValue = quantity?.upperValue?.bitPattern
+            self.quantityUnit = quantity?.unit.rawValue
+        }
+    }
     
     /// Fetch all items in a list
     func fetchItems(listId: UUID) async throws -> [(id: UUID, name: String, quantity: Quantity?, isChecked: Bool)] {
@@ -262,6 +367,25 @@ actor GroceryRepository {
         }
         
         context.delete(item)
+        try context.save()
+    }
+
+    /// Deletes an exact set of grocery items in one SwiftData transaction.
+    /// Validation happens before mutation so a stale ID cannot produce a
+    /// partially committed bulk deletion.
+    func deleteItems(ids: Set<UUID>) async throws {
+        guard !ids.isEmpty else { return }
+
+        let context = ModelContext(modelContainer)
+        let models = try context.fetch(FetchDescriptor<GroceryItemModel>())
+            .filter { ids.contains($0.id) }
+        guard models.count == ids.count else {
+            throw RepositoryError.notFound
+        }
+
+        for model in models {
+            context.delete(model)
+        }
         try context.save()
     }
     

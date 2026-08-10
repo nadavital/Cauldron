@@ -63,4 +63,42 @@ final class RecipeWebExtractionCoreTests: XCTestCase {
         XCTAssertTrue(extraction.rawLines.contains("Fallback Page"))
         XCTAssertFalse(extraction.rawLines.isEmpty)
     }
+
+    func testCompleteRecipeCandidateWinsOverHigherScoringIncompleteCandidate() throws {
+        let incompleteSteps = (1...12)
+            .map { #"{"@type":"HowToStep","text":"Incomplete step \#($0)"}"# }
+            .joined(separator: ",")
+        let html = """
+        <html>
+          <head>
+            <title>Candidate Selection</title>
+            <script type="application/ld+json">
+            {
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Recipe",
+                  "name": "High Score But No Ingredients",
+                  "recipeInstructions": [\(incompleteSteps)]
+                },
+                {
+                  "@type": "Recipe",
+                  "name": "Complete Soup",
+                  "recipeIngredient": ["1 cup stock"],
+                  "recipeInstructions": ["Warm the stock"]
+                }
+              ]
+            }
+            </script>
+          </head>
+        </html>
+        """
+
+        let extraction = try XCTUnwrap(RecipeWebExtractionCore().extract(fromHTML: html))
+
+        XCTAssertEqual(extraction.method, "jsonld_recipe")
+        XCTAssertEqual(extraction.title, "Complete Soup")
+        XCTAssertEqual(extraction.ingredientLines, ["1 cup stock"])
+        XCTAssertEqual(extraction.stepLines, ["Warm the stock"])
+    }
 }

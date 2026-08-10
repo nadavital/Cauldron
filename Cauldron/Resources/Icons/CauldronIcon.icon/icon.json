@@ -4,6 +4,7 @@
     {
       "layers" : [
         {
+          "blend-mode" : "normal",
           "fill-specializations" : [
             {
               "value" : {
@@ -17,6 +18,7 @@
               }
             }
           ],
+          "glass" : true,
           "image-name" : "CauldronIcon_Bubbles.png",
           "name" : "Bubbling",
           "position" : {
@@ -28,6 +30,7 @@
           }
         },
         {
+          "blend-mode" : "normal",
           "fill-specializations" : [
             {
               "value" : {
@@ -52,6 +55,7 @@
           ],
           "image-name" : "CauldronIcon_Cauldron.png",
           "name" : "Cauldron",
+          "opacity" : 1,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
@@ -61,6 +65,7 @@
           }
         },
         {
+          "blend-mode" : "normal",
           "fill" : {
             "solid" : "srgb:0.66800,0.47512,0.25860,1.00000"
           },
@@ -81,6 +86,11 @@
           0,
           -9
         ]
+      },
+      "refractivity" : {
+        "depth" : 0.1984375,
+        "enabled" : false,
+        "strength" : -0.1294921875
       },
       "shadow" : {
         "kind" : "neutral",

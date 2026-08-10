@@ -16,8 +16,8 @@ struct WelcomeView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 24) {
-                    Spacer(minLength: 20)
+                VStack(spacing: Theme.Spacing.xl) {
+                    Spacer(minLength: Theme.Spacing.lg)
 
                     Image("BrandMarks/CauldronIcon")
                         .resizable()
@@ -27,8 +27,7 @@ struct WelcomeView: View {
 
                     VStack(spacing: 8) {
                         Text("Welcome to Cauldron")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
+                            .font(Theme.Typography.screenTitle)
 
                         Text("Your personal recipe collection awaits.")
                             .font(.subheadline)
@@ -36,43 +35,37 @@ struct WelcomeView: View {
                             .multilineTextAlignment(.center)
                     }
 
-                    VStack(alignment: .leading, spacing: 18) {
-                        FeatureRow(
-                            symbol: "link",
-                            color: .blue,
-                            title: "Import Recipes",
-                            detail: "Save recipes from any website, YouTube, TikTok, or Instagram with a single tap."
-                        )
-                        FeatureRow(
-                            symbol: "timer",
-                            color: .cauldronOrange,
-                            title: "Cook Mode",
-                            detail: "Hands-free cooking with step-by-step instructions and built-in timers."
-                        )
-                        FeatureRow(
-                            symbol: "person.2.fill",
-                            color: .pink,
-                            title: "Share & Connect",
-                            detail: "Share recipes with friends and see what they're cooking."
-                        )
+                    AppCard(style: .resting, padding: Theme.Spacing.lg) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                            FeatureRow(
+                                symbol: "link",
+                                color: .blue,
+                                title: "Import Recipes",
+                                detail: "Save recipes from any website, YouTube, TikTok, or Instagram with a single tap."
+                            )
+                            FeatureRow(
+                                symbol: "timer",
+                                color: .cauldronOrange,
+                                title: "Cook Mode",
+                                detail: "Hands-free cooking with step-by-step instructions and built-in timers."
+                            )
+                            FeatureRow(
+                                symbol: "person.2.fill",
+                                color: .pink,
+                                title: "Share & Connect",
+                                detail: "Share recipes with friends and see what they're cooking."
+                            )
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button {
+                    PrimaryActionButton("Get Started") {
                         onClose()
-                    } label: {
-                        Text("Get Started")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.cauldronOrange)
-                            .cornerRadius(14)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, Theme.Spacing.xs)
                 }
-                .padding(24)
+                .padding(Theme.Spacing.xl)
                 .frame(maxWidth: .infinity)
+                .frame(maxWidth: 640)
             }
         }
     }
@@ -85,13 +78,13 @@ private struct FeatureRow: View {
     let detail: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             Image(systemName: symbol)
                 .font(.headline)
                 .foregroundColor(color)
                 .frame(width: 20)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(title)
                     .font(.headline)
                     .foregroundColor(.primary)

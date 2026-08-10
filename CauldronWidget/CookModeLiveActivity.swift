@@ -102,7 +102,10 @@ struct CookModeLiveActivity: Widget {
                     // Step navigation buttons
                     HStack(spacing: 16) {
                         // Previous button
-                        Button(intent: PreviousStepIntent()) {
+                        Button(intent: PreviousStepIntent(
+                            recipeID: context.attributes.recipeId,
+                            sessionStartTime: context.attributes.sessionStartTime
+                        )) {
                             Label("Previous", systemImage: "chevron.left")
                                 .font(.caption2)
                         }
@@ -112,7 +115,10 @@ struct CookModeLiveActivity: Widget {
                         Spacer()
 
                         // Next button
-                        Button(intent: NextStepIntent()) {
+                        Button(intent: NextStepIntent(
+                            recipeID: context.attributes.recipeId,
+                            sessionStartTime: context.attributes.sessionStartTime
+                        )) {
                             Label("Next", systemImage: "chevron.right")
                                 .font(.caption2)
                                 .labelStyle(.trailingIcon)
@@ -242,7 +248,10 @@ struct LockScreenLiveActivityView: View {
             // Navigation buttons
             HStack(spacing: 12) {
                 // Previous button
-                Button(intent: PreviousStepIntent()) {
+                Button(intent: PreviousStepIntent(
+                    recipeID: context.attributes.recipeId,
+                    sessionStartTime: context.attributes.sessionStartTime
+                )) {
                     HStack {
                         Image(systemName: "chevron.left")
                         Text("Previous")
@@ -254,7 +263,10 @@ struct LockScreenLiveActivityView: View {
                 .tint(.orange)
 
                 // Next button
-                Button(intent: NextStepIntent()) {
+                Button(intent: NextStepIntent(
+                    recipeID: context.attributes.recipeId,
+                    sessionStartTime: context.attributes.sessionStartTime
+                )) {
                     HStack {
                         Text("Next")
                         Image(systemName: "chevron.right")

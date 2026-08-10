@@ -14,7 +14,8 @@ struct CollectionDetailView: View {
 
     @State private var collection: Collection
     @State private var recipes: [Recipe] = []
-    @State private var isLoading = false
+    @State private var isLoading = true
+    @State private var hasResolvedRecipes = false
     @State private var searchText = ""
     @State private var activeSheet: ActiveSheet?
     @State private var errorMessage: String?
@@ -346,7 +347,10 @@ struct CollectionDetailView: View {
 
     private func loadRecipes(forceRefresh: Bool = false) async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasResolvedRecipes = true
+        }
 
         do {
             // For owned collections, refresh from local database
@@ -793,13 +797,16 @@ struct CollectionDetailView: View {
                 .font(.title3)
                 .fontWeight(.bold)
 
-            if isLoading {
-                HStack {
-                    Spacer()
-                    ProgressView("Loading recipes...")
-                    Spacer()
+            if RuntimeEnvironment.forceSkeletonLoading || SkeletonPresentationPolicy.shouldShow(
+                isLoading: isLoading,
+                hasResolvedOnce: hasResolvedRecipes,
+                hasContent: !visibleRecipes.isEmpty
+            ) {
+                if usesGridRecipeLayout {
+                    RecipeCardSkeletonGrid(columns: recipeGridColumns, count: 4)
+                } else {
+                    RecipeRowSkeletonList()
                 }
-                .padding(.vertical, 40)
             } else if visibleRecipes.isEmpty {
                 VStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: emptyStateIconName)

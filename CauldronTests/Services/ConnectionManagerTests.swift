@@ -370,18 +370,17 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertEqual(queued?.payload, payload)
     }
 
-    func testOperationQueueMarkInProgressByEntityIdFallback() async throws {
+    func testOperationQueueMarkInProgressUsesOperationId() async throws {
         let (_, dependencies, _) = makeConnectionManager()
         let connectionId = UUID()
 
-        await dependencies.operationQueueService.addOperation(
+        let operationId = await dependencies.operationQueueService.addOperation(
             type: .create,
             entityType: .connection,
             entityId: connectionId
         )
 
-        // Existing repository call sites pass entity IDs here.
-        await dependencies.operationQueueService.markInProgress(operationId: connectionId)
+        await dependencies.operationQueueService.markInProgress(operationId: operationId)
 
         let queued = await dependencies.operationQueueService.getOperation(
             for: connectionId,

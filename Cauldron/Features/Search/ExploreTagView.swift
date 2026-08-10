@@ -44,27 +44,27 @@ struct ExploreTagView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                if viewModel.isLoading && !viewModel.hasContent {
+                if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
                     loadingPlaceholder
                 }
 
-                if !viewModel.allRecipes.isEmpty {
+                if !RuntimeEnvironment.forceSkeletonLoading && !viewModel.allRecipes.isEmpty {
                     allRecipesSection
                 }
 
-                if !viewModel.friendRecipes.isEmpty {
+                if !RuntimeEnvironment.forceSkeletonLoading && !viewModel.friendRecipes.isEmpty {
                     friendRecipesSection
                 }
 
-                if !viewModel.publicRecipes.isEmpty {
+                if !RuntimeEnvironment.forceSkeletonLoading && !viewModel.publicRecipes.isEmpty {
                     publicRecipesSection
                 }
 
-                if !viewModel.hasContent && !viewModel.isLoading {
+                if !RuntimeEnvironment.forceSkeletonLoading && !viewModel.hasContent && !viewModel.isLoading {
                     emptyState
                 }
 
-                if viewModel.isLoading && viewModel.hasContent {
+                if !RuntimeEnvironment.forceSkeletonLoading && viewModel.isLoading && viewModel.hasContent {
                     refreshingIndicator
                 }
             }
@@ -242,10 +242,12 @@ struct ExploreTagView: View {
             }
             .font(.headline)
 
-            ExploreTagRecipeCarouselPlaceholder(horizontalContentPadding: horizontalContentPadding)
+            RecipeCardSkeletonRail(horizontalPadding: horizontalContentPadding)
+                .padding(.horizontal, -horizontalContentPadding)
         }
         .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading recipes for \(displayName)")
     }
 
     private var refreshingIndicator: some View {
@@ -261,64 +263,6 @@ struct ExploreTagView: View {
     }
 }
 
-private struct ExploreTagRecipeCarouselPlaceholder: View {
-    let horizontalContentPadding: CGFloat
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(0..<3, id: \.self) { _ in
-                    ExploreTagRecipeCardPlaceholder()
-                }
-            }
-            .padding(.horizontal, horizontalContentPadding)
-        }
-        .padding(.horizontal, -horizontalContentPadding)
-    }
-}
-
-private struct ExploreTagRecipeCardPlaceholder: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
-    private var cardWidth: CGFloat {
-        horizontalSizeClass == .regular ? 252 : 240
-    }
-
-    private var cardHeight: CGFloat {
-        horizontalSizeClass == .regular ? 168 : 160
-    }
-
-    private var placeholderFill: Color {
-        Color.secondary.opacity(0.14)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: Theme.Radius.large)
-                .fill(placeholderFill)
-                .frame(width: cardWidth, height: cardHeight)
-
-            RoundedRectangle(cornerRadius: 4)
-                .fill(placeholderFill)
-                .frame(width: cardWidth, height: 20)
-
-            HStack(spacing: 4) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(placeholderFill)
-                    .frame(width: 72, height: 14)
-
-                Spacer()
-
-                Capsule()
-                    .fill(placeholderFill)
-                    .frame(width: 86, height: 20)
-            }
-            .frame(width: cardWidth, height: 20)
-        }
-        .frame(width: cardWidth)
-    }
-}
-
 // MARK: - ViewModel
 
 @MainActor
@@ -330,7 +274,8 @@ final class ExploreTagViewModel {
     var allRecipes: [Recipe] = []
     var friendRecipes: [SharedRecipeSummary] = []
     var publicRecipes: [SharedRecipeSummary] = []
-    var isLoading = false
+    var isLoading = true
+    private(set) var hasResolvedOnce = false
 
     @ObservationIgnored private var ownerCache: [UUID: User] = [:]
     @ObservationIgnored private var hasRequestedSearchMetadataRefresh = false
@@ -353,6 +298,14 @@ final class ExploreTagViewModel {
         !allRecipes.isEmpty || !friendRecipes.isEmpty || !publicRecipes.isEmpty
     }
 
+    var isColdLoading: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoading,
+            hasResolvedOnce: hasResolvedOnce,
+            hasContent: hasContent
+        )
+    }
+
     init(tag: Tag, dependencies: DependencyContainer) {
         self.tag = tag
         self.dependencies = dependencies
@@ -366,11 +319,16 @@ final class ExploreTagViewModel {
         let cacheKey = Self.cacheKey(for: normalizedTag, currentUserId: currentUserId)
 
         if !forceRefresh, applyCachedResults(for: cacheKey) {
+            isLoading = false
+            hasResolvedOnce = true
             return
         }
 
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasResolvedOnce = true
+        }
 
         AppLogger.general.info("🔍 Loading recipes for tag: \(tag.name)")
 

@@ -1,4 +1,17 @@
 {
     "indexes": [],
-    "fieldOverrides": []
+    "fieldOverrides": [
+        {
+            "collectionGroup": "share_rate_limits",
+            "fieldPath": "expiresAt",
+            "ttl": true,
+            "indexes": []
+        },
+        {
+            "collectionGroup": "share_read_rate_limits",
+            "fieldPath": "expiresAt",
+            "ttl": true,
+            "indexes": []
+        }
+    ]
 }

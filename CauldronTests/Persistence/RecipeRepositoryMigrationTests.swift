@@ -209,6 +209,8 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         let recipeCloudService = RecipeCloudService(core: cloudKitCore)
         let imageManager = RecipeImageManager(
             directoryName: "RecipeRepositoryMigrationTests-\(UUID().uuidString)",
+            baseDirectoryURL: FileManager.default.temporaryDirectory,
+            removesDirectoryOnDeinit: true,
             uploadToCloudWithDatabase: nil,
             downloadFromCloudWithDatabase: nil
         )

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">Cauldron</title>
+  <desc id="description">Keep the recipes you love, beautifully organized.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff8ec"/>
+      <stop offset="1" stop-color="#efd8b8"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#ef7f35" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#ef7f35" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" rx="0" fill="url(#background)"/>
+  <circle cx="1020" cy="80" r="390" fill="url(#glow)"/>
+  <circle cx="1080" cy="40" r="230" fill="none" stroke="#cb6c2f" stroke-opacity=".24" stroke-width="2"/>
+  <circle cx="1080" cy="40" r="150" fill="none" stroke="#cb6c2f" stroke-opacity=".18" stroke-width="2"/>
+  <g transform="translate(82 82)">
+    <rect width="126" height="126" rx="32" fill="#27211c"/>
+    <path d="M31 57h64c0 28-12 45-32 45S31 85 31 57Z" fill="#ef8d3d"/>
+    <path d="M26 54h74" stroke="#fff7e9" stroke-width="9" stroke-linecap="round"/>
+    <path d="M74 20c22 10 19 23 9 34" fill="none" stroke="#ef8d3d" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="49" cy="31" r="7" fill="#ef8d3d"/>
+  </g>
+  <text x="82" y="290" fill="#29231d" font-family="Georgia, 'Times New Roman', serif" font-size="92" letter-spacing="-3">Cauldron</text>
+  <text x="88" y="366" fill="#6f6257" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="33">Keep the recipes you love,</text>
+  <text x="88" y="410" fill="#6f6257" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="33">beautifully organized.</text>
+  <rect x="88" y="474" width="226" height="66" rx="33" fill="#e56f2d"/>
+  <text x="201" y="517" text-anchor="middle" fill="#2b1600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700">Open Cauldron</text>
+</svg>

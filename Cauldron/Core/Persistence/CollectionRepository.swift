@@ -66,6 +66,7 @@ actor CollectionRepository {
     private let cloudKitCore: CloudKitCore
     private let collectionCloudService: CollectionCloudService
     private let operationQueueService: OperationQueueService
+    private let externalShareService: ExternalShareService?
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
     // Track collections pending sync
@@ -81,12 +82,14 @@ actor CollectionRepository {
         modelContainer: ModelContainer,
         cloudKitCore: CloudKitCore,
         collectionCloudService: CollectionCloudService,
-        operationQueueService: OperationQueueService
+        operationQueueService: OperationQueueService,
+        externalShareService: ExternalShareService? = nil
     ) {
         self.modelContainer = modelContainer
         self.cloudKitCore = cloudKitCore
         self.collectionCloudService = collectionCloudService
         self.operationQueueService = operationQueueService
+        self.externalShareService = externalShareService
 
         if !RuntimeEnvironment.isRunningTests {
             setupRecipeVisibilityObserver()
@@ -181,18 +184,18 @@ actor CollectionRepository {
         }
 
         // 2. Queue operation for background sync
-        await operationQueueService.addOperation(
+        let operationID = await operationQueueService.addOperation(
             type: .create,
             entityType: .collection,
             entityId: collection.id
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, collection] in
+        Task.detached { [weak self, collection, operationID] in
             guard let self = self else { return }
 
             // Mark operation as in progress
-            await self.operationQueueService.markInProgress(operationId: collection.id)
+            await self.operationQueueService.markInProgress(operationId: operationID)
 
             // Sync to CloudKit PUBLIC database (for sharing)
             await self.syncCollectionToCloudKit(collection)
@@ -201,15 +204,12 @@ actor CollectionRepository {
 
             if metadataPending || !membershipSynced {
                 await self.operationQueueService.markFailed(
-                    operationId: collection.id,
+                    operationId: operationID,
                     error: "Collection create sync incomplete"
                 )
             } else {
                 // Mark operation as completed
-                await self.operationQueueService.markCompleted(
-                    entityId: collection.id,
-                    entityType: .collection
-                )
+                await self.operationQueueService.markCompleted(operationId: operationID)
             }
         }
     }
@@ -463,35 +463,35 @@ actor CollectionRepository {
         }
 
         // 2. Queue operation for background sync
-        await operationQueueService.addOperation(
+        let operationID = await operationQueueService.addOperation(
             type: .update,
             entityType: .collection,
             entityId: collection.id
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, collection] in
+        Task.detached { [weak self, collection, operationID] in
             guard let self = self else { return }
 
             // Mark operation as in progress
-            await self.operationQueueService.markInProgress(operationId: collection.id)
+            await self.operationQueueService.markInProgress(operationId: operationID)
+            guard let latestCollection = try? await self.fetch(id: collection.id),
+                  latestCollection.updatedAt == collection.updatedAt,
+                  latestCollection.visibility == collection.visibility else { return }
 
             // Sync to CloudKit
-            await self.syncCollectionToCloudKit(collection)
-            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
-            let metadataPending = await self.isPendingSync(collectionId: collection.id)
+            await self.syncCollectionToCloudKit(latestCollection)
+            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: latestCollection.id)
+            let metadataPending = await self.isPendingSync(collectionId: latestCollection.id)
 
             if metadataPending || !membershipSynced {
                 await self.operationQueueService.markFailed(
-                    operationId: collection.id,
+                    operationId: operationID,
                     error: "Collection update sync incomplete"
                 )
             } else {
                 // Mark operation as completed
-                await self.operationQueueService.markCompleted(
-                    entityId: collection.id,
-                    entityType: .collection
-                )
+                await self.operationQueueService.markCompleted(operationId: operationID)
             }
         }
     }
@@ -862,7 +862,7 @@ actor CollectionRepository {
         }
 
         // 2. Queue operation for background sync
-        await operationQueueService.addOperation(
+        let operationID = await operationQueueService.addOperation(
             type: .delete,
             entityType: .collection,
             entityId: id,
@@ -877,7 +877,7 @@ actor CollectionRepository {
             guard let self = self else { return }
 
             // Mark operation as in progress
-            await self.operationQueueService.markInProgress(operationId: id)
+            await self.operationQueueService.markInProgress(operationId: operationID)
 
             // Delete from CloudKit
             do {
@@ -888,16 +888,13 @@ actor CollectionRepository {
                 // Deleted collection from CloudKit
 
                 // Mark operation as completed
-                await self.operationQueueService.markCompleted(
-                    entityId: id,
-                    entityType: .collection
-                )
+                await self.operationQueueService.markCompleted(operationId: operationID)
             } catch {
                 self.logger.error("❌ Failed to delete collection from CloudKit: \(error.localizedDescription)")
 
                 // Mark operation as failed
                 await self.operationQueueService.markFailed(
-                    operationId: id,
+                    operationId: operationID,
                     error: error.localizedDescription
                 )
             }
@@ -932,7 +929,23 @@ actor CollectionRepository {
 
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
+        guard await AccountDeletionGate.shared.permitsWrite(ownerID: collection.userId) else {
+            return
+        }
         // Attempting to sync collection to CloudKit
+        if collection.visibility != .publicRecipe, let externalShareService {
+            do {
+                try await externalShareService.removeCollectionShareMetadata(
+                    collectionId: collection.id,
+                    ownerId: collection.userId
+                )
+            } catch {
+                logger.error("Web collection unpublish failed for '\(collection.name)': \(error.localizedDescription)")
+                pendingSyncCollections.insert(collection.id)
+                return
+            }
+        }
+
         let isAvailable = await cloudKitCore.isAvailable()
 
         guard isAvailable else {
@@ -961,6 +974,17 @@ actor CollectionRepository {
             // Syncing collection to CloudKit
             try await collectionCloudService.saveCollection(collectionToSync)
             try await syncCoverImageIfNeeded(for: collectionToSync)
+            if collectionToSync.visibility == .publicRecipe,
+               let externalShareService {
+                let didUpdateWebSnapshot = await externalShareService.updateCollectionShareMetadata(
+                    for: collectionToSync,
+                    recipeIds: collectionToSync.recipeIds
+                )
+                if !didUpdateWebSnapshot {
+                    pendingSyncCollections.insert(collectionToSync.id)
+                    return
+                }
+            }
             // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
@@ -1040,6 +1064,14 @@ actor CollectionRepository {
         tombstone: DeletedCollectionTombstone,
         removedMembershipEdges: [CollectionMembershipEdge]
     ) async throws {
+        if let externalShareService,
+           await AccountDeletionGate.shared.permitsWrite(ownerID: tombstone.ownerId) {
+            try await externalShareService.removeCollectionShareMetadata(
+                collectionId: tombstone.collectionId,
+                ownerId: tombstone.ownerId
+            )
+        }
+
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
@@ -1128,7 +1160,7 @@ actor CollectionRepository {
                             removedMembershipEdges: removedEdges
                         )
                     }
-                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+                    await operationQueueService.markCompleted(operationId: operation.id)
                     return
                 }
 
@@ -1140,7 +1172,7 @@ actor CollectionRepository {
                         error: "Collection replay sync incomplete"
                     )
                 } else {
-                    await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+                    await operationQueueService.markCompleted(operationId: operation.id)
                 }
             } catch {
                 await operationQueueService.markFailed(
@@ -1165,7 +1197,7 @@ actor CollectionRepository {
                     tombstone: tombstone,
                     removedMembershipEdges: removedEdges
                 )
-                await operationQueueService.markCompleted(entityId: operation.entityId, entityType: .collection)
+                await operationQueueService.markCompleted(operationId: operation.id)
             } catch {
                 await operationQueueService.markFailed(
                     operationId: operation.id,
@@ -1377,14 +1409,39 @@ actor CollectionRepository {
         )
 
         let models = try context.fetch(descriptor)
-        // Found collections to delete
-
-        // Delete each collection and wait for CloudKit cleanup before account deletion continues.
-        for model in models {
+        var collectionsToDelete: [(collection: Collection, localModel: CollectionModel?)] = try models.map { model in
             let collection = try applyMembershipOverlay(
                 to: [model.toDomain()],
                 context: context
             ).first ?? model.toDomain()
+            return (collection, model)
+        }
+        var deletionTombstonesByID = try localDeletedCollectionTombstones(context: context)
+            .filter { $0.ownerId == userId }
+            .reduce(into: [UUID: DeletedCollectionTombstone]()) { result, tombstone in
+                if let existing = result[tombstone.collectionId], existing.deletedAt >= tombstone.deletedAt {
+                    return
+                }
+                result[tombstone.collectionId] = tombstone
+            }
+
+        if !RuntimeEnvironment.isRunningTests {
+            // Include collections created on another device and not yet present
+            // in this installation's SwiftData cache.
+            let localIDs = Set(collectionsToDelete.map { $0.collection.id })
+            let remoteCollections = try await collectionCloudService.fetchCollections(forUserId: userId)
+            let remoteTombstones = try await collectionCloudService.fetchDeletedCollectionTombstones(ownerId: userId)
+            for tombstone in remoteTombstones {
+                deletionTombstonesByID[tombstone.collectionId] = tombstone
+            }
+            collectionsToDelete.append(contentsOf: remoteCollections
+                .filter { !localIDs.contains($0.id) }
+                .map { (collection: $0, localModel: Optional<CollectionModel>.none) })
+        }
+
+        // Delete each collection and wait for CloudKit cleanup before account deletion continues.
+        for item in collectionsToDelete {
+            let collection = item.collection
             let deletedAt = Date()
             let tombstone = DeletedCollectionTombstone(
                 collectionId: collection.id,
@@ -1393,13 +1450,16 @@ actor CollectionRepository {
                 cloudRecordName: collection.cloudRecordName,
                 sourceDeviceId: SyncDeviceIdentifier.current()
             )
+            deletionTombstonesByID[tombstone.collectionId] = tombstone
             let removedMembershipEdges = removedMembershipEdges(for: collection, deletedAt: deletedAt)
 
             try upsertLocalDeletedCollectionTombstone(tombstone, context: context)
             for edge in removedMembershipEdges {
                 try upsertLocalMembershipEdge(edge, context: context)
             }
-            context.delete(model)
+            if let localModel = item.localModel {
+                context.delete(localModel)
+            }
             try context.save()
 
             NotificationCenter.default.post(
@@ -1412,29 +1472,53 @@ actor CollectionRepository {
                 continue
             }
 
-            await operationQueueService.addOperation(
+            let operationID = await operationQueueService.addOperation(
                 type: .delete,
                 entityType: .collection,
                 entityId: collection.id
             )
-            await operationQueueService.markInProgress(operationId: collection.id)
+            await operationQueueService.markInProgress(operationId: operationID)
 
             do {
                 try await syncCollectionDeletionToCloudKit(
                     tombstone: tombstone,
                     removedMembershipEdges: removedMembershipEdges
                 )
-                await operationQueueService.markCompleted(
-                    entityId: collection.id,
-                    entityType: .collection
-                )
+                await operationQueueService.markCompleted(operationId: operationID)
             } catch {
                 await operationQueueService.markFailed(
-                    operationId: collection.id,
+                    operationId: operationID,
                     error: error.localizedDescription
                 )
                 throw error
             }
+        }
+
+        if !RuntimeEnvironment.isRunningTests {
+            // A previous attempt may have persisted a tombstone and then
+            // stopped before deleting the active collection or its membership
+            // edges. Tombstoned collections are absent from the active fetch,
+            // so finish them from the durable deletion inventory.
+            for tombstone in deletionTombstonesByID.values {
+                if let externalShareService,
+                   await AccountDeletionGate.shared.permitsWrite(ownerID: tombstone.ownerId) {
+                    try await externalShareService.removeCollectionShareMetadata(
+                        collectionId: tombstone.collectionId,
+                        ownerId: tombstone.ownerId
+                    )
+                }
+                try await collectionCloudService.saveDeletedCollectionTombstone(tombstone)
+                try await collectionCloudService.deleteCollection(tombstone.collectionId)
+                try await collectionCloudService.deleteMembershipEdges(
+                    forCollectionId: tombstone.collectionId,
+                    ownerId: tombstone.ownerId
+                )
+            }
+
+            // Inventory raw owner-scoped records as the final authority. This
+            // also removes malformed legacy edges that cannot be decoded into
+            // the current domain model or associated with a local collection.
+            try await collectionCloudService.deleteAllMembershipEdges(forOwnerId: userId)
         }
 
         // Deleted all user collections

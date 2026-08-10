@@ -21,6 +21,21 @@ enum CookModeStartOutcome: Sendable, Equatable {
     case invalidRecipe
 }
 
+nonisolated enum CookSessionRecipePayloadCodec {
+    static func encode(_ recipe: Recipe) -> Data? {
+        try? JSONEncoder().encode(recipe)
+    }
+
+    static func decode(_ data: Data?, recipeID: UUID) -> Recipe? {
+        guard let data,
+              let recipe = try? JSONDecoder().decode(Recipe.self, from: data),
+              recipe.id == recipeID else {
+            return nil
+        }
+        return recipe
+    }
+}
+
 @MainActor
 @Observable
 class CookModeCoordinator {
@@ -31,9 +46,7 @@ class CookModeCoordinator {
     var isActive: Bool = false {
         didSet {
             guard isActive != oldValue else { return }
-            // Keep the screen awake while actively cooking so the recipe stays
-            // visible with hands full; restore normal behavior when finished.
-            UIApplication.shared.isIdleTimerDisabled = isActive
+            updateIdleTimer()
         }
     }
 
@@ -52,6 +65,10 @@ class CookModeCoordinator {
     /// Session start time
     var sessionStartTime: Date?
 
+    /// The signed-in account that owns this cooking session. This is distinct
+    /// from recipe ownership because shared recipes are cookable.
+    private var sessionOwnerID: UUID?
+
     /// Show conflict alert when trying to start new recipe
     var showSessionConflictAlert: Bool = false
     var pendingRecipe: Recipe?
@@ -62,7 +79,11 @@ class CookModeCoordinator {
     // MARK: - Dependencies
 
     private let dependencies: DependencyContainer
+    private let experiencePreferences: ExperiencePreferences
+    private let idleTimerController: any IdleTimerControlling
+    private var applicationIsActive: Bool
     private let storageKey = "activeCookSession"
+    private let recipePayloadKey = "activeCookSession.recipePayload.v1"
 
     // Live Activity support
     #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
@@ -74,8 +95,17 @@ class CookModeCoordinator {
 
     // MARK: - Initialization
 
-    init(dependencies: DependencyContainer) {
+    init(
+        dependencies: DependencyContainer,
+        experiencePreferences: ExperiencePreferences? = nil,
+        idleTimerController: (any IdleTimerControlling)? = nil,
+        applicationIsActive: Bool? = nil,
+        observesApplicationLifecycle: Bool = true
+    ) {
         self.dependencies = dependencies
+        self.experiencePreferences = experiencePreferences ?? .shared
+        self.idleTimerController = idleTimerController ?? ApplicationIdleTimerController()
+        self.applicationIsActive = applicationIsActive ?? (UIApplication.shared.applicationState == .active)
 
         // Set up timer change callback
         dependencies.timerManager.onTimersChanged = { [weak self] in
@@ -84,6 +114,28 @@ class CookModeCoordinator {
         if CookSessionSharedStore.read() == nil,
            !dependencies.timerManager.activeTimers.isEmpty {
             dependencies.timerManager.stopAllTimers()
+        }
+
+        if observesApplicationLifecycle {
+            Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIApplication.didEnterBackgroundNotification
+                ) {
+                    self?.setApplicationActive(false)
+                }
+            }
+            Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIApplication.didBecomeActiveNotification
+                ) {
+                    self?.setApplicationActive(true)
+                }
+            }
+        }
+        Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .experiencePreferencesChanged) {
+                self?.updateIdleTimer()
+            }
         }
 
         // Listen for recipe deletion notifications
@@ -108,6 +160,22 @@ class CookModeCoordinator {
     // Required to prevent crashes in XCTest due to Swift bug #85221
     nonisolated deinit {}
 
+    /// Internal lifecycle seam used by application notifications and focused
+    /// tests. Backgrounding always restores the system idle timer immediately.
+    func setApplicationActive(_ active: Bool) {
+        guard applicationIsActive != active else { return }
+        applicationIsActive = active
+        updateIdleTimer()
+    }
+
+    private func updateIdleTimer() {
+        idleTimerController.isIdleTimerDisabled = CookAwakePolicy.shouldDisableIdleTimer(
+            sessionIsActive: isActive,
+            applicationIsActive: applicationIsActive,
+            keepScreenAwake: experiencePreferences.keepScreenAwake
+        )
+    }
+
     /// Handle recipe deletion - check if current recipe was deleted
     private func handleRecipeDeletion(deletedRecipeId: UUID) async {
         guard isActive, let currentRecipeId = currentRecipe?.id else { return }
@@ -130,8 +198,13 @@ class CookModeCoordinator {
         guard isActive,
               let recipe = currentRecipe,
               snapshot.recipeID == recipe.id,
+              snapshot.ownerID == sessionOwnerID,
+              snapshot.ownerID == CurrentUserSession.shared.userId,
+              snapshot.sessionStartTime == sessionStartTime,
               let latest = CookSessionSharedStore.read(defaults: sharedDefaults),
               latest.recipeID == snapshot.recipeID,
+              latest.ownerID == snapshot.ownerID,
+              latest.sessionStartTime == snapshot.sessionStartTime,
               latest.revision == snapshot.revision,
               snapshot.stepIndex >= 0,
               snapshot.stepIndex < recipe.steps.count else {
@@ -154,9 +227,14 @@ class CookModeCoordinator {
     /// Start cooking a recipe
     @discardableResult
     func startCooking(_ recipe: Recipe) async -> CookModeStartOutcome {
-        guard !recipe.steps.isEmpty else {
+        guard let currentUserID = CurrentUserSession.shared.userId,
+              !recipe.steps.isEmpty else {
             AppLogger.general.warning("Cannot start Cook Mode for a recipe without steps")
             return .invalidRecipe
+        }
+
+        if let sessionOwnerID, sessionOwnerID != currentUserID {
+            endSession()
         }
 
         // Check if different recipe is already cooking
@@ -175,13 +253,26 @@ class CookModeCoordinator {
         currentStepIndex = 0
         totalSteps = recipe.steps.count
         sessionStartTime = Date()
+        sessionOwnerID = currentUserID
         isActive = true
 
         // Save state
         saveState()
+        let startedSessionStartTime = sessionStartTime
 
         // Update CookSessionManager (legacy support)
         await dependencies.cookSessionManager.startSession(recipe: recipe)
+
+        // MainActor methods are reentrant across the actor await above. Do not
+        // resurrect UI or report success if this session ended or was replaced.
+        guard matchesActiveSession(
+            recipeID: recipe.id,
+            ownerID: currentUserID,
+            sessionStartTime: startedSessionStartTime
+        ) else {
+            await reconcileLegacySessionWithAuthority()
+            return .invalidRecipe
+        }
 
         // Show full screen cook mode
         showFullScreen = true
@@ -189,28 +280,53 @@ class CookModeCoordinator {
         // Start Live Activity
         await startLiveActivity()
 
+        guard matchesActiveSession(
+            recipeID: recipe.id,
+            ownerID: currentUserID,
+            sessionStartTime: startedSessionStartTime
+        ) else {
+            await reconcileLegacySessionWithAuthority()
+            return .invalidRecipe
+        }
+
         AppLogger.general.info("✅ Started cooking session: \(recipe.title)")
         return .started
     }
 
     /// Start cooking with pending recipe (after conflict resolution)
-    func startPendingRecipe() async {
-        guard let pending = pendingRecipe else { return }
+    @discardableResult
+    func startPendingRecipe() async -> CookModeStartOutcome {
+        guard let pending = pendingRecipe else { return .invalidRecipe }
+        // Release only the request being confirmed before suspension. A newer
+        // conflict arriving while startCooking awaits remains pending.
+        pendingRecipe = nil
 
         // End current session
         endSession()
 
         // Start new session
-        _ = await startCooking(pending)
+        let outcome = await startCooking(pending)
 
-        // Clear pending
-        pendingRecipe = nil
+        return outcome
     }
 
     /// Navigate to next step
     func nextStep() {
-        guard let recipe = currentRecipe, currentStepIndex < recipe.steps.count - 1,
-              let snapshot = CookSessionSharedStore.move(by: 1, defaults: sharedDefaults) else {
+        guard isActive,
+              let recipe = currentRecipe,
+              let sessionOwnerID,
+              sessionOwnerID == CurrentUserSession.shared.userId,
+              let sessionStartTime,
+              let expected = CookSessionSharedStore.read(defaults: sharedDefaults),
+              expected.recipeID == recipe.id,
+              expected.ownerID == sessionOwnerID,
+              expected.sessionStartTime == sessionStartTime,
+              expected.stepIndex < expected.totalSteps - 1,
+              let snapshot = CookSessionSharedStore.move(
+                by: 1,
+                expected: expected,
+                defaults: sharedDefaults
+              ) else {
             return
         }
 
@@ -226,8 +342,21 @@ class CookModeCoordinator {
 
     /// Navigate to previous step
     func previousStep() {
-        guard currentStepIndex > 0,
-              let snapshot = CookSessionSharedStore.move(by: -1, defaults: sharedDefaults) else { return }
+        guard isActive,
+              let recipe = currentRecipe,
+              let sessionOwnerID,
+              sessionOwnerID == CurrentUserSession.shared.userId,
+              let sessionStartTime,
+              let expected = CookSessionSharedStore.read(defaults: sharedDefaults),
+              expected.recipeID == recipe.id,
+              expected.ownerID == sessionOwnerID,
+              expected.sessionStartTime == sessionStartTime,
+              expected.stepIndex > 0,
+              let snapshot = CookSessionSharedStore.move(
+                by: -1,
+                expected: expected,
+                defaults: sharedDefaults
+              ) else { return }
 
         currentStepIndex = snapshot.stepIndex
 
@@ -253,10 +382,10 @@ class CookModeCoordinator {
 
     /// End the cooking session
     func endSession() {
-        guard isActive else { return }
-
         let recipeName = currentRecipe?.title ?? "Unknown"
-        let endedRecipeID = currentRecipe?.id
+        let persisted = persistedSnapshot()
+        let endedRecipeID = currentRecipe?.id ?? persisted?.recipeID
+        let endedSessionStartTime = sessionStartTime ?? persisted?.sessionStartTime
 
         // Batch all state changes together to prevent cascading view updates
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -266,6 +395,7 @@ class CookModeCoordinator {
             currentStepIndex = 0
             totalSteps = 0
             sessionStartTime = nil
+            sessionOwnerID = nil
         }
 
         // Clear persisted state
@@ -275,12 +405,19 @@ class CookModeCoordinator {
         dependencies.timerManager.stopAllTimers()
 
         // End CookSessionManager session (legacy support)
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             await dependencies.cookSessionManager.endSession()
+            await reconcileLegacySessionWithAuthority()
         }
 
         // End Live Activity
-        Task { await endLiveActivity(recipeID: endedRecipeID) }
+        Task {
+            await endLiveActivity(
+                recipeID: endedRecipeID,
+                sessionStartTime: endedSessionStartTime
+            )
+        }
 
         AppLogger.general.info("🛑 Ended cooking session: \(recipeName)")
     }
@@ -290,6 +427,13 @@ class CookModeCoordinator {
         // Check if we have a saved session
         guard let persisted = persistedSnapshot() else {
             // No saved cooking session to restore (routine)
+            await endLiveActivity(recipeID: nil, sessionStartTime: nil)
+            return
+        }
+
+        guard let currentUserID = CurrentUserSession.shared.userId,
+              persisted.belongs(to: currentUserID) else {
+            endSession()
             return
         }
 
@@ -299,17 +443,34 @@ class CookModeCoordinator {
 
         // Fetch recipe from repository
         do {
-            let fetchedRecipe = try await dependencies.recipeRepository.fetch(id: recipeId)
+            let cachedRecipe = persistedRecipePayload(recipeID: recipeId)
+            let restoredRecipe: Recipe?
+            do {
+                if let fetchedRecipe = try await dependencies.recipeRepository.fetch(id: recipeId) {
+                    restoredRecipe = fetchedRecipe
+                } else if let cachedRecipe,
+                          cachedRecipe.isPreview || cachedRecipe.ownerId != currentUserID {
+                    // Public/shared recipes are intentionally session-cached
+                    // because they are not members of the owner's repository.
+                    restoredRecipe = cachedRecipe
+                } else {
+                    // A successful miss for an owned recipe is a deletion.
+                    restoredRecipe = nil
+                }
+            } catch {
+                guard let cachedRecipe else { throw error }
+                restoredRecipe = cachedRecipe
+            }
 
             // MainActor is reentrant while the repository fetch is suspended.
             // Never let an old restore overwrite a session started in the meantime.
             guard currentRecipe?.id == sessionBeforeFetch,
-                  persistedSnapshot()?.recipeID == recipeId else {
+                  persistedSnapshot() == persisted,
+                  CurrentUserSession.shared.userId == currentUserID else {
                 return
             }
 
-            if let recipe = fetchedRecipe,
-               !recipe.steps.isEmpty {
+            if let recipe = restoredRecipe, !recipe.steps.isEmpty {
                 // Restore session state
                 currentRecipe = recipe
                 currentStepIndex = min(max(stepIndex, 0), recipe.steps.count - 1)
@@ -317,6 +478,7 @@ class CookModeCoordinator {
                 isActive = true
 
                 sessionStartTime = persisted.sessionStartTime
+                sessionOwnerID = currentUserID
 
                 // Don't auto-show full screen - just show banner
                 showFullScreen = false
@@ -331,11 +493,9 @@ class CookModeCoordinator {
             } else {
                 // Recipe was deleted
                 AppLogger.general.warning("⚠️ Recipe from saved session no longer exists")
-                if isActive {
-                    endSession()
-                } else {
-                    clearState()
-                }
+                // Clear every session-owned resource, including timers and a
+                // stale Live Activity, even during a cold inactive restore.
+                endSession()
             }
         } catch {
             AppLogger.general.error("❌ Failed to restore cooking session: \(error.localizedDescription)")
@@ -353,16 +513,31 @@ class CookModeCoordinator {
             if isActive {
                 endSession()
             }
+            await endLiveActivity(recipeID: nil, sessionStartTime: nil)
             return true
+        }
+
+        guard let currentUserID = CurrentUserSession.shared.userId,
+              persisted.belongs(to: currentUserID) else {
+            endSession()
+            return false
         }
         let recipeId = persisted.recipeID
 
-        if currentRecipe?.id != recipeId || !isActive {
+        if currentRecipe?.id != recipeId
+            || sessionStartTime != persisted.sessionStartTime
+            || sessionOwnerID != currentUserID
+            || !isActive {
             await restoreState()
-            return isActive && currentRecipe?.id == recipeId
+            return isActive
+                && currentRecipe?.id == recipeId
+                && sessionOwnerID == currentUserID
+                && sessionStartTime == persisted.sessionStartTime
         }
 
-        guard let recipe = currentRecipe, !recipe.steps.isEmpty else {
+        guard let recipe = currentRecipe,
+              sessionOwnerID == currentUserID,
+              !recipe.steps.isEmpty else {
             endSession()
             return false
         }
@@ -408,7 +583,8 @@ class CookModeCoordinator {
     // MARK: - Private Methods
 
     private func saveState() {
-        guard let recipe = currentRecipe else {
+        guard let recipe = currentRecipe,
+              let sessionOwnerID else {
             clearState()
             return
         }
@@ -417,9 +593,13 @@ class CookModeCoordinator {
         sharedDefaults?.set(currentStepIndex, forKey: "\(storageKey).stepIndex")
         sharedDefaults?.set(totalSteps, forKey: "\(storageKey).totalSteps")
         sharedDefaults?.set(Date().timeIntervalSince1970, forKey: "\(storageKey).timestamp")
+        if let payload = CookSessionRecipePayloadCodec.encode(recipe) {
+            sharedDefaults?.set(payload, forKey: recipePayloadKey)
+        }
 
         if let synchronized = CookSessionSharedStore.synchronizeSession(
             recipeID: recipe.id,
+            ownerID: sessionOwnerID,
             preferredStep: currentStepIndex,
             totalSteps: totalSteps,
             sessionStartTime: sessionStartTime ?? Date(),
@@ -437,29 +617,73 @@ class CookModeCoordinator {
         sharedDefaults?.removeObject(forKey: "\(storageKey).stepIndex")
         sharedDefaults?.removeObject(forKey: "\(storageKey).totalSteps")
         sharedDefaults?.removeObject(forKey: "\(storageKey).timestamp")
+        sharedDefaults?.removeObject(forKey: recipePayloadKey)
         CookSessionSharedStore.clear(defaults: sharedDefaults)
 
         AppLogger.general.debug("🗑️ Cleared cook session state")
     }
 
     private func persistedSnapshot() -> CookSessionSharedSnapshot? {
-        if let snapshot = CookSessionSharedStore.read(defaults: sharedDefaults) {
-            return snapshot
-        }
-        guard let recipeIdString = sharedDefaults?.string(forKey: "\(storageKey).recipeId"),
-              let recipeID = UUID(uuidString: recipeIdString) else {
-            return nil
-        }
-        let totalSteps = sharedDefaults?.integer(forKey: "\(storageKey).totalSteps") ?? 0
-        guard totalSteps > 0 else { return nil }
-        let stepIndex = sharedDefaults?.integer(forKey: "\(storageKey).stepIndex") ?? 0
-        let timestamp = sharedDefaults?.double(forKey: "\(storageKey).timestamp") ?? 0
-        return CookSessionSharedSnapshot(
-            recipeID: recipeID,
-            stepIndex: stepIndex,
-            totalSteps: totalSteps,
-            sessionStartTime: timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : Date()
+        CookSessionSharedStore.read(defaults: sharedDefaults)
+    }
+
+    private func persistedRecipePayload(recipeID: UUID) -> Recipe? {
+        CookSessionRecipePayloadCodec.decode(
+            sharedDefaults?.data(forKey: recipePayloadKey),
+            recipeID: recipeID
         )
+    }
+
+    private func matchesActiveSession(
+        recipeID: UUID,
+        ownerID: UUID,
+        sessionStartTime: Date?
+    ) -> Bool {
+        guard isActive,
+              CurrentUserSession.shared.userId == ownerID,
+              sessionOwnerID == ownerID,
+              currentRecipe?.id == recipeID,
+              self.sessionStartTime == sessionStartTime,
+              let snapshot = persistedSnapshot() else {
+            return false
+        }
+        return snapshot.recipeID == recipeID
+            && snapshot.ownerID == ownerID
+            && snapshot.sessionStartTime == sessionStartTime
+    }
+
+    private func reconcileLegacySessionWithAuthority() async {
+        while true {
+            if let recipe = currentRecipe,
+               let ownerID = sessionOwnerID,
+               let sessionStartTime,
+               matchesActiveSession(
+                recipeID: recipe.id,
+                ownerID: ownerID,
+                sessionStartTime: sessionStartTime
+               ) {
+                await dependencies.cookSessionManager.startSession(recipe: recipe)
+                if matchesActiveSession(
+                    recipeID: recipe.id,
+                    ownerID: ownerID,
+                    sessionStartTime: sessionStartTime
+                ) {
+                    return
+                }
+            } else {
+                await dependencies.cookSessionManager.endSession()
+                guard let recipe = currentRecipe,
+                      let ownerID = sessionOwnerID,
+                      let sessionStartTime,
+                      matchesActiveSession(
+                        recipeID: recipe.id,
+                        ownerID: ownerID,
+                        sessionStartTime: sessionStartTime
+                      ) else {
+                    return
+                }
+            }
+        }
     }
 
     // MARK: - Live Activity Methods
@@ -467,6 +691,13 @@ class CookModeCoordinator {
     private func startLiveActivity() async {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
         guard let recipe = currentRecipe,
+              let sessionStartTime,
+              let currentUserID = CurrentUserSession.shared.userId,
+              sessionOwnerID == currentUserID,
+              let expectedSnapshot = CookSessionSharedStore.read(defaults: sharedDefaults),
+              expectedSnapshot.recipeID == recipe.id,
+              expectedSnapshot.ownerID == currentUserID,
+              expectedSnapshot.sessionStartTime == sessionStartTime,
               ActivityAuthorizationInfo().areActivitiesEnabled else {
             return
         }
@@ -475,7 +706,7 @@ class CookModeCoordinator {
             recipeId: recipe.id.uuidString,
             recipeName: recipe.title,
             recipeEmoji: nil, // Recipe model doesn't have emoji - using Cauldron icon from assets
-            sessionStartTime: sessionStartTime ?? Date()
+            sessionStartTime: sessionStartTime
         )
 
         // Get shortest timer (running or paused)
@@ -484,21 +715,42 @@ class CookModeCoordinator {
             .min(by: { $0.remainingSeconds() < $1.remainingSeconds() })
 
         let contentState = CookModeActivityAttributes.ContentState(
-            currentStep: currentStepIndex,
-            totalSteps: totalSteps,
-            stepInstruction: currentStep?.text ?? "",
+            currentStep: expectedSnapshot.stepIndex,
+            totalSteps: expectedSnapshot.totalSteps,
+            stepInstruction: expectedSnapshot.stepInstructions.flatMap {
+                $0.indices.contains(expectedSnapshot.stepIndex) ? $0[expectedSnapshot.stepIndex] : nil
+            } ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
             primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
             primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
-            progressPercentage: progress,
+            progressPercentage: Double(expectedSnapshot.stepIndex + 1) / Double(expectedSnapshot.totalSteps),
             lastUpdated: Date()
         )
 
         do {
-            currentActivity = try Activity.request(
+            let requestedActivity = try Activity.request(
                 attributes: attributes,
                 content: .init(state: contentState, staleDate: nil)
             )
+            guard isActive,
+                  CurrentUserSession.shared.userId == currentUserID,
+                  currentRecipe?.id == recipe.id,
+                  sessionOwnerID == currentUserID,
+                  self.sessionStartTime == sessionStartTime,
+                  let latestSnapshot = CookSessionSharedStore.read(defaults: sharedDefaults),
+                  latestSnapshot.recipeID == expectedSnapshot.recipeID,
+                  latestSnapshot.ownerID == expectedSnapshot.ownerID,
+                  latestSnapshot.sessionStartTime == expectedSnapshot.sessionStartTime else {
+                await requestedActivity.end(
+                    .init(state: contentState, staleDate: nil),
+                    dismissalPolicy: .immediate
+                )
+                return
+            }
+            currentActivity = requestedActivity
+            if latestSnapshot.revision != expectedSnapshot.revision {
+                await updateLiveActivity()
+            }
             AppLogger.general.info("✅ Started Live Activity")
         } catch {
             AppLogger.general.error("❌ Failed to start Live Activity: \(error.localizedDescription)")
@@ -508,13 +760,30 @@ class CookModeCoordinator {
 
     private func updateLiveActivity() async {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
-        guard let recipe = currentRecipe else {
+        guard let recipe = currentRecipe,
+              let sessionStartTime,
+              let currentUserID = CurrentUserSession.shared.userId,
+              sessionOwnerID == currentUserID,
+              let snapshot = CookSessionSharedStore.read(defaults: sharedDefaults),
+              snapshot.recipeID == recipe.id,
+              snapshot.ownerID == currentUserID,
+              snapshot.sessionStartTime == sessionStartTime else {
             return
         }
-        let activity = currentActivity ?? Activity<CookModeActivityAttributes>.activities.first {
+        currentStepIndex = snapshot.stepIndex
+        totalSteps = snapshot.totalSteps
+        let matchesSession: (Activity<CookModeActivityAttributes>) -> Bool = {
             $0.attributes.recipeId == recipe.id.uuidString
+                && $0.attributes.sessionStartTime == sessionStartTime
         }
-        guard let activity else { return }
+        let activity = currentActivity.flatMap { matchesSession($0) ? $0 : nil }
+            ?? Activity<CookModeActivityAttributes>.activities.first {
+                matchesSession($0)
+            }
+        guard let activity else {
+            currentActivity = nil
+            return
+        }
         currentActivity = activity
 
         // Get shortest timer (running or paused)
@@ -534,39 +803,72 @@ class CookModeCoordinator {
         }
 
         let contentState = CookModeActivityAttributes.ContentState(
-            currentStep: currentStepIndex,
-            totalSteps: totalSteps,
-            stepInstruction: currentStep?.text ?? "",
+            currentStep: snapshot.stepIndex,
+            totalSteps: snapshot.totalSteps,
+            stepInstruction: snapshot.stepInstructions.flatMap {
+                $0.indices.contains(snapshot.stepIndex) ? $0[snapshot.stepIndex] : nil
+            } ?? "",
             activeTimerCount: dependencies.timerManager.activeTimers.count,
             primaryTimerDurationSeconds: shortestTimer?.spec.seconds,
             primaryTimerIsRunning: shortestTimer?.isRunning ?? false,
-            progressPercentage: progress,
+            progressPercentage: Double(snapshot.stepIndex + 1) / Double(snapshot.totalSteps),
             lastUpdated: Date()
         )
 
         await activity.update(
             .init(state: contentState, staleDate: nil)
         )
-        AppLogger.general.debug("🔄 Updated Live Activity - Step \(currentStepIndex + 1)/\(totalSteps)")
+        if let latest = CookSessionSharedStore.read(defaults: sharedDefaults),
+           latest.recipeID == snapshot.recipeID,
+           latest.ownerID == snapshot.ownerID,
+           latest.sessionStartTime == snapshot.sessionStartTime,
+           latest.revision != snapshot.revision {
+            await CookSessionLiveActivityUpdater.update(from: latest)
+        }
+        AppLogger.general.debug("🔄 Updated Live Activity - Step \(snapshot.stepIndex + 1)/\(snapshot.totalSteps)")
         #endif
     }
 
-    private func endLiveActivity(recipeID: UUID?) async {
+    private func endLiveActivity(recipeID: UUID?, sessionStartTime: Date?) async {
         #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+        let isBulkOrphanCleanup = recipeID == nil && sessionStartTime == nil
+        let isAuthoritative: (Activity<CookModeActivityAttributes>) -> Bool = { activity in
+            guard isBulkOrphanCleanup,
+                  let userID = CurrentUserSession.shared.userId,
+                  let snapshot = CookSessionSharedStore.read(defaults: self.sharedDefaults),
+                  snapshot.belongs(to: userID) else {
+                return false
+            }
+            return activity.attributes.recipeId == snapshot.recipeID.uuidString
+                && activity.attributes.sessionStartTime == snapshot.sessionStartTime
+        }
         let activities = Activity<CookModeActivityAttributes>.activities.filter { activity in
-            if let recipeID {
+            if let recipeID, let sessionStartTime {
                 return activity.attributes.recipeId == recipeID.uuidString
+                    && activity.attributes.sessionStartTime == sessionStartTime
+            }
+            // With no authoritative session identity (for example after
+            // rejecting a pre-owner snapshot), every Cook Mode activity is an
+            // orphan and must be removed before a new session can begin.
+            if isBulkOrphanCleanup {
+                return !isAuthoritative(activity)
             }
             return activity.id == currentActivity?.id
         }
+        var endedActivityIDs = Set<String>()
         for activity in activities {
+            // Authority is cross-process and may appear after enumeration.
+            guard !isAuthoritative(activity) else { continue }
             await activity.end(
                 .init(state: activity.content.state, staleDate: nil),
                 dismissalPolicy: .immediate
             )
+            endedActivityIDs.insert(activity.id)
         }
 
-        currentActivity = nil
+        if let currentActivity, endedActivityIDs.contains(currentActivity.id) {
+            self.currentActivity = nil
+        }
         AppLogger.general.info("🛑 Ended Live Activity")
         #endif
     }

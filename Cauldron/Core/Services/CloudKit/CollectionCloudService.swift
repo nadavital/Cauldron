@@ -99,6 +99,10 @@ actor CollectionCloudService {
             )
 
             do {
+                guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: collection.userId) else {
+                    throw CloudKitError.invalidRecord
+                }
+                defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
                 _ = try await db.save(record)
                 logger.info("✅ Saved collection to PUBLIC database")
                 return
@@ -148,6 +152,7 @@ actor CollectionCloudService {
     private func fetchCollectionsWithoutOverlay(forUserId userId: UUID) async throws -> [Collection] {
 
         let db = try await core.getPublicDatabase()
+        let currentIdentity = try await core.getCurrentUserRecordID()
         let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
         let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
@@ -165,10 +170,9 @@ actor CollectionCloudService {
                 }
 
                 for (_, result) in results.matchResults {
-                    if let record = try? result.get(),
-                       let collection = try? collectionFromRecord(record) {
-                        collections.append(collection)
-                    }
+                    let record = try result.get()
+                    guard record.creatorUserRecordID == currentIdentity else { continue }
+                    collections.append(try collectionFromRecord(record))
                 }
 
                 cursor = results.queryCursor
@@ -401,6 +405,10 @@ actor CollectionCloudService {
         for attempt in 1...maxSaveAttempts {
             populateMembershipRecord(record, from: edge)
             do {
+                guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: edge.ownerId) else {
+                    throw CloudKitError.invalidRecord
+                }
+                defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
                 _ = try await db.save(record)
                 return
             } catch let error as CKError where error.code == .serverRecordChanged {
@@ -469,15 +477,50 @@ actor CollectionCloudService {
     }
 
     func fetchMembershipEdges(forUserId userId: UUID) async throws -> [CollectionMembershipEdge] {
-        let db = try await core.getPublicDatabase()
         let predicate = NSPredicate(format: "ownerId == %@", userId.uuidString)
+        return try await fetchMembershipRecords(matching: predicate).map(membershipEdge(from:))
+    }
+
+    func deleteMembershipEdges(forCollectionId collectionId: UUID, ownerId: UUID) async throws {
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "ownerId == %@", ownerId.uuidString),
+            NSPredicate(format: "collectionId == %@", collectionId.uuidString),
+        ])
+        let records = try await fetchMembershipRecords(matching: predicate)
+
+        guard !records.isEmpty else {
+            logger.info("No collection membership edges found to delete for collection: \(collectionId)")
+            return
+        }
+
+        let db = try await core.getPublicDatabase()
+        let recordIDs = records.map(\.recordID)
+
+        for chunk in Self.chunked(recordIDs, size: 200) {
+            try await deleteRecordIDs(chunk, in: db)
+        }
+
+        logger.info("✅ Deleted \(records.count) collection membership edges for collection: \(collectionId)")
+    }
+
+    func deleteAllMembershipEdges(forOwnerId ownerId: UUID) async throws {
+        let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
+        let records = try await fetchMembershipRecords(matching: predicate)
+        guard !records.isEmpty else { return }
+        let db = try await core.getPublicDatabase()
+        for chunk in Self.chunked(records.map(\.recordID), size: 200) {
+            try await deleteRecordIDs(chunk, in: db)
+        }
+        logger.info("✅ Deleted \(records.count) collection membership edges for owner: \(ownerId)")
+    }
+
+    private func fetchMembershipRecords(matching predicate: NSPredicate) async throws -> [CKRecord] {
+        let db = try await core.getPublicDatabase()
         let query = CKQuery(recordType: CloudKitCore.RecordType.collectionMembership, predicate: predicate)
-        query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
+        var records: [CKRecord] = []
+        var cursor: CKQueryOperation.Cursor?
 
         do {
-            var edges: [CollectionMembershipEdge] = []
-            var cursor: CKQueryOperation.Cursor?
-
             repeat {
                 let results: (matchResults: [(CKRecord.ID, Result<CKRecord, Error>)], queryCursor: CKQueryOperation.Cursor?)
                 if let cursor {
@@ -485,15 +528,12 @@ actor CollectionCloudService {
                 } else {
                     results = try await db.records(matching: query, resultsLimit: 500)
                 }
-
-                edges += results.matchResults.compactMap { _, result in
-                    guard let record = try? result.get() else { return nil }
-                    return try? membershipEdge(from: record)
+                for (_, result) in results.matchResults {
+                    records.append(try result.get())
                 }
                 cursor = results.queryCursor
             } while cursor != nil
-
-            return edges
+            return records
         } catch let error as CKError {
             if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("CollectionMembership record type not yet in CloudKit schema - returning empty list")
@@ -501,27 +541,6 @@ actor CollectionCloudService {
             }
             throw error
         }
-    }
-
-    func deleteMembershipEdges(forCollectionId collectionId: UUID, ownerId: UUID) async throws {
-        let edges = try await fetchMembershipEdges(forUserId: ownerId)
-            .filter { $0.collectionId == collectionId }
-
-        guard !edges.isEmpty else {
-            logger.info("No collection membership edges found to delete for collection: \(collectionId)")
-            return
-        }
-
-        let db = try await core.getPublicDatabase()
-        let recordIDs = edges.map {
-            Self.membershipRecordID(collectionId: $0.collectionId, recipeId: $0.recipeId)
-        }
-
-        for chunk in Self.chunked(recordIDs, size: 200) {
-            try await deleteRecordIDs(chunk, in: db)
-        }
-
-        logger.info("✅ Deleted \(edges.count) collection membership edges for collection: \(collectionId)")
     }
 
     // MARK: - Cover Image
@@ -553,6 +572,14 @@ actor CollectionCloudService {
             record["coverImageAsset"] = asset
             record["coverImageModifiedAt"] = Date() as CKRecordValue
 
+            guard let ownerIDString = record["userId"] as? String,
+                  let ownerID = UUID(uuidString: ownerIDString) else {
+                throw CloudKitError.invalidRecord
+            }
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerID) else {
+                throw CancellationError()
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
             let savedRecord = try await db.save(record)
             logger.info("✅ Uploaded collection cover image asset")
             return savedRecord.recordID.recordName

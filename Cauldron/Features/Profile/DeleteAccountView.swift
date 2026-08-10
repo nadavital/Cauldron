@@ -52,29 +52,25 @@ struct DeleteAccountView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                     .background(Color.appSurface, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+
+                    Text("Cauldron may retain minimal deletion markers in your private iCloud database so an offline device cannot restore content you deleted.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .padding(.horizontal)
 
                 Spacer()
 
                 // Delete button
-                Button(role: .destructive) {
+                PrimaryActionButton(
+                    "Permanently Delete Account",
+                    systemImage: "trash",
+                    role: .destructive,
+                    tint: .red,
+                    isBusy: isDeleting
+                ) {
                     showingDeleteConfirmation = true
-                } label: {
-                    if isDeleting {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Permanently Delete Account")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(isDeleting)
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
@@ -108,42 +104,75 @@ struct DeleteAccountView: View {
             showError = true
             return
         }
+        guard let deletingUser = CurrentUserSession.shared.currentUser else {
+            errorMessage = "Unable to load user account"
+            showError = true
+            return
+        }
+
+        let deletionLease = await AccountDeletionGate.shared.begin(ownerID: userId)
 
         do {
             AppLogger.general.info("🗑️ Starting account deletion for user: \(userId)")
 
-            // Step 1: Delete all user recipes from CloudKit and local storage
-            AppLogger.general.info("Deleting all user recipes...")
-            try await dependencies.recipeRepository.deleteAllUserRecipes(userId: userId)
-            AppLogger.general.info("✅ All recipes deleted")
+            if deletingUser.cloudRecordName != nil {
+                // Remove hosted snapshots while their management capability is available.
+                try await dependencies.externalShareService.removeAllShareMetadata(for: deletingUser)
 
-            // Step 2: Delete all user collections from CloudKit and local storage
-            AppLogger.general.info("Deleting all user collections...")
-            try await dependencies.collectionRepository.deleteAllUserCollections(userId: userId)
-            AppLogger.general.info("✅ All collections deleted")
+                AppLogger.general.info("Deleting all user recipes...")
+                try await dependencies.recipeRepository.deleteAllUserRecipes(userId: userId)
+                AppLogger.general.info("✅ All recipes deleted")
 
-            // Step 3: Delete all connections involving this user
-            AppLogger.general.info("Deleting all user connections...")
-            try await dependencies.connectionRepository.deleteAllConnectionsForUser(userId: userId)
-            try await dependencies.connectionCloudService.deleteAllConnectionsForUser(userId: userId)
-            AppLogger.general.info("✅ All connections deleted")
+                AppLogger.general.info("Deleting all user collections...")
+                try await dependencies.collectionRepository.deleteAllUserCollections(userId: userId)
+                AppLogger.general.info("✅ All collections deleted")
 
-            // Step 4: Delete user profile from CloudKit
-            AppLogger.general.info("Deleting user profile from CloudKit...")
-            try await dependencies.userCloudService.deleteUserProfile(userId: userId)
-            AppLogger.general.info("✅ User profile deleted from CloudKit")
+                try await dependencies.savedReferenceCloudService.deleteAllReferences(for: userId)
 
-            // Step 5: Clear local user data and sign out
+                AppLogger.general.info("Deleting all user connections...")
+                try await dependencies.connectionRepository.deleteAllConnectionsForUser(userId: userId)
+                try await dependencies.connectionCloudService.deleteAllConnectionsForUser(userId: userId)
+                AppLogger.general.info("✅ All connections deleted")
+
+                // Every remaining fallible local/private cleanup happens while
+                // the public identity still exists, preserving retry authority.
+                try await dependencies.userCloudService.deleteWebShareCapability(for: userId)
+                try await dependencies.purgeAllLocalAccountData()
+
+                do {
+                    try ShareCapabilityStore.shared.removeCapability(for: userId)
+                } catch {
+                    AppLogger.general.warning("Unable to clear obsolete web-share key: \(error.localizedDescription)")
+                }
+
+                AppLogger.general.info("Deleting user profile from CloudKit...")
+                try await dependencies.userCloudService.deleteUserProfile(userId: userId)
+                AppLogger.general.info("✅ User profile deleted from CloudKit")
+            } else {
+                // Onboarding intentionally supports a local-only fallback. With
+                // no CloudKit identity there is no hosted authority to revoke.
+                try await dependencies.purgeAllLocalAccountData()
+            }
+
             AppLogger.general.info("Clearing local data and signing out...")
             await dependencies.profileImageManager.deleteImage(userId: userId)
             dependencies.connectionManager.resetSessionState()
             FriendsTabViewModel.shared.resetSessionState()
             await dependencies.sharingService.resetSharedRecipeCache()
 
+            // Invalidate local identity synchronously before suspending in
+            // system donation cleanup. Otherwise a donation for the deleted
+            // owner could still pass its real-identity preflight and supersede
+            // this nil-owner boundary while cleanup is in progress.
             await MainActor.run {
                 ReferralManager.shared.reset()
                 CurrentUserSession.shared.signOut()
             }
+
+            // Recipe donations are system-wide. Remove only the two intents
+            // carrying recipe entities after crossing the local identity
+            // boundary; generic timer donations and App Shortcuts remain.
+            await RecipeIntentDonation.reconcileAccountBoundary(currentOwnerID: nil)
 
             AppLogger.general.info("✅ Account deletion complete")
 
@@ -152,9 +181,17 @@ struct DeleteAccountView: View {
 
         } catch {
             AppLogger.general.error("❌ Account deletion failed: \(error.localizedDescription)")
-            errorMessage = "Failed to delete account: \(error.localizedDescription)"
+            if deletingUser.cloudRecordName != nil {
+                do {
+                    try await dependencies.externalShareService.restoreAccountShareMetadata(for: deletingUser)
+                } catch {
+                    AppLogger.general.error("Account deletion is paused and web sharing remains revoked: \(error.localizedDescription)")
+                }
+            }
+            errorMessage = "Account deletion did not finish. No deleted web shares were restored; retry deletion to complete cleanup. \(error.localizedDescription)"
             showError = true
         }
+        await AccountDeletionGate.shared.end(deletionLease)
     }
 }
 

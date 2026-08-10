@@ -21,28 +21,42 @@ struct CollectionsListView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: Theme.Spacing.md) {
-                collectionSection(
-                    title: "My Collections",
-                    collections: viewModel.filteredOwnedCollections,
-                    isSavedSection: false
-                )
-
-                collectionSection(
-                    title: "Saved Collections",
-                    collections: viewModel.filteredSavedCollections,
-                    isSavedSection: true
-                )
-
-                // Empty State
-                if !viewModel.hasVisibleCollections {
-                    EmptyStateView(
-                        title: "No Collections Yet",
-                        message: "Create a collection to organize your recipes.",
-                        systemImage: "folder.badge.plus",
-                        actionTitle: "Create Collection",
-                        action: { showingCreateSheet = true }
+                if RuntimeEnvironment.forceSkeletonLoading ||
+                    SkeletonPresentationPolicy.shouldShow(
+                        isLoading: viewModel.isLoading,
+                        hasResolvedOnce: viewModel.hasLoadedOnce,
+                        hasContent: viewModel.hasVisibleCollections
+                    ) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        Text("My Collections")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        CollectionCardSkeletonGrid(columns: gridColumns)
+                    }
+                    .padding(.horizontal)
+                } else {
+                    collectionSection(
+                        title: "My Collections",
+                        collections: viewModel.filteredOwnedCollections,
+                        isSavedSection: false
                     )
-                    .padding()
+
+                    collectionSection(
+                        title: "Saved Collections",
+                        collections: viewModel.filteredSavedCollections,
+                        isSavedSection: true
+                    )
+
+                    if !viewModel.hasVisibleCollections && viewModel.hasLoadedOnce {
+                        EmptyStateView(
+                            title: "No Collections Yet",
+                            message: "Create a collection to organize your recipes.",
+                            systemImage: "folder.badge.plus",
+                            actionTitle: "Create Collection",
+                            action: { showingCreateSheet = true }
+                        )
+                        .padding()
+                    }
                 }
             }
             .padding(.vertical)
@@ -53,10 +67,8 @@ struct CollectionsListView: View {
         .searchable(text: $viewModel.searchText, prompt: "Search collections")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
+                IconActionButton("Create collection", systemImage: "plus") {
                     showingCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
                 }
             }
         }
@@ -109,16 +121,15 @@ struct CollectionsListView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 HStack {
                     Text(title)
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                        .font(Theme.Typography.sectionTitle)
 
                     Spacer()
 
                     Text("\(collections.count)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, Theme.Spacing.xs)
+                        .padding(.vertical, Theme.Spacing.xxs)
                         .background(Color.appSurface, in: Capsule())
                 }
                 .padding(.horizontal)

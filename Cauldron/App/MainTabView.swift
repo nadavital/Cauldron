@@ -35,6 +35,7 @@ struct MainTabView: View {
     @State private var showSharedRecipeSavedToast = false
     @State private var sidebarRefreshTask: Task<Void, Never>?
     @State private var activeShareImportAcknowledgement: ShareImportAcknowledgement?
+    @State private var isOpeningRecipeIntent = false
     @Binding private var pendingSharedContent: ContentView.SharedContentWrapper?
     @ObservedObject private var connectionManager: ConnectionManager
 
@@ -92,7 +93,7 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        tabScaffoldWithAccessory
+        appIntentAwareScaffold
         .fullScreenCover(isPresented: Binding(
             get: { dependencies.cookModeCoordinator.showFullScreen },
             set: { dependencies.cookModeCoordinator.showFullScreen = $0 }
@@ -157,11 +158,10 @@ struct MainTabView: View {
             openImporter(with: url, acknowledgement: .url(url))
         }
         .task {
-            guard !didCheckInitialPendingImport else { return }
-            didCheckInitialPendingImport = true
-            openPendingImporterIfNeeded()
-        }
-        .task {
+            if !didCheckInitialPendingImport {
+                didCheckInitialPendingImport = true
+                openPendingImporterIfNeeded()
+            }
             scheduleSidebarCollectionsRefresh(delayNanoseconds: 0)
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -173,6 +173,8 @@ struct MainTabView: View {
             scheduleSidebarCollectionsRefresh()
             Task {
                 await dependencies.cookModeCoordinator.reconcileExternalState()
+                await openPendingRecipeIntentIfNeeded()
+                openPendingVisualRecipeSearchIfNeeded()
             }
         }
         .onChange(of: horizontalSizeClass) {
@@ -226,6 +228,27 @@ struct MainTabView: View {
             resetCatalystWindowTitle()
             #endif
         }
+    }
+
+    private var appIntentAwareScaffold: some View {
+        tabScaffoldWithAccessory
+            .task {
+                await openPendingRecipeIntentIfNeeded()
+                openPendingVisualRecipeSearchIfNeeded()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openRecipeFromIntent)) { _ in
+                Task { await openPendingRecipeIntentIfNeeded() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openVisualRecipeSearch)) { _ in
+                openPendingVisualRecipeSearchIfNeeded()
+            }
+            .onReceive(Publishers.Merge3(
+                NotificationCenter.default.publisher(for: .recipeAdded),
+                NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated")),
+                NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))
+            )) { _ in
+                RecipeSpotlightIndexer.shared.scheduleReconciliation()
+            }
     }
 
     @ViewBuilder
@@ -285,6 +308,48 @@ struct MainTabView: View {
         case .collection(let collection, _):
             searchNavigationPath.append(collection)
         }
+    }
+
+    @MainActor
+    private func openPendingRecipeIntentIfNeeded() async {
+        guard !isOpeningRecipeIntent else { return }
+        isOpeningRecipeIntent = true
+        defer { isOpeningRecipeIntent = false }
+
+        while let recipeID = RecipeIntentNavigationStore.pendingRecipeID() {
+            do {
+                guard let recipe = try await RecipeIntentProvider.shared.recipe(id: recipeID) else {
+                    _ = RecipeIntentNavigationStore.consume(expectedRecipeID: recipeID)
+                    continue
+                }
+                guard RecipeIntentNavigationStore.consume(expectedRecipeID: recipeID) != nil else {
+                    // A newer route replaced this one while it was resolving.
+                    continue
+                }
+                selectedTab = .search
+                searchNavigationPath = NavigationPath()
+                searchNavigationPath.append(recipe)
+            } catch {
+                AppLogger.general.error("Unable to open recipe from App Intent: \(error.localizedDescription)")
+                // Drain a newer request if one replaced the failing route. Keep
+                // the current route durable so a later activation can retry it.
+                guard RecipeIntentNavigationStore.pendingRecipeID() != recipeID else {
+                    return
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func openPendingVisualRecipeSearchIfNeeded() {
+        guard RecipeIntentNavigationStore.hasPendingVisualSearch() else { return }
+        let recipeIDs = RecipeIntentNavigationStore.pendingVisualSearch()
+        guard RecipeIntentNavigationStore.consumeVisualSearch(expectedRecipeIDs: recipeIDs) else {
+            return
+        }
+        selectedTab = .search
+        searchNavigationPath = NavigationPath()
+        searchNavigationPath.append(VisualRecipeSearchRoute(recipeIDs: recipeIDs))
     }
 
     private var tabScaffold: some View {
@@ -391,10 +456,11 @@ struct MainTabView: View {
 
             if let payloadData = item.preparedPayload,
                let prepared = ShareExtensionImportStore.preparedRecipe(from: payloadData) {
+                let canonical = await prepared.canonicalized(using: dependencies.textParser)
                 _ = try await dependencies.recipeImportInboxStore.transition(id: job.id, to: .needsReview)
                 openPreparedImporter(
-                    recipe: prepared.recipe,
-                    sourceInfo: prepared.sourceInfo,
+                    recipe: canonical.recipe,
+                    sourceInfo: canonical.sourceInfo,
                     acknowledgement: .durableJob(job.id)
                 )
                 return
@@ -496,17 +562,8 @@ struct MainTabView: View {
             isSavingPreparedSharedRecipe = false
             scheduleNextPendingImport()
         }
-        let prepared = pending.preparedRecipe
-
-        let recipeForImport: Recipe
-        do {
-            let parsedRecipe = try await dependencies.textParser.parse(from: prepared.recipeParserInputText())
-            recipeForImport = prepared.recipeMergedWithParsedContent(parsedRecipe)
-            AppLogger.general.info("🧠 Reparsed Share Extension payload via text parser before save")
-        } catch {
-            recipeForImport = prepared.recipe
-            AppLogger.general.warning("⚠️ Failed to reparse prepared share recipe; falling back to preprocessed payload: \(error.localizedDescription)")
-        }
+        let prepared = await pending.preparedRecipe.canonicalized(using: dependencies.textParser)
+        let recipeForImport = prepared.recipe
 
         guard let userId = CurrentUserSession.shared.userId else {
             AppLogger.general.error("❌ Cannot auto-save prepared share recipe without a current user")

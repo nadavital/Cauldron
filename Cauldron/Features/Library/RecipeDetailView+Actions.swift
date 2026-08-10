@@ -123,7 +123,10 @@ extension RecipeDetailView {
             showSessionConflictAlert = true
         } else {
             Task {
-                await dependencies.cookModeCoordinator.startCooking(recipe)
+                let outcome = await dependencies.cookModeCoordinator.startCooking(recipe)
+                if outcome == .started {
+                    await RecipeIntentDonation.recordCookModeStarted(for: recipe)
+                }
             }
         }
     }
@@ -139,6 +142,8 @@ extension RecipeDetailView {
                 recipeName: recipe.title,
                 items: items
             )
+
+            await RecipeIntentDonation.recordIngredientsAdded(for: recipe)
 
             AppLogger.general.info("Added \(items.count) ingredients to grocery list from '\(recipe.title)'")
 
@@ -855,5 +860,6 @@ extension RecipeDetailView {
             stepIndex: stepIndex,
             recipeName: recipe.title
         )
+        Task { await RecipeIntentDonation.recordTimerStarted(timer) }
     }
 }

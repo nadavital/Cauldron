@@ -21,6 +21,7 @@ struct User: Sendable, Hashable, Identifiable {
     let profileImageURL: URL?  // Local file URL for profile image
     let cloudProfileImageRecordName: String?  // CloudKit record name for profile image asset
     let profileImageModifiedAt: Date?  // Last modified date for sync tracking
+    let profileImageLocalRevision: UUID?  // Local-only revision for same-path image refreshes
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -35,6 +36,7 @@ struct User: Sendable, Hashable, Identifiable {
         case profileImageURL
         case cloudProfileImageRecordName
         case profileImageModifiedAt
+        case profileImageLocalRevision
     }
 
     nonisolated init(
@@ -49,7 +51,8 @@ struct User: Sendable, Hashable, Identifiable {
         profileColor: String? = nil,
         profileImageURL: URL? = nil,
         cloudProfileImageRecordName: String? = nil,
-        profileImageModifiedAt: Date? = nil
+        profileImageModifiedAt: Date? = nil,
+        profileImageLocalRevision: UUID? = nil
     ) {
         self.id = id
         self.username = username
@@ -63,6 +66,7 @@ struct User: Sendable, Hashable, Identifiable {
         self.profileImageURL = profileImageURL
         self.cloudProfileImageRecordName = cloudProfileImageRecordName
         self.profileImageModifiedAt = profileImageModifiedAt
+        self.profileImageLocalRevision = profileImageLocalRevision
     }
 
     /// Get user's initials from display name
@@ -96,7 +100,51 @@ struct User: Sendable, Hashable, Identifiable {
             profileColor: profileColor,
             profileImageURL: profileImageURL,
             cloudProfileImageRecordName: cloudProfileImageRecordName,
-            profileImageModifiedAt: profileImageModifiedAt
+            profileImageModifiedAt: profileImageModifiedAt,
+            profileImageLocalRevision: profileImageLocalRevision
+        )
+    }
+
+    nonisolated func updatedProfile(
+        profileEmoji: String?,
+        profileColor: String?,
+        profileImageURL: URL?,
+        cloudProfileImageRecordName: String?,
+        profileImageModifiedAt: Date?,
+        profileImageLocalRevision: UUID?
+    ) -> User {
+        User(
+            id: id,
+            username: username,
+            displayName: displayName,
+            email: email,
+            cloudRecordName: cloudRecordName,
+            referralCode: referralCode,
+            createdAt: createdAt,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor,
+            profileImageURL: profileImageURL,
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt,
+            profileImageLocalRevision: profileImageLocalRevision
+        )
+    }
+
+    nonisolated func updatedBasicInfo(username: String, displayName: String) -> User {
+        User(
+            id: id,
+            username: username,
+            displayName: displayName,
+            email: email,
+            cloudRecordName: cloudRecordName,
+            referralCode: referralCode,
+            createdAt: createdAt,
+            profileEmoji: profileEmoji,
+            profileColor: profileColor,
+            profileImageURL: profileImageURL,
+            cloudProfileImageRecordName: cloudProfileImageRecordName,
+            profileImageModifiedAt: profileImageModifiedAt,
+            profileImageLocalRevision: profileImageLocalRevision
         )
     }
 
@@ -137,6 +185,7 @@ struct User: Sendable, Hashable, Identifiable {
         self.profileImageURL = try container.decodeIfPresent(URL.self, forKey: .profileImageURL)
         self.cloudProfileImageRecordName = try container.decodeIfPresent(String.self, forKey: .cloudProfileImageRecordName)
         self.profileImageModifiedAt = try container.decodeIfPresent(Date.self, forKey: .profileImageModifiedAt)
+        self.profileImageLocalRevision = try container.decodeIfPresent(UUID.self, forKey: .profileImageLocalRevision)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -153,6 +202,7 @@ struct User: Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(profileImageURL, forKey: .profileImageURL)
         try container.encodeIfPresent(cloudProfileImageRecordName, forKey: .cloudProfileImageRecordName)
         try container.encodeIfPresent(profileImageModifiedAt, forKey: .profileImageModifiedAt)
+        try container.encodeIfPresent(profileImageLocalRevision, forKey: .profileImageLocalRevision)
     }
 }
 

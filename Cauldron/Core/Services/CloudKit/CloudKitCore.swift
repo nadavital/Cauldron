@@ -59,6 +59,8 @@ actor CloudKitCore {
         static let connection = "Connection"
         static let profileImage = "ProfileImage"
         static let referralSignup = "ReferralSignup"
+        static let usernameClaim = "UsernameClaim"
+        static let webShareCapability = "WebShareCapability"
     }
 
     // MARK: - Initialization

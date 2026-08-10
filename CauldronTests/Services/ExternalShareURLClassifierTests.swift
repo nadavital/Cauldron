@@ -15,7 +15,8 @@ final class ExternalShareURLClassifierTests: XCTestCase {
             "https://cauldron.app/u/nadav",
             "https://cauldron.app/u/nadav/recipe-id",
             "https://cauldron-prod.web.app/u/nadav",
-            "https://cauldron-prod.firebaseapp.com/u/nadav/recipe-id"
+            "https://cauldron-prod.firebaseapp.com/u/nadav/recipe-id",
+            "https://cauldron-f900a.firebaseapp.com/recipe/recipe-id"
         ]
 
         for rawURL in accepted {

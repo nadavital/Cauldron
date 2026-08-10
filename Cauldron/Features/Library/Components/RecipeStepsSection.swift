@@ -10,7 +10,7 @@ import SwiftUI
 struct RecipeStepsSection: View {
     let steps: [CookStep]
     let highlightedStepIndex: Int?
-    let onTimerTap: (TimerSpec, Int) -> Void
+    var onTimerTap: ((TimerSpec, Int) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -59,7 +59,7 @@ struct RecipeStepsSection: View {
 private struct StepRow: View {
     let step: CookStep
     let isHighlighted: Bool
-    let onTimerTap: (TimerSpec, Int) -> Void
+    let onTimerTap: ((TimerSpec, Int) -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -81,18 +81,16 @@ private struct StepRow: View {
                     .layoutPriority(1)
 
                 if let timer = step.timers.first {
-                    Button {
-                        onTimerTap(timer, step.index)
-                    } label: {
-                        Label(timer.displayDuration, systemImage: "timer")
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.cauldronOrange.opacity(0.1))
-                            .cornerRadius(6)
+                    if let onTimerTap {
+                        Button {
+                            onTimerTap(timer, step.index)
+                        } label: {
+                            timerLabel(timer)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        timerLabel(timer)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -103,6 +101,15 @@ private struct StepRow: View {
         .cornerRadius(Theme.Radius.card)
         .id("step-\(step.index)")
     }
+
+    private func timerLabel(_ timer: TimerSpec) -> some View {
+        Label(timer.displayDuration, systemImage: "timer")
+            .font(.caption)
+            .foregroundColor(.cauldronOrange)
+            .padding(.horizontal, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .background(Color.cauldronOrange.opacity(0.1), in: Capsule())
+    }
 }
 
 #Preview {
@@ -110,7 +117,7 @@ private struct StepRow: View {
         steps: [
             CookStep(index: 0, text: "Preheat oven to 350°F", timers: []),
             CookStep(index: 1, text: "Mix dry ingredients together", timers: []),
-            CookStep(index: 2, text: "Bake for 30 minutes", timers: [.minutes(30)])
+            CookStep(index: 2, text: "Bake for 30 minutes", timers: [.minutes(30)]),
         ],
         highlightedStepIndex: 1,
         onTimerTap: { _, _ in }

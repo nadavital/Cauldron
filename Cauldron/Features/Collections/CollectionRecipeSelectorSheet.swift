@@ -89,7 +89,10 @@ struct CollectionRecipeSelectorSheet: View {
         NavigationStack {
             Group {
                 if isLoading {
-                    ProgressView("Loading recipes...")
+                    ScrollView {
+                        RecipeRowSkeletonList()
+                            .padding()
+                    }
                 } else if recipes.isEmpty {
                     emptyState
                 } else {

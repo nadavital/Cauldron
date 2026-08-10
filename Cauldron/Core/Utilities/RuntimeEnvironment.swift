@@ -65,6 +65,17 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    /// Holds content surfaces in their cold-loading presentation so the shared
+    /// skeleton geometry and motion can be inspected in Simulator QA builds.
+    nonisolated static var forceSkeletonLoading: Bool {
+        #if DEBUG
+        arguments.contains("--cauldron-skeleton-qa") ||
+            environment["CAULDRON_SKELETON_QA"] == "1"
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var canUseCloudKit: Bool {
         !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }

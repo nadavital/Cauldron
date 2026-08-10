@@ -358,13 +358,7 @@ struct ModelRecipeAssembler: Sendable {
     }
 
     nonisolated private func looksLikeSubsectionHeader(_ line: String) -> Bool {
-        let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.hasSuffix(":") else { return false }
-        let words = text.dropLast().split(whereSeparator: \.isWhitespace)
-        guard !words.isEmpty && words.count <= 7 else { return false }
-        if text.count > 90 { return false }
-        if text.contains(where: \.isNumber) { return false }
-        return true
+        RecipeSubsectionHeaderPolicy.title(from: line) != nil
     }
 
     nonisolated private func looksLikeIngredientLine(_ line: String) -> Bool {
@@ -545,7 +539,7 @@ struct ModelRecipeAssembler: Sendable {
         if extractTipsRemainder(cleaned) != nil { return true }
 
         let lowered = cleaned.lowercased()
-        if quantity == nil {
+        if case nil = quantity {
             if looksLikeHeaderlessInstruction(cleaned) {
                 return true
             }

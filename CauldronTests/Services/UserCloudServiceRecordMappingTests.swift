@@ -9,6 +9,53 @@ import XCTest
 
 @MainActor
 final class UserCloudServiceRecordMappingTests: XCTestCase {
+    func testCapabilityRegistrationAcceptsNewerGeneration() {
+        XCTAssertEqual(
+            UserCloudService.capabilityRegistrationDecision(
+                registeredGeneration: 2,
+                registeredHash: "old",
+                incomingGeneration: 3,
+                incomingHash: "new"
+            ),
+            .accept
+        )
+    }
+
+    func testCapabilityRegistrationRejectsStaleGeneration() {
+        XCTAssertEqual(
+            UserCloudService.capabilityRegistrationDecision(
+                registeredGeneration: 3,
+                registeredHash: "new",
+                incomingGeneration: 2,
+                incomingHash: "old"
+            ),
+            .stale
+        )
+    }
+
+    func testCapabilityRegistrationDetectsSameGenerationConflict() {
+        XCTAssertEqual(
+            UserCloudService.capabilityRegistrationDecision(
+                registeredGeneration: 3,
+                registeredHash: "first",
+                incomingGeneration: 3,
+                incomingHash: "second"
+            ),
+            .conflict
+        )
+    }
+
+    func testCapabilityRegistrationRecognizesIdempotentRegistration() {
+        XCTAssertEqual(
+            UserCloudService.capabilityRegistrationDecision(
+                registeredGeneration: 3,
+                registeredHash: "same",
+                incomingGeneration: 3,
+                incomingHash: "same"
+            ),
+            .alreadyRegistered
+        )
+    }
     func testPopulateUserRecordClearsRemovedOptionalFields() async throws {
         let service = UserCloudService(core: CloudKitCore())
         let userId = UUID()

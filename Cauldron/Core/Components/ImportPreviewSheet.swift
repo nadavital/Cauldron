@@ -45,7 +45,9 @@ final class ImportPreviewViewModel {
 
     func importRecipe(_ recipe: Recipe, originalCreator: User?) async throws {
         guard CurrentUserSession.shared.userId != nil else {
-            throw NSError(domain: "ImportPreview", code: 1, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
+            throw NSError(
+                domain: "ImportPreview", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
 
         _ = try await dependencies.recipeSaveService.saveRecipeToLibrary(
@@ -63,6 +65,7 @@ struct ImportPreviewSheet: View {
 
     @State private var isImporting = false
     @State private var showSuccess = false
+    @State private var importErrorMessage: String?
 
     init(url: URL, dependencies: DependencyContainer) {
         _viewModel = State(initialValue: ImportPreviewViewModel(url: url, dependencies: dependencies))
@@ -107,30 +110,20 @@ struct ImportPreviewSheet: View {
     }
 
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-            Text("Loading shared content...")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        AppStateView(kind: .loading, message: "Loading shared content…")
+            .warmCanvas()
     }
 
     private func errorView(_ message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 48))
-                .foregroundColor(.cauldronOrange)
-            Text("Unable to Load")
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text(message)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+        AppStateView(
+            kind: .error(),
+            titleText: .localized("Unable to Load"),
+            messageText: .verbatim(message),
+            actionText: .localized("Try Again")
+        ) {
+            Task { await viewModel.loadContent() }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .warmCanvas()
     }
 
     @ViewBuilder
@@ -149,170 +142,114 @@ struct ImportPreviewSheet: View {
 
     private func recipePreview(_ recipe: Recipe, originalCreator: User?) -> some View {
         ScrollView {
-            VStack(spacing: 20) {
-                // Recipe Image - Using RecipeImageView with CloudKit fallback
-                RecipeImageView(
-                    imageURL: recipe.imageURL,
-                    size: .preview,
-                    showPlaceholderText: false,
-                    recipeImageService: viewModel.dependencies.recipeImageService,
-                    recipeId: recipe.id,
-                    ownerId: recipe.ownerId
+            VStack(spacing: Theme.Spacing.lg) {
+                RecipeReviewPresentation(
+                    recipe: recipe,
+                    dependencies: viewModel.dependencies,
+                    sourceDescription: "Shared recipe",
+                    attributionName: originalCreator?.displayName
                 )
-                .frame(height: 250)
-                .cornerRadius(Theme.Radius.card)
-                .padding(.horizontal)
-                .task(id: recipe.id) {
-                    // Task will automatically cancel when recipe.id changes
+
+                if let importErrorMessage {
+                    AppCard {
+                        Label(importErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                    }
+                    .frame(maxWidth: 520)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Import failed")
+                    .accessibilityValue(importErrorMessage)
                 }
 
-                VStack(spacing: 12) {
-                    Text(recipe.title)
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.center)
-
-                    // Recipe metadata
-                    HStack(spacing: 20) {
-                        Label("\(recipe.ingredients.count) ingredients", systemImage: "list.bullet")
-                        if let minutes = recipe.totalMinutes {
-                            Label("\(minutes) min", systemImage: "clock")
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                    // Tags
-                    if !recipe.tags.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(recipe.tags, id: \.self) { tag in
-                                    Text(tag.name)
-                                        .font(.caption)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.cauldronOrange.opacity(0.2))
-                                        .foregroundColor(.cauldronOrange)
-                                        .cornerRadius(Theme.Radius.card)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-
-                    // Attribution
-                    if let creator = originalCreator {
-                        HStack {
-                            Image(systemName: "person.circle.fill")
-                            Text("Shared by \(creator.displayName)")
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 8)
-                    }
-                }
-                .padding(.horizontal)
-
-                // Import button
-                Button(action: {
+                PrimaryActionButton(
+                    "Add to My Recipes",
+                    systemImage: "plus.circle.fill",
+                    isBusy: isImporting
+                ) {
+                    guard !isImporting else { return }
                     Task {
                         isImporting = true
+                        importErrorMessage = nil
                         do {
                             try await viewModel.importRecipe(recipe, originalCreator: originalCreator)
                             showSuccess = true
                         } catch {
                             AppLogger.general.error("Import error: \(error.localizedDescription)")
+                            importErrorMessage = error.localizedDescription
                         }
                         isImporting = false
                     }
-                }) {
-                    HStack {
-                        if isImporting {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        } else {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Add to My Recipes")
-                        }
-                    }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.cauldronOrange)
-                    .cornerRadius(Theme.Radius.card)
                 }
-                .disabled(isImporting)
-                .padding(.horizontal)
-                .padding(.top, 20)
+                .frame(maxWidth: 520)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xxl)
             }
-            .padding(.vertical)
         }
+        .warmCanvas()
     }
 
     // MARK: - Profile Preview
 
     private func profilePreview(_ user: User) -> some View {
-        VStack(spacing: 24) {
+        VStack(spacing: Theme.Spacing.xl) {
             Spacer()
 
-            // Profile Image
-            if let imageURL = user.profileImageURL {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 120, height: 120)
-                            .clipShape(Circle())
-                    case .failure, .empty:
-                        profilePlaceholder
-                    @unknown default:
+            AppCard(style: .elevated, alignment: .center) {
+                VStack(spacing: Theme.Spacing.md) {
+                    if let imageURL = user.profileImageURL {
+                        AsyncImage(url: imageURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 120, height: 120)
+                                    .clipShape(Circle())
+                            case .failure, .empty:
+                                profilePlaceholder
+                            @unknown default:
+                                profilePlaceholder
+                            }
+                        }
+                    } else {
                         profilePlaceholder
                     }
+
+                    VStack(spacing: Theme.Spacing.xs) {
+                        Text(user.displayName)
+                            .font(Theme.Typography.screenTitle)
+
+                        Text("@\(user.username)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            } else {
-                profilePlaceholder
             }
+            .frame(maxWidth: 520)
 
-            VStack(spacing: 8) {
-                Text(user.displayName)
-                    .font(.title)
-                    .fontWeight(.bold)
-
-                Text("@\(user.username)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            // Close button
-            Button(action: {
+            PrimaryActionButton("Close", systemImage: "xmark", tint: .secondary) {
                 dismiss()
-            }) {
-                HStack {
-                    Image(systemName: "xmark")
-                    Text("Close")
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.secondary)
-                .cornerRadius(Theme.Radius.card)
             }
-            .padding(.horizontal)
+            .frame(maxWidth: 520)
 
             Spacer()
         }
+        .padding(Theme.Spacing.md)
+        .warmCanvas()
     }
 
     // MARK: - Collection Preview
 
     private func collectionPreview(_ collection: Collection, owner: User?) -> some View {
         ScrollView {
-            VStack(spacing: 20) {
-                // Collection Cover Image
+            VStack(spacing: Theme.Spacing.lg) {
                 if let imageURL = collection.coverImageURL {
                     AsyncImage(url: imageURL) { phase in
                         switch phase {
@@ -331,72 +268,57 @@ struct ImportPreviewSheet: View {
                             placeholderImage
                         }
                     }
-                    .cornerRadius(Theme.Radius.card)
-                    .padding(.horizontal)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
                 }
 
-                VStack(spacing: 12) {
-                    Text(collection.name)
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.center)
+                AppCard(style: .glass, alignment: .center) {
+                    VStack(spacing: Theme.Spacing.sm) {
+                        Text(collection.name)
+                            .font(Theme.Typography.screenTitle)
+                            .multilineTextAlignment(.center)
 
-                    // Attribution
-                    if let owner = owner {
-                        HStack {
-                            Image(systemName: "person.circle.fill")
-                            Text("By \(owner.displayName)")
+                        if let owner {
+                            Label("By \(owner.displayName)", systemImage: "person.circle.fill")
+                                .font(Theme.Typography.metadata)
+                                .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                     }
                 }
-                .padding(.horizontal)
 
-                // Close button (collection import not supported)
-                Button(action: {
+                PrimaryActionButton("Close", systemImage: "xmark") {
                     dismiss()
-                }) {
-                    HStack {
-                        Image(systemName: "xmark")
-                        Text("Close")
-                    }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.cauldronOrange)
-                    .cornerRadius(Theme.Radius.card)
                 }
-                .disabled(isImporting)
-                .padding(.horizontal)
-                .padding(.top, 20)
+                .frame(maxWidth: 520)
             }
-            .padding(.vertical)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
+            .padding(Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.lg)
         }
+        .warmCanvas()
     }
 
     // MARK: - Helper Views
 
     private var placeholderImage: some View {
-        Rectangle()
-            .fill(Color.gray.opacity(0.2))
+        RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+            .fill(Color.appSurfaceElevated)
             .frame(height: 250)
             .overlay(
                 Image(systemName: "photo")
-                    .font(.system(size: 48))
-                    .foregroundColor(.gray)
+                    .font(.system(size: Theme.IconSize.large))
+                    .foregroundStyle(.secondary)
             )
     }
 
     private var profilePlaceholder: some View {
         Circle()
-            .fill(Color.gray.opacity(0.2))
+            .fill(Color.appSurfaceElevated)
             .frame(width: 120, height: 120)
             .overlay(
                 Image(systemName: "person.fill")
-                    .font(.system(size: 48))
-                    .foregroundColor(.gray)
+                    .font(.system(size: Theme.IconSize.large))
+                    .foregroundStyle(.secondary)
             )
     }
 }

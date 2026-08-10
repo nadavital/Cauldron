@@ -19,8 +19,12 @@ struct ConnectionsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
+                if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
+                    UserRowSkeletonList()
+                        .padding(.horizontal, Theme.Spacing.md)
+                }
                 // Pending requests received
-                if !viewModel.receivedRequests.isEmpty {
+                if !viewModel.isColdLoading && !RuntimeEnvironment.forceSkeletonLoading && !viewModel.receivedRequests.isEmpty {
                     sectionHeader(title: "Pending Requests", icon: "bell.badge.fill", color: .cauldronOrange)
 
                     ForEach(viewModel.receivedRequests, id: \.id) { connection in
@@ -41,7 +45,7 @@ struct ConnectionsView: View {
                 }
 
                 // Active friends
-                if !viewModel.connections.isEmpty {
+                if !viewModel.isColdLoading && !RuntimeEnvironment.forceSkeletonLoading && !viewModel.connections.isEmpty {
                     sectionHeader(title: "Friends", icon: "person.2.fill", color: .green)
 
                     ForEach(viewModel.connections, id: \.id) { connection in
@@ -53,7 +57,7 @@ struct ConnectionsView: View {
                 }
 
                 // Sent requests (pending)
-                if !viewModel.sentRequests.isEmpty {
+                if !viewModel.isColdLoading && !RuntimeEnvironment.forceSkeletonLoading && !viewModel.sentRequests.isEmpty {
                     sectionHeader(title: "Sent Requests", icon: "paperplane.fill", color: .blue)
 
                     ForEach(viewModel.sentRequests, id: \.id) { connection in
@@ -64,37 +68,19 @@ struct ConnectionsView: View {
                 }
 
                 // Empty state
-                if viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "person.2.circle")
-                            .font(.system(size: 72))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [Color.cauldronOrange, Color.cauldronOrange.opacity(0.6)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-
-                        VStack(spacing: 8) {
-                            Text("No Friends Yet")
-                                .font(.title2)
-                                .fontWeight(.bold)
-
-                            Text("Search for users in the Search tab to start adding friends!")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 80)
+                if !viewModel.isColdLoading && !RuntimeEnvironment.forceSkeletonLoading && viewModel.connections.isEmpty && viewModel.receivedRequests.isEmpty && viewModel.sentRequests.isEmpty {
+                    AppStateView(
+                        kind: .empty(systemImage: "person.2.circle"),
+                        title: "No Friends Yet",
+                        message: "Find people to start sharing recipes and collections."
+                    )
+                    .frame(minHeight: 360)
+                    .padding(.horizontal, Theme.Spacing.md)
                 }
             }
             .padding(.vertical, 12)
         }
-        .background(Color.cauldronBackground.ignoresSafeArea())
+        .warmCanvas()
         .navigationTitle("Friends")
         .task {
             await viewModel.loadConnections()
@@ -114,22 +100,13 @@ struct ConnectionsView: View {
     }
 
     private func sectionHeader(title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(color)
-
-            Text(title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-
+        HStack {
+            SectionHeaderLabel(title: title, systemImage: icon, iconColor: color)
             Spacer()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .padding(.top, 8)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .padding(.top, Theme.Spacing.xs)
     }
 }
 
@@ -145,12 +122,16 @@ struct ConnectionRequestCard: View {
     @State private var isProcessing = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.Spacing.sm) {
             // Avatar - smaller and more compact
             NavigationLink {
                 UserProfileView(user: user, dependencies: dependencies)
             } label: {
                 ProfileAvatar(user: user, size: 40, dependencies: dependencies)
+                    .frame(
+                        minWidth: Theme.HitTarget.minimum,
+                        minHeight: Theme.HitTarget.minimum
+                    )
             }
             .buttonStyle(.plain)
 
@@ -168,50 +149,49 @@ struct ConnectionRequestCard: View {
 
             Spacer()
 
-            // Action buttons - horizontal for compactness
             if isProcessing {
                 ProgressView()
+                    .controlSize(.small)
+                    .frame(
+                        minWidth: Theme.HitTarget.minimum,
+                        minHeight: Theme.HitTarget.minimum
+                    )
             } else {
-                HStack(spacing: 8) {
-                    Button {
+                HStack(spacing: Theme.Spacing.xs) {
+                    IconActionButton(
+                        "Accept friend request",
+                        systemImage: "checkmark",
+                        style: .tinted,
+                        tint: .green
+                    ) {
                         guard !isProcessing else { return }
                         isProcessing = true
                         Task {
                             await onAccept()
                             isProcessing = false
                         }
-                    } label: {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.green)
-                            .clipShape(Circle())
                     }
 
-                    Button {
+                    IconActionButton(
+                        "Decline friend request",
+                        systemImage: "xmark",
+                        style: .tinted,
+                        tint: .red
+                    ) {
                         guard !isProcessing else { return }
                         isProcessing = true
                         Task {
                             await onReject()
                             isProcessing = false
                         }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.red)
-                            .clipShape(Circle())
                     }
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.cauldronOrange.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 2)
+        .padding(Theme.Spacing.sm)
+        .appSurface(.resting)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xxs)
     }
 }
 
@@ -225,34 +205,11 @@ struct ConnectionCard: View {
         NavigationLink {
             UserProfileView(user: user, dependencies: dependencies)
         } label: {
-            HStack(spacing: 16) {
-                // Avatar
-                ProfileAvatar(user: user, size: 60, dependencies: dependencies)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(user.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Text("@\(user.username)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary.opacity(0.5))
-            }
-            .padding(16)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(Theme.Radius.large)
-            .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            ConnectionPersonRow(user: user, dependencies: dependencies)
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xs)
     }
 }
 
@@ -266,42 +223,51 @@ struct SentRequestCard: View {
         NavigationLink {
             UserProfileView(user: user, dependencies: dependencies)
         } label: {
-            HStack(spacing: 16) {
-                // Avatar
+            ConnectionPersonRow(
+                user: user,
+                dependencies: dependencies,
+                status: "Pending"
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+}
+
+private struct ConnectionPersonRow: View {
+    let user: User
+    let dependencies: DependencyContainer
+    var status: String? = nil
+
+    var body: some View {
+        AppCard(style: .resting) {
+            HStack(spacing: Theme.Spacing.md) {
                 ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                     Text(user.displayName)
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                        .font(Theme.Typography.cardTitle)
+                        .foregroundStyle(.primary)
 
                     Text("@\(user.username)")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
 
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.caption2)
-                        Text("Pending")
-                            .font(.caption)
+                    if let status {
+                        Label(status, systemImage: "clock")
+                            .font(Theme.Typography.metadata)
+                            .foregroundStyle(.blue)
                     }
-                    .foregroundColor(.blue)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary.opacity(0.5))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(16)
-            .background(Color.cauldronSecondaryBackground)
-            .cornerRadius(Theme.Radius.large)
-            .shadow(color: .black.opacity(0.04), radius: 6, x: 0, y: 2)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -314,6 +280,16 @@ final class ConnectionsViewModel {
     var usersMap: [UUID: User] = [:]
     var showErrorAlert = false
     var alertMessage = ""
+    private(set) var isLoading = true
+    private(set) var hasLoadedOnce = false
+
+    var isColdLoading: Bool {
+        SkeletonPresentationPolicy.shouldShow(
+            isLoading: isLoading,
+            hasResolvedOnce: hasLoadedOnce,
+            hasContent: !connections.isEmpty || !receivedRequests.isEmpty || !sentRequests.isEmpty
+        )
+    }
 
     let dependencies: DependencyContainer
     private let cacheValidityDuration: TimeInterval = 1800 // 30 minutes
@@ -339,6 +315,11 @@ final class ConnectionsViewModel {
     nonisolated deinit {}
 
     func loadConnections(forceRefresh: Bool = false) async {
+        isLoading = true
+        defer {
+            isLoading = false
+            hasLoadedOnce = true
+        }
         // Use ConnectionManager - it handles caching and sync automatically
         await dependencies.connectionManager.loadConnections(forUserId: currentUserId, forceRefresh: forceRefresh)
 

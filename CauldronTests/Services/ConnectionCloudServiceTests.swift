@@ -1,7 +1,13 @@
 import XCTest
+import CloudKit
 @testable import Cauldron
 
 final class ConnectionCloudServiceTests: XCTestCase {
+    func testUnknownItemMeansConnectionDeleteAlreadySucceeded() {
+        XCTAssertTrue(ConnectionCloudService.deletionIsSatisfied(by: CKError(.unknownItem)))
+        XCTAssertFalse(ConnectionCloudService.deletionIsSatisfied(by: CKError(.networkFailure)))
+    }
+
     func testCanonicalDuplicateConnectionKeepsAcceptedOverNewerPending() {
         let userA = UUID()
         let userB = UUID()
