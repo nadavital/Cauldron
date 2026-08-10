@@ -873,7 +873,7 @@ actor CollectionRepository {
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, id, tombstone, removedMembershipEdges] in
+        Task.detached { [weak self, tombstone, removedMembershipEdges] in
             guard let self = self else { return }
 
             // Mark operation as in progress

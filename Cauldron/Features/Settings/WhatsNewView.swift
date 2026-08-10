@@ -29,7 +29,7 @@ struct WhatsNewView: View {
                         Text("What's New")
                             .font(Theme.Typography.screenTitle)
 
-                        Text("Imports recover, recipes travel farther, and Siri understands more of your kitchen.")
+                        Text("A calmer design, safer imports, and more ways to use your recipes.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -38,34 +38,28 @@ struct WhatsNewView: View {
                     AppCard(style: .resting, padding: Theme.Spacing.lg) {
                         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                             FeatureRow(
+                                symbol: "sparkles",
+                                color: .cauldronOrange,
+                                title: "Refined Design",
+                                detail: "Cleaner navigation, recipe details, collections, and large-screen layouts now share one warmer visual system."
+                            )
+                            FeatureRow(
                                 symbol: "tray.full.fill",
                                 color: .purple,
-                                title: "Import Inbox",
-                                detail: "Shared recipes are saved to a durable inbox first, so an interrupted import can be reviewed or retried later."
+                                title: "Safer Imports",
+                                detail: "Interrupted share-sheet imports are saved first, so you can review or retry them later."
                             )
                             FeatureRow(
-                                symbol: "sparkles",
+                                symbol: "waveform",
                                 color: .blue,
-                                title: "Smarter Siri & Visual Search",
-                                detail: "Find and open your recipes, add ingredients, import links or text, control Cook Mode, and discover visual matches with supported Apple Intelligence features."
-                            )
-                            FeatureRow(
-                                symbol: "flame.fill",
-                                color: .cauldronOrange,
-                                title: "Cook Mode Everywhere",
-                                detail: "Resume and navigate cooking from Siri, Shortcuts, widgets, and Live Activities—even after Cauldron relaunches."
+                                title: "Siri & Visual Search",
+                                detail: "Find recipes, add ingredients, import content, and control Cook Mode with supported Apple Intelligence features."
                             )
                             FeatureRow(
                                 symbol: "safari.fill",
-                                color: .cauldronOrange,
-                                title: "Recipes on the Web",
-                                detail: "Share your profile or a public recipe with anyone. Recipe links now open as complete, readable pages with an easy path back to Cauldron."
-                            )
-                            FeatureRow(
-                                symbol: "checkmark.seal.fill",
                                 color: .green,
-                                title: "More Reliable by Design",
-                                detail: "Persistent timers, clearer sync health, safer grocery merging, private diagnostics, and Apple Intelligence fallback make everyday use steadier."
+                                title: "Sharing That Travels",
+                                detail: "Public recipes open as complete web pages, while syncing, timers, and grocery updates recover more reliably."
                             )
                         }
                     }

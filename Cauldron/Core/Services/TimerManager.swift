@@ -429,7 +429,7 @@ class TimerManager: ObservableObject {
     }
     
     private func scheduleNotification(for timer: ActiveTimer) {
-        guard schedulesNotifications else { return }
+        guard schedulesNotifications, !RuntimeEnvironment.isSimulatorQAMode else { return }
         let content = UNMutableNotificationContent()
         content.title = "Timer Complete!"
         content.body = "\(timer.spec.label) - \(timer.recipeName)"

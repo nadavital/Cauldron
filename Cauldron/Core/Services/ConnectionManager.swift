@@ -911,6 +911,7 @@ class ConnectionManager: ObservableObject {
     /// Update app icon badge count based on pending connection requests
     func updateBadgeCount() {
         guard isCloudSyncEnabled else { return }
+        guard !RuntimeEnvironment.isSimulatorQAMode else { return }
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(pendingRequestsCount)
@@ -923,6 +924,7 @@ class ConnectionManager: ObservableObject {
     /// Clear app icon badge (call when user views connection requests)
     func clearBadge() {
         guard isCloudSyncEnabled else { return }
+        guard !RuntimeEnvironment.isSimulatorQAMode else { return }
         Task {
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(0)
