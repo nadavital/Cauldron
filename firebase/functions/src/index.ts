@@ -307,6 +307,20 @@ export function canonicalCloudKitRecipeCreator(
     return { username, displayName, profileEmoji, profileColor };
 }
 
+export function cloudKitOwnerQuery(ownerId: string): object {
+    return {
+        query: {
+            recordType: "User",
+            filterBy: [{
+                fieldName: "userId",
+                comparator: "EQUALS",
+                fieldValue: { value: ownerId },
+            }],
+        },
+        resultsLimit: 20,
+    };
+}
+
 export function cloudKitReferralRecordIsActive(
     record: CloudKitRecordLike,
     referralCode: string
@@ -402,18 +416,7 @@ async function verifyCloudKitAuthority(
     }
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
     const endpoint = new URL(`https://api.apple-cloudkit.com${subpath}`);
-    const body = JSON.stringify({
-        query: {
-            recordType: "User",
-            filterBy: [{
-                fieldName: "userId",
-                comparator: "EQUALS",
-                fieldValue: { value: ownerId },
-            }],
-            sortBy: [{ systemFieldName: "createdTimestamp", ascending: true }],
-        },
-        resultsLimit: 20,
-    });
+    const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
     const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const signatureInput = cloudKitSignatureInput(body, date, subpath);
     const signature = createSign("SHA256")
@@ -731,18 +734,7 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
         return null;
     }
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
-    const body = JSON.stringify({
-        query: {
-            recordType: "User",
-            filterBy: [{
-                fieldName: "userId",
-                comparator: "EQUALS",
-                fieldValue: { value: ownerId },
-            }],
-            sortBy: [{ systemFieldName: "createdTimestamp", ascending: true }],
-        },
-        resultsLimit: 20,
-    });
+    const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
     const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const signature = createSign("SHA256")
         .update(cloudKitSignatureInput(body, date, subpath))

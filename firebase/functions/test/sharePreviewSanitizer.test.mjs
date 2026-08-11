@@ -7,6 +7,7 @@ import {
     cloudKitReferralQueryResolvesUniquely,
     canonicalCloudKitOwnerRecord,
     canonicalCloudKitRecipeCreator,
+    cloudKitOwnerQuery,
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
     generateCompactRecipePageHtml,
@@ -271,6 +272,23 @@ test("CloudKit server request signature input hashes the exact body", async () =
     const subpath = "/database/1/iCloud.Nadav.Cauldron/production/public/records/lookup";
     const expectedHash = createHash("sha256").update(body, "utf8").digest("base64");
     assert.equal(cloudKitSignatureInput(body, date, subpath), `${date}:${expectedHash}:${subpath}`);
+});
+
+test("CloudKit owner lookup uses only production-indexed query fields", () => {
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const query = cloudKitOwnerQuery(ownerId);
+    assert.deepEqual(query, {
+        query: {
+            recordType: "User",
+            filterBy: [{
+                fieldName: "userId",
+                comparator: "EQUALS",
+                fieldValue: { value: ownerId },
+            }],
+        },
+        resultsLimit: 20,
+    });
+    assert.equal("sortBy" in query.query, false);
 });
 
 test("CloudKit referral validation accepts only canonical current User records", () => {
