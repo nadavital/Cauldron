@@ -675,7 +675,7 @@ private struct RecipeDetailIOS27Chrome: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 27.0, *) {
-            content.toolbarMinimizeBehavior(.onScrollDown, for: .navigationBar)
+            content.toolbarMinimizationBehavior(.onScrollDown, for: .navigationBar)
         } else {
             content
         }
