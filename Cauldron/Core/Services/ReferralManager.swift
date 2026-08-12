@@ -332,9 +332,14 @@ final class ReferralManager: ObservableObject {
 
 /// Helpers for parsing referral invite links.
 enum ReferralInviteLink {
+    private static let supportedHosts = Set([
+        "cauldron-f900a.web.app",
+        "cauldron-f900a.firebaseapp.com",
+    ])
+
     static func referralCode(from url: URL) -> String? {
         let host = url.host?.lowercased() ?? ""
-        let isSupportedHost = host.contains("web.app") || host.contains("firebaseapp.com") || host == "cauldron.app"
+        let isSupportedHost = supportedHosts.contains(host)
 
         if url.scheme?.lowercased() == "cauldron" {
             // Supports: cauldron://invite?code=ABC123 and cauldron://invite/ABC123
@@ -352,7 +357,7 @@ enum ReferralInviteLink {
             return nil
         }
 
-        guard isSupportedHost else { return nil }
+        guard url.scheme?.lowercased() == "https", isSupportedHost else { return nil }
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         if let queryCode = components?

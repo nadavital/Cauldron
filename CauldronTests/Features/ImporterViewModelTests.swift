@@ -152,6 +152,27 @@ final class ImporterViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.canImport)
     }
 
+    func testClearSourceErrorsRemovesStaleFailureWhenIdle() {
+        let (viewModel, _) = makeViewModel()
+        viewModel.errorMessage = "Invalid recipe source"
+        viewModel.ocrErrorMessage = "Could not read image"
+
+        viewModel.clearSourceErrors()
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.ocrErrorMessage)
+    }
+
+    func testClearSourceErrorsPreservesActiveImportFailure() {
+        let (viewModel, _) = makeViewModel()
+        viewModel.isLoading = true
+        viewModel.errorMessage = "Current failure"
+
+        viewModel.clearSourceErrors()
+
+        XCTAssertEqual(viewModel.errorMessage, "Current failure")
+    }
+
     // MARK: - URL Import Tests - Invalid URLs
 
     func testImportRecipe_TikTok_InvalidURL_ReturnsError() async {

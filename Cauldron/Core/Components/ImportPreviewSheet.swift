@@ -325,7 +325,7 @@ struct ImportPreviewSheet: View {
 
 #Preview {
     let dependencies = DependencyContainer.preview()
-    let url = URL(string: "https://cauldron.web.app/recipe/abc123")!
+    let url = URL(string: "https://cauldron-f900a.web.app/recipe/abc123")!
 
     return ImportPreviewSheet(url: url, dependencies: dependencies)
 }

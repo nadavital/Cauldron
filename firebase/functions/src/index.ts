@@ -2520,6 +2520,7 @@ function compactPageStyles(): string {
         .description { max-width:48ch; margin:18px 0 0; color:var(--muted); font-size:16px; line-height:1.55; }
         .meta { display:flex; flex-wrap:wrap; gap:10px 16px; margin:22px 0 0; padding:0; color:var(--muted); list-style:none; font-size:13px; }
         .action { min-height:44px; width:max-content; margin-top:28px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
+        .download-action { min-height:44px; width:max-content; margin:28px 0 0 14px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
         .shelf { margin-top:68px; }
         .count { margin:0 0 24px; color:var(--muted); font-size:13px; font-weight:650; }
         .recipe-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 52px; margin:0; padding:0; list-style:none; counter-reset:recipes; }
@@ -2533,7 +2534,7 @@ function compactPageStyles(): string {
         a:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
         @media (hover:hover) { .recipe-row:hover .recipe-name { color:var(--accent-text); } .action:hover { filter:brightness(.97); } }
         @media (max-width:680px) { .bar,main { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } main { margin-top:30px; margin-bottom:72px; } .recipe-list { grid-template-columns:1fr; gap:4px; } .shelf { margin-top:58px; } .identity { align-items:flex-start; } }
-        @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
+        @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action,.download-action { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
     </style>`;
 }
 
@@ -2548,11 +2549,14 @@ function compactBrandHeader(): string {
     return `<header class="bar"><div class="brand"><picture><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span>Cauldron</span></div></header>`;
 }
 
-function appOpenFallbackScript(elementId: string, appURL: string, downloadURL: string): string {
+function appOpenFallbackScript(elementId: string, appURL: string): string {
     const safeElementId = JSON.stringify(elementId).replace(/</g, "\\u003c");
     const safeAppURL = JSON.stringify(appURL).replace(/</g, "\\u003c");
-    const safeDownloadURL = JSON.stringify(downloadURL).replace(/</g, "\\u003c");
-    return `<script>(function(){var button=document.getElementById(${safeElementId});if(!button)return;var appURL=${safeAppURL};var downloadURL=${safeDownloadURL};button.addEventListener("click",function(event){event.preventDefault();var started=Date.now();window.location.href=appURL;setTimeout(function(){if(document.visibilityState==="visible"&&Date.now()-started<2200){window.location.href=downloadURL;}},1300);});})();</script>`;
+    // Do not automatically redirect to the App Store. iOS may keep Safari's
+    // page visible briefly while presenting the system confirmation dialog;
+    // a timer-based fallback then steals focus back from an installed app.
+    // The page's explicit download action remains the unambiguous fallback.
+    return `<script>(function(){var button=document.getElementById(${safeElementId});if(!button)return;var appURL=${safeAppURL};button.addEventListener("click",function(event){event.preventDefault();window.location.assign(appURL);});})();</script>`;
 }
 
 export function generatePublicStatusPageHtml(title: string, message: string): string {
@@ -2573,7 +2577,7 @@ export function generateCompactRecipePageHtml(
         ...recipe.tags.slice(0, 3),
     ].filter((value): value is string => Boolean(value));
     const metaHTML = metadata.map((value) => `<li>${escapeHtml(value)}</li>`).join("");
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(recipe.title, description, canonicalURL)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${escapeHtml(recipe.title)}</h1>${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}<a class="action" id="openCompactRecipe" href="${escapeHtml(appURL)}">Open in Cauldron</a></article></main>${appOpenFallbackScript("openCompactRecipe", appURL, downloadURL)}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(recipe.title, description, canonicalURL)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${escapeHtml(recipe.title)}</h1>${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}<a class="action" id="openCompactRecipe" href="${escapeHtml(appURL)}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a></article></main>${appOpenFallbackScript("openCompactRecipe", appURL)}</body></html>`;
 }
 
 function formatWebQuantityValue(value: number): string {
@@ -2733,6 +2737,7 @@ export function generateRecipePageHtml(
         .tags li { display:flex; gap:5px; align-items:center; font-size:12px; font-weight:600; }
         .recipe-actions { margin-top:34px; display:flex; flex-wrap:wrap; align-items:center; gap:18px; }
         .intro-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
+        .download-action { min-height:44px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
         .share-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 0; border:0; color:var(--muted); background:none; font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
         .share-action:hover { color:var(--ink); }
         .share-status { color:var(--muted); font-size:12px; }
@@ -2761,7 +2766,7 @@ export function generateRecipePageHtml(
         @media (max-width:820px) { .topbar,main { width:min(calc(100% - 32px),680px); } .topbar { min-height:68px; } main { margin:24px auto 80px; } .recipe-masthead { grid-template-columns:1fr; gap:30px; } .hero-image { aspect-ratio:4/3; border-radius:12px; } .recipe-intro { padding:0; } h1 { max-width:16ch; font-size:clamp(40px,11vw,56px); } .meta { margin-top:22px; } .recipe-actions { margin-top:28px; } .recipe-body { grid-template-columns:1fr; gap:58px; margin-top:72px; } .ingredients-column { position:static; } .method { max-width:none; } }
         @media (max-width:430px) { .brand-name { font-size:19px; } .brand-icon,.brand-icon img { width:30px; height:30px; } .creator-copy { flex-direction:column; gap:1px; align-items:flex-start; } }
         @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .topbar,.recipe-actions { display:none; } body { background:#fff; } main { width:100%; margin:0; } .recipe-masthead { grid-template-columns:42% 1fr; gap:32px; align-items:start; } .hero-image { max-height:360px; border-radius:0; } h1 { font-size:42px; } .recipe-body { grid-template-columns:34% 1fr; gap:44px; margin-top:48px; } .ingredients-column { position:static !important; } .step { break-inside:avoid; } }
-    </style></head><body><header class="topbar"><div class="brand"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></div></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main><script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL, downloadURL)}</body></html>`;
+    </style></head><body><header class="topbar"><div class="brand"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></div></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main><script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
 }
 
 export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptions): string {
@@ -2776,7 +2781,7 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
     const identity = options.avatarEmoji
         ? `<div class="identity"><span class="profile-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(options.avatarEmoji)}</span><div class="identity-text"><h1>${escapeHtml(options.title)}</h1>${handleHTML}</div></div>`
         : `<h1>${escapeHtml(options.title)}</h1>`;
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(options.title, options.description, options.canonicalURL, options.openGraphType)}</head><body>${compactBrandHeader()}<main><section class="intro">${identity}<a class="action" id="openRecipeShelf" href="${safeAppURL}">Open in Cauldron</a></section><section class="shelf" aria-labelledby="recipe-count"><p class="count" id="recipe-count">${count} ${noun}</p>${rows ? `<ol class="recipe-list">${rows}</ol>` : `<p class="empty">No public recipes have been shared here yet.</p>`}</section></main>${appOpenFallbackScript("openRecipeShelf", options.appURL, options.downloadURL)}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(options.title, options.description, options.canonicalURL, options.openGraphType)}</head><body>${compactBrandHeader()}<main><section class="intro">${identity}<a class="action" id="openRecipeShelf" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(options.downloadURL)}">Get the app</a></section><section class="shelf" aria-labelledby="recipe-count"><p class="count" id="recipe-count">${count} ${noun}</p>${rows ? `<ol class="recipe-list">${rows}</ol>` : `<p class="empty">No public recipes have been shared here yet.</p>`}</section></main>${appOpenFallbackScript("openRecipeShelf", options.appURL)}</body></html>`;
 }
 
 type InviteRequestLike = {
@@ -2816,7 +2821,7 @@ function extractReferralCodeFromRequest(req: InviteRequestLike): string | null {
     return null;
 }
 
-function generateInvitePreviewHtml(inviteCode: string | null): string {
+export function generateInvitePreviewHtml(inviteCode: string | null): string {
     const hasValidCode = inviteCode !== null;
     const universalURL = hasValidCode
         ? `https://cauldron-f900a.web.app/invite/${inviteCode}`
@@ -2998,19 +3003,12 @@ function generateInvitePreviewHtml(inviteCode: string | null): string {
     <script>
         (function() {
             var deepLink = ${JSON.stringify(appURL)};
-            var appStoreURL = ${JSON.stringify(appStoreURL)};
             var inviteCode = ${JSON.stringify(inviteCode)};
 
             var openButton = document.getElementById("openAppButton");
             if (openButton) {
                 openButton.addEventListener("click", function() {
-                    var start = Date.now();
-                    window.location.href = deepLink;
-                    setTimeout(function() {
-                        if (Date.now() - start < 2200) {
-                            window.location.href = appStoreURL;
-                        }
-                    }, 1300);
+                    window.location.assign(deepLink);
                 });
             }
 

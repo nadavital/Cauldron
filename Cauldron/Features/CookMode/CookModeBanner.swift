@@ -13,10 +13,10 @@ struct CookModeBanner: View {
     let coordinator: CookModeCoordinator
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.Spacing.xs) {
             // Recipe icon
             recipeIcon
-                .frame(width: 36, height: 36)
+                .frame(width: 28, height: 28)
 
             // Recipe info
             VStack(alignment: .leading, spacing: 2) {
@@ -32,7 +32,7 @@ struct CookModeBanner: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Theme.Spacing.xs)
 
             // Timer badge (if timers active)
             if !dependencies.timerManager.activeTimers.isEmpty {
@@ -48,9 +48,10 @@ struct CookModeBanner: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("End cooking")
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 20)
+        .padding(.vertical, Theme.Spacing.xxs)
+        .padding(.horizontal, Theme.Spacing.md)
     }
 
     // MARK: - Subviews

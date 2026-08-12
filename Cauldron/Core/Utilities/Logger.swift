@@ -11,7 +11,7 @@ import os.log
 /// Centralized logging for the app
 /// Uses os.log for production and print for debug builds to ensure visibility in Xcode console
 struct AppLogger {
-    nonisolated private static let subsystem = Bundle.main.bundleIdentifier ?? "com.cauldron.app"
+    nonisolated private static let subsystem = Bundle.main.bundleIdentifier ?? "Nadav.Cauldron"
 
     nonisolated static let general = Logger(subsystem: subsystem, category: "general")
     nonisolated static let parsing = Logger(subsystem: subsystem, category: "parsing")

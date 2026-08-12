@@ -11,6 +11,7 @@ import {
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
     generateCompactRecipePageHtml,
+    generateInvitePreviewHtml,
     generatePublicStatusPageHtml,
     generateRecipePageHtml,
     generatePreviewHtml,
@@ -32,6 +33,14 @@ import {
     retiredCapabilityCannotSupersedeRestoration,
     sanitizeRecipeUnshareInput,
 } from "../lib/index.js";
+
+test("invite preview opens the app without an automatic App Store redirect", () => {
+    const html = generateInvitePreviewHtml("ABC123");
+    assert.match(html, /window\.location\.assign\(deepLink\)/);
+    assert.doesNotMatch(html, /setTimeout\(/);
+    assert.doesNotMatch(html, /window\.location\.href\s*=\s*appStoreURL/);
+    assert.match(html, /Download Cauldron<\/a>/);
+});
 
 test("public responses use browser defense-in-depth headers", () => {
     const headers = publicSecurityHeaders();
@@ -366,7 +375,8 @@ test("recipe web content is summary-only, normalized, and safe", () => {
     assert.doesNotMatch(html, /Ingredients|Method/);
     assert.doesNotMatch(html, /Shared recipe|The full recipe is available in Cauldron/);
     assert.equal((html.match(/href="cauldron:\/\/import\/recipe\//g) ?? []).length, 1);
-    assert.match(html, /https:\/\/apps\.apple\.com\/app\/id6754004943/);
+    assert.match(html, /href="https:\/\/apps\.apple\.com\/app\/id6754004943">Get the app<\/a>/);
+    assert.match(html, /window\.location\.assign\(appURL\)/);
     assert.match(html, /id="openCompactRecipe"/);
     assert.doesNotMatch(html, /surface|secondary|<footer/);
     assert.doesNotMatch(html, /application\/ld\+json/);
@@ -411,7 +421,8 @@ test("profile and collection pages expose clean recipe shelves without managemen
     assert.match(html, /class="profile-avatar"[^>]*>🧑‍🍳<\/span>/);
     assert.match(html, /class="recipe-list"/);
     assert.match(html, /id="openRecipeShelf"/);
-    assert.match(html, /https:\/\/apps\.apple\.com\/us\/app\/cauldron-magical-recipes\/id6754004943/);
+    assert.match(html, /href="https:\/\/apps\.apple\.com\/us\/app\/cauldron-magical-recipes\/id6754004943">Get the app<\/a>/);
+    assert.match(html, /window\.location\.assign\(appURL\)/);
     assert.doesNotMatch(html, /class="surface"|<footer|Get Cauldron/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /unshare|stop sharing|make private/i);
@@ -521,8 +532,10 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.doesNotMatch(html, /Recipe by/);
     assert.match(html, /class="creator-avatar"[^>]*>🧑‍🍳<\/span>/);
     assert.equal((html.match(/href="cauldron:\/\/import\/recipe\//g) ?? []).length, 1);
-    assert.match(html, /https:\/\/apps\.apple\.com\/app\/id6754004943/);
+    assert.match(html, /href="https:\/\/apps\.apple\.com\/app\/id6754004943">Get the app<\/a>/);
     assert.match(html, /id="openRecipe"/);
+    assert.match(html, /window\.location\.assign\(appURL\)/);
+    assert.doesNotMatch(html, /window\.location\.href=downloadURL/);
     assert.doesNotMatch(html, /<footer|top-action|Get Cauldron/);
     assert.match(html, /@media print/);
     assert.match(html, /id="shareRecipe"/);

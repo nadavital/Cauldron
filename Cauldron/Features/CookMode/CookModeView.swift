@@ -179,24 +179,15 @@ struct CookModeView: View {
     private var compactContent: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: 0) {
-                    recipeVisualHeader
-                        .overlay(alignment: .bottom) {
-                            stepProgressBadge
-                                .padding(.horizontal, 16)
-                                .offset(y: 20)
-                        }
-                    VStack(spacing: 24) {
-                        stepContent
-                        timersSection
-                    }
-                    .padding(.top, 34)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                VStack(spacing: Theme.Spacing.lg) {
+                    stepProgressBadge
+                    stepContent
+                    timersSection
                 }
+                .padding(.top, Theme.Spacing.md)
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.lg)
             }
-
-            Spacer()
 
             navigationControls
         }

@@ -89,6 +89,12 @@ import os
         errorMessage = nil
         ocrErrorMessage = nil
     }
+
+    func clearSourceErrors() {
+        guard !isLoading else { return }
+        errorMessage = nil
+        ocrErrorMessage = nil
+    }
     
     func importRecipe() async {
         isLoading = true

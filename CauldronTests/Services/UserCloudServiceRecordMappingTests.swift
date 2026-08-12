@@ -56,6 +56,43 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
             .alreadyRegistered
         )
     }
+
+    func testUsernameClaimAcceptsMatchingCreatorIdentity() {
+        XCTAssertTrue(UserCloudService.usernameClaimBelongsToUser(
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            claimedUserID: "user-id",
+            claimedUsername: "chef",
+            creatorRecordName: "icloud-id",
+            expectedUserID: "user-id",
+            expectedUsername: "chef",
+            expectedIdentityRecordName: "icloud-id"
+        ))
+    }
+
+    func testUsernameClaimRejectsWritableIdentityWhenCreatorDiffers() {
+        XCTAssertFalse(UserCloudService.usernameClaimBelongsToUser(
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            claimedUserID: "user-id",
+            claimedUsername: "chef",
+            creatorRecordName: "server-owner",
+            expectedUserID: "user-id",
+            expectedUsername: "chef",
+            expectedIdentityRecordName: "icloud-id"
+        ))
+    }
+
+    func testUsernameClaimRejectsDifferentIdentityOrAccount() {
+        XCTAssertFalse(UserCloudService.usernameClaimBelongsToUser(
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            claimedUserID: "other-user",
+            claimedUsername: "chef",
+            creatorRecordName: "other-icloud-id",
+            expectedUserID: "user-id",
+            expectedUsername: "chef",
+            expectedIdentityRecordName: "icloud-id"
+        ))
+    }
+
     func testPopulateUserRecordClearsRemovedOptionalFields() async throws {
         let service = UserCloudService(core: CloudKitCore())
         let userId = UUID()

@@ -17,6 +17,7 @@ struct SearchTabView: View {
     @State private var searchMode: SearchMode = .recipes
     @State private var searchHistory: SearchHistoryStore
     @State private var showingProfileSheet = false
+    @State private var showingIngredientFilters = false
     @Namespace private var recipeTransition
 
     enum SearchMode: String, CaseIterable {
@@ -55,6 +56,9 @@ struct SearchTabView: View {
                         }
                 }
             }
+        }
+        .sheet(isPresented: $showingIngredientFilters) {
+            ingredientFiltersSheet
         }
         .task {
             searchHistory.selectOwner(currentUserSession.userId)
@@ -207,6 +211,7 @@ struct SearchTabView: View {
                 }
                 .padding()
             }
+            .contentMargins(.bottom, Theme.Spacing.xxl, for: .scrollContent)
         }
         .warmCanvas()
     }
@@ -272,37 +277,32 @@ struct SearchTabView: View {
                     Text(section.rawValue)
                         .font(Theme.Typography.sectionTitle)
 
-                    GlassEffectContainer(spacing: 2) {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
-                            ForEach(RecipeCategory.all(in: section)) { category in
-                                Button {
-                                    navigationPath.append(Tag(name: category.tagValue))
-                                } label: {
-                                    HStack(spacing: Theme.Spacing.sm) {
-                                        // Icon Container
-                                        ZStack {
-                                            Circle()
-                                                .fill(category.color.opacity(0.15))
-                                                .frame(width: 40, height: 40)
-                                            Text(category.emoji)
-                                                .font(.title3)
-                                        }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: Theme.Spacing.sm)], spacing: Theme.Spacing.sm) {
+                        ForEach(RecipeCategory.all(in: section)) { category in
+                            Button {
+                                navigationPath.append(Tag(name: category.tagValue))
+                            } label: {
+                                HStack(spacing: Theme.Spacing.sm) {
+                                    Text(category.emoji)
+                                        .font(.body)
+                                        .frame(width: 30, height: 30)
+                                        .background(category.color.opacity(0.1), in: Circle())
 
-                                        Text(category.displayName)
-                                            .font(.body)
-                                            .fontWeight(.medium)
-                                            .foregroundColor(.primary)
+                                    Text(category.displayName)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
 
-                                        Spacer()
-                                    }
-                                    .padding(Theme.Spacing.sm)
-                                    .glassEffect(
-                                        .regular.tint(category.color.opacity(0.35)).interactive(),
-                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                                    )
+                                    Spacer(minLength: 0)
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
                                 }
-                                .buttonStyle(PressableScaleStyle())
+                                .padding(.horizontal, Theme.Spacing.sm)
+                                .padding(.vertical, Theme.Spacing.xs)
+                                .appSurface(.resting)
                             }
+                            .buttonStyle(PressableScaleStyle())
                         }
                     }
                 }
@@ -326,14 +326,6 @@ struct SearchTabView: View {
                 .padding(.vertical, Theme.Spacing.xxl)
             } else {
                 refinementBar
-
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    TextField("Must include ingredients (comma separated)", text: $viewModel.requiredIngredientsText)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Exclude ingredients (comma separated)", text: $viewModel.excludedIngredientsText)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .accessibilityElement(children: .contain)
 
                 if results.isEmpty {
                     EmptyStateView(
@@ -376,49 +368,152 @@ struct SearchTabView: View {
 
     /// Time filter + sort controls shown above recipe results.
     private var refinementBar: some View {
-        GlassEffectContainer(spacing: Theme.Spacing.sm) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Menu {
-                    Picker("Time", selection: $viewModel.timeFilter) {
-                        ForEach(RecipeTimeFilter.allCases) { filter in
-                            Text(filter.label).tag(filter)
+        ScrollView(.horizontal, showsIndicators: false) {
+            GlassEffectContainer(spacing: Theme.Spacing.sm) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Menu {
+                        Picker("Time", selection: $viewModel.timeFilter) {
+                            ForEach(RecipeTimeFilter.allCases) { filter in
+                                Text(filter.label).tag(filter)
+                            }
+                        }
+                    } label: {
+                        refinementChip(
+                            title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
+                            systemImage: "clock",
+                            isActive: viewModel.timeFilter != .any
+                        )
+                    }
+
+                    Button {
+                        showingIngredientFilters = true
+                    } label: {
+                        refinementChip(
+                            title: ingredientFilterLabel,
+                            systemImage: "carrot",
+                            isActive: hasIngredientFilters
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Menu {
+                        Picker("Sort", selection: $viewModel.sortOrder) {
+                            ForEach(RecipeSortOrder.allCases) { order in
+                                Text(order.label).tag(order)
+                            }
+                        }
+                    } label: {
+                        refinementChip(
+                            title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
+                            systemImage: "arrow.up.arrow.down",
+                            isActive: viewModel.sortOrder != .relevance
+                        )
+                    }
+
+                    if viewModel.hasActiveRefinements {
+                        IconActionButton(
+                            "Clear filters",
+                            systemImage: "xmark",
+                            style: .glass,
+                            tint: .secondary
+                        ) {
+                            withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
                         }
                     }
-                } label: {
-                    refinementChip(
-                        title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
-                        systemImage: "clock",
-                        isActive: viewModel.timeFilter != .any
-                    )
                 }
-
-                Menu {
-                    Picker("Sort", selection: $viewModel.sortOrder) {
-                        ForEach(RecipeSortOrder.allCases) { order in
-                            Text(order.label).tag(order)
-                        }
-                    }
-                } label: {
-                    refinementChip(
-                        title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
-                        systemImage: "arrow.up.arrow.down",
-                        isActive: viewModel.sortOrder != .relevance
-                    )
-                }
-
-                if viewModel.hasActiveRefinements {
-                    IconActionButton(
-                        "Clear filters",
-                        systemImage: "xmark",
-                        style: .glass,
-                        tint: .secondary
-                    ) {
-                        withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
-                    }
-                }
-
-                Spacer()
             }
+        }
+        .contentMargins(.horizontal, 1, for: .scrollContent)
+    }
+
+    private var hasIngredientFilters: Bool {
+        !viewModel.requiredIngredientsText.trimmed.isEmpty ||
+            !viewModel.excludedIngredientsText.trimmed.isEmpty
+    }
+
+    private var ingredientFilterLabel: String {
+        let filterCount = [
+            viewModel.requiredIngredientsText,
+            viewModel.excludedIngredientsText,
+        ].filter { !$0.trimmed.isEmpty }.count
+        return filterCount == 0 ? "Ingredients" : "Ingredients · \(filterCount)"
+    }
+
+    private var ingredientFiltersSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Ingredient filters")
+                            .font(Theme.Typography.sectionTitle)
+                        Text("Use commas to separate ingredients. Leave either field empty when it doesn't matter.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        ingredientField(
+                            title: "Include",
+                            detail: "Every result must contain these",
+                            prompt: "tomato, basil",
+                            text: $viewModel.requiredIngredientsText
+                        )
+                        Divider()
+                        ingredientField(
+                            title: "Exclude",
+                            detail: "Hide recipes containing these",
+                            prompt: "peanuts, shellfish",
+                            text: $viewModel.excludedIngredientsText
+                        )
+                    }
+                    .padding(Theme.Spacing.lg)
+                    .appSurface(.resting)
+                }
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
+                .padding(Theme.Spacing.xl)
+            }
+            .warmCanvas()
+            .navigationTitle("Ingredients")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if hasIngredientFilters {
+                        Button("Clear") {
+                            viewModel.requiredIngredientsText = ""
+                            viewModel.excludedIngredientsText = ""
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showingIngredientFilters = false }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func ingredientField(
+        title: String,
+        detail: String,
+        prompt: String,
+        text: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text(title)
+                .font(.headline)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(prompt, text: text)
+                .textFieldStyle(.plain)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, Theme.Spacing.sm)
+                .padding(.vertical, Theme.Spacing.sm)
+                .background(Color.appBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
         }
     }
 

@@ -9,14 +9,11 @@ enum ExternalShareURLClassifier {
     private static let legacyShareTypes = Set(["recipe", "profile", "collection"])
     private static let allowedHosts = Set([
         "cauldron-f900a.web.app",
-        "cauldron-f900a.firebaseapp.com",
-        "cauldron-prod.web.app",
-        "cauldron-prod.firebaseapp.com",
-        "cauldron.app"
+        "cauldron-f900a.firebaseapp.com"
     ])
 
     static func isExternalShareURL(_ url: URL) -> Bool {
-        guard let host = url.host else { return false }
+        guard url.scheme?.lowercased() == "https", let host = url.host else { return false }
 
         guard allowedHosts.contains(host.lowercased()) else {
             return false

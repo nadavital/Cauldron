@@ -12,83 +12,87 @@ struct WhatsNewView: View {
 
     var body: some View {
         ZStack {
-            AnimatedMeshGradient()
-                .ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
+
+            RadialGradient(
+                colors: [Color.cauldronOrange.opacity(0.1), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 360
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
 
             ScrollView {
-                VStack(spacing: Theme.Spacing.xl) {
-                    Spacer(minLength: Theme.Spacing.lg)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image("BrandMarks/CauldronIcon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
 
-                    Image("BrandMarks/CauldronIcon")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 72, height: 72)
-                        .cornerRadius(Theme.Radius.large)
+                        Text("Cauldron")
+                            .font(.headline)
+                    }
 
-                    VStack(spacing: 8) {
-                        Text("What's New")
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("A more polished Cauldron")
                             .font(Theme.Typography.screenTitle)
-
-                        Text("A calmer design, safer imports, and more ways to use your recipes.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                        Text("The everyday parts of Cauldron are now calmer, faster, and more dependable.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                     }
 
-                    AppCard(style: .resting, padding: Theme.Spacing.lg) {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                            FeatureRow(
-                                symbol: "sparkles",
-                                color: .cauldronOrange,
-                                title: "Refined Design",
-                                detail: "Cleaner navigation, recipe details, collections, and large-screen layouts now share one warmer visual system."
-                            )
-                            FeatureRow(
-                                symbol: "tray.full.fill",
-                                color: .purple,
-                                title: "Safer Imports",
-                                detail: "Interrupted share-sheet imports are saved first, so you can review or retry them later."
-                            )
-                            FeatureRow(
-                                symbol: "waveform",
-                                color: .blue,
-                                title: "Siri & Visual Search",
-                                detail: "Find recipes, add ingredients, import content, and control Cook Mode with supported Apple Intelligence features."
-                            )
-                            FeatureRow(
-                                symbol: "safari.fill",
-                                color: .green,
-                                title: "Sharing That Travels",
-                                detail: "Public recipes open as complete web pages, while syncing, timers, and grocery updates recover more reliably."
-                            )
-                        }
+                    VStack(alignment: .leading, spacing: 0) {
+                        FeatureRow(
+                            symbol: "sparkles",
+                            title: "A calmer Cauldron",
+                            detail: "Cleaner navigation and recipe views across iPhone, iPad, and Mac."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
+                            symbol: "tray.full.fill",
+                            title: "Imports you can trust",
+                            detail: "Shared recipes survive interruptions and remain ready to review."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
+                            symbol: "waveform",
+                            title: "Your recipes, everywhere",
+                            detail: "Use Siri, visual search, Cook Mode, and complete public recipe links."
+                        )
                     }
-
-                    PrimaryActionButton("Continue") {
-                        onClose()
-                    }
-                    .padding(.top, Theme.Spacing.xs)
                 }
-                .padding(Theme.Spacing.xl)
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.top, Theme.Spacing.xxl)
+                .padding(.bottom, Theme.Spacing.xxl)
                 .frame(maxWidth: .infinity)
-                .frame(maxWidth: 640)
+                .frame(maxWidth: 560)
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            PrimaryActionButton("Continue") { onClose() }
+                .frame(maxWidth: 520)
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(Color.appBackground)
         }
     }
 }
 
 private struct FeatureRow: View {
     let symbol: String
-    let color: Color
     let title: String
     let detail: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
             Image(systemName: symbol)
-                .font(.headline)
-                .foregroundColor(color)
-                .frame(width: 20)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(Color.cauldronOrange)
+                .frame(width: 28, height: 28)
+                .background(Color.cauldronOrange.opacity(0.12), in: Circle())
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(title)
@@ -100,6 +104,7 @@ private struct FeatureRow: View {
                     .foregroundColor(.secondary)
             }
         }
+        .padding(.vertical, Theme.Spacing.md)
     }
 }
 

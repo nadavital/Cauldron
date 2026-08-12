@@ -271,9 +271,15 @@ actor UserCloudService {
         let db = try await core.getPublicDatabase()
         do {
             let existing = try await db.record(for: usernameClaimRecordID(normalizedUsername))
-            guard existing.recordType == CloudKitCore.RecordType.usernameClaim,
-                  existing.creatorUserRecordID == identity,
-                  existing["userId"] as? String == userId.uuidString else {
+            guard Self.usernameClaimBelongsToUser(
+                recordType: existing.recordType,
+                claimedUserID: existing["userId"] as? String,
+                claimedUsername: existing["username"] as? String,
+                creatorRecordName: existing.creatorUserRecordID?.recordName,
+                expectedUserID: userId.uuidString,
+                expectedUsername: normalizedUsername,
+                expectedIdentityRecordName: identity.recordName
+            ) else {
                 throw CloudKitError.usernameUnavailable
             }
         } catch let error as CKError where error.code == .unknownItem {
@@ -294,10 +300,15 @@ actor UserCloudService {
         let recordID = usernameClaimRecordID(username)
         do {
             let existing = try await db.record(for: recordID)
-            guard existing.recordType == CloudKitCore.RecordType.usernameClaim,
-                  existing.creatorUserRecordID == identityRecordID,
-                  existing["userId"] as? String == userId.uuidString,
-                  existing["username"] as? String == username else {
+            guard Self.usernameClaimBelongsToUser(
+                recordType: existing.recordType,
+                claimedUserID: existing["userId"] as? String,
+                claimedUsername: existing["username"] as? String,
+                creatorRecordName: existing.creatorUserRecordID?.recordName,
+                expectedUserID: userId.uuidString,
+                expectedUsername: username,
+                expectedIdentityRecordName: identityRecordID.recordName
+            ) else {
                 throw CloudKitError.usernameUnavailable
             }
             return false
@@ -315,9 +326,41 @@ actor UserCloudService {
                 _ = try await db.save(claim)
                 return true
             } catch let saveError as CKError where saveError.code == .serverRecordChanged {
-                throw CloudKitError.usernameUnavailable
+                let winner = try await db.record(for: recordID)
+                guard Self.usernameClaimBelongsToUser(
+                    recordType: winner.recordType,
+                    claimedUserID: winner["userId"] as? String,
+                    claimedUsername: winner["username"] as? String,
+                    creatorRecordName: winner.creatorUserRecordID?.recordName,
+                    expectedUserID: userId.uuidString,
+                    expectedUsername: username,
+                    expectedIdentityRecordName: identityRecordID.recordName
+                ) else {
+                    throw CloudKitError.usernameUnavailable
+                }
+                return false
             }
         }
+    }
+
+    /// Compares the trusted creator record name rather than the full record ID,
+    /// whose zone can differ across CloudKit responses for the same identity.
+    /// User ID and username must also match to preserve global uniqueness.
+    static func usernameClaimBelongsToUser(
+        recordType: String,
+        claimedUserID: String?,
+        claimedUsername: String?,
+        creatorRecordName: String?,
+        expectedUserID: String,
+        expectedUsername: String,
+        expectedIdentityRecordName: String
+    ) -> Bool {
+        guard recordType == CloudKitCore.RecordType.usernameClaim,
+              claimedUserID == expectedUserID,
+              claimedUsername == expectedUsername else {
+            return false
+        }
+        return creatorRecordName == expectedIdentityRecordName
     }
 
     private func releaseOtherUsernameClaims(
@@ -331,7 +374,15 @@ actor UserCloudService {
             recordType: CloudKitCore.RecordType.usernameClaim,
             predicate: NSPredicate(format: "userId == %@", userId.uuidString)
         )
-        for record in records where record.creatorUserRecordID == identityRecordID {
+        for record in records where Self.usernameClaimBelongsToUser(
+            recordType: record.recordType,
+            claimedUserID: record["userId"] as? String,
+            claimedUsername: record["username"] as? String,
+            creatorRecordName: record.creatorUserRecordID?.recordName,
+            expectedUserID: userId.uuidString,
+            expectedUsername: record["username"] as? String ?? "",
+            expectedIdentityRecordName: identityRecordID.recordName
+        ) {
             let username = record["username"] as? String
             guard username != retainedUsername else { continue }
             do {

@@ -527,8 +527,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
             }
 
             // Check if it's an external share URL (from Firebase)
-            // Matches: https://YOUR-PROJECT.web.app/recipe/abc123
-            // Or: https://cauldron.app/recipe/abc123
+            // Matches the production Firebase Hosting domains.
             if isExternalShareURL(url) {
                 AppLogger.general.info("🟣 SceneDelegate: Detected external share URL, processing...")
 

@@ -111,6 +111,15 @@ struct ImporterView: View {
             .task {
                 await autoImportIfNeeded()
             }
+            .onChange(of: viewModel.importType) { _, _ in
+                viewModel.clearSourceErrors()
+            }
+            .onChange(of: viewModel.urlString) { _, _ in
+                viewModel.clearSourceErrors()
+            }
+            .onChange(of: viewModel.textInput) { _, _ in
+                viewModel.clearSourceErrors()
+            }
             .fullScreenCover(item: $previewContext) { context in
                 RecipeImportPreviewView(
                     importedRecipe: context.recipe,
@@ -122,7 +131,7 @@ struct ImporterView: View {
             }
             .fullScreenCover(isPresented: $showingOCRPicker) {
                 ImagePicker(
-                    image: $viewModel.selectedOCRImage, sourceType: ocrSourceType, allowsEditing: false
+                    image: ocrImageBinding, sourceType: ocrSourceType, allowsEditing: false
                 )
                 .ignoresSafeArea()
             }
@@ -369,6 +378,16 @@ struct ImporterView: View {
 
     private var imageSourceButtonTitle: String {
         viewModel.selectedOCRImage == nil ? "Choose Recipe Image" : "Replace Image"
+    }
+
+    private var ocrImageBinding: Binding<UIImage?> {
+        Binding(
+            get: { viewModel.selectedOCRImage },
+            set: { image in
+                viewModel.selectedOCRImage = image
+                viewModel.clearSourceErrors()
+            }
+        )
     }
 
     private var headerDescription: String {
