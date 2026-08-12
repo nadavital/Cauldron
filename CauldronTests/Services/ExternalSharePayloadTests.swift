@@ -3,6 +3,24 @@ import XCTest
 
 @MainActor
 final class ExternalSharePayloadTests: XCTestCase {
+    func testPublicationResponseReportsWhetherSnapshotWasActuallyWritten() throws {
+        let response = try JSONDecoder().decode(
+            ShareResponse.self,
+            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldron-f900a.web.app/recipe/recipe-id","published":true}"#.utf8)
+        )
+
+        XCTAssertEqual(response.published, true)
+    }
+
+    func testLegacyPublicationResponseStillDecodesForCompatibility() throws {
+        let response = try JSONDecoder().decode(
+            ShareResponse.self,
+            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldron-f900a.web.app/recipe/recipe-id"}"#.utf8)
+        )
+
+        XCTAssertNil(response.published)
+    }
+
     func testUnshareSuccessResponseMatchesBackendContract() throws {
         let response = try JSONDecoder().decode(
             UnshareResponse.self,

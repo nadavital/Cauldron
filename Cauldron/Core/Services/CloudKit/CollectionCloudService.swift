@@ -279,6 +279,7 @@ actor CollectionCloudService {
                 continue
             } catch {
                 logger.warning("Failed to fetch saved source collection \(id.uuidString): \(error.localizedDescription)")
+                throw error
             }
         }
 

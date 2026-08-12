@@ -162,6 +162,10 @@ type SanitizedCollectionUnshare = {
     capability: string;
 };
 
+export function publishedShareResponse(shareId: string, shareUrl: string, published: boolean) {
+    return { shareId, shareUrl, published };
+}
+
 export function escapeHtml(value: unknown): string {
     return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -242,9 +246,41 @@ function capabilityHashesMatch(storedHash: unknown, suppliedHash: string): boole
 type CloudKitRecordLike = {
     recordName?: unknown;
     recordType?: unknown;
+    serverErrorCode?: unknown;
     created?: { timestamp?: unknown; userRecordName?: unknown };
     fields?: Record<string, { value?: unknown }>;
 };
+
+type CloudKitRecordsPayload = {
+    records?: CloudKitRecordLike[];
+    serverErrorCode?: unknown;
+};
+
+export function cloudKitRecordsPayloadDisposition(
+    payload: CloudKitRecordsPayload
+): "records" | "notFound" | "error" {
+    const topLevelCode = typeof payload.serverErrorCode === "string"
+        ? payload.serverErrorCode.toUpperCase()
+        : null;
+    if (topLevelCode) {
+        return topLevelCode === "UNKNOWN_ITEM" ? "notFound" : "error";
+    }
+
+    const records = payload.records ?? [];
+    if (records.some((record) => typeof record.serverErrorCode !== "string")) {
+        return "records";
+    }
+
+    const recordErrorCodes = records.flatMap((record) =>
+        typeof record.serverErrorCode === "string"
+            ? [record.serverErrorCode.toUpperCase()]
+            : []
+    );
+    if (recordErrorCodes.length === 0 || recordErrorCodes.every((code) => code === "UNKNOWN_ITEM")) {
+        return "notFound";
+    }
+    return "error";
+}
 
 type VerifiedCloudKitAuthority = {
     record: CloudKitRecordLike;
@@ -692,7 +728,7 @@ async function fetchPublicCloudKitRecipe(
     const keyID = cloudKitServerKeyID.value();
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
     if (!keyID || !privateKey) {
-        return null;
+        throw new Error("CloudKit web recipe credentials are unavailable");
     }
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
     const body = JSON.stringify({ records: [{ recordName: recipeId }] });
@@ -716,14 +752,23 @@ async function fetchPublicCloudKitRecipe(
         });
         if (!response.ok) {
             logger.warn("CloudKit web recipe lookup failed", { recipeId, status: response.status });
+            throw new Error(`CloudKit web recipe lookup returned ${response.status}`);
+        }
+        const payload = await response.json() as CloudKitRecordsPayload;
+        const disposition = cloudKitRecordsPayloadDisposition(payload);
+        if (disposition === "error") {
+            throw new Error("CloudKit web recipe lookup returned a record error");
+        }
+        if (disposition === "notFound") {
             return null;
         }
-        const payload = await response.json() as { records?: CloudKitRecordLike[] };
-        const record = payload.records?.[0];
+        const record = payload.records?.find((candidate) =>
+            typeof candidate.serverErrorCode !== "string"
+        );
         return record ? sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId) : null;
     } catch (error) {
         logger.warn("CloudKit web recipe lookup failed", { recipeId, error });
-        return null;
+        throw error;
     }
 }
 
@@ -731,7 +776,7 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
     const keyID = cloudKitServerKeyID.value();
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
     if (!keyID || !privateKey) {
-        return null;
+        throw new Error("CloudKit web creator credentials are unavailable");
     }
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
     const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
@@ -755,10 +800,19 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
         });
         if (!response.ok) {
             logger.warn("CloudKit web recipe creator lookup failed", { ownerId, status: response.status });
+            throw new Error(`CloudKit web recipe creator lookup returned ${response.status}`);
+        }
+        const payload = await response.json() as CloudKitRecordsPayload;
+        const disposition = cloudKitRecordsPayloadDisposition(payload);
+        if (disposition === "error") {
+            throw new Error("CloudKit web creator lookup returned a record error");
+        }
+        if (disposition === "notFound") {
             return null;
         }
-        const payload = await response.json() as { records?: CloudKitRecordLike[] };
-        const records = payload.records ?? [];
+        const records = (payload.records ?? []).filter((record) =>
+            typeof record.serverErrorCode !== "string"
+        );
         const canonicalRecord = canonicalCloudKitOwnerRecord(records, ownerId);
         const creator = canonicalCloudKitRecipeCreator(records, ownerId);
         if (!canonicalRecord || !creator ||
@@ -768,7 +822,7 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
         return creator;
     } catch (error) {
         logger.warn("CloudKit web recipe creator lookup failed", { ownerId, error });
-        return null;
+        throw error;
     }
 }
 
@@ -1569,11 +1623,7 @@ export const shareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, r
         // The iOS app generates https://cauldron-f900a.web.app/u/{username}/{recipeId} locally.
         const shareUrl = `https://cauldron-f900a.web.app/recipe/${shareId}`;
 
-        res.status(200).json({
-            shareId,
-            shareUrl,
-            published,
-        });
+        res.status(200).json(publishedShareResponse(shareId, shareUrl, published));
     } catch (error) {
         if (error instanceof StaleShareMutationError) {
             res.status(409).json({ error: 'A newer recipe sharing change superseded this request' });
@@ -1759,11 +1809,11 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
         });
 
         if (!published) {
-            res.status(200).json({
+            res.status(200).json(publishedShareResponse(
                 shareId,
-                shareUrl: `https://cauldron-f900a.web.app/profile/${shareId}`,
-                published: false,
-            });
+                `https://cauldron-f900a.web.app/profile/${shareId}`,
+                false
+            ));
             return;
         }
 
@@ -1797,10 +1847,7 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
 
         const shareUrl = `https://cauldron-f900a.web.app/profile/${shareId}`;
 
-        res.status(200).json({
-            shareId,
-            shareUrl
-        });
+        res.status(200).json(publishedShareResponse(shareId, shareUrl, true));
     } catch (error) {
         if (error instanceof StaleShareMutationError) {
             res.status(409).json({ error: 'A newer profile sharing change superseded this request' });
@@ -2069,11 +2116,7 @@ export const shareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (re
 
         const shareUrl = `https://cauldron-f900a.web.app/collection/${shareId}`;
 
-        res.status(200).json({
-            shareId,
-            shareUrl,
-            published,
-        });
+        res.status(200).json(publishedShareResponse(shareId, shareUrl, published));
     } catch (error) {
         if (error instanceof StaleShareMutationError) {
             res.status(409).json({ error: 'A newer collection sharing change superseded this request' });
@@ -2501,8 +2544,8 @@ type RecipeIndexPageOptions = {
 
 function compactPageStyles(): string {
     return `<style>
-        :root { color-scheme:light dark; --paper:#F7F3ED; --ink:#211C18; --muted:#71675F; --accent:#E9792F; --accent-text:#A84712; --soft:#EEE5D9; }
-        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#FFF9F3; --muted:#C4B8AE; --accent:#F39750; --accent-text:#F5A56B; --soft:#2A231E; } }
+        :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#1C1C1E; --muted:#6E6E73; --accent:#FF9933; --accent-text:#995100; --soft:#FFFFFF; }
+        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } }
         * { box-sizing:border-box; }
         body { margin:0; min-height:100vh; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
         .bar,main { width:min(960px,calc(100% - 64px)); margin-inline:auto; }
@@ -2639,6 +2682,74 @@ function recipePageHead(recipe: WebRecipeContent, description: string, canonical
     return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA"><title>${title} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="article"><meta property="og:title" content="${title}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${previewImage}"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${previewImage}"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}"><script type="application/ld+json">${structuredData}</script>`;
 }
 
+export const recipeCategoryPresentation: Readonly<Record<string, Readonly<{
+    emoji: string;
+    light: string;
+    dark: string;
+}>>> = {
+    Breakfast: { emoji: "🍳", light: "#FF9500", dark: "#FF9F0A" },
+    Lunch: { emoji: "🥪", light: "#007AFF", dark: "#0A84FF" },
+    Dinner: { emoji: "🍽️", light: "#AF52DE", dark: "#BF5AF2" },
+    Dessert: { emoji: "🍰", light: "#FF2D55", dark: "#FF375F" },
+    Snack: { emoji: "🍿", light: "#FFCC00", dark: "#FFD60A" },
+    Drink: { emoji: "🍹", light: "#5856D6", dark: "#5E5CE6" },
+    Appetizer: { emoji: "🥣", light: "#FF9500", dark: "#FF9F0A" },
+    "Side Dish": { emoji: "🥗", light: "#34C759", dark: "#30D158" },
+    Vegetarian: { emoji: "🥕", light: "#34C759", dark: "#30D158" },
+    Vegan: { emoji: "🌱", light: "#66CC66", dark: "#66CC66" },
+    "Gluten-Free": { emoji: "🌾", light: "#A2845E", dark: "#AC8E68" },
+    Keto: { emoji: "🥑", light: "#FF3B30", dark: "#FF453A" },
+    Paleo: { emoji: "🍖", light: "#FF9500", dark: "#FF9F0A" },
+    Healthy: { emoji: "💪", light: "#00C7BE", dark: "#63E6E2" },
+    "Low Carb": { emoji: "🥬", light: "#34C759", dark: "#30D158" },
+    "High Protein": { emoji: "🍗", light: "#FF3B30", dark: "#FF453A" },
+    Italian: { emoji: "🍝", light: "#CC3333", dark: "#CC3333" },
+    Mexican: { emoji: "🌮", light: "#E6801A", dark: "#E6801A" },
+    Asian: { emoji: "🥢", light: "#FF3B30", dark: "#FF453A" },
+    Chinese: { emoji: "🥡", light: "#FF3B30", dark: "#FF453A" },
+    Japanese: { emoji: "🍣", light: "#FF6666", dark: "#FF6666" },
+    Jewish: { emoji: "🥯", light: "#007AFF", dark: "#0A84FF" },
+    Thai: { emoji: "🍜", light: "#34C759", dark: "#30D158" },
+    Indian: { emoji: "🍛", light: "#FF9500", dark: "#FF9F0A" },
+    Greek: { emoji: "🥙", light: "#007AFF", dark: "#0A84FF" },
+    "Middle Eastern": { emoji: "🧆", light: "#FF9500", dark: "#FF9F0A" },
+    American: { emoji: "🍔", light: "#007AFF", dark: "#0A84FF" },
+    French: { emoji: "🥐", light: "#5856D6", dark: "#5E5CE6" },
+    "Quick & Easy": { emoji: "⚡️", light: "#FFCC00", dark: "#FFD60A" },
+    "Comfort Food": { emoji: "🍲", light: "#A2845E", dark: "#AC8E68" },
+    Baking: { emoji: "🥧", light: "#FF2D55", dark: "#FF375F" },
+    "One Pot": { emoji: "🥘", light: "#FF9500", dark: "#FF9F0A" },
+    "Air Fryer": { emoji: "♨️", light: "#8E8E93", dark: "#8E8E93" },
+    "Budget Friendly": { emoji: "💰", light: "#34C759", dark: "#30D158" },
+};
+
+const recipeCategoryAliases: Readonly<Record<string, string>> = {
+    veg: "Vegetarian", veggie: "Vegetarian",
+    gf: "Gluten-Free", "gluten-free": "Gluten-Free",
+    "low carb": "Low Carb", "high protein": "High Protein",
+    bbq: "American", barbecue: "American",
+    airfryer: "Air Fryer", "air-fryer": "Air Fryer",
+    "one-pot": "One Pot", onepot: "One Pot",
+    cheap: "Budget Friendly", budget: "Budget Friendly",
+    fast: "Quick & Easy", quick: "Quick & Easy", easy: "Quick & Easy",
+    bake: "Baking", baked: "Baking",
+    "chinese food": "Chinese", "italian food": "Italian",
+    "mexican food": "Mexican", "indian food": "Indian",
+    "thai food": "Thai", "japanese food": "Japanese",
+    "jewish food": "Jewish", matzah: "Jewish", bagel: "Jewish",
+    "greek food": "Greek",
+    starter: "Appetizer", apps: "Appetizer", soup: "Appetizer",
+    side: "Side Dish", salad: "Side Dish",
+};
+
+export function canonicalRecipeCategoryName(rawTag: string): string | null {
+    const normalized = rawTag.trim().toLocaleLowerCase("en-US");
+    const directMatch = Object.keys(recipeCategoryPresentation).find(
+        (name) => name.toLocaleLowerCase("en-US") === normalized
+    );
+    return directMatch ?? recipeCategoryAliases[normalized] ?? null;
+}
+
 export function generateRecipePageHtml(
     recipe: WebRecipeContent,
     canonicalURL: string,
@@ -2658,19 +2769,16 @@ export function generateRecipePageHtml(
         return `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="7" r="2.5"></circle><circle cx="14" cy="8" r="2"></circle><path d="M2.8 15c.5-2.8 2-4.2 4.4-4.2s4 1.4 4.5 4.2M12 12c2.8-.6 4.6.4 5.2 3"></path></svg>`;
     };
     const metaHTML = metadata.map(({ icon, value }) => `<li>${metadataIcon(icon)}<span>${escapeHtml(value)}</span></li>`).join("");
-    const categoryEmoji: Record<string, string> = {
-        Breakfast: "🍳", Lunch: "🥪", Dinner: "🍽️", Dessert: "🍰", Snack: "🍿",
-        Drink: "🍹", Appetizer: "🥣", "Side Dish": "🥗", Vegetarian: "🥕", Vegan: "🌱",
-        "Gluten-Free": "🌾", Keto: "🥑", Paleo: "🍖", Healthy: "💪", "Low Carb": "🥬",
-        "High Protein": "🍗", Italian: "🍝", Mexican: "🌮", Asian: "🥢", Chinese: "🥡",
-        Japanese: "🍣", Jewish: "🥯", Thai: "🍜", Indian: "🍛", Greek: "🥙",
-        "Middle Eastern": "🧆", American: "🍔", French: "🥐", "Quick & Easy": "⚡️",
-        "Comfort Food": "🍲", Baking: "🥧", "One Pot": "🥘", "Air Fryer": "♨️",
-        "Budget Friendly": "💰",
-    };
     const tagsHTML = recipe.tags.slice(0, 6).map((tag) => {
-        const emoji = categoryEmoji[tag];
-        return `<li>${emoji ? `<span aria-hidden="true">${emoji}</span>` : ""}${escapeHtml(tag)}</li>`;
+        const categoryName = canonicalRecipeCategoryName(tag);
+        const presentation = (categoryName ? recipeCategoryPresentation[categoryName] : null) ?? {
+            emoji: "",
+            light: "#FF9933",
+            dark: "#FF9933",
+        };
+        const style = `--tag-color:${presentation.light};--tag-color-dark:${presentation.dark}`;
+        const displayName = categoryName ?? tag.trim();
+        return `<li style="${style}">${presentation.emoji ? `<span aria-hidden="true">${presentation.emoji}</span>` : ""}${escapeHtml(displayName)}</li>`;
     }).join("");
 
     let ingredientSection: string | null = null;
@@ -2699,15 +2807,15 @@ export function generateRecipePageHtml(
         const avatar = creator.profileEmoji || Array.from(creator.displayName)[0] || "C";
         const avatarColor = creator.profileColor && /^#[0-9a-f]{6}$/i.test(creator.profileColor)
             ? creator.profileColor
-            : "#E9792F";
+            : "#FF9933";
         return `<a class="creator" href="/u/${encodeURIComponent(creator.username)}"><span class="creator-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(avatar)}</span><span class="creator-copy"><strong>${escapeHtml(creator.displayName)}</strong><small>@${escapeHtml(creator.username)}</small></span></a>`;
     })() : "";
     const ingredientsClass = recipe.ingredients.length <= 12 ? "ingredients-column sticky-eligible" : "ingredients-column";
     const safeCanonicalJSON = JSON.stringify(canonicalURL).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html><html lang="en"><head>${recipePageHead(recipe, description, canonicalURL)}<style>
-        :root { color-scheme:light dark; --paper:#F7F3ED; --ink:#211C18; --muted:#71675F; --accent:#E9792F; --accent-text:#A84712; --soft:#EEE5D9; }
-        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#FFF9F3; --muted:#C4B8AE; --accent:#F39750; --accent-text:#F5A56B; --soft:#2A231E; } }
+        :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#1C1C1E; --muted:#6E6E73; --accent:#FF9933; --accent-text:#995100; --soft:#FFFFFF; }
+        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } .tags li { color:var(--tag-color-dark); background:color-mix(in srgb,var(--tag-color-dark) 15%,transparent); } }
         * { box-sizing:border-box; }
         html { background:var(--paper); }
         body { margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
@@ -2733,8 +2841,8 @@ export function generateRecipePageHtml(
         .meta { display:flex; flex-wrap:wrap; gap:18px; margin:28px 0 0; padding:0; list-style:none; color:var(--muted); }
         .meta li { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; }
         .meta svg { width:15px; height:15px; fill:none; stroke:var(--accent-text); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-        .tags { display:flex; flex-wrap:wrap; gap:8px 14px; margin:15px 0 0; padding:0; list-style:none; color:var(--muted); }
-        .tags li { display:flex; gap:5px; align-items:center; font-size:12px; font-weight:600; }
+        .tags { display:flex; flex-wrap:wrap; gap:8px; margin:15px 0 0; padding:0; list-style:none; }
+        .tags li { display:flex; gap:5px; align-items:center; min-height:28px; padding:5px 10px; border-radius:999px; color:var(--tag-color); background:color-mix(in srgb,var(--tag-color) 15%,transparent); font-size:12px; font-weight:600; }
         .recipe-actions { margin-top:34px; display:flex; flex-wrap:wrap; align-items:center; gap:18px; }
         .intro-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
         .download-action { min-height:44px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
@@ -2769,6 +2877,28 @@ export function generateRecipePageHtml(
     </style></head><body><header class="topbar"><div class="brand"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></div></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main><script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
 }
 
+export function renderCanonicalRecipePage(
+    recipe: WebRecipeContent | null,
+    creator: WebRecipeCreator | null,
+    canonicalURL: string,
+    appURL: string,
+    downloadURL: string
+): { status: number; html: string } {
+    if (recipe && creator) {
+        return {
+            status: 200,
+            html: generateRecipePageHtml(recipe, canonicalURL, appURL, downloadURL, creator),
+        };
+    }
+    return {
+        status: 404,
+        html: generatePublicStatusPageHtml(
+            "Recipe unavailable",
+            "This recipe is no longer available on the web."
+        ),
+    };
+}
+
 export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptions): string {
     const safeAppURL = escapeHtml(options.appURL);
     const count = `${options.totalRecipeCount}${options.hasMoreRecipes ? "+" : ""}`;
@@ -2776,7 +2906,7 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
     const rows = options.recipes.map((recipe) => `<li><a class="recipe-row" href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-name">${escapeHtml(recipe.title)}</span></a></li>`).join("");
     const avatarColor = options.avatarColor && /^#[0-9a-f]{6}$/i.test(options.avatarColor)
         ? options.avatarColor
-        : "#E9792F";
+        : "#FF9933";
     const handleHTML = options.handle ? `<p class="handle">${escapeHtml(options.handle)}</p>` : "";
     const identity = options.avatarEmoji
         ? `<div class="identity"><span class="profile-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(options.avatarEmoji)}</span><div class="identity-text"><h1>${escapeHtml(options.title)}</h1>${handleHTML}</div></div>`
@@ -2857,26 +2987,24 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
     <meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${universalURL}">
     <style>
         :root {
-            --orange: #a53e13;
-            --primary-bg: #a53e13;
-            --primary-text: #ffffff;
-            --bg: #f5f5f7;
+            --orange: #FF9933;
+            --primary-bg: #FF9933;
+            --primary-text: #1C1C1E;
+            --bg: #F6F1EA;
             --card: #ffffff;
-            --text: #1d1d1f;
-            --subtext: #6e6e73;
-            --border: rgba(0, 0, 0, 0.08);
+            --text: #1C1C1E;
+            --subtext: #6E6E73;
         }
 
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #000000;
-                --card: #1c1c1e;
-                --text: #f5f5f7;
-                --subtext: #a1a1a6;
-                --border: rgba(255, 255, 255, 0.12);
-                --orange: #ffb083;
-                --primary-bg: #ff9857;
-                --primary-text: #2b1600;
+                --bg: #18120D;
+                --card: #262220;
+                --text: #F2F2F7;
+                --subtext: #AEAEB2;
+                --orange: #FF9933;
+                --primary-bg: #FF9933;
+                --primary-text: #1C1C1E;
             }
         }
 
@@ -2885,7 +3013,7 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
         body {
             margin: 0;
             min-height: 100vh;
-            background: radial-gradient(circle at top, rgba(255, 153, 51, 0.22), transparent 48%), var(--bg);
+            background: var(--bg);
             color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
@@ -2898,9 +3026,7 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
             width: 100%;
             max-width: 480px;
             border-radius: 24px;
-            background: var(--card);
-            border: 1px solid var(--border);
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+            background: transparent;
             padding: 28px;
             text-align: center;
         }
@@ -3108,13 +3234,19 @@ export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (
             fetchPublicCloudKitRecipeCreator(sanitized.value.ownerId),
         ]);
 
+        const rendered = renderCanonicalRecipePage(
+            fullRecipe,
+            creator,
+            canonicalURL,
+            appURL,
+            downloadURL
+        );
         res.set("Cache-Control", "private, no-store, max-age=0");
-        res.send(fullRecipe
-            ? generateRecipePageHtml(fullRecipe, canonicalURL, appURL, downloadURL, creator)
-            : generateCompactRecipePageHtml(sanitized.value, canonicalURL, appURL, downloadURL));
+        res.status(rendered.status).send(rendered.html);
     } catch (error) {
         logger.error('Error loading recipe preview:', error);
-        res.status(500).send(generatePublicStatusPageHtml("Recipe temporarily unavailable", "Please try opening this recipe again in a moment."));
+        res.set("Retry-After", "30");
+        res.status(503).send(generatePublicStatusPageHtml("Recipe temporarily unavailable", "Please try opening this recipe again in a moment."));
     }
 });
 

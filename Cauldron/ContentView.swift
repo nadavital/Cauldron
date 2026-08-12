@@ -137,22 +137,8 @@ struct ContentView: View {
             
             // Share Loading Overlay
             if isLoadingShare {
-                ZStack {
-                    Color.black.opacity(0.4)
-                        .ignoresSafeArea()
-                    
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.white)
-                        Text("Loading shared content...")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                    }
-                    .padding(30)
-                    .background(Material.ultraThinMaterial)
-                    .cornerRadius(16)
-                }
+                SharedContentLoadingOverlay()
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
             }
             
@@ -452,23 +438,18 @@ struct ContentView: View {
             if case .recipe(let partialRecipe, let owner) = content {
                 AppLogger.general.info("🌐 ContentView: Processing recipe share for \(partialRecipe.title)")
 
-                // 1. Check if we already have this recipe locally (e.g. we are the owner)
-                // This prevents fetching a stale public version if we just made it private
-                if let localRecipe = try? await dependencies.recipeRepository.fetch(id: partialRecipe.id),
-                   localRecipe.ownerId == userSession.userId,
-                   !localRecipe.isPreview {
-                    AppLogger.general.info("✅ ContentView: Found local copy of recipe, using that")
-                    await MainActor.run {
-                        let wrapper = SharedContentWrapper(content: .recipe(localRecipe, originalCreator: owner))
-                        sharedContentWrapper = wrapper
-                    }
-                    await PendingShareManager.shared.clearPendingURL(matching: url)
-                    return
-                }
-
-                // 2. If not found locally, fetch from CloudKit public database
-                AppLogger.general.info("🌐 ContentView: Fetching full recipe details from CloudKit")
-                if let fullRecipe = try await dependencies.recipeDiscoveryCache.fetchPublicRecipe(id: partialRecipe.id) {
+                // The Firebase response is an authenticated publication pointer.
+                // Always resolve that exact ID from the public CloudKit record,
+                // bypassing local copies and discovery caches so app and web show
+                // one canonical set of ingredients, quantities, tags, and steps.
+                AppLogger.general.info("🌐 ContentView: Force-refreshing canonical recipe from CloudKit")
+                if let fullRecipe = try await dependencies.recipeDiscoveryCache.fetchPublicRecipe(
+                    id: partialRecipe.id,
+                    forceRefresh: true
+                ), SharedContentAuthority.matches(
+                    pointerOwnerID: partialRecipe.ownerId,
+                    recordOwnerID: fullRecipe.ownerId
+                ) {
                     AppLogger.general.info("✅ ContentView: Successfully fetched full recipe")
                     await MainActor.run {
                         // Post notification to navigate to the recipe in the Search tab
@@ -486,11 +467,36 @@ struct ContentView: View {
                     }
                     await PendingShareManager.shared.clearPendingURL(matching: url)
                 }
-            } else {
-                // For profiles and collections, the share data is usually sufficient or handled differently
+            } else if case .profile(let partialUser) = content {
+                guard let canonicalUser = try await dependencies.userCloudService.fetchUser(
+                    byUserId: partialUser.id
+                ) else {
+                    throw ExternalShareError.invalidProfile
+                }
                 await MainActor.run {
-                    let wrapper = SharedContentWrapper(content: content)
-                    sharedContentWrapper = wrapper
+                    sharedContentWrapper = SharedContentWrapper(content: .profile(canonicalUser))
+                }
+                await PendingShareManager.shared.clearPendingURL(matching: url)
+            } else if case .collection(let partialCollection, _) = content {
+                let collections = try await dependencies.collectionCloudService.fetchPublicCollections(
+                    ids: [partialCollection.id]
+                )
+                guard let canonicalCollection = collections[partialCollection.id] else {
+                    throw ExternalShareError.invalidCollection
+                }
+                guard SharedContentAuthority.matches(
+                    pointerOwnerID: partialCollection.userId,
+                    recordOwnerID: canonicalCollection.userId
+                ) else {
+                    throw ExternalShareError.invalidCollection
+                }
+                let owner = try? await dependencies.userCloudService.fetchUser(
+                    byUserId: canonicalCollection.userId
+                )
+                await MainActor.run {
+                    sharedContentWrapper = SharedContentWrapper(
+                        content: .collection(canonicalCollection, owner: owner)
+                    )
                 }
                 await PendingShareManager.shared.clearPendingURL(matching: url)
             }
@@ -642,6 +648,8 @@ struct ContentView: View {
     private func scheduleBackgroundMaintenance(for userId: UUID) {
         let recipeRepository = dependencies.recipeRepository
         let recipeSyncService = dependencies.recipeSyncService
+        let collectionRepository = dependencies.collectionRepository
+        let externalShareService = dependencies.externalShareService
 
         backgroundMaintenanceTask?.cancel()
         backgroundMaintenanceTask = Task.detached(priority: .utility) {
@@ -668,22 +676,81 @@ struct ContentView: View {
                 return
             }
 
-            await recipeRepository.migratePublicRecipesToPublicDatabase()
-            await recipeRepository.migratePublicRecipeSearchMetadata()
-
             guard !Task.isCancelled,
                   await MainActor.run(body: {
-                      CurrentUserSession.shared.userId == userId &&
-                      CurrentUserSession.shared.isCloudSyncAvailable
+                      CurrentUserSession.shared.userId == userId
                   }) else {
                 return
             }
 
             do {
-                try await recipeSyncService.performFullSync(for: userId)
+                try await PublicWebRepairWorkflow.run(
+                    sync: {
+                        try await recipeSyncService.performFullSync(for: userId)
+                    },
+                    publish: {
+                        guard await MainActor.run(body: {
+                            CurrentUserSession.shared.userId == userId
+                        }) else { return }
+
+                        await recipeRepository.migratePublicRecipesToPublicDatabase()
+                        await recipeRepository.migratePublicRecipeSearchMetadata()
+                        try await Self.repairPublicWebSnapshots(
+                            for: userId,
+                            collectionRepository: collectionRepository,
+                            externalShareService: externalShareService
+                        )
+                    }
+                )
             } catch {
-                AppLogger.general.warning("Background sync failed: \(error.localizedDescription)")
+                // Never publish from a potentially stale local library. A
+                // successful authoritative sync must reconcile remote privacy
+                // changes and deletion tombstones first.
+                AppLogger.general.warning("Background sync failed; public web repair deferred: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private nonisolated static func repairPublicWebSnapshots(
+        for userId: UUID,
+        collectionRepository: CollectionRepository,
+        externalShareService: ExternalShareService
+    ) async throws {
+        let repairKey = "hasRepairedPublicWebSnapshots_v1_\(userId.uuidString)"
+        guard !UserDefaults.standard.bool(forKey: repairKey) else { return }
+
+        guard let user = await MainActor.run(body: {
+            let session = CurrentUserSession.shared
+            return session.userId == userId ? session.currentUser : nil
+        }) else { throw CancellationError() }
+
+        let profilePublished = await externalShareService.updateProfileShareMetadata(for: user)
+        try Task.checkCancellation()
+
+        do {
+            let collections = try await collectionRepository.fetchUserCollections(
+                ownerId: userId,
+                visibility: .publicRecipe
+            )
+            var collectionsPublished = true
+            for collection in collections {
+                try Task.checkCancellation()
+                let published = await externalShareService.updateCollectionShareMetadata(
+                    for: collection,
+                    recipeIds: collection.recipeIds
+                )
+                collectionsPublished = collectionsPublished && published
+            }
+
+            if profilePublished && collectionsPublished {
+                UserDefaults.standard.set(true, forKey: repairKey)
+            } else {
+                AppLogger.general.warning("Public web snapshot repair remains pending")
+                throw ExternalShareError.invalidResponse
+            }
+        } catch {
+            AppLogger.general.warning("Public web snapshot repair failed: \(error.localizedDescription)")
+            throw error
         }
     }
 
@@ -784,6 +851,36 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+private struct SharedContentLoadingOverlay: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.22)
+                .ignoresSafeArea()
+
+            GlassEffectContainer(spacing: Theme.Spacing.sm) {
+                VStack(spacing: Theme.Spacing.md) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.cauldronOrange)
+
+                    Text("Opening shared content")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.lg)
+                .glassEffect(
+                    .regular,
+                    in: .rect(cornerRadius: Theme.Radius.card, style: .continuous)
+                )
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Opening shared content")
+        .accessibilityAddTraits(.updatesFrequently)
     }
 }
 

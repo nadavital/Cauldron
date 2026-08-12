@@ -297,7 +297,6 @@ struct RecipeDetailView: View {
         .toolbar {
             toolbarContent
         }
-        .modifier(RecipeDetailIOS27Chrome())
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -667,17 +666,6 @@ struct RecipeDetailView: View {
             return "3x"
         default:
             return "\(scaleFactor.formatted(.number.precision(.fractionLength(0...1))))x"
-        }
-    }
-}
-
-private struct RecipeDetailIOS27Chrome: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 27.0, *) {
-            content.toolbarMinimizationBehavior(.onScrollDown, for: .navigationBar)
-        } else {
-            content
         }
     }
 }

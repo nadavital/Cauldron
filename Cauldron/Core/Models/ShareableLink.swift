@@ -103,6 +103,9 @@ struct ShareMetadata: Codable {
 struct ShareResponse: Codable {
     let shareId: String
     let shareUrl: String
+    /// V2 publication endpoints distinguish a successful request from an
+    /// actual snapshot write. Older responses omitted this field.
+    let published: Bool?
 }
 
 struct UnshareResponse: Codable {

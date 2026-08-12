@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     escapeHtml,
+    canonicalRecipeCategoryName,
     cloudKitAuthorityMatches,
     cloudKitReferralRecordIsActive,
     cloudKitReferralQueryResolvesUniquely,
     canonicalCloudKitOwnerRecord,
     canonicalCloudKitRecipeCreator,
     cloudKitOwnerQuery,
+    cloudKitRecordsPayloadDisposition,
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
     generateCompactRecipePageHtml,
@@ -18,6 +20,9 @@ import {
     isValidUUID,
     isCurrentResourceMutationGeneration,
     publicSecurityHeaders,
+    publishedShareResponse,
+    recipeCategoryPresentation,
+    renderCanonicalRecipePage,
     resourceMutationCannotSupersede,
     safeImageURL,
     sanitizeAccountUnshareInput,
@@ -34,12 +39,53 @@ import {
     sanitizeRecipeUnshareInput,
 } from "../lib/index.js";
 
+test("share publication responses expose the write outcome on every endpoint", () => {
+    assert.deepEqual(
+        publishedShareResponse("profile-id", "https://cauldron-f900a.web.app/profile/profile-id", true),
+        {
+            shareId: "profile-id",
+            shareUrl: "https://cauldron-f900a.web.app/profile/profile-id",
+            published: true,
+        }
+    );
+    assert.equal(publishedShareResponse("profile-id", "url", false).published, false);
+});
+
+test("web recipe category colors match the app's adaptive and custom palette", () => {
+    assert.deepEqual(recipeCategoryPresentation.Mexican, {
+        emoji: "🌮", light: "#E6801A", dark: "#E6801A",
+    });
+    assert.deepEqual(recipeCategoryPresentation.Japanese, {
+        emoji: "🍣", light: "#FF6666", dark: "#FF6666",
+    });
+    assert.deepEqual(recipeCategoryPresentation.Vegan, {
+        emoji: "🌱", light: "#66CC66", dark: "#66CC66",
+    });
+    assert.deepEqual(recipeCategoryPresentation.Snack, {
+        emoji: "🍿", light: "#FFCC00", dark: "#FFD60A",
+    });
+    assert.deepEqual(recipeCategoryPresentation["Side Dish"], {
+        emoji: "🥗", light: "#34C759", dark: "#30D158",
+    });
+});
+
+test("web recipe tags use the app's trimming, case, and alias normalization", () => {
+    assert.equal(canonicalRecipeCategoryName(" dessert "), "Dessert");
+    assert.equal(canonicalRecipeCategoryName("mexican food"), "Mexican");
+    assert.equal(canonicalRecipeCategoryName("GF"), "Gluten-Free");
+    assert.equal(canonicalRecipeCategoryName("not a category"), null);
+});
+
 test("invite preview opens the app without an automatic App Store redirect", () => {
     const html = generateInvitePreviewHtml("ABC123");
     assert.match(html, /window\.location\.assign\(deepLink\)/);
     assert.doesNotMatch(html, /setTimeout\(/);
     assert.doesNotMatch(html, /window\.location\.href\s*=\s*appStoreURL/);
     assert.match(html, /Download Cauldron<\/a>/);
+    assert.match(html, /--bg: #F6F1EA/);
+    assert.match(html, /--bg: #18120D/);
+    assert.match(html, /--orange: #FF9933/);
+    assert.doesNotMatch(html, /radial-gradient|box-shadow/);
 });
 
 test("public responses use browser defense-in-depth headers", () => {
@@ -272,6 +318,21 @@ test("CloudKit authority binds identity, owner, and capability hash", async () =
         { username: "nadav", displayName: "Nadav", profileEmoji: "🧑‍🍳", profileColor: "#E9792F" }
     );
     assert.equal(canonicalCloudKitRecipeCreator([attackerRecord], ownerId), null);
+});
+
+test("CloudKit HTTP-200 record errors distinguish missing data from retryable failures", () => {
+    assert.equal(cloudKitRecordsPayloadDisposition({
+        records: [{ serverErrorCode: "UNKNOWN_ITEM" }],
+    }), "notFound");
+    assert.equal(cloudKitRecordsPayloadDisposition({
+        records: [{ serverErrorCode: "TRY_AGAIN_LATER" }],
+    }), "error");
+    assert.equal(cloudKitRecordsPayloadDisposition({
+        serverErrorCode: "SERVICE_UNAVAILABLE",
+    }), "error");
+    assert.equal(cloudKitRecordsPayloadDisposition({
+        records: [{ recordName: "recipe-id", recordType: "SharedRecipe" }],
+    }), "records");
 });
 
 test("CloudKit server request signature input hashes the exact body", async () => {
@@ -522,7 +583,10 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.match(html, /class="brand-icon"/);
     assert.match(html, /src="\/icon-small-light\.svg"/);
     assert.match(html, /srcset="\/icon-small-dark\.svg"/);
-    assert.match(html, /class="tags" aria-label="Recipe tags"><li><span aria-hidden="true">🍽️<\/span>Dinner<\/li>/);
+    assert.match(html, /class="tags" aria-label="Recipe tags"><li style="--tag-color:#AF52DE;--tag-color-dark:#BF5AF2"><span aria-hidden="true">🍽️<\/span>Dinner<\/li>/);
+    assert.match(html, /--paper:#F6F1EA/);
+    assert.match(html, /--accent:#FF9933/);
+    assert.match(html, /background:color-mix\(in srgb,var\(--tag-color\) 15%,transparent\)/);
     assert.doesNotMatch(html, /class="cauldron-mark"/);
     assert.match(html, /class="recipe-masthead"/);
     assert.doesNotMatch(html, />Shared recipe</);
@@ -549,6 +613,19 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /unshare|stop sharing|make private/i);
     assert.equal(sanitizeCloudKitRecipeForWeb(record, recipeId, crypto.randomUUID()), null);
+});
+
+test("canonical recipe routes never render a Firebase-only compact fallback", () => {
+    const rendered = renderCanonicalRecipePage(
+        null,
+        null,
+        "https://cauldron-f900a.web.app/recipe/recipe-id",
+        "cauldron://import/recipe/recipe-id",
+        "https://apps.apple.com/app/id6754004943"
+    );
+    assert.equal(rendered.status, 404);
+    assert.match(rendered.html, /Recipe unavailable/);
+    assert.doesNotMatch(rendered.html, /Open this recipe|Ingredients|Recipe details/);
 });
 
 test("public status pages use the shared restrained design and escape messages", () => {

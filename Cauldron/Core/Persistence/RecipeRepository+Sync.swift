@@ -59,7 +59,9 @@ nonisolated enum RecipeDeletionSyncPolicy {
 
 extension RecipeRepository {
     private var publicRecipeMigrationCompletedKey: String {
-        "hasMigratedPublicRecipesToPublicDB_v4"
+        // v5 also creates any missing Firebase publication pointer after the
+        // public CloudKit record is current.
+        "hasMigratedPublicRecipesToPublicDB_v5"
     }
 
     private var publicRecipeMigrationPendingIDsKey: String {

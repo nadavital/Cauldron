@@ -125,7 +125,11 @@ final class ExternalShareService: Sendable {
         logger.info("🔄 Updating share metadata for recipe: \(recipe.title)")
 
         do {
-            _ = try await publishRecipeShareMetadata(for: recipe, shouldCreate: false)
+            let response = try await publishRecipeShareMetadata(for: recipe, shouldCreate: true)
+            guard response.published == true else {
+                logger.warning("Recipe publication endpoint did not write a snapshot")
+                return false
+            }
             logger.info("✅ Share metadata updated successfully")
             return true
         } catch {
@@ -177,6 +181,9 @@ final class ExternalShareService: Sendable {
         }
 
         let response = try await publishRecipeShareMetadata(for: recipe, shouldCreate: true)
+        guard response.published == true else {
+            throw ExternalShareError.invalidResponse
+        }
 
         guard let publishedURL = URL(string: response.shareUrl) else {
             throw ExternalShareError.invalidResponse
@@ -217,11 +224,15 @@ final class ExternalShareService: Sendable {
         logger.info("🔄 Updating share metadata for profile: \(user.username)")
 
         do {
-            _ = try await publishProfileShareMetadata(
+            let response = try await publishProfileShareMetadata(
                 for: user,
                 recipeCount: recipeCount,
-                shouldCreate: false
+                shouldCreate: true
             )
+            guard response.published == true else {
+                logger.warning("Profile publication endpoint did not write a snapshot")
+                return false
+            }
             logger.info("✅ Profile metadata updated successfully")
             return true
         } catch {
@@ -238,6 +249,9 @@ final class ExternalShareService: Sendable {
             recipeCount: recipeCount,
             shouldCreate: true
         )
+        guard response.published == true else {
+            throw ExternalShareError.invalidResponse
+        }
         guard let publishedURL = URL(string: response.shareUrl) else {
             throw ExternalShareError.invalidResponse
         }
@@ -460,11 +474,15 @@ final class ExternalShareService: Sendable {
          logger.info("🔄 Updating share metadata for collection: \(collection.name)")
 
         do {
-            _ = try await publishCollectionShareMetadata(
+            let response = try await publishCollectionShareMetadata(
                 for: collection,
                 recipeIds: recipeIds,
-                shouldCreate: false
+                shouldCreate: true
             )
+            guard response.published == true else {
+                logger.warning("Collection publication endpoint did not write a snapshot")
+                return false
+            }
              logger.info("✅ Collection metadata updated successfully")
             return true
         } catch {
@@ -488,6 +506,9 @@ final class ExternalShareService: Sendable {
             recipeIds: recipeIds,
             shouldCreate: true
         )
+        guard response.published == true else {
+            throw ExternalShareError.invalidResponse
+        }
         guard let publishedURL = URL(string: response.shareUrl) else {
             throw ExternalShareError.invalidResponse
         }

@@ -300,7 +300,13 @@ struct SearchTabView: View {
                                 }
                                 .padding(.horizontal, Theme.Spacing.sm)
                                 .padding(.vertical, Theme.Spacing.xs)
-                                .appSurface(.resting)
+                                .background(
+                                    category.color.opacity(0.08),
+                                    in: .rect(
+                                        cornerRadius: Theme.Radius.card,
+                                        style: .continuous
+                                    )
+                                )
                             }
                             .buttonStyle(PressableScaleStyle())
                         }
