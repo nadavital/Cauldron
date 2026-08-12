@@ -744,6 +744,7 @@ final class RecipeIntentEntityTests: XCTestCase {
         var shouldFailNewestCleanup = true
         let firstDeleteStarted = AsyncGate()
         let allowFirstDeleteToFinish = AsyncGate()
+        let secondRequestObserved = expectation(description: "Second reconciliation request observed")
         var requestCount = 0
         let coordinator = RecipeIntentDonationBoundaryCoordinator(
             defaults: defaults,
@@ -758,6 +759,9 @@ final class RecipeIntentEntityTests: XCTestCase {
             },
             reconciliationRequested: { _ in
                 requestCount += 1
+                if requestCount == 2 {
+                    secondRequestObserved.fulfill()
+                }
             }
         )
 
@@ -765,7 +769,7 @@ final class RecipeIntentEntityTests: XCTestCase {
         await firstDeleteStarted.wait()
 
         async let signOutResult = coordinator.reconcile(currentOwnerID: nil)
-        await Task.yield()
+        await fulfillment(of: [secondRequestObserved], timeout: 1)
         XCTAssertEqual(requestCount, 2)
         await allowFirstDeleteToFinish.open()
 
