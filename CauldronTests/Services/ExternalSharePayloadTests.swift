@@ -3,6 +3,233 @@ import XCTest
 
 @MainActor
 final class ExternalSharePayloadTests: XCTestCase {
+    func testCapabilityRegistrationRotatesAfterSameGenerationConflict() async throws {
+        let original = UserCloudService.WebShareCredential(capability: "original", generation: 1)
+        let replacement = UserCloudService.WebShareCredential(capability: "replacement", generation: 2)
+        var events: [String] = []
+
+        let credential = try await WebShareCapabilityRegistrationWorkflow.recover {
+            events.append("resolve")
+            return original
+        } rotate: {
+            events.append("rotate")
+            return replacement
+        } register: { candidate in
+            events.append("register-\(candidate.generation)")
+            if candidate == original {
+                throw CloudKitError.webShareCapabilityConflict
+            }
+            return true
+        }
+
+        XCTAssertEqual(credential, replacement)
+        XCTAssertEqual(events, ["resolve", "register-1", "rotate", "register-2"])
+    }
+
+    func testCapabilityRegistrationReResolvesAfterStaleGeneration() async throws {
+        let original = UserCloudService.WebShareCredential(capability: "original", generation: 1)
+        let refreshed = UserCloudService.WebShareCredential(capability: "refreshed", generation: 2)
+        var resolveCount = 0
+        var rotateCount = 0
+
+        let credential = try await WebShareCapabilityRegistrationWorkflow.recover {
+            resolveCount += 1
+            return resolveCount == 1 ? original : refreshed
+        } rotate: {
+            rotateCount += 1
+            return refreshed
+        } register: { candidate in
+            candidate == refreshed
+        }
+
+        XCTAssertEqual(credential, refreshed)
+        XCTAssertEqual(resolveCount, 2)
+        XCTAssertEqual(rotateCount, 0)
+    }
+
+    func testCapabilityRegistrationDoesNotRotateForUnrelatedErrors() async {
+        let original = UserCloudService.WebShareCredential(capability: "original", generation: 1)
+        var rotateCount = 0
+
+        do {
+            _ = try await WebShareCapabilityRegistrationWorkflow.recover {
+                original
+            } rotate: {
+                rotateCount += 1
+                return original
+            } register: { _ in
+                throw CloudKitError.permissionDenied
+            }
+            XCTFail("Expected permissionDenied")
+        } catch let error as CloudKitError {
+            XCTAssertEqual(error, .permissionDenied)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(rotateCount, 0)
+    }
+
+    func testCapabilityRegistrationDoesNotRotateForSaveContention() async {
+        let original = UserCloudService.WebShareCredential(capability: "original", generation: 1)
+        var rotateCount = 0
+
+        do {
+            _ = try await WebShareCapabilityRegistrationWorkflow.recover {
+                original
+            } rotate: {
+                rotateCount += 1
+                return original
+            } register: { _ in
+                throw CloudKitError.syncConflict
+            }
+            XCTFail("Expected syncConflict")
+        } catch let error as CloudKitError {
+            XCTAssertEqual(error, .syncConflict)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(rotateCount, 0)
+    }
+
+    func testOwnerMutationCoordinatorKeepsRecoveredCredentialCurrentThroughPublication() async throws {
+        let ownerID = UUID()
+        let coordinator = WebShareOwnerMutationCoordinator()
+        var generation: Int64 = 1
+        var currentCapability = "original"
+        var events: [String] = []
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        let firstReachedPublication = expectation(description: "first reached publication")
+        let secondAttemptedAcquisition = expectation(description: "second attempted acquisition")
+
+        let first = Task { @MainActor in
+            try await coordinator.perform(ownerID: ownerID) {
+                var registrationAttempts = 0
+                let credential = try await WebShareCapabilityRegistrationWorkflow.recover {
+                    UserCloudService.WebShareCredential(
+                        capability: currentCapability,
+                        generation: generation
+                    )
+                } rotate: {
+                    generation += 1
+                    currentCapability = "capability-\(generation)"
+                    events.append("rotate-\(generation)")
+                    return UserCloudService.WebShareCredential(
+                        capability: currentCapability,
+                        generation: generation
+                    )
+                } register: { candidate in
+                    registrationAttempts += 1
+                    if registrationAttempts == 1 {
+                        throw CloudKitError.webShareCapabilityConflict
+                    }
+                    currentCapability = candidate.capability
+                    return true
+                }
+
+                firstReachedPublication.fulfill()
+                await withCheckedContinuation { continuation in
+                    releaseFirst = continuation
+                }
+                XCTAssertEqual(credential.capability, currentCapability)
+                events.append("publish-\(credential.generation)")
+            }
+        }
+
+        await fulfillment(of: [firstReachedPublication], timeout: 1)
+        let second = Task { @MainActor in
+            secondAttemptedAcquisition.fulfill()
+            try await coordinator.perform(ownerID: ownerID) {
+                var registrationAttempts = 0
+                let credential = try await WebShareCapabilityRegistrationWorkflow.recover {
+                    UserCloudService.WebShareCredential(
+                        capability: currentCapability,
+                        generation: generation
+                    )
+                } rotate: {
+                    generation += 1
+                    currentCapability = "capability-\(generation)"
+                    events.append("rotate-\(generation)")
+                    return UserCloudService.WebShareCredential(
+                        capability: currentCapability,
+                        generation: generation
+                    )
+                } register: { candidate in
+                    registrationAttempts += 1
+                    if registrationAttempts == 1 {
+                        throw CloudKitError.webShareCapabilityConflict
+                    }
+                    currentCapability = candidate.capability
+                    return true
+                }
+
+                XCTAssertEqual(credential.capability, currentCapability)
+                events.append("publish-\(credential.generation)")
+            }
+        }
+
+        await fulfillment(of: [secondAttemptedAcquisition], timeout: 1)
+        while coordinator.queuedMutationCount(for: ownerID) < 1 {
+            await Task.yield()
+        }
+        XCTAssertEqual(events, ["rotate-2"])
+        releaseFirst?.resume()
+        try await first.value
+        try await second.value
+        XCTAssertEqual(events, ["rotate-2", "publish-2", "rotate-3", "publish-3"])
+    }
+
+    func testOwnerMutationCoordinatorSkipsCancelledWaiterAndAdvancesQueue() async throws {
+        let ownerID = UUID()
+        let coordinator = WebShareOwnerMutationCoordinator()
+        var releaseFirst: CheckedContinuation<Void, Never>?
+        var cancelledOperationRan = false
+        var finalOperationRan = false
+        let firstStarted = expectation(description: "first started")
+
+        let first = Task { @MainActor in
+            try await coordinator.perform(ownerID: ownerID) {
+                firstStarted.fulfill()
+                await withCheckedContinuation { continuation in
+                    releaseFirst = continuation
+                }
+            }
+        }
+        await fulfillment(of: [firstStarted], timeout: 1)
+
+        let cancelled = Task { @MainActor in
+            try await coordinator.perform(ownerID: ownerID) {
+                cancelledOperationRan = true
+            }
+        }
+        while coordinator.queuedMutationCount(for: ownerID) < 1 {
+            await Task.yield()
+        }
+        cancelled.cancel()
+
+        let final = Task { @MainActor in
+            try await coordinator.perform(ownerID: ownerID) {
+                finalOperationRan = true
+            }
+        }
+        while coordinator.queuedMutationCount(for: ownerID) < 2 {
+            await Task.yield()
+        }
+        releaseFirst?.resume()
+
+        try await first.value
+        do {
+            try await cancelled.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected.
+        }
+        try await final.value
+        XCTAssertFalse(cancelledOperationRan)
+        XCTAssertTrue(finalOperationRan)
+    }
+
     func testPublicationResponseReportsWhetherSnapshotWasActuallyWritten() throws {
         let response = try JSONDecoder().decode(
             ShareResponse.self,

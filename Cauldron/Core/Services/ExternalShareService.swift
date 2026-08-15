@@ -47,6 +47,91 @@ enum ExternalShareError: LocalizedError {
     }
 }
 
+/// Registers the private, account-wide web-share credential with the public
+/// profile record. A same-generation hash mismatch can be left behind by an
+/// older client or interrupted migration; rotating the private credential
+/// advances the generation so the public record can be repaired safely.
+@MainActor
+enum WebShareCapabilityRegistrationWorkflow {
+    static func recover(
+        maxAttempts: Int = 3,
+        resolve: () async throws -> UserCloudService.WebShareCredential,
+        rotate: () async throws -> UserCloudService.WebShareCredential,
+        register: (UserCloudService.WebShareCredential) async throws -> Bool
+    ) async throws -> UserCloudService.WebShareCredential {
+        precondition(maxAttempts > 0)
+
+        var credential = try await resolve()
+        for attempt in 1...maxAttempts {
+            do {
+                if try await register(credential) {
+                    return credential
+                }
+
+                guard attempt < maxAttempts else {
+                    throw ExternalShareError.invalidProfile
+                }
+                // A false result means the public record has a newer
+                // generation. Re-read the private authority before retrying.
+                credential = try await resolve()
+            } catch let error as CloudKitError where error == .webShareCapabilityConflict {
+                guard attempt < maxAttempts else { throw error }
+                // Equal generations with different hashes cannot be merged.
+                // Advance the private authority and register that generation.
+                credential = try await rotate()
+            }
+        }
+
+        throw ExternalShareError.invalidProfile
+    }
+}
+
+/// Keeps one owner's credential registration and backend mutation atomic with
+/// respect to other in-process share operations. Main-actor methods are
+/// reentrant across awaits, so actor isolation alone does not close this race.
+@MainActor
+final class WebShareOwnerMutationCoordinator {
+    private var activeOwners: Set<UUID> = []
+    private var waiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+
+    func perform<T>(
+        ownerID: UUID,
+        operation: () async throws -> T
+    ) async throws -> T {
+        await acquire(ownerID: ownerID)
+        defer { release(ownerID: ownerID) }
+        // A task can be cancelled while its continuation is queued. Never let
+        // that stale request mutate CloudKit or Firebase once it gets a turn.
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    func queuedMutationCount(for ownerID: UUID) -> Int {
+        waiters[ownerID]?.count ?? 0
+    }
+
+    private func acquire(ownerID: UUID) async {
+        guard activeOwners.contains(ownerID) else {
+            activeOwners.insert(ownerID)
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters[ownerID, default: []].append(continuation)
+        }
+    }
+
+    private func release(ownerID: UUID) {
+        guard var ownerWaiters = waiters[ownerID], !ownerWaiters.isEmpty else {
+            activeOwners.remove(ownerID)
+            waiters[ownerID] = nil
+            return
+        }
+        let next = ownerWaiters.removeFirst()
+        waiters[ownerID] = ownerWaiters.isEmpty ? nil : ownerWaiters
+        next.resume()
+    }
+}
+
 /// Service for creating and importing external share links
 @MainActor
 final class ExternalShareService: Sendable {
@@ -58,6 +143,7 @@ final class ExternalShareService: Sendable {
 
     private let session: URLSession
     private let userCloudService: UserCloudService?
+    private let mutationCoordinator = WebShareOwnerMutationCoordinator()
 
     init(imageManager _: RecipeImageManager, userCloudService: UserCloudService? = nil) {
         let config = URLSessionConfiguration.default
@@ -145,22 +231,24 @@ final class ExternalShareService: Sendable {
             throw ExternalShareError.invalidRecipe
         }
 
-        let context = try await registeredOwnerContext(ownerId: ownerId)
-        let metadata = ShareMetadata.RecipeUnshare(
-            recipeId: recipe.id.uuidString,
-            ownerId: ownerId.uuidString,
-            identityRecordName: context.identityRecordName,
-            capability: context.capability
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
-            throw ExternalShareError.accountDeletionInProgress
+        try await mutationCoordinator.perform(ownerID: ownerId) {
+            let context = try await registeredOwnerContext(ownerId: ownerId)
+            let metadata = ShareMetadata.RecipeUnshare(
+                recipeId: recipe.id.uuidString,
+                ownerId: ownerId.uuidString,
+                identityRecordName: context.identityRecordName,
+                capability: context.capability
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            let response: UnshareResponse = try await post(endpoint: "/unshareRecipeV2", metadata: metadata)
+            guard response.success else {
+                throw ExternalShareError.invalidResponse
+            }
+            try await rotateManagementCapability(forOwnerID: ownerId)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        let response: UnshareResponse = try await post(endpoint: "/unshareRecipeV2", metadata: metadata)
-        guard response.success else {
-            throw ExternalShareError.invalidResponse
-        }
-        try await rotateManagementCapability(forOwnerID: ownerId)
     }
 
     /// Legacy support - calls generate and optionally updates metadata
@@ -274,18 +362,20 @@ final class ExternalShareService: Sendable {
         guard let ownerId = recipe.ownerId else {
             throw ExternalShareError.invalidRecipe
         }
-        let context = try await registeredOwnerContext(ownerId: ownerId)
-        let metadata = ShareMetadata.RecipeShare(
-            recipe: recipe,
-            identityRecordName: context.identityRecordName,
-            capability: context.capability,
-            shouldCreate: shouldCreate
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
-            throw ExternalShareError.accountDeletionInProgress
+        return try await mutationCoordinator.perform(ownerID: ownerId) {
+            let context = try await registeredOwnerContext(ownerId: ownerId)
+            let metadata = ShareMetadata.RecipeShare(
+                recipe: recipe,
+                identityRecordName: context.identityRecordName,
+                capability: context.capability,
+                shouldCreate: shouldCreate
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            return try await post(endpoint: "/shareRecipeV2", metadata: metadata)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        return try await post(endpoint: "/shareRecipeV2", metadata: metadata)
     }
 
     private func publishProfileShareMetadata(
@@ -296,84 +386,92 @@ final class ExternalShareService: Sendable {
         guard await AccountDeletionGate.shared.permitsWrite(ownerID: user.id) else {
             throw ExternalShareError.accountDeletionInProgress
         }
-        let context = try await registeredOwnerContext(ownerId: user.id)
-        let metadata = ShareMetadata.ProfileShare(
-            userId: user.id.uuidString,
-            identityRecordName: context.identityRecordName,
-            username: user.username,
-            displayName: user.displayName,
-            profileEmoji: user.profileEmoji,
-            profileColor: user.profileColor,
-            recipeCount: recipeCount,
-            capability: context.capability,
-            shouldCreate: shouldCreate
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: user.id) else {
-            throw ExternalShareError.accountDeletionInProgress
+        return try await mutationCoordinator.perform(ownerID: user.id) {
+            let context = try await registeredOwnerContext(ownerId: user.id)
+            let metadata = ShareMetadata.ProfileShare(
+                userId: user.id.uuidString,
+                identityRecordName: context.identityRecordName,
+                username: user.username,
+                displayName: user.displayName,
+                profileEmoji: user.profileEmoji,
+                profileColor: user.profileColor,
+                recipeCount: recipeCount,
+                capability: context.capability,
+                shouldCreate: shouldCreate
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: user.id) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            return try await post(endpoint: "/shareProfileV2", metadata: metadata)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        return try await post(endpoint: "/shareProfileV2", metadata: metadata)
     }
 
     func removeProfileShareMetadata(for user: User) async throws {
-        let context = try await registeredOwnerContext(ownerId: user.id)
-        let metadata = ShareMetadata.ProfileUnshare(
-            userId: user.id.uuidString,
-            identityRecordName: context.identityRecordName,
-            username: user.username,
-            capability: context.capability
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: user.id) else {
-            throw ExternalShareError.accountDeletionInProgress
+        try await mutationCoordinator.perform(ownerID: user.id) {
+            let context = try await registeredOwnerContext(ownerId: user.id)
+            let metadata = ShareMetadata.ProfileUnshare(
+                userId: user.id.uuidString,
+                identityRecordName: context.identityRecordName,
+                username: user.username,
+                capability: context.capability
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: user.id) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            let response: UnshareResponse = try await post(endpoint: "/unshareProfileV2", metadata: metadata)
+            guard response.success else {
+                throw ExternalShareError.invalidResponse
+            }
+            try await rotateManagementCapability(forOwnerID: user.id)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        let response: UnshareResponse = try await post(endpoint: "/unshareProfileV2", metadata: metadata)
-        guard response.success else {
-            throw ExternalShareError.invalidResponse
-        }
-        try await rotateManagementCapability(forOwnerID: user.id)
     }
 
     func removeAllShareMetadata(for user: User) async throws {
-        let context = try await registeredOwnerContext(ownerId: user.id, allowDuringAccountDeletion: true)
-        let metadata = ShareMetadata.AccountUnshare(
-            userId: user.id.uuidString,
-            identityRecordName: context.identityRecordName,
-            capability: context.capability
-        )
-        let response: UnshareResponse = try await post(endpoint: "/unshareAccountV2", metadata: metadata)
-        guard response.success else {
-            throw ExternalShareError.invalidResponse
+        try await mutationCoordinator.perform(ownerID: user.id) {
+            let context = try await registeredOwnerContext(ownerId: user.id, allowDuringAccountDeletion: true)
+            let metadata = ShareMetadata.AccountUnshare(
+                userId: user.id.uuidString,
+                identityRecordName: context.identityRecordName,
+                capability: context.capability
+            )
+            let response: UnshareResponse = try await post(endpoint: "/unshareAccountV2", metadata: metadata)
+            guard response.success else {
+                throw ExternalShareError.invalidResponse
+            }
         }
     }
 
     func restoreAccountShareMetadata(for user: User) async throws {
-        guard let userCloudService else {
-            throw ExternalShareError.invalidProfile
-        }
-        guard let identityRecordName = user.cloudRecordName, !identityRecordName.isEmpty else {
-            throw ExternalShareError.invalidProfile
-        }
-        // Rotate while the server-side revocation epoch is still active. The
-        // restore endpoint requires the replacement hash, so the credential
-        // used to begin deletion can never clear or bypass that epoch.
-        let replacement = try await userCloudService.rotateWebShareCapability(
-            for: user,
-            allowDuringAccountDeletion: true
-        )
-        guard try await userCloudService.registerWebShareCapabilityHash(
-            replacement,
-            for: user,
-            allowDuringAccountDeletion: true
-        ) else { throw ExternalShareError.invalidProfile }
-        let metadata = ShareMetadata.AccountUnshare(
-            userId: user.id.uuidString,
-            identityRecordName: identityRecordName,
-            capability: replacement.capability
-        )
-        let response: UnshareResponse = try await post(endpoint: "/restoreAccountSharingV2", metadata: metadata)
-        guard response.success else {
-            throw ExternalShareError.invalidResponse
+        try await mutationCoordinator.perform(ownerID: user.id) {
+            guard let userCloudService else {
+                throw ExternalShareError.invalidProfile
+            }
+            guard let identityRecordName = user.cloudRecordName, !identityRecordName.isEmpty else {
+                throw ExternalShareError.invalidProfile
+            }
+            // Rotate while the server-side revocation epoch is still active. The
+            // restore endpoint requires the replacement hash, so the credential
+            // used to begin deletion can never clear or bypass that epoch.
+            let replacement = try await userCloudService.rotateWebShareCapability(
+                for: user,
+                allowDuringAccountDeletion: true
+            )
+            guard try await userCloudService.registerWebShareCapabilityHash(
+                replacement,
+                for: user,
+                allowDuringAccountDeletion: true
+            ) else { throw ExternalShareError.invalidProfile }
+            let metadata = ShareMetadata.AccountUnshare(
+                userId: user.id.uuidString,
+                identityRecordName: identityRecordName,
+                capability: replacement.capability
+            )
+            let response: UnshareResponse = try await post(endpoint: "/restoreAccountSharingV2", metadata: metadata)
+            guard response.success else {
+                throw ExternalShareError.invalidResponse
+            }
         }
     }
 
@@ -393,24 +491,22 @@ final class ExternalShareService: Sendable {
               let userCloudService else {
             throw ExternalShareError.invalidProfile
         }
-        var credential = try await userCloudService.resolveWebShareCapability(
-            for: user,
-            allowDuringAccountDeletion: allowDuringAccountDeletion
-        )
-        if !(try await userCloudService.registerWebShareCapabilityHash(
-            credential,
-            for: user,
-            allowDuringAccountDeletion: allowDuringAccountDeletion
-        )) {
-            credential = try await userCloudService.resolveWebShareCapability(
+        let credential = try await WebShareCapabilityRegistrationWorkflow.recover {
+            try await userCloudService.resolveWebShareCapability(
                 for: user,
                 allowDuringAccountDeletion: allowDuringAccountDeletion
             )
-            guard try await userCloudService.registerWebShareCapabilityHash(
+        } rotate: {
+            try await userCloudService.rotateWebShareCapability(
+                for: user,
+                allowDuringAccountDeletion: allowDuringAccountDeletion
+            )
+        } register: { credential in
+            try await userCloudService.registerWebShareCapabilityHash(
                 credential,
                 for: user,
                 allowDuringAccountDeletion: allowDuringAccountDeletion
-            ) else { throw ExternalShareError.invalidProfile }
+            )
         }
         return OwnerContext(identityRecordName: identityRecordName, capability: credential.capability)
     }
@@ -527,41 +623,45 @@ final class ExternalShareService: Sendable {
         guard await AccountDeletionGate.shared.permitsWrite(ownerID: collection.userId) else {
             throw ExternalShareError.accountDeletionInProgress
         }
-        let context = try await registeredOwnerContext(ownerId: collection.userId)
-        let metadata = ShareMetadata.CollectionShare(
-            collectionId: collection.id.uuidString,
-            ownerId: collection.userId.uuidString,
-            identityRecordName: context.identityRecordName,
-            title: collection.name,
-            recipeCount: recipeIds.count,
-            recipeIds: recipeIds.map { $0.uuidString },
-            capability: context.capability,
-            shouldCreate: shouldCreate
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: collection.userId) else {
-            throw ExternalShareError.accountDeletionInProgress
+        return try await mutationCoordinator.perform(ownerID: collection.userId) {
+            let context = try await registeredOwnerContext(ownerId: collection.userId)
+            let metadata = ShareMetadata.CollectionShare(
+                collectionId: collection.id.uuidString,
+                ownerId: collection.userId.uuidString,
+                identityRecordName: context.identityRecordName,
+                title: collection.name,
+                recipeCount: recipeIds.count,
+                recipeIds: recipeIds.map { $0.uuidString },
+                capability: context.capability,
+                shouldCreate: shouldCreate
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: collection.userId) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            return try await createShare(endpoint: "/shareCollectionV2", metadata: metadata)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        return try await createShare(endpoint: "/shareCollectionV2", metadata: metadata)
     }
 
     func removeCollectionShareMetadata(collectionId: UUID, ownerId: UUID) async throws {
-        let context = try await registeredOwnerContext(ownerId: ownerId)
-        let metadata = ShareMetadata.CollectionUnshare(
-            collectionId: collectionId.uuidString,
-            ownerId: ownerId.uuidString,
-            identityRecordName: context.identityRecordName,
-            capability: context.capability
-        )
-        guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
-            throw ExternalShareError.accountDeletionInProgress
+        try await mutationCoordinator.perform(ownerID: ownerId) {
+            let context = try await registeredOwnerContext(ownerId: ownerId)
+            let metadata = ShareMetadata.CollectionUnshare(
+                collectionId: collectionId.uuidString,
+                ownerId: ownerId.uuidString,
+                identityRecordName: context.identityRecordName,
+                capability: context.capability
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            let response: UnshareResponse = try await post(endpoint: "/unshareCollectionV2", metadata: metadata)
+            guard response.success else {
+                throw ExternalShareError.invalidResponse
+            }
+            try await rotateManagementCapability(forOwnerID: ownerId)
         }
-        defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-        let response: UnshareResponse = try await post(endpoint: "/unshareCollectionV2", metadata: metadata)
-        guard response.success else {
-            throw ExternalShareError.invalidResponse
-        }
-        try await rotateManagementCapability(forOwnerID: ownerId)
     }
 
     // MARK: - Import from Share Link

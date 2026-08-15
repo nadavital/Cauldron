@@ -59,6 +59,7 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
     case networkError
     case quotaExceeded
     case syncConflict
+    case webShareCapabilityConflict
     case assetNotFound
     case assetTooLarge
     case compressionFailed
@@ -92,6 +93,8 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
             return "iCloud storage is full. Please free up space in Settings"
         case .syncConflict:
             return "Sync conflict detected. Your changes may need to be merged manually"
+        case .webShareCapabilityConflict:
+            return "Web sharing credentials need to be refreshed"
         case .assetNotFound:
             return "Image not found in iCloud"
         case .assetTooLarge:
@@ -131,6 +134,7 @@ enum CloudKitError: Sendable, LocalizedError, Equatable {
              (.networkError, .networkError),
              (.quotaExceeded, .quotaExceeded),
              (.syncConflict, .syncConflict),
+             (.webShareCapabilityConflict, .webShareCapabilityConflict),
              (.assetNotFound, .assetNotFound),
              (.assetTooLarge, .assetTooLarge),
              (.compressionFailed, .compressionFailed),

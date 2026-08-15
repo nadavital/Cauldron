@@ -494,7 +494,7 @@ actor UserCloudService {
             case .alreadyRegistered:
                 return true
             case .conflict:
-                throw CloudKitError.syncConflict
+                throw CloudKitError.webShareCapabilityConflict
             case .accept:
                 break
             }
