@@ -74,6 +74,46 @@ final class PublicWebRepairWorkflowTests: XCTestCase {
         XCTAssertEqual(publishCount, 1)
     }
 
+    func testLegacyCheckpointDoesNotSuppressConsecutiveLaunchReconciliation() async throws {
+        actor Attempts {
+            var syncCount = 0
+            var publishCount = 0
+
+            func sync() {
+                syncCount += 1
+            }
+
+            func publish() {
+                publishCount += 1
+            }
+        }
+        let attempts = Attempts()
+        let ownerID = UUID()
+        let suiteName = "PublicWebRepairLaunchPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let legacyKey = "hasRepairedPublicWebSnapshots_v1_\(ownerID.uuidString)"
+        defaults.set(true, forKey: legacyKey)
+
+        for _ in 0..<2 {
+            try await PublicWebRepairWorkflow.reconcileOnLaunch(
+                ownerID: ownerID,
+                defaults: defaults,
+                maxAttempts: 1,
+                sync: { await attempts.sync() },
+                publish: { await attempts.publish() },
+                waitBeforeRetry: { _ in }
+            )
+        }
+
+        let syncCount = await attempts.syncCount
+        let publishCount = await attempts.publishCount
+        XCTAssertEqual(syncCount, 2)
+        XCTAssertEqual(publishCount, 2)
+        XCTAssertNil(defaults.object(forKey: legacyKey))
+    }
+
     func testCanonicalRecordMustBelongToFirebasePointerOwner() {
         let expectedOwner = UUID()
         XCTAssertTrue(SharedContentAuthority.matches(

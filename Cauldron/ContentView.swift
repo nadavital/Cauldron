@@ -684,7 +684,8 @@ struct ContentView: View {
             }
 
             do {
-                try await PublicWebRepairWorkflow.run(
+                try await PublicWebRepairWorkflow.reconcileOnLaunch(
+                    ownerID: userId,
                     sync: {
                         try await recipeSyncService.performFullSync(for: userId)
                     },
@@ -716,9 +717,6 @@ struct ContentView: View {
         collectionRepository: CollectionRepository,
         externalShareService: ExternalShareService
     ) async throws {
-        let repairKey = "hasRepairedPublicWebSnapshots_v1_\(userId.uuidString)"
-        guard !UserDefaults.standard.bool(forKey: repairKey) else { return }
-
         guard let user = await MainActor.run(body: {
             let session = CurrentUserSession.shared
             return session.userId == userId ? session.currentUser : nil
@@ -742,9 +740,7 @@ struct ContentView: View {
                 collectionsPublished = collectionsPublished && published
             }
 
-            if profilePublished && collectionsPublished {
-                UserDefaults.standard.set(true, forKey: repairKey)
-            } else {
+            if !profilePublished || !collectionsPublished {
                 AppLogger.general.warning("Public web snapshot repair remains pending")
                 throw ExternalShareError.invalidResponse
             }
