@@ -275,6 +275,7 @@ actor UserCloudService {
                 recordType: existing.recordType,
                 claimedUserID: existing["userId"] as? String,
                 claimedUsername: existing["username"] as? String,
+                claimedIdentityRecordName: existing["identityRecordName"] as? String,
                 creatorRecordName: existing.creatorUserRecordID?.recordName,
                 expectedUserID: userId.uuidString,
                 expectedUsername: normalizedUsername,
@@ -304,6 +305,7 @@ actor UserCloudService {
                 recordType: existing.recordType,
                 claimedUserID: existing["userId"] as? String,
                 claimedUsername: existing["username"] as? String,
+                claimedIdentityRecordName: existing["identityRecordName"] as? String,
                 creatorRecordName: existing.creatorUserRecordID?.recordName,
                 expectedUserID: userId.uuidString,
                 expectedUsername: username,
@@ -331,6 +333,7 @@ actor UserCloudService {
                     recordType: winner.recordType,
                     claimedUserID: winner["userId"] as? String,
                     claimedUsername: winner["username"] as? String,
+                    claimedIdentityRecordName: winner["identityRecordName"] as? String,
                     creatorRecordName: winner.creatorUserRecordID?.recordName,
                     expectedUserID: userId.uuidString,
                     expectedUsername: username,
@@ -345,11 +348,14 @@ actor UserCloudService {
 
     /// Compares the trusted creator record name rather than the full record ID,
     /// whose zone can differ across CloudKit responses for the same identity.
-    /// User ID and username must also match to preserve global uniqueness.
+    /// CloudKit may redact the creator of the current user's record to its
+    /// system alias; accept that alias only when the stored concrete identity,
+    /// user ID, and username all match the signed-in account.
     static func usernameClaimBelongsToUser(
         recordType: String,
         claimedUserID: String?,
         claimedUsername: String?,
+        claimedIdentityRecordName: String?,
         creatorRecordName: String?,
         expectedUserID: String,
         expectedUsername: String,
@@ -357,10 +363,12 @@ actor UserCloudService {
     ) -> Bool {
         guard recordType == CloudKitCore.RecordType.usernameClaim,
               claimedUserID == expectedUserID,
-              claimedUsername == expectedUsername else {
+              claimedUsername == expectedUsername,
+              claimedIdentityRecordName == expectedIdentityRecordName else {
             return false
         }
-        return creatorRecordName == expectedIdentityRecordName
+        return creatorRecordName == expectedIdentityRecordName ||
+            creatorRecordName == CKCurrentUserDefaultName
     }
 
     private func releaseOtherUsernameClaims(
@@ -378,6 +386,7 @@ actor UserCloudService {
             recordType: record.recordType,
             claimedUserID: record["userId"] as? String,
             claimedUsername: record["username"] as? String,
+            claimedIdentityRecordName: record["identityRecordName"] as? String,
             creatorRecordName: record.creatorUserRecordID?.recordName,
             expectedUserID: userId.uuidString,
             expectedUsername: record["username"] as? String ?? "",

@@ -62,7 +62,34 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
             recordType: CloudKitCore.RecordType.usernameClaim,
             claimedUserID: "user-id",
             claimedUsername: "chef",
+            claimedIdentityRecordName: "icloud-id",
             creatorRecordName: "icloud-id",
+            expectedUserID: "user-id",
+            expectedUsername: "chef",
+            expectedIdentityRecordName: "icloud-id"
+        ))
+    }
+
+    func testUsernameClaimAcceptsCurrentUserCreatorAliasWithMatchingConcreteIdentity() {
+        XCTAssertTrue(UserCloudService.usernameClaimBelongsToUser(
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            claimedUserID: "user-id",
+            claimedUsername: "chef",
+            claimedIdentityRecordName: "icloud-id",
+            creatorRecordName: CKCurrentUserDefaultName,
+            expectedUserID: "user-id",
+            expectedUsername: "chef",
+            expectedIdentityRecordName: "icloud-id"
+        ))
+    }
+
+    func testUsernameClaimRejectsCurrentUserAliasWhenConcreteIdentityDiffers() {
+        XCTAssertFalse(UserCloudService.usernameClaimBelongsToUser(
+            recordType: CloudKitCore.RecordType.usernameClaim,
+            claimedUserID: "user-id",
+            claimedUsername: "chef",
+            claimedIdentityRecordName: "other-icloud-id",
+            creatorRecordName: CKCurrentUserDefaultName,
             expectedUserID: "user-id",
             expectedUsername: "chef",
             expectedIdentityRecordName: "icloud-id"
@@ -74,6 +101,7 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
             recordType: CloudKitCore.RecordType.usernameClaim,
             claimedUserID: "user-id",
             claimedUsername: "chef",
+            claimedIdentityRecordName: "icloud-id",
             creatorRecordName: "server-owner",
             expectedUserID: "user-id",
             expectedUsername: "chef",
@@ -86,6 +114,7 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
             recordType: CloudKitCore.RecordType.usernameClaim,
             claimedUserID: "other-user",
             claimedUsername: "chef",
+            claimedIdentityRecordName: "other-icloud-id",
             creatorRecordName: "other-icloud-id",
             expectedUserID: "user-id",
             expectedUsername: "chef",
