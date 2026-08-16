@@ -14,6 +14,11 @@ enum FriendsTabDestination: Hashable {
     case profile(User)
 }
 
+private enum FriendsMacSection: Hashable {
+    case recipes
+    case connections
+}
+
 /// Friends tab - showing shared recipes and connections
 struct FriendsTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -21,6 +26,7 @@ struct FriendsTabView: View {
     @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var sidebarSelection: FriendsTabDestination?
+    @State private var macSection: FriendsMacSection = .recipes
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
     @State private var showingInviteSheet = false
@@ -61,6 +67,7 @@ struct FriendsTabView: View {
         .onChange(of: userSession.userId) { _, _ in
             navigationPath = NavigationPath()
             sidebarSelection = nil
+            macSection = .recipes
             collectionImageCache = [:]
         }
         .alert("Success", isPresented: $viewModel.showSuccessAlert) {
@@ -88,12 +95,81 @@ struct FriendsTabView: View {
 
     @ViewBuilder
     private var contentView: some View {
+#if targetEnvironment(macCatalyst)
+        macView
+#else
         if horizontalSizeClass == .regular {
             regularView
         } else {
             compactView
         }
+#endif
     }
+
+#if targetEnvironment(macCatalyst)
+    private var macView: some View {
+        NavigationStack(path: $navigationPath) {
+            Group {
+                switch macSection {
+                case .recipes:
+                    combinedFeedSection
+                        .refreshable {
+                            await refreshFriendsContent()
+                        }
+                case .connections:
+                    ConnectionsView(dependencies: dependencies)
+                }
+            }
+            .navigationTitle(macSection == .recipes ? "Friends" : "Connections")
+            .toolbarTitleDisplayMode(.inlineLarge)
+            .toolbar { macFriendsToolbar }
+            .navigationDestination(for: FriendsTabDestination.self) { destination in
+                switch destination {
+                case .connections:
+                    ConnectionsView(dependencies: dependencies)
+                case .profile(let user):
+                    UserProfileView(user: user, dependencies: dependencies)
+                }
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var macFriendsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("Friends Section", selection: $macSection) {
+                Text("Recipes")
+                    .tag(FriendsMacSection.recipes)
+                Text("Connections")
+                    .tag(FriendsMacSection.connections)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 280)
+        }
+
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button {
+                showingPeopleSearch = true
+            } label: {
+                Label("Find People", systemImage: "person.badge.plus")
+            }
+
+            Button {
+                showingInviteSheet = true
+            } label: {
+                Label("Invite", systemImage: "gift.fill")
+            }
+
+            if let user = userSession.currentUser {
+                Button {
+                    showingProfileSheet = true
+                } label: {
+                    ProfileAvatar(user: user, size: 30, dependencies: dependencies)
+                }
+            }
+        }
+    }
+#endif
 
     private var compactView: some View {
         NavigationStack(path: $navigationPath) {
@@ -222,12 +298,17 @@ struct FriendsTabView: View {
     }
 
     private func handleConnectionsNavigation() {
+#if targetEnvironment(macCatalyst)
+        navigationPath = NavigationPath()
+        macSection = .connections
+#else
         if horizontalSizeClass == .regular {
             sidebarSelection = .connections
         } else {
             navigationPath = NavigationPath()
             navigationPath.append(FriendsTabDestination.connections)
         }
+#endif
     }
 
     private func handleReferralProfileNavigation(userId: UUID) async {
@@ -255,12 +336,17 @@ struct FriendsTabView: View {
     }
 
     private func navigateToProfile(_ user: User) {
+#if targetEnvironment(macCatalyst)
+        navigationPath = NavigationPath()
+        navigationPath.append(FriendsTabDestination.profile(user))
+#else
         if horizontalSizeClass == .regular {
             sidebarSelection = .profile(user)
         } else {
             navigationPath = NavigationPath()
             navigationPath.append(FriendsTabDestination.profile(user))
         }
+#endif
     }
 
     private var combinedFeedSection: some View {

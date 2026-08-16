@@ -73,6 +73,10 @@ type SanitizedRecipeShare = {
     shouldCreate: boolean;
 };
 
+type WebRecipeIndexItem = SanitizedRecipeShare & {
+    imageURL?: string | null;
+};
+
 type WebRecipeQuantity = {
     value: number;
     upperValue: number | null;
@@ -769,6 +773,90 @@ async function fetchPublicCloudKitRecipe(
     } catch (error) {
         logger.warn("CloudKit web recipe lookup failed", { recipeId, error });
         throw error;
+    }
+}
+
+export function recipeIndexItemsWithCloudKitImages(
+    recipes: SanitizedRecipeShare[],
+    records: CloudKitRecordLike[]
+): WebRecipeIndexItem[] {
+    const recordsByName = new Map(records.flatMap((record) =>
+        typeof record.recordName === "string" && typeof record.serverErrorCode !== "string"
+            ? [[record.recordName, record] as const]
+            : []
+    ));
+    return recipes.map((recipe) => {
+        const record = recordsByName.get(recipe.recipeId);
+        const canonical = record
+            ? sanitizeCloudKitRecipeForWeb(record, recipe.recipeId, recipe.ownerId)
+            : null;
+        return {
+            ...recipe,
+            imageURL: canonical?.imageURL ?? null,
+        };
+    });
+}
+
+async function fetchPublicCloudKitRecipeIndexItems(
+    recipes: SanitizedRecipeShare[]
+): Promise<WebRecipeIndexItem[]> {
+    if (recipes.length === 0) {
+        return [];
+    }
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    if (!keyID || !privateKey) {
+        throw new Error("CloudKit web recipe credentials are unavailable");
+    }
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+    const body = JSON.stringify(cloudKitRecipeShelfLookupBody(recipes));
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const signature = createSign("SHA256")
+        .update(cloudKitSignatureInput(body, date, subpath))
+        .end()
+        .sign(privateKey)
+        .toString("base64");
+    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Apple-CloudKit-Request-KeyID": keyID,
+            "X-Apple-CloudKit-Request-ISO8601Date": date,
+            "X-Apple-CloudKit-Request-SignatureV1": signature,
+        },
+        body,
+        // Shelf imagery is optional. Fall back quickly so a CloudKit slowdown
+        // never holds an otherwise valid profile or collection page hostage.
+        signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) {
+        throw new Error(`CloudKit web recipe shelf lookup returned ${response.status}`);
+    }
+    const payload = await response.json() as CloudKitRecordsPayload;
+    if (typeof payload.serverErrorCode === "string" &&
+        payload.serverErrorCode.toUpperCase() !== "UNKNOWN_ITEM") {
+        throw new Error("CloudKit web recipe shelf lookup returned a server error");
+    }
+    return recipeIndexItemsWithCloudKitImages(recipes, payload.records ?? []);
+}
+
+export function cloudKitRecipeShelfLookupBody(
+    recipes: Array<Pick<SanitizedRecipeShare, "recipeId">>
+): Readonly<{ records: Array<{ recordName: string }>; desiredKeys: string[] }> {
+    return {
+        records: recipes.map((recipe) => ({ recordName: recipe.recipeId })),
+        desiredKeys: ["recipeId", "ownerId", "visibility", "title", "imageAsset"],
+    };
+}
+
+async function bestEffortRecipeIndexItems(
+    recipes: SanitizedRecipeShare[]
+): Promise<WebRecipeIndexItem[]> {
+    try {
+        return await fetchPublicCloudKitRecipeIndexItems(recipes);
+    } catch (error) {
+        logger.warn("CloudKit recipe shelf imagery is temporarily unavailable", { error });
+        return recipes.map((recipe) => ({ ...recipe, imageURL: null }));
     }
 }
 
@@ -2534,7 +2622,7 @@ type RecipeIndexPageOptions = {
     canonicalURL: string;
     appURL: string;
     downloadURL: string;
-    recipes: SanitizedRecipeShare[];
+    recipes: WebRecipeIndexItem[];
     totalRecipeCount: number;
     hasMoreRecipes?: boolean;
     openGraphType?: "profile" | "website";
@@ -2565,18 +2653,25 @@ function compactPageStyles(): string {
         .action { min-height:44px; width:max-content; margin-top:28px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
         .download-action { min-height:44px; width:max-content; margin:28px 0 0 14px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
         .shelf { margin-top:68px; }
-        .count { margin:0 0 24px; color:var(--muted); font-size:13px; font-weight:650; }
-        .recipe-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 52px; margin:0; padding:0; list-style:none; counter-reset:recipes; }
-        .recipe-list li { min-width:0; counter-increment:recipes; }
-        .recipe-row { min-height:58px; display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; align-items:baseline; padding:9px 0; color:inherit; text-decoration:none; }
-        .recipe-row::before { content:counter(recipes,decimal-leading-zero); color:var(--accent-text); font-family:"New York",ui-serif,serif; font-size:11px; font-weight:800; }
-        .recipe-name { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:650; line-height:1.25; overflow-wrap:anywhere; }
+        .count { margin:0 0 18px; color:var(--muted); font-size:13px; font-weight:650; }
+        .recipe-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:34px 20px; margin:0; padding:0; list-style:none; }
+        .recipe-list li { min-width:0; }
+        .recipe-row { display:block; color:inherit; text-decoration:none; }
+        .recipe-media { position:relative; aspect-ratio:4/3; display:grid; place-items:center; overflow:hidden; border-radius:18px; background:color-mix(in srgb,var(--accent) 10%,var(--soft)); }
+        .recipe-photo { width:100%; height:100%; display:block; object-fit:cover; transition:transform .24s ease; }
+        .recipe-placeholder,.recipe-placeholder img { width:38px; height:38px; display:block; opacity:.7; }
+        .recipe-copy { display:block; padding:12px 2px 0; }
+        .recipe-name { display:block; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:650; line-height:1.2; overflow-wrap:anywhere; }
+        .recipe-meta { min-height:19px; display:flex; align-items:center; gap:9px; margin-top:7px; color:var(--muted); font-size:12px; font-weight:620; }
+        .recipe-tag { --tag-color:#FF9933; --tag-color-dark:#FF9933; display:inline-flex; align-items:center; gap:4px; color:color-mix(in srgb,var(--tag-color) 72%,#3A210A); }
+        @media (prefers-color-scheme:dark) { .recipe-tag { color:color-mix(in srgb,var(--tag-color-dark) 74%,white); } }
         .empty { margin:0; color:var(--muted); font-size:16px; }
         .compact-recipe { max-width:720px; }
         .compact-recipe .meta { margin-top:24px; }
         a:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
-        @media (hover:hover) { .recipe-row:hover .recipe-name { color:var(--accent-text); } .action:hover { filter:brightness(.97); } }
-        @media (max-width:680px) { .bar,main { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } main { margin-top:30px; margin-bottom:72px; } .recipe-list { grid-template-columns:1fr; gap:4px; } .shelf { margin-top:58px; } .identity { align-items:flex-start; } }
+        @media (hover:hover) { .recipe-row:hover .recipe-name { color:var(--accent-text); } .recipe-row:hover .recipe-photo { transform:scale(1.025); } .action:hover { filter:brightness(.97); } }
+        @media (max-width:760px) { .recipe-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+        @media (max-width:520px) { .bar,main { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } main { margin-top:30px; margin-bottom:72px; } .recipe-list { grid-template-columns:1fr; gap:28px; } .recipe-media { aspect-ratio:16/10; } .shelf { margin-top:58px; } .identity { align-items:flex-start; } }
         @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action,.download-action { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
     </style>`;
 }
@@ -2903,7 +2998,23 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
     const safeAppURL = escapeHtml(options.appURL);
     const count = `${options.totalRecipeCount}${options.hasMoreRecipes ? "+" : ""}`;
     const noun = options.totalRecipeCount === 1 ? "recipe" : "recipes";
-    const rows = options.recipes.map((recipe) => `<li><a class="recipe-row" href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-name">${escapeHtml(recipe.title)}</span></a></li>`).join("");
+    const rows = options.recipes.map((recipe) => {
+        const categoryName = recipe.tags.flatMap((tag) => {
+            const category = canonicalRecipeCategoryName(tag);
+            return category ? [category] : [];
+        })[0] ?? null;
+        const presentation = categoryName ? recipeCategoryPresentation[categoryName] : null;
+        const verifiedImageURL = safeCloudKitAssetURL(recipe.imageURL);
+        const media = verifiedImageURL
+            ? `<img class="recipe-photo" src="${escapeHtml(verifiedImageURL)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+            : `<picture class="recipe-placeholder"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture>`;
+        const tag = presentation && categoryName
+            ? `<span class="recipe-tag" style="--tag-color:${presentation.light};--tag-color-dark:${presentation.dark}"><span aria-hidden="true">${presentation.emoji}</span>${escapeHtml(categoryName)}</span>`
+            : "";
+        const time = recipe.totalMinutes ? `<span>${recipe.totalMinutes} min</span>` : "";
+        const metadata = tag || time ? `<span class="recipe-meta">${tag}${time}</span>` : "";
+        return `<li><a class="recipe-row" href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-media">${media}</span><span class="recipe-copy"><span class="recipe-name">${escapeHtml(recipe.title)}</span>${metadata}</span></a></li>`;
+    }).join("");
     const avatarColor = options.avatarColor && /^#[0-9a-f]{6}$/i.test(options.avatarColor)
         ? options.avatarColor
         : "#FF9933";
@@ -3284,7 +3395,7 @@ async function browsableRecipes(
         .map(({ recipe }) => recipe);
 }
 
-export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) => {
+export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
@@ -3349,6 +3460,7 @@ export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) 
         const hasMoreRecipes = browsable.length > MAX_WEB_RECIPE_CARDS;
         const recipes = browsable.slice(0, MAX_WEB_RECIPE_CARDS);
         recipes.sort((lhs, rhs) => lhs.title.localeCompare(rhs.title));
+        const indexItems = await bestEffortRecipeIndexItems(recipes);
         const description = "A recipe shelf shared from Cauldron.";
         const canonicalURL = `https://cauldron-f900a.web.app/profile/${encodeURIComponent(data.userId)}`;
         const appURL = `cauldron://import/profile/${shareId}`;
@@ -3362,7 +3474,7 @@ export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) 
             canonicalURL,
             appURL,
             downloadURL,
-            recipes,
+            recipes: indexItems,
             totalRecipeCount: recipes.length,
             hasMoreRecipes,
             openGraphType: "profile",
@@ -3375,7 +3487,7 @@ export const previewProfile = onRequest(publicReadHTTPOptions, async (req, res) 
     }
 });
 
-export const previewCollection = onRequest(publicReadHTTPOptions, async (req, res) => {
+export const previewCollection = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
@@ -3420,6 +3532,7 @@ export const previewCollection = onRequest(publicReadHTTPOptions, async (req, re
         const recipeOrder = new Map(data.recipeIds.map((recipeId, index) => [recipeId, index]));
         recipes.sort((lhs, rhs) => (recipeOrder.get(lhs.recipeId) ?? Number.MAX_SAFE_INTEGER) -
             (recipeOrder.get(rhs.recipeId) ?? Number.MAX_SAFE_INTEGER));
+        const indexItems = await bestEffortRecipeIndexItems(recipes);
         const description = "A recipe collection shared from Cauldron.";
         const canonicalURL = `https://cauldron-f900a.web.app/collection/${encodeURIComponent(shareId)}`;
         const appURL = `cauldron://import/collection/${shareId}`;
@@ -3432,7 +3545,7 @@ export const previewCollection = onRequest(publicReadHTTPOptions, async (req, re
             canonicalURL,
             appURL,
             downloadURL,
-            recipes,
+            recipes: indexItems,
             totalRecipeCount: recipes.length,
             hasMoreRecipes,
             openGraphType: "website",

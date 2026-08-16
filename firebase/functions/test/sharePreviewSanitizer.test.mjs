@@ -9,6 +9,7 @@ import {
     canonicalCloudKitOwnerRecord,
     canonicalCloudKitRecipeCreator,
     cloudKitOwnerQuery,
+    cloudKitRecipeShelfLookupBody,
     cloudKitRecordsPayloadDisposition,
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
@@ -20,8 +21,11 @@ import {
     isValidUUID,
     isCurrentResourceMutationGeneration,
     publicSecurityHeaders,
+    previewCollection,
+    previewProfile,
     publishedShareResponse,
     recipeCategoryPresentation,
+    recipeIndexItemsWithCloudKitImages,
     renderCanonicalRecipePage,
     resourceMutationCannotSupersede,
     safeImageURL,
@@ -476,7 +480,11 @@ test("profile and collection pages expose clean recipe shelves without managemen
 
     assert.match(html, /Tomato &amp; Basil Soup/);
     assert.match(html, /href="\/recipe\/018f9344-54ff-42fc-83a8-c2a92e2d1b10"/);
-    assert.doesNotMatch(html, /30 min|recipe-time/);
+    assert.match(html, /30 min/);
+    assert.match(html, /class="recipe-media"/);
+    assert.match(html, /class="recipe-placeholder"/);
+    assert.match(html, /src="\/icon-small-light\.svg"/);
+    assert.match(html, /class="recipe-tag"[^>]*><span aria-hidden="true">🍽️<\/span>Dinner/);
     assert.match(html, /2 recipes/);
     assert.match(html, /class="handle">@chef_nadav/);
     assert.match(html, /class="profile-avatar"[^>]*>🧑‍🍳<\/span>/);
@@ -488,6 +496,68 @@ test("profile and collection pages expose clean recipe shelves without managemen
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /unshare|stop sharing|make private/i);
     assert.doesNotMatch(html, /Shared recipe|Shared page|personal shelf|recipe shelf shared from Cauldron/i);
+});
+
+test("recipe shelves use only owner-validated CloudKit image assets", () => {
+    const recipeId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const summary = sanitizeRecipeShareInput({
+        recipeId,
+        ownerId,
+        identityRecordName: "user_current-user-record",
+        title: "Tomato Soup",
+        capability: "a".repeat(43),
+        tags: ["Dinner"],
+    });
+    assert.equal(summary.ok, true);
+    const record = {
+        recordName: recipeId,
+        recordType: "SharedRecipe",
+        fields: {
+            recipeId: { value: recipeId },
+            ownerId: { value: ownerId },
+            visibility: { value: "public" },
+            title: { value: "Tomato Soup" },
+            imageAsset: { value: {
+                size: 120_000,
+                downloadURL: "https://cvws.icloud-content.com/image.jpg?token=signed",
+            } },
+        },
+    };
+
+    const [valid] = recipeIndexItemsWithCloudKitImages([summary.value], [record]);
+    assert.equal(valid.imageURL, "https://cvws.icloud-content.com/image.jpg?token=signed");
+
+    const [wrongOwner] = recipeIndexItemsWithCloudKitImages([summary.value], [{
+        ...record,
+        fields: { ...record.fields, ownerId: { value: "018f9344-54ff-42fc-83a8-c2a92e2d1b10" } },
+    }]);
+    assert.equal(wrongOwner.imageURL, null);
+
+    const html = generateCompactRecipeIndexPageHtml({
+        title: "Favorites",
+        description: "A collection",
+        canonicalURL: "https://cauldron-f900a.web.app/collection/test",
+        appURL: "cauldron://import/collection/test",
+        downloadURL: "https://apps.apple.com/app/id6754004943",
+        recipes: [valid],
+        totalRecipeCount: 1,
+    });
+    assert.match(html, /src="https:\/\/cvws\.icloud-content\.com\/image\.jpg\?token=signed"/);
+    assert.match(html, /loading="lazy" decoding="async"/);
+});
+
+test("profile and collection shelves bind CloudKit secrets and request image-only fields", () => {
+    const expectedSecrets = ["CLOUDKIT_SERVER_KEY_ID", "CLOUDKIT_SERVER_PRIVATE_KEY"];
+    const endpointSecrets = (endpoint) => endpoint.__endpoint.secretEnvironmentVariables
+        .map(({ key }) => key)
+        .sort();
+    assert.deepEqual(endpointSecrets(previewProfile), expectedSecrets);
+    assert.deepEqual(endpointSecrets(previewCollection), expectedSecrets);
+    assert.deepEqual(cloudKitRecipeShelfLookupBody([{ recipeId: "recipe-id" }]), {
+        records: [{ recordName: "recipe-id" }],
+        desiredKeys: ["recipeId", "ownerId", "visibility", "title", "imageAsset"],
+    });
 });
 
 test("public recipe summary text strips embedded URL credentials and signed queries", () => {
