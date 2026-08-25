@@ -141,7 +141,7 @@ struct DeleteAccountView: View {
                 try await dependencies.purgeAllLocalAccountData()
 
                 do {
-                    try ShareCapabilityStore.shared.removeCapability(for: userId)
+                    try await ShareCapabilityStore.shared.removeCapability(for: userId)
                 } catch {
                     AppLogger.general.warning("Unable to clear obsolete web-share key: \(error.localizedDescription)")
                 }
@@ -157,8 +157,8 @@ struct DeleteAccountView: View {
 
             AppLogger.general.info("Clearing local data and signing out...")
             await dependencies.profileImageManager.deleteImage(userId: userId)
-            dependencies.connectionManager.resetSessionState()
-            FriendsTabViewModel.shared.resetSessionState()
+            await dependencies.connectionManager.resetSessionState()
+            await FriendsTabViewModel.shared.resetSessionState()
             await dependencies.sharingService.resetSharedRecipeCache()
 
             // Invalidate local identity synchronously before suspending in

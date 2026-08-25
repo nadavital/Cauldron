@@ -1053,9 +1053,9 @@ actor CollectionCloudService {
             record["coverImageAsset"] = nil
             record["coverImageModifiedAt"] = nil
 
-            _ = try await withPublicationLease(ownerID: ownerId) {
+            try await withPublicationLease(ownerID: ownerId) {
                 try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
-                try await db.save(record)
+                _ = try await db.save(record)
             }
             logger.info("✅ Deleted collection cover image asset")
 
