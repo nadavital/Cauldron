@@ -73,4 +73,40 @@ final class ExternalShareURLClassifierTests: XCTestCase {
             )
         }
     }
+
+    func testShareRouteParserCoversCanonicalLegacyAliasAndCustomSchemeRoutes() throws {
+        let cases: [(String, ExternalShareURLClassifier.Route)] = [
+            ("https://cauldron-f900a.web.app/u/nadav", .profile("nadav")),
+            ("https://cauldron-f900a.web.app/u/nadav/recipe-id", .recipe("recipe-id")),
+            ("https://cauldron-f900a.web.app/profile/user-id", .profile("user-id")),
+            ("https://cauldron-f900a.web.app/recipe/recipe-id", .recipe("recipe-id")),
+            ("https://cauldron-f900a.web.app/collection/collection-id", .collection("collection-id")),
+            ("https://cauldron-f900a.firebaseapp.com/u/nadav/recipe-id", .recipe("recipe-id")),
+            ("cauldron://import/recipe/recipe-id", .recipe("recipe-id")),
+            ("cauldron://import/profile/nadav", .profile("nadav")),
+            ("cauldron://import/collection/collection-id", .collection("collection-id")),
+        ]
+        for (rawURL, expected) in cases {
+            XCTAssertEqual(
+                ExternalShareURLClassifier.route(from: try XCTUnwrap(URL(string: rawURL))),
+                expected,
+                rawURL
+            )
+        }
+    }
+
+    func testShareRouteParserRejectsUnownedAndMalformedRoutes() throws {
+        for rawURL in [
+            "https://example.com/recipe/recipe-id",
+            "http://cauldron-f900a.web.app/recipe/recipe-id",
+            "https://cauldron-f900a.web.app/u/nadav/recipe-id/extra",
+            "cauldron://evil/recipe/recipe-id",
+            "cauldron://import/recipe/recipe-id/extra",
+        ] {
+            XCTAssertNil(
+                ExternalShareURLClassifier.route(from: try XCTUnwrap(URL(string: rawURL))),
+                rawURL
+            )
+        }
+    }
 }

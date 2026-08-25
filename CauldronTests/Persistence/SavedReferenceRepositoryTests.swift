@@ -297,6 +297,116 @@ final class SavedReferenceRepositoryTests: XCTestCase {
         XCTAssertEqual(filtered.map(\.id), [currentUsersRemoteReference.id])
     }
 
+    func testReconciliationDoesNotCommitWhenAccountChangesBeforeSave() async throws {
+        let reference = try await repository.saveRecipeReference(
+            sourceRecipe: makeRecipe(id: UUID()),
+            userId: userId,
+            originalCreatorName: "Source Chef"
+        ).reference
+        let scope = SyncOperationAccountScope(
+            ownerId: userId,
+            revision: UUID(),
+            cloudKitIdentity: "account-a"
+        )
+        let validation = SavedReferenceValidationSequence(allowedValidationCount: 3)
+        let guardedRepository = SavedReferenceRepository(
+            modelContainer: modelContainer,
+            operationQueueService: operationQueueService,
+            accountScopeProvider: { _ in scope },
+            accountScopeValidator: { _ in await validation.validate() }
+        )
+
+        do {
+            try await guardedRepository.reconcileLocalReferences(
+                userId: userId,
+                remoteRecipeReferences: [],
+                remoteCollectionReferences: []
+            )
+            XCTFail("Expected reconciliation to stop at the account boundary")
+        } catch UserSessionError.accountChanged {
+            // Expected.
+        }
+
+        let retained = try await guardedRepository.recipeReferences(for: userId)
+        XCTAssertEqual(retained.map(\.id), [reference.id])
+    }
+
+    func testSaveIntentIsQueuedBeforeLocalCommitAndRemovedWhenCommitFails() async throws {
+        let queue = OperationQueueService()
+        let observation = SavedReferenceQueueObservation()
+        let failingRepository = SavedReferenceRepository(
+            modelContainer: modelContainer,
+            operationQueueService: queue,
+            localMutationCommitHook: {
+                await observation.record((await queue.getAllOperations()).count)
+                throw SavedReferenceMutationTestError.expectedFailure
+            },
+            queueMutationsDuringTests: true
+        )
+
+        do {
+            _ = try await failingRepository.saveRecipeReference(
+                sourceRecipe: makeRecipe(id: UUID()),
+                userId: userId,
+                originalCreatorName: "Source Chef"
+            )
+            XCTFail("Expected local save failure")
+        } catch SavedReferenceMutationTestError.expectedFailure {
+            // Expected.
+        }
+
+        let observedQueueCount = await observation.latestCount()
+        let remainingOperations = await queue.getAllOperations()
+        let savedReferences = try await failingRepository.recipeReferences(for: userId)
+        XCTAssertEqual(observedQueueCount, 1)
+        XCTAssertTrue(remainingOperations.isEmpty)
+        XCTAssertTrue(savedReferences.isEmpty)
+    }
+
+    func testDeleteIntentIsQueuedBeforeLocalCommitAndRemovedWhenCommitFails() async throws {
+        let collection = makeCollection(id: UUID())
+        let reference = SavedCollectionReference(
+            userId: userId,
+            sourceCollectionId: collection.id,
+            sourceOwnerId: sourceOwnerId
+        )
+        let seedContext = ModelContext(modelContainer)
+        seedContext.insert(SavedCollectionReferenceModel.from(reference))
+        try seedContext.save()
+
+        let queue = OperationQueueService()
+        let observation = SavedReferenceQueueObservation()
+        let failingRepository = SavedReferenceRepository(
+            modelContainer: modelContainer,
+            operationQueueService: queue,
+            localMutationCommitHook: {
+                await observation.record((await queue.getAllOperations()).count)
+                throw SavedReferenceMutationTestError.expectedFailure
+            },
+            queueMutationsDuringTests: true
+        )
+
+        do {
+            _ = try await failingRepository.deleteCollectionReference(
+                userId: userId,
+                sourceCollectionId: collection.id
+            )
+            XCTFail("Expected local delete failure")
+        } catch SavedReferenceMutationTestError.expectedFailure {
+            // Expected.
+        }
+
+        let observedQueueCount = await observation.latestCount()
+        let remainingOperations = await queue.getAllOperations()
+        let retainedReference = try await failingRepository.collectionReference(
+            userId: userId,
+            sourceCollectionId: collection.id
+        )
+        XCTAssertEqual(observedQueueCount, 1)
+        XCTAssertTrue(remainingOperations.isEmpty)
+        XCTAssertNotNil(retainedReference)
+    }
+
     private func makeRecipe(id: UUID) -> Recipe {
         Recipe(
             id: id,
@@ -318,5 +428,35 @@ final class SavedReferenceRepositoryTests: XCTestCase {
             recipeIds: [],
             visibility: .publicRecipe
         )
+    }
+}
+
+private enum SavedReferenceMutationTestError: Error {
+    case expectedFailure
+}
+
+private actor SavedReferenceQueueObservation {
+    private var count = 0
+
+    func record(_ count: Int) {
+        self.count = count
+    }
+
+    func latestCount() -> Int {
+        count
+    }
+}
+
+private actor SavedReferenceValidationSequence {
+    private let allowedValidationCount: Int
+    private var validationCount = 0
+
+    init(allowedValidationCount: Int) {
+        self.allowedValidationCount = allowedValidationCount
+    }
+
+    func validate() -> Bool {
+        validationCount += 1
+        return validationCount <= allowedValidationCount
     }
 }

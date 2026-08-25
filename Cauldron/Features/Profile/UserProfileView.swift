@@ -6,6 +6,19 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
+
+private actor ArchiveRestoreProgressTracker {
+    private var latestReport: LibraryArchiveService.RestoreReport?
+
+    func record(_ report: LibraryArchiveService.RestoreReport) {
+        latestReport = report
+    }
+
+    func latest() -> LibraryArchiveService.RestoreReport? {
+        latestReport
+    }
+}
 
 /// User profile view - displays user information and manages connections
 struct UserProfileView: View {
@@ -29,6 +42,14 @@ struct UserProfileView: View {
     // Referral
     @StateObject private var referralManager = ReferralManager.shared
     @State private var codeCopied = false
+
+    // Library recovery and durable-sync visibility
+    @State private var archiveDocument: LibraryArchiveDocument?
+    @State private var showingArchiveExporter = false
+    @State private var showingArchiveImporter = false
+    @State private var isPreparingArchive = false
+    @State private var isRestoringArchive = false
+    @State private var archiveStatusMessage: String?
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -55,8 +76,12 @@ struct UserProfileView: View {
                     profileHeader
 
                     // Rewards & Progress Section (only for current user)
-                    if viewModel.isCurrentUser {
+                    if viewModel.isCurrentUser && appIconManager.supportsAlternateIcons {
                         rewardsSection
+                    }
+
+                    if viewModel.isCurrentUser {
+                        dataAndSyncSection
                     }
 
                     // Connection Management Section
@@ -76,6 +101,7 @@ struct UserProfileView: View {
             .padding()
         }
         .warmCanvas()
+        .frame(minWidth: catalystMinimumWidth, minHeight: catalystMinimumHeight)
         .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "Search recipes")
@@ -116,6 +142,35 @@ struct UserProfileView: View {
         .sheet(isPresented: $showAppIconPicker) {
             AppIconPickerView()
         }
+        .fileExporter(
+            isPresented: $showingArchiveExporter,
+            document: archiveDocument,
+            contentType: .cauldronLibraryArchive,
+            defaultFilename: "Cauldron Library.cauldron"
+        ) { result in
+            archiveDocument = nil
+            if case .failure(let error) = result,
+               !Self.archivePickerWasCancelled(error) {
+                archiveStatusMessage = "Cauldron couldn't export your library. Your recipes were not changed."
+            }
+        }
+        .fileImporter(
+            isPresented: $showingArchiveImporter,
+            // The legacy app.cauldron.library-archive identifier is imported
+            // in Info.plist as JSON, so .json also admits existing backups.
+            allowedContentTypes: [.cauldronLibraryArchive, .json],
+            allowsMultipleSelection: false
+        ) { result in
+            Task { await restoreArchive(result) }
+        }
+        .alert("Library Backup", isPresented: Binding(
+            get: { archiveStatusMessage != nil },
+            set: { if !$0 { archiveStatusMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(archiveStatusMessage ?? "")
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if viewModel.isCurrentUser {
@@ -150,70 +205,310 @@ struct UserProfileView: View {
     }
 
     private var profileHeader: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            // Avatar
-            ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Theme.Spacing.md) {
+                ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
+                profileIdentityInfo
+            }
 
-            // Info column
-            VStack(alignment: .leading, spacing: 6) {
-                // Name row with edit button
-                HStack {
-                    Text(displayUser.displayName)
-                        .font(.system(.title2, design: .serif).weight(.bold))
-
-                    Spacer()
-
-                    if viewModel.isCurrentUser {
-                        Button {
-                            showingEditProfile = true
-                        } label: {
-                            Image(systemName: "pencil.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.cauldronOrange)
-                        }
-                    }
-                }
-
-                // Username
-                Text("@\(displayUser.username)")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                // Tier badge and friends/connection row
-                HStack(spacing: Theme.Spacing.sm) {
-                    // Tier badge - clickable for own profile to see roadmap
-                    if viewModel.isCurrentUser {
-                        Button {
-                            showTierRoadmap = true
-                        } label: {
-                            TierBadgeView(tier: viewModel.userTier, style: .standard)
-                        }
-                    } else {
-                        TierBadgeView(tier: viewModel.userTier, style: .standard)
-                    }
-
-                    if viewModel.isCurrentUser {
-                        NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
-                            HStack(spacing: Theme.Spacing.xxs) {
-                                Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                            }
-                            .font(.caption)
-                            .foregroundColor(.cauldronOrange)
-                        }
-                    } else {
-                        connectionActionBadge
-                    }
-                }
-
-                if viewModel.isCurrentUser {
-                    referralQuickSection
-                }
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
+                profileIdentityInfo
             }
         }
         .padding()
         .glassCard(cornerRadius: 16)
+    }
+
+    private var profileIdentityInfo: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(displayUser.displayName)
+                    .font(.system(.title2, design: .serif).weight(.bold))
+
+                Spacer()
+
+                if viewModel.isCurrentUser {
+                    Button {
+                        showingEditProfile = true
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.cauldronOrange)
+                    }
+                    .accessibilityLabel("Edit profile")
+                }
+            }
+
+            Text("@\(displayUser.username)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ViewThatFits(in: .horizontal) {
+                profileRelationshipRow
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    profileTierControl
+                    profileConnectionControl
+                }
+            }
+
+            if viewModel.isCurrentUser {
+                referralQuickSection
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var profileRelationshipRow: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            profileTierControl
+            profileConnectionControl
+        }
+    }
+
+    @ViewBuilder
+    private var profileTierControl: some View {
+        if viewModel.isCurrentUser {
+            Button {
+                showTierRoadmap = true
+            } label: {
+                TierBadgeView(tier: viewModel.userTier, style: .standard)
+            }
+            .accessibilityLabel("View tier progress")
+        } else {
+            TierBadgeView(tier: viewModel.userTier, style: .standard)
+        }
+    }
+
+    @ViewBuilder
+    private var profileConnectionControl: some View {
+        if viewModel.isCurrentUser {
+            NavigationLink(destination: ConnectionsView(dependencies: viewModel.dependencies)) {
+                HStack(spacing: Theme.Spacing.xxs) {
+                    Text("\(viewModel.connections.count) \(viewModel.connections.count == 1 ? "friend" : "friends")")
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                }
+                .font(.caption)
+                .foregroundStyle(Color.cauldronOrange)
+            }
+        } else {
+            connectionActionBadge
+        }
+    }
+
+    private var catalystMinimumWidth: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        680
+        #else
+        nil
+        #endif
+    }
+
+    private var catalystMinimumHeight: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        640
+        #else
+        nil
+        #endif
+    }
+
+    // MARK: - Data & Sync
+
+    private var dataAndSyncSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            SectionHeaderLabel(title: "Data & Sync", systemImage: "externaldrive.badge.icloud")
+
+            NavigationLink {
+                SyncHealthView(viewModel: viewModel.dependencies.operationQueueViewModel)
+            } label: {
+                settingsRow(
+                    title: "Sync Health",
+                    detail: "Queued uploads and protected changes",
+                    systemImage: "icloud.and.arrow.up"
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows queued iCloud uploads and changes that need attention")
+
+            Divider()
+
+            Button {
+                Task { await prepareArchiveExport() }
+            } label: {
+                settingsRow(
+                    title: isPreparingArchive ? "Preparing Backup…" : "Back Up Library",
+                    detail: "Recipes, collections, and saved images",
+                    systemImage: "square.and.arrow.up",
+                    showsProgress: isPreparingArchive
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreparingArchive || isRestoringArchive)
+            .accessibilityHint("Creates a portable Cauldron library archive")
+
+            Divider()
+
+            Button {
+                showingArchiveImporter = true
+            } label: {
+                settingsRow(
+                    title: isRestoringArchive ? "Restoring Backup…" : "Restore Library Backup",
+                    detail: "Merge a backup without removing newer items",
+                    systemImage: "square.and.arrow.down",
+                    showsProgress: isRestoringArchive
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isPreparingArchive || isRestoringArchive)
+            .accessibilityHint("Selects a Cauldron library archive to merge into this account")
+        }
+        .padding()
+        .glassCard(cornerRadius: 16)
+    }
+
+    private func settingsRow(
+        title: String,
+        detail: String,
+        systemImage: String,
+        showsProgress: Bool = false
+    ) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 24)
+            } else {
+                Image(systemName: systemImage)
+                    .foregroundStyle(Color.cauldronOrange)
+                    .frame(width: 24)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: Theme.Spacing.sm)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(.rect)
+    }
+
+    @MainActor
+    private func prepareArchiveExport() async {
+        guard let userID = currentUserSession.userId else {
+            archiveStatusMessage = "Sign in to iCloud before backing up your library."
+            return
+        }
+
+        isPreparingArchive = true
+        defer { isPreparingArchive = false }
+        do {
+            guard let accountScope = currentUserSession.syncOperationAccountScope(ownerID: userID) else {
+                throw LibraryArchiveService.ArchiveError.accountAuthorizationUnavailable
+            }
+            let data = try await viewModel.dependencies.libraryArchiveService.export(ownerID: userID)
+            guard currentUserSession.syncOperationAccountScope(ownerID: userID) == accountScope else {
+                throw LibraryArchiveService.ArchiveError.accountAuthorizationChanged
+            }
+            archiveDocument = LibraryArchiveDocument(data: data)
+            showingArchiveExporter = true
+        } catch {
+            archiveStatusMessage = "Cauldron couldn't prepare your library backup. Your recipes were not changed."
+        }
+    }
+
+    @MainActor
+    private func restoreArchive(_ result: Result<[URL], Error>) async {
+        if case .failure(let error) = result {
+            guard !Self.archivePickerWasCancelled(error) else { return }
+            archiveStatusMessage = "Cauldron couldn't open that backup. Your existing library was not changed."
+            return
+        }
+
+        guard let userID = currentUserSession.userId else {
+            archiveStatusMessage = "Sign in to iCloud before restoring a library backup."
+            return
+        }
+
+        isRestoringArchive = true
+        defer { isRestoringArchive = false }
+        let progressTracker = ArchiveRestoreProgressTracker()
+        do {
+            guard let url = try result.get().first else { return }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess { url.stopAccessingSecurityScopedResource() }
+            }
+            let data = try await Task.detached(priority: .userInitiated) {
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true,
+                      let fileSize = values.fileSize,
+                      fileSize <= LibraryArchiveService.defaultMaximumArchiveBytes else {
+                    throw CocoaError(.fileReadTooLarge)
+                }
+                return try Data(contentsOf: url, options: [.mappedIfSafe])
+            }.value
+            let report = try await viewModel.dependencies.libraryArchiveService.restore(
+                data,
+                ownerID: userID,
+                progress: { report in
+                    await progressTracker.record(report)
+                }
+            )
+            archiveStatusMessage = Self.archiveRestoreMessage(report)
+            await viewModel.refreshProfile()
+        } catch {
+            if let partialReport = await progressTracker.latest(),
+               Self.archiveRestoreDidChangeLibrary(partialReport) {
+                archiveStatusMessage = Self.archivePartialRestoreMessage(partialReport)
+                await viewModel.refreshProfile()
+            } else {
+                archiveStatusMessage = "Cauldron couldn't restore that backup. Your existing library was not removed."
+            }
+        }
+    }
+
+    nonisolated static func archivePickerWasCancelled(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain &&
+            nsError.code == CocoaError.Code.userCancelled.rawValue
+    }
+
+    nonisolated static func archiveRestoreMessage(_ report: LibraryArchiveService.RestoreReport) -> String {
+        let added = report.recipesInserted + report.collectionsInserted
+        let updated = report.recipesUpdated + report.collectionsUpdated
+        let kept = report.recipesKept + report.collectionsKept
+        let skippedMemberships = report.membershipsSkipped
+        var message = "Restore complete: \(added) added, \(updated) updated, and \(kept) kept."
+        if skippedMemberships > 0 {
+            message += " \(skippedMemberships) collection links were skipped because their recipes were not in this account."
+        }
+        return message
+    }
+
+    nonisolated static func archiveRestoreDidChangeLibrary(
+        _ report: LibraryArchiveService.RestoreReport
+    ) -> Bool {
+        report.recipesInserted + report.recipesUpdated +
+            report.collectionsInserted + report.collectionsUpdated +
+            report.imagesRestored > 0
+    }
+
+    nonisolated static func archivePartialRestoreMessage(
+        _ report: LibraryArchiveService.RestoreReport
+    ) -> String {
+        let added = report.recipesInserted + report.collectionsInserted
+        let updated = report.recipesUpdated + report.collectionsUpdated
+        return "Restore stopped after partially completing: \(added) added and \(updated) updated. " +
+            "Your existing library was not removed, and it is safe to select the same backup again."
     }
 
     // MARK: - App Icons Section

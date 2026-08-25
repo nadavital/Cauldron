@@ -10,9 +10,18 @@ import os
 actor SavedReferenceCloudService {
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "SavedReferenceCloudService")
+    private let publicationAuthorizer: @Sendable (VerifiedAccountMutationContext) async -> Bool
 
-    init(core: CloudKitCore) {
+    init(
+        core: CloudKitCore,
+        publicationAuthorizer: (@Sendable (VerifiedAccountMutationContext) async -> Bool)? = nil
+    ) {
         self.core = core
+        self.publicationAuthorizer = publicationAuthorizer ?? { context in
+            await MainActor.run {
+                CurrentUserSession.shared.permitsMutation(context)
+            }
+        }
     }
 
     nonisolated static func recipeReferenceRecordName(userId: UUID, sourceRecipeId: UUID) -> String {
@@ -23,7 +32,14 @@ actor SavedReferenceCloudService {
         "savedCollectionReference_\(userId.uuidString)_\(sourceCollectionId.uuidString)"
     }
 
-    func saveRecipeReference(_ reference: SavedRecipeReference) async throws {
+    func saveRecipeReference(
+        _ reference: SavedRecipeReference,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: reference.userId,
+            provided: authorizationContext
+        )
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
         let recordID = CKRecord.ID(
@@ -43,10 +59,18 @@ actor SavedReferenceCloudService {
             throw CancellationError()
         }
         defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+        try await authorizeMutation(ownerID: reference.userId, context: authorizationContext)
         _ = try await db.save(record)
     }
 
-    func deleteRecipeReference(_ reference: SavedRecipeReference) async throws {
+    func deleteRecipeReference(
+        _ reference: SavedRecipeReference,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: reference.userId,
+            provided: authorizationContext
+        )
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
         let recordID = CKRecord.ID(
@@ -58,6 +82,7 @@ actor SavedReferenceCloudService {
         )
 
         do {
+            try await authorizeMutation(ownerID: reference.userId, context: authorizationContext)
             _ = try await db.deleteRecord(withID: recordID)
         } catch let error as CKError where error.code == .unknownItem {
             return
@@ -80,7 +105,14 @@ actor SavedReferenceCloudService {
         }
     }
 
-    func saveCollectionReference(_ reference: SavedCollectionReference) async throws {
+    func saveCollectionReference(
+        _ reference: SavedCollectionReference,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: reference.userId,
+            provided: authorizationContext
+        )
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
         let recordID = CKRecord.ID(
@@ -100,10 +132,18 @@ actor SavedReferenceCloudService {
             throw CancellationError()
         }
         defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+        try await authorizeMutation(ownerID: reference.userId, context: authorizationContext)
         _ = try await db.save(record)
     }
 
-    func deleteCollectionReference(_ reference: SavedCollectionReference) async throws {
+    func deleteCollectionReference(
+        _ reference: SavedCollectionReference,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: reference.userId,
+            provided: authorizationContext
+        )
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
         let recordID = CKRecord.ID(
@@ -115,6 +155,7 @@ actor SavedReferenceCloudService {
         )
 
         do {
+            try await authorizeMutation(ownerID: reference.userId, context: authorizationContext)
             _ = try await db.deleteRecord(withID: recordID)
         } catch let error as CKError where error.code == .unknownItem {
             return
@@ -139,7 +180,14 @@ actor SavedReferenceCloudService {
 
     /// Fail-closed owner sweep used only for account deletion. It deletes by
     /// record ID, so malformed legacy payloads cannot disappear from inventory.
-    func deleteAllReferences(for userId: UUID) async throws {
+    func deleteAllReferences(
+        for userId: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: userId,
+            provided: authorizationContext
+        )
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
         for recordType in [
@@ -158,6 +206,7 @@ actor SavedReferenceCloudService {
             }
             for record in records {
                 do {
+                    try await authorizeMutation(ownerID: userId, context: authorizationContext)
                     _ = try await db.deleteRecord(withID: record.recordID)
                 } catch let error as CKError where error.code == .unknownItem {
                     continue
@@ -165,6 +214,42 @@ actor SavedReferenceCloudService {
             }
         }
     }
+
+    private func resolvedAuthorizationContext(
+        ownerID: UUID,
+        provided: VerifiedAccountMutationContext?
+    ) async throws -> VerifiedAccountMutationContext {
+        if let provided {
+            try await authorizeMutation(ownerID: ownerID, context: provided)
+            return provided
+        }
+        guard let context = await MainActor.run(body: {
+            CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerID)
+        }) else {
+            throw UserSessionError.accountChanged
+        }
+        return context
+    }
+
+    private func authorizeMutation(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await RecipePublicationAuthorizationPolicy.authorize(
+            ownerID: ownerID,
+            context: context,
+            validator: publicationAuthorizer
+        )
+    }
+
+#if DEBUG
+    func validateMutationAuthorization(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await authorizeMutation(ownerID: ownerID, context: context)
+    }
+#endif
 
     func populateRecipeReferenceRecord(_ record: CKRecord, from reference: SavedRecipeReference) {
         record["id"] = reference.id.uuidString as CKRecordValue

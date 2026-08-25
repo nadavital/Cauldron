@@ -77,16 +77,30 @@ final class EntityImageLoader {
         }
 
         guard let dependencies = dependencies,
-              collection.cloudCoverImageRecordName != nil,
+              let recordName = collection.cloudCoverImageRecordName,
               collection.coverImageURL == nil else {
             return nil
         }
 
         do {
-            if let downloadedURL = try await dependencies.collectionImageManager.downloadImageFromCloud(collectionId: collection.id),
-               let downloadedImage = await loadImage(from: downloadedURL) {
-                ImageCache.shared.set(cacheKey, image: downloadedImage)
-                return downloadedImage
+            let expectedModificationDate = await dependencies.collectionImageManager.getImageModificationDate(
+                collectionId: collection.id
+            )
+            if let data = try await dependencies.collectionCloudService.downloadCollectionCoverImage(
+                collectionId: collection.id,
+                ownerId: collection.userId,
+                recordName: recordName
+            ) {
+                _ = try await dependencies.collectionImageManager.saveDownloadedImageData(
+                    data,
+                    collectionId: collection.id,
+                    expectedModificationDate: expectedModificationDate
+                )
+                let downloadedURL = await dependencies.collectionImageManager.imageURL(for: collection.id)
+                if let downloadedImage = await loadImage(from: downloadedURL) {
+                    ImageCache.shared.set(cacheKey, image: downloadedImage)
+                    return downloadedImage
+                }
             }
         } catch {
             logger.warning("Failed to download collection cover image from CloudKit: \(error.localizedDescription)")

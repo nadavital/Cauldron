@@ -981,12 +981,11 @@ func createCollectionImageManager(collectionService: CollectionCloudService) -> 
         cacheKeyGenerator: { collectionId in
             ImageCache.collectionImageKey(collectionId: collectionId)
         },
-        uploadToCloud: { collectionId, data in
-            try await collectionService.uploadCollectionCoverImage(collectionId: collectionId, imageData: data)
-        },
-        downloadFromCloud: { collectionId in
-            try await collectionService.downloadCollectionCoverImage(collectionId: collectionId)
-        },
+        // Collection CloudKit records are qualified by both owner and physical
+        // record name. The repository and EntityImageLoader supply that full
+        // identity instead of using this UUID-only generic hook.
+        uploadToCloud: nil,
+        downloadFromCloud: nil,
         deleteFromCloud: nil  // Collection images are deleted when the collection is deleted
     )
 }
@@ -1244,6 +1243,18 @@ extension CollectionImageManagerV2 {
     /// Get image modification date for collection
     func getImageModificationDate(collectionId: UUID) -> Date? {
         getImageModificationDate(entityId: collectionId)
+    }
+
+    func saveDownloadedImageData(
+        _ data: Data,
+        collectionId: UUID,
+        expectedModificationDate: Date?
+    ) throws -> String {
+        try saveDownloadedImageData(
+            data,
+            entityId: collectionId,
+            expectedModificationDate: expectedModificationDate
+        )
     }
 
     /// Upload image to CloudKit for collection

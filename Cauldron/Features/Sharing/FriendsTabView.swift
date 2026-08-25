@@ -166,6 +166,8 @@ struct FriendsTabView: View {
                 } label: {
                     ProfileAvatar(user: user, size: 30, dependencies: dependencies)
                 }
+                .accessibilityLabel("Profile and settings")
+                .accessibilityHint("Opens your profile and app settings")
             }
         }
     }
@@ -228,6 +230,8 @@ struct FriendsTabView: View {
                         } label: {
                             ProfileAvatar(user: user, size: 32, dependencies: dependencies)
                         }
+                        .accessibilityLabel("Profile and settings")
+                        .accessibilityHint("Opens your profile and app settings")
                         .buttonStyle(PressableScaleStyle())
                     }
                 }
@@ -283,6 +287,8 @@ struct FriendsTabView: View {
                 } label: {
                     ProfileAvatar(user: user, size: 30, dependencies: dependencies)
                 }
+                .accessibilityLabel("Profile and settings")
+                .accessibilityHint("Opens your profile and app settings")
             }
         }
     }

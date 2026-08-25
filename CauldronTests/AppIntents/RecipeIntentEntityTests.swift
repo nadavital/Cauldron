@@ -36,6 +36,19 @@ final class RecipeIntentEntityTests: XCTestCase {
         XCTAssertTrue(gate.complete(token: gate.token))
     }
 
+    func testStaleInitializationFailureCannotCommitAfterAccountInvalidation() {
+        var gate = AccountIdentityVerificationGate()
+        let staleInitializationToken = gate.token
+
+        gate.invalidate()
+
+        XCTAssertFalse(
+            gate.permitsInitializationCommit(token: staleInitializationToken),
+            "A cancelled initialization must not apply its fallback user to the new account generation"
+        )
+        XCTAssertTrue(gate.permitsInitializationCommit(token: gate.token))
+    }
+
     func testAccountMutationTokenSurvivesVerificationWithinSameRevision() {
         var gate = AccountIdentityVerificationGate()
         let mutationToken = gate.mutationToken

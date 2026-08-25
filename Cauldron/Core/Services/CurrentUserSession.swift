@@ -12,15 +12,21 @@ import Combine
 import CloudKit
 
 /// Captures the iCloud-account revision that an async local mutation began in.
-struct AccountIdentityMutationToken: Equatable, Sendable {
+nonisolated struct AccountIdentityMutationToken: Equatable, Sendable {
     fileprivate let revision: UInt64
 }
 
 /// Binds an account-scoped mutation to both the verified identity generation
 /// and the user that owned the data when the work began.
-struct VerifiedAccountMutationContext: Equatable, Sendable {
+nonisolated struct VerifiedAccountMutationContext: Equatable, Sendable {
     let ownerID: UUID
     fileprivate let token: AccountIdentityMutationToken
+
+#if DEBUG
+    static func testing(ownerID: UUID, revision: UInt64 = 0) -> Self {
+        Self(ownerID: ownerID, token: AccountIdentityMutationToken(revision: revision))
+    }
+#endif
 }
 
 private struct PendingProfileSyncSnapshot: Codable, Sendable {
@@ -151,6 +157,10 @@ struct AccountIdentityVerificationGate {
     }
     var isVerified: Bool { verifiedRevision == revision }
 
+    func permitsInitializationCommit(token: UInt64) -> Bool {
+        token == revision
+    }
+
     mutating func invalidate() {
         revision &+= 1
         verifiedRevision = nil
@@ -233,12 +243,14 @@ class CurrentUserSession: ObservableObject {
     private let hasCompletedLocalOnboardingKey = "hasCompletedLocalOnboarding"
     private let userSnapshotKey = "currentUserSnapshot.v1"
     private let pendingProfileSyncKey = "pendingProfileSync.v1"
+    private let syncOperationAccountRevisionKey = "syncOperationAccountRevision.v1"
     private let logger = Logger(subsystem: "com.cauldron", category: "UserSession")
     private var refreshTask: Task<Void, Never>?
     private var initializationTask: Task<Void, Never>?
     private var accountReverificationTask: Task<Void, Never>?
     private var accountChangeObserver: NSObjectProtocol?
     private var identityVerificationGate = AccountIdentityVerificationGate()
+    private var syncOperationAccountRevision: UUID
     private var profileAvatarMutationRevision: UInt64 = 0
     private var profileBasicInfoMutationGate = ProfileBasicInfoMutationGate()
 
@@ -259,6 +271,21 @@ class CurrentUserSession: ObservableObject {
     func verifiedMutationContext(ownerID: UUID) -> VerifiedAccountMutationContext? {
         guard isInitialized, currentUser?.id == ownerID else { return nil }
         return identityVerificationGate.mutationContext(ownerID: ownerID)
+    }
+
+    /// Durable generation used by the offline operation queue. Unlike the
+    /// in-memory verification token, this survives a relaunch and rotates at
+    /// every observed account boundary.
+    func syncOperationAccountScope(ownerID: UUID) -> SyncOperationAccountScope? {
+        guard isAccountIdentityVerified,
+              currentUser?.id == ownerID,
+              let cloudKitIdentity = UserDefaults.standard.string(forKey: cloudKitSystemRecordNameKey),
+              !cloudKitIdentity.isEmpty else { return nil }
+        return SyncOperationAccountScope(
+            ownerId: ownerID,
+            revision: syncOperationAccountRevision,
+            cloudKitIdentity: cloudKitIdentity
+        )
     }
 
     func permitsMutation(_ context: VerifiedAccountMutationContext) -> Bool {
@@ -593,6 +620,14 @@ class CurrentUserSession: ObservableObject {
     }
 
     private init() {
+        if let rawRevision = UserDefaults.standard.string(forKey: syncOperationAccountRevisionKey),
+           let revision = UUID(uuidString: rawRevision) {
+            syncOperationAccountRevision = revision
+        } else {
+            let revision = UUID()
+            syncOperationAccountRevision = revision
+            UserDefaults.standard.set(revision.uuidString, forKey: syncOperationAccountRevisionKey)
+        }
         accountChangeObserver = NotificationCenter.default.addObserver(
             forName: .CKAccountChanged,
             object: nil,
@@ -736,6 +771,13 @@ class CurrentUserSession: ObservableObject {
                     needsiCloudSignIn = false
                     return
                 } catch {
+                    // Cancellation is delivered as an error. An initialization
+                    // started for the previous iCloud generation must not mutate
+                    // the newly verified session before completeInitialization
+                    // gets a chance to reject its stale token.
+                    guard identityVerificationGate.permitsInitializationCommit(token: identityToken) else {
+                        return
+                    }
                     let storedRecordName = UserDefaults.standard.string(forKey: cloudKitSystemRecordNameKey)
                     guard let verifiedSystemRecordName,
                           storedRecordName == verifiedSystemRecordName else {
@@ -894,6 +936,7 @@ class CurrentUserSession: ObservableObject {
         logger.notice("CloudKit account changed; locking account-scoped data pending verification")
 
         identityVerificationGate.invalidate()
+        rotateSyncOperationAccountRevision()
         profileAvatarMutationRevision &+= 1
         refreshTask?.cancel()
         refreshTask = nil
@@ -911,6 +954,12 @@ class CurrentUserSession: ObservableObject {
             guard let self else { return }
             await self.initialize(dependencies: .shared)
         }
+    }
+
+    private func rotateSyncOperationAccountRevision() {
+        let revision = UUID()
+        syncOperationAccountRevision = revision
+        UserDefaults.standard.set(revision.uuidString, forKey: syncOperationAccountRevisionKey)
     }
 
     private func restoreUserFromDefaults() -> User? {
@@ -1504,6 +1553,7 @@ class CurrentUserSession: ObservableObject {
         // synchronously so any suspended profile/onboarding mutation fails its
         // post-await authorization check before it can restore local session data.
         identityVerificationGate.invalidate()
+        rotateSyncOperationAccountRevision()
         profileAvatarMutationRevision &+= 1
         refreshTask?.cancel()
         refreshTask = nil

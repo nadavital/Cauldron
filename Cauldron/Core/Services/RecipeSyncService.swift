@@ -34,6 +34,17 @@ actor RecipeSyncService {
     private let collectionRepository: CollectionRepository?
     private let savedReferenceRepository: SavedReferenceRepository?
     private let imageManager: RecipeImageManager
+    private let accountContextProvider: @Sendable (UUID) async -> VerifiedAccountMutationContext?
+    private let accountContextValidator: @Sendable (VerifiedAccountMutationContext) async -> Bool
+    private let migrateLegacyOwnership: @Sendable (UUID) async throws -> Void
+    private let cloudAvailability: @Sendable () async -> Bool
+    private let fetchCloudRecipes: @Sendable (UUID) async throws -> [Recipe]
+    private let fetchRemoteDeletedRecipes: @Sendable (UUID) async throws -> [DeletedRecipeTombstone]
+    private let savePrivateRecipe: @Sendable (Recipe, UUID, VerifiedAccountMutationContext) async throws -> Void
+    private let saveRemoteTombstone: @Sendable (DeletedRecipeTombstone) async throws -> Void
+    private let deletePrivateRecipe: @Sendable (Recipe) async throws -> Void
+    private let deletePublicRecipe: @Sendable (UUID, UUID) async throws -> Void
+    private let fetchPublishedRecipes: @Sendable (UUID) async throws -> [Recipe]
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeSyncService")
 
     private var lastSyncDate: Date?
@@ -51,7 +62,18 @@ actor RecipeSyncService {
         deletedRecipeRepository: DeletedRecipeRepository,
         collectionRepository: CollectionRepository? = nil,
         savedReferenceRepository: SavedReferenceRepository? = nil,
-        imageManager: RecipeImageManager
+        imageManager: RecipeImageManager,
+        accountContextProvider: (@Sendable (UUID) async -> VerifiedAccountMutationContext?)? = nil,
+        accountContextValidator: (@Sendable (VerifiedAccountMutationContext) async -> Bool)? = nil,
+        migrateLegacyOwnership: (@Sendable (UUID) async throws -> Void)? = nil,
+        cloudAvailability: (@Sendable () async -> Bool)? = nil,
+        fetchCloudRecipes: (@Sendable (UUID) async throws -> [Recipe])? = nil,
+        fetchRemoteDeletedRecipes: (@Sendable (UUID) async throws -> [DeletedRecipeTombstone])? = nil,
+        savePrivateRecipe: (@Sendable (Recipe, UUID, VerifiedAccountMutationContext) async throws -> Void)? = nil,
+        saveRemoteTombstone: (@Sendable (DeletedRecipeTombstone) async throws -> Void)? = nil,
+        deletePrivateRecipe: (@Sendable (Recipe) async throws -> Void)? = nil,
+        deletePublicRecipe: (@Sendable (UUID, UUID) async throws -> Void)? = nil,
+        fetchPublishedRecipes: (@Sendable (UUID) async throws -> [Recipe])? = nil
     ) {
         self.cloudKitCore = cloudKitCore
         self.recipeCloudService = recipeCloudService
@@ -60,6 +82,52 @@ actor RecipeSyncService {
         self.collectionRepository = collectionRepository
         self.savedReferenceRepository = savedReferenceRepository
         self.imageManager = imageManager
+        self.accountContextProvider = accountContextProvider ?? { ownerID in
+            await MainActor.run {
+                CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerID)
+            }
+        }
+        self.accountContextValidator = accountContextValidator ?? { context in
+            await MainActor.run {
+                CurrentUserSession.shared.permitsMutation(context)
+            }
+        }
+        self.migrateLegacyOwnership = migrateLegacyOwnership ?? { ownerID in
+            try await recipeRepository.migrateRecipeOwnership(currentUserId: ownerID)
+        }
+        self.cloudAvailability = cloudAvailability ?? { await cloudKitCore.isAvailable() }
+        self.fetchCloudRecipes = fetchCloudRecipes ?? { ownerID in
+            try await recipeCloudService.syncUserRecipes(ownerId: ownerID)
+        }
+        self.fetchRemoteDeletedRecipes = fetchRemoteDeletedRecipes ?? { ownerID in
+            try await recipeCloudService.fetchDeletedRecipeTombstones(ownerId: ownerID)
+        }
+        self.savePrivateRecipe = savePrivateRecipe ?? { recipe, ownerID, context in
+            try await recipeCloudService.saveRecipe(
+                recipe,
+                ownerId: ownerID,
+                authorizationContext: context
+            )
+        }
+        self.saveRemoteTombstone = saveRemoteTombstone ?? { tombstone in
+            try await recipeCloudService.saveDeletedRecipeTombstone(tombstone)
+        }
+        self.deletePrivateRecipe = deletePrivateRecipe ?? { recipe in
+            try await recipeCloudService.deleteRecipe(recipe)
+        }
+        self.deletePublicRecipe = deletePublicRecipe ?? { recipeID, ownerID in
+            try await recipeCloudService.deletePublicRecipe(
+                recipeId: recipeID,
+                ownerID: ownerID
+            )
+        }
+        self.fetchPublishedRecipes = fetchPublishedRecipes ?? { ownerID in
+            try await recipeCloudService.querySharedRecipes(
+                ownerIds: [ownerID],
+                visibility: .publicRecipe,
+                includeDerivedCopies: true
+            )
+        }
 
         // Load last sync date
         if let timestamp = UserDefaults.standard.object(forKey: lastSyncKey) as? Date {
@@ -118,57 +186,93 @@ actor RecipeSyncService {
 
     // MARK: - Sync Operations
 
+    private func beginVerifiedSync(for ownerID: UUID) async throws -> VerifiedAccountMutationContext {
+        guard let context = await accountContextProvider(ownerID), context.ownerID == ownerID else {
+            throw UserSessionError.accountChanged
+        }
+        try await requireVerifiedSync(context)
+        return context
+    }
+
+    private func requireVerifiedSync(_ context: VerifiedAccountMutationContext) async throws {
+        guard !Task.isCancelled, await accountContextValidator(context) else {
+            throw UserSessionError.accountChanged
+        }
+    }
+
     /// Perform full bidirectional sync
     func performFullSync(for userId: UUID) async throws {
+        let accountContext = try await beginVerifiedSync(for: userId)
+
+        // Upgrade legacy local ownership before any deletion snapshot or CloudKit
+        // inventory. Otherwise an ownerless tombstone can be omitted from this
+        // run and then cleared when its stale active recipe is downloaded.
+        try await requireVerifiedSync(accountContext)
+        try await migrateLegacyOwnership(userId)
+        try await requireVerifiedSync(accountContext)
+
         // Check if CloudKit is available
-        let isAvailable = await cloudKitCore.isAvailable()
+        let isAvailable = await cloudAvailability()
+        try await requireVerifiedSync(accountContext)
         guard isAvailable else {
             logger.warning("CloudKit not available - skipping sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
         }
 
         // Fetch recipes from CloudKit
-        let cloudRecipes = try await recipeCloudService.syncUserRecipes(ownerId: userId)
+        let cloudRecipes = try await fetchCloudRecipes(userId)
+        try await requireVerifiedSync(accountContext)
 
         // Fetch durable remote deletion facts before merging active recipe records.
-        let remoteDeletedRecipes = try await recipeCloudService.fetchDeletedRecipeTombstones(ownerId: userId)
+        let remoteDeletedRecipes = try await fetchRemoteDeletedRecipes(userId)
+        try await requireVerifiedSync(accountContext)
         for tombstone in remoteDeletedRecipes {
+            try await requireVerifiedSync(accountContext)
             try await deletedRecipeRepository.markAsDeleted(
                 recipeId: tombstone.recipeId,
+                ownerId: userId,
                 cloudRecordName: tombstone.cloudRecordName,
                 deletedAt: tombstone.deletedAt
             )
         }
-        let deletedRecipeIds = Set(try await deletedRecipeRepository.fetchAllDeletedRecipeIds())
-
-        // Normalize legacy ownerless rows before narrowing the sync set. Sync
-        // should only compare current-user private records against current-user
-        // local library rows, never cached public/non-owned recipes.
-        try await recipeRepository.migrateRecipeOwnership(currentUserId: userId)
+        let deletedRecipeIds = Set(
+            try await deletedRecipeRepository.fetchAllDeletedRecipeIds(ownerId: userId)
+        )
+        try await requireVerifiedSync(accountContext)
 
         let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
+        try await requireVerifiedSync(accountContext)
 
         // Merge strategies
         try await mergeRecipes(
             cloudRecipes: cloudRecipes,
             localRecipes: localRecipes,
             userId: userId,
-            deletedRecipeIds: deletedRecipeIds
+            deletedRecipeIds: deletedRecipeIds,
+            accountContext: accountContext
         )
+        try await requireVerifiedSync(accountContext)
 
         // Refresh saved recipes that still follow their source of truth.
-        try await syncFollowedRecipesFromSources(for: userId)
+        try await syncFollowedRecipesFromSources(for: userId, accountContext: accountContext)
+        try await requireVerifiedSync(accountContext)
 
         if let collectionRepository {
+            try await requireVerifiedSync(accountContext)
             try await collectionRepository.syncFromCloudKit(userId: userId)
+            try await requireVerifiedSync(accountContext)
             try await collectionRepository.removeRecipesFromAllCollections(deletedRecipeIds)
+            try await requireVerifiedSync(accountContext)
             try await collectionRepository.repairInvalidPublicCollectionMemberships(
                 recipeRepository: recipeRepository,
                 ownerId: userId
             )
+            try await requireVerifiedSync(accountContext)
         }
 
+        try await requireVerifiedSync(accountContext)
         try await savedReferenceRepository?.syncFromCloudKit(userId: userId)
+        try await requireVerifiedSync(accountContext)
 
         // Update last sync date
         lastSyncDate = Date()
@@ -178,7 +282,12 @@ actor RecipeSyncService {
         // the pre-merge snapshot can delete public records for recipes that were
         // just restored from private CloudKit during this sync.
         let reconciledLocalRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
-        await cleanupOrphanedPublicRecipes(userId: userId, localRecipeIds: Set(reconciledLocalRecipes.map { $0.id }))
+        try await requireVerifiedSync(accountContext)
+        try await cleanupOrphanedPublicRecipes(
+            userId: userId,
+            localRecipeIds: Set(reconciledLocalRecipes.map { $0.id }),
+            accountContext: accountContext
+        )
 
         // Do not aggressively clean local tombstones here. Remote deleted-recipe
         // records are now the durable source of truth, and local cleanup must be
@@ -194,25 +303,30 @@ actor RecipeSyncService {
             logger.warning("Cannot sync recipe without owner ID: \(recipe.title)")
             return
         }
+        let accountContext = try await beginVerifiedSync(for: ownerId)
 
         // Syncing recipe to CloudKit
-        try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
+        try await requireVerifiedSync(accountContext)
+        try await savePrivateRecipe(recipe, ownerId, accountContext)
         // Recipe synced successfully
     }
 
     /// Force sync of all local recipes to CloudKit (useful for recovery)
     /// Syncs ALL recipes regardless of visibility - visibility only controls social sharing
     func forceSyncAllRecipesToCloud(for userId: UUID) async throws {
+        let accountContext = try await beginVerifiedSync(for: userId)
         // Force syncing all local recipes to CloudKit
 
         // Check if CloudKit is available
-        let isAvailable = await cloudKitCore.isAvailable()
+        let isAvailable = await cloudAvailability()
+        try await requireVerifiedSync(accountContext)
         guard isAvailable else {
             logger.warning("CloudKit not available - cannot force sync")
             throw CloudKitError.accountNotAvailable(.couldNotDetermine)
         }
 
         let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
+        try await requireVerifiedSync(accountContext)
         // Found current-user local recipes to sync
 
         var syncedCount = 0
@@ -226,16 +340,21 @@ actor RecipeSyncService {
 
             // Sync ALL recipes to iCloud (visibility controls social sharing, not cloud backup)
             do {
-                try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
+                try await requireVerifiedSync(accountContext)
+                try await savePrivateRecipe(recipe, ownerId, accountContext)
                 syncedCount += 1
                 // Synced recipe
+            } catch UserSessionError.accountChanged {
+                throw UserSessionError.accountChanged
             } catch {
                 failedCount += 1
                 logger.error("Failed to sync recipe '\(recipe.title)': \(error.localizedDescription)")
             }
         }
 
+        try await requireVerifiedSync(accountContext)
         try await savedReferenceRepository?.forceSyncAllReferencesToCloud(userId: userId)
+        try await requireVerifiedSync(accountContext)
 
         logger.info("✅ Force sync complete - Synced: \(syncedCount), Failed: \(failedCount)")
     }
@@ -246,7 +365,8 @@ actor RecipeSyncService {
         cloudRecipes: [Recipe],
         localRecipes: [Recipe],
         userId: UUID,
-        deletedRecipeIds: Set<UUID>
+        deletedRecipeIds: Set<UUID>,
+        accountContext: VerifiedAccountMutationContext
     ) async throws {
         // Starting recipe merge process
 
@@ -282,13 +402,16 @@ actor RecipeSyncService {
                     sourceDeviceId: SyncDeviceIdentifier.current()
                 )
                 do {
-                    try await recipeCloudService.saveDeletedRecipeTombstone(tombstone)
+                    try await requireVerifiedSync(accountContext)
+                    try await saveRemoteTombstone(tombstone)
                 } catch {
                     logger.error("Failed to save recipe tombstone before stale active-record cleanup: \(error.localizedDescription)")
                     throw error
                 }
-                try? await recipeCloudService.deleteRecipe(cloudRecipe)
-                try? await recipeCloudService.deletePublicRecipe(recipeId: cloudRecipe.id)
+                try await requireVerifiedSync(accountContext)
+                try? await deletePrivateRecipe(cloudRecipe)
+                try await requireVerifiedSync(accountContext)
+                try? await deletePublicRecipe(cloudRecipe.id, userId)
                 deletedLocally += 1
                 skipped += 1
                 continue
@@ -328,10 +451,15 @@ actor RecipeSyncService {
                         followsSourceUpdates: cloudRecipe.followsSourceUpdates,
                         relatedRecipeIds: cloudRecipe.relatedRecipeIds  // Preserve related recipes
                     )
+                    try await requireVerifiedSync(accountContext)
                     try await recipeRepository.update(mergedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
                     // Download image if cloud has it and local doesn't
-                    await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+                    try await downloadImageIfNeeded(
+                        recipe: cloudRecipe,
+                        userId: userId,
+                        accountContext: accountContext
+                    )
 
                     updated += 1
                 } else if localRecipe.updatedAt > cloudRecipe.updatedAt {
@@ -371,9 +499,11 @@ actor RecipeSyncService {
                             followsSourceUpdates: localRecipe.followsSourceUpdates,
                             relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
-                        try await recipeCloudService.saveRecipe(cloudSyncRecipe, ownerId: ownerId)
+                        try await requireVerifiedSync(accountContext)
+                        try await savePrivateRecipe(cloudSyncRecipe, ownerId, accountContext)
 
                         // Update local to preserve cloud record name (don't update timestamp - this is just metadata sync)
+                        try await requireVerifiedSync(accountContext)
                         try await recipeRepository.update(cloudSyncRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
                     }
                     updated += 1
@@ -412,28 +542,42 @@ actor RecipeSyncService {
                             relatedRecipeIds: localRecipe.relatedRecipeIds  // Preserve related recipes
                         )
                         // Don't update timestamp - just syncing CloudKit metadata (skip image sync for metadata-only updates)
+                        try await requireVerifiedSync(accountContext)
                         try await recipeRepository.update(updated, shouldUpdateTimestamp: false, skipImageSync: true)
                     }
 
                     // Download image if missing locally but exists in cloud
-                    await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+                    try await downloadImageIfNeeded(
+                        recipe: cloudRecipe,
+                        userId: userId,
+                        accountContext: accountContext
+                    )
 
                     skipped += 1
                 }
             } else {
                 // Recipe exists in cloud but not locally - create local
                 // Creating local recipe from cloud (skip cloud sync since we're downloading FROM cloud)
+                try await requireVerifiedSync(accountContext)
                 try await recipeRepository.create(cloudRecipe, skipCloudSync: true)
 
                 // Download image if exists in cloud
-                await downloadImageIfNeeded(recipe: cloudRecipe, userId: userId)
+                try await downloadImageIfNeeded(
+                    recipe: cloudRecipe,
+                    userId: userId,
+                    accountContext: accountContext
+                )
 
                 created += 1
             }
         }
 
         for localRecipe in localRecipes where deletedRecipeIds.contains(localRecipe.id) {
-            try await recipeRepository.removeLocalRecipeAfterRemoteDeletion(id: localRecipe.id)
+            try await requireVerifiedSync(accountContext)
+            try await recipeRepository.removeLocalRecipeAfterRemoteDeletion(
+                id: localRecipe.id,
+                ownerId: userId
+            )
         }
 
         // Process local-only recipes (push ALL to cloud regardless of visibility)
@@ -447,7 +591,8 @@ actor RecipeSyncService {
                 if let ownerId = localRecipe.ownerId, ownerId == userId {
                     // Push ALL recipes to cloud (visibility controls social sharing, not cloud backup)
                     // Pushing local recipe to cloud
-                    try await recipeCloudService.saveRecipe(localRecipe, ownerId: ownerId)
+                    try await requireVerifiedSync(accountContext)
+                    try await savePrivateRecipe(localRecipe, ownerId, accountContext)
                     pushedToCloud += 1
                 }
             }
@@ -498,14 +643,15 @@ actor RecipeSyncService {
 
     /// Remove public recipes that no longer exist in private database
     /// This cleans up "orphaned" records that friends can see but the owner cannot
-    private func cleanupOrphanedPublicRecipes(userId: UUID, localRecipeIds: Set<UUID>) async {
+    private func cleanupOrphanedPublicRecipes(
+        userId: UUID,
+        localRecipeIds: Set<UUID>,
+        accountContext: VerifiedAccountMutationContext
+    ) async throws {
         do {
             // Fetch user's public recipes from CloudKit public database
-            let publicRecipes = try await recipeCloudService.querySharedRecipes(
-                ownerIds: [userId],
-                visibility: .publicRecipe,
-                includeDerivedCopies: true
-            )
+            let publicRecipes = try await fetchPublishedRecipes(userId)
+            try await requireVerifiedSync(accountContext)
 
             // Find orphans: public records not in local/private storage
             let orphanedRecipes = publicRecipes.filter { !localRecipeIds.contains($0.id) }
@@ -517,20 +663,27 @@ actor RecipeSyncService {
             // Delete each orphan from public database
             for recipe in orphanedRecipes {
                 do {
-                    try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+                    try await requireVerifiedSync(accountContext)
+                    try await deletePublicRecipe(recipe.id, userId)
                     logger.info("🧹 Deleted orphaned public recipe: \(recipe.title)")
                 } catch {
                     logger.warning("Failed to delete orphan \(recipe.id): \(error.localizedDescription)")
                 }
             }
+        } catch UserSessionError.accountChanged {
+            throw UserSessionError.accountChanged
         } catch {
             // Don't fail sync if cleanup fails - this is a best-effort operation
             logger.warning("Orphan cleanup skipped: \(error.localizedDescription)")
         }
     }
 
-    private func syncFollowedRecipesFromSources(for userId: UUID) async throws {
+    private func syncFollowedRecipesFromSources(
+        for userId: UUID,
+        accountContext: VerifiedAccountMutationContext
+    ) async throws {
         let localRecipes = try await recipeRepository.fetchLibraryRecipes(ownerId: userId)
+        try await requireVerifiedSync(accountContext)
         let followedRecipes = localRecipes.filter {
             $0.originalRecipeId != nil &&
             $0.isFollowingSourceUpdates
@@ -539,14 +692,17 @@ actor RecipeSyncService {
         guard !followedRecipes.isEmpty else { return }
 
         let sourceRecipeIds = Array(Set(followedRecipes.compactMap(\.originalRecipeId)))
-        let sourceRecipesById: [UUID: Recipe]
+        var sourceRecipesById: [UUID: Recipe] = [:]
         do {
             sourceRecipesById = try await recipeCloudService.fetchPublicRecipes(ids: sourceRecipeIds)
+            try await requireVerifiedSync(accountContext)
         } catch {
+            if case UserSessionError.accountChanged = error { throw error }
             logger.warning("Failed to batch fetch followed recipe sources: \(error.localizedDescription)")
             var fallbackSources: [UUID: Recipe] = [:]
             for sourceRecipeId in sourceRecipeIds {
                 if let sourceRecipe = try? await recipeCloudService.fetchPublicRecipe(id: sourceRecipeId) {
+                    try await requireVerifiedSync(accountContext)
                     fallbackSources[sourceRecipeId] = sourceRecipe
                 }
             }
@@ -566,6 +722,7 @@ actor RecipeSyncService {
                     sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
                     followsSourceUpdates: false
                 )
+                try await requireVerifiedSync(accountContext)
                 try await recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
                 continue
             }
@@ -579,6 +736,7 @@ actor RecipeSyncService {
                         sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
                         followsSourceUpdates: followsSourceUpdates
                     )
+                    try await requireVerifiedSync(accountContext)
                     try await recipeRepository.update(migratedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
                 }
                 continue
@@ -610,9 +768,11 @@ actor RecipeSyncService {
                     )
             }
 
+            try await requireVerifiedSync(accountContext)
             try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
 
             if shouldRemoveImage {
+                try await requireVerifiedSync(accountContext)
                 await imageManager.deleteImage(recipeId: updatedRecipe.id)
             } else if needsImageRefresh {
                 do {
@@ -620,6 +780,7 @@ actor RecipeSyncService {
                         recipeId: sourceRecipeId,
                         fromPublic: true
                     ), let image = UIImage(data: imageData) {
+                        try await requireVerifiedSync(accountContext)
                         let filename = try await imageManager.saveImage(image, recipeId: updatedRecipe.id)
                         let imageURL = await imageManager.imageURL(for: filename)
                         updatedRecipe = updatedRecipe
@@ -632,8 +793,11 @@ actor RecipeSyncService {
                                 sourceRecipeUpdatedAt: sourceRecipe.updatedAt,
                                 followsSourceUpdates: followsSourceUpdates
                             )
+                        try await requireVerifiedSync(accountContext)
                         try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
                     }
+                } catch UserSessionError.accountChanged {
+                    throw UserSessionError.accountChanged
                 } catch {
                     logger.warning("Failed to refresh source image for saved recipe \(localRecipe.id): \(error.localizedDescription)")
                 }
@@ -655,7 +819,12 @@ actor RecipeSyncService {
     /// - Parameters:
     ///   - recipe: The recipe to check and download image for
     ///   - userId: The current user's ID (to determine which database to use)
-    private func downloadImageIfNeeded(recipe: Recipe, userId: UUID) async {
+    private func downloadImageIfNeeded(
+        recipe: Recipe,
+        userId: UUID,
+        accountContext: VerifiedAccountMutationContext
+    ) async throws {
+        try await requireVerifiedSync(accountContext)
         // Check if image already exists locally
         let hasLocalImage = await imageManager.imageExists(recipeId: recipe.id)
         if hasLocalImage {
@@ -691,6 +860,7 @@ actor RecipeSyncService {
                     fromPublic: false,
                     privateRecordName: cloudRecordName
                 ), let image = UIImage(data: imageData) {
+                    try await requireVerifiedSync(accountContext)
                     filename = try await imageManager.saveImage(image, recipeId: recipe.id)
                 } else {
                     filename = nil
@@ -700,6 +870,7 @@ actor RecipeSyncService {
             }
 
             if let filename {
+                try await requireVerifiedSync(accountContext)
 
                 // IMPORTANT: Update recipe's imageURL to point to the local file
                 // Build the proper local URL (not the CloudKit temporary path)
@@ -712,8 +883,13 @@ actor RecipeSyncService {
                     cloudImageRecordName: recipe.cloudImageRecordName ?? recipe.id.uuidString,
                     imageModifiedAt: modificationDate
                 )
-                await bestEffort("Persist downloaded image metadata for recipe \(recipe.id)", logger: logger) {
+                do {
+                    try await requireVerifiedSync(accountContext)
                     try await recipeRepository.update(updatedRecipe, shouldUpdateTimestamp: false, skipImageSync: true)
+                } catch UserSessionError.accountChanged {
+                    throw UserSessionError.accountChanged
+                } catch {
+                    logger.warning("Persist downloaded image metadata failed: \(error.localizedDescription)")
                 }
 
                 // Notify views that recipe image was downloaded (so they can refresh and show the image)
@@ -724,6 +900,8 @@ actor RecipeSyncService {
                     )
                 }
             }
+        } catch UserSessionError.accountChanged {
+            throw UserSessionError.accountChanged
         } catch {
             logger.warning("Failed to download image for recipe '\(recipe.title)': \(error.localizedDescription)")
         }

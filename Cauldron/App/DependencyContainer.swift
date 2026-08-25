@@ -11,6 +11,33 @@ import SwiftUI
 import Combine
 import os
 
+/// The single source of truth for Cauldron's shipping local SwiftData schema.
+/// Tests and recovery probes must use this factory rather than maintaining a
+/// second model list that can silently drift from production.
+enum CauldronPersistenceSchema {
+    static var modelTypes: [any PersistentModel.Type] {
+        [
+            RecipeModel.self,
+            DeletedRecipeModel.self,
+            DeletedCollectionModel.self,
+            GroceryListModel.self,
+            GroceryItemModel.self,
+            CookingHistoryModel.self,
+            UserModel.self,
+            SharedRecipeModel.self,
+            ConnectionModel.self,
+            CollectionModel.self,
+            CollectionMembershipModel.self,
+            SavedRecipeReferenceModel.self,
+            SavedCollectionReferenceModel.self
+        ]
+    }
+
+    static func make() -> Schema {
+        Schema(modelTypes)
+    }
+}
+
 /// Dependency injection container
 ///
 /// ## Architecture
@@ -151,7 +178,9 @@ class DependencyContainer: ObservableObject {
     init(
         modelContainer: ModelContainer,
         recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore(),
-        persistenceRecoveryReport: PersistenceRecoveryReport? = nil
+        persistenceRecoveryReport: PersistenceRecoveryReport? = nil,
+        allowsUnverifiedArchiveRestore: Bool = false,
+        collectionImageManager: CollectionImageManagerV2? = nil
     ) {
         self.modelContainer = modelContainer
         self.persistenceRecoveryReport = persistenceRecoveryReport
@@ -176,7 +205,9 @@ class DependencyContainer: ObservableObject {
         // Image managers using unified EntityImageManager with domain-specific services
         self.imageManager = createRecipeImageManager(recipeService: recipeCloudService)
         self.profileImageManager = createProfileImageManager(userService: userCloudService)
-        self.collectionImageManager = createCollectionImageManager(collectionService: collectionCloudService)
+        self.collectionImageManager = collectionImageManager ?? createCollectionImageManager(
+            collectionService: collectionCloudService
+        )
         self.imageSyncManager = ImageSyncManager()
         self.operationQueueService = OperationQueueService()
         self.recipeImportInboxStore = recipeImportInboxStore
@@ -225,9 +256,41 @@ class DependencyContainer: ObservableObject {
         self.cookingHistoryRepository = CookingHistoryRepository(modelContainer: modelContainer)
         self.sharingRepository = SharingRepository(modelContainer: modelContainer)
         self.connectionRepository = ConnectionRepository(modelContainer: modelContainer)
+        let remoteDeletedRecipeFetcher: (@Sendable (UUID) async throws -> Set<UUID>)?
+        let remoteDeletedCollectionFetcher: (@Sendable (UUID) async throws -> Set<UUID>)?
+        if allowsUnverifiedArchiveRestore {
+            remoteDeletedRecipeFetcher = nil
+            remoteDeletedCollectionFetcher = nil
+        } else {
+            remoteDeletedRecipeFetcher = { [recipeCloudService] ownerID in
+                Set(try await recipeCloudService.fetchDeletedRecipeTombstones(ownerId: ownerID).map(\.recipeId))
+            }
+            remoteDeletedCollectionFetcher = { [collectionCloudService] ownerID in
+                Set(try await collectionCloudService.fetchDeletedCollectionTombstones(ownerId: ownerID).map(\.collectionId))
+            }
+        }
         self.libraryArchiveService = LibraryArchiveService(
             recipeRepository: recipeRepository,
-            collectionRepository: collectionRepository
+            collectionRepository: collectionRepository,
+            modelContainer: modelContainer,
+            imageManager: imageManager,
+            collectionImageManager: self.collectionImageManager,
+            captureAccountScope: { ownerID in
+                if allowsUnverifiedArchiveRestore {
+                    return SyncOperationAccountScope(ownerId: ownerID, revision: UUID())
+                }
+                return await MainActor.run {
+                    CurrentUserSession.shared.syncOperationAccountScope(ownerID: ownerID)
+                }
+            },
+            permitsAccountScope: { scope in
+                if allowsUnverifiedArchiveRestore { return true }
+                return await MainActor.run {
+                    CurrentUserSession.shared.syncOperationAccountScope(ownerID: scope.ownerId) == scope
+                }
+            },
+            fetchRemoteDeletedRecipeIDs: remoteDeletedRecipeFetcher,
+            fetchRemoteDeletedCollectionIDs: remoteDeletedCollectionFetcher
         )
 
         // ============================================================
@@ -339,6 +402,7 @@ class DependencyContainer: ObservableObject {
     func purgeAllLocalAccountData() async throws {
         let context = ModelContext(modelContainer)
         let recipeIDs = try context.fetch(FetchDescriptor<RecipeModel>()).map(\.id)
+        let collectionIDs = try context.fetch(FetchDescriptor<CollectionModel>()).map(\.id)
         for model in try context.fetch(FetchDescriptor<GroceryItemModel>()) { context.delete(model) }
         for model in try context.fetch(FetchDescriptor<GroceryListModel>()) { context.delete(model) }
         for model in try context.fetch(FetchDescriptor<CookingHistoryModel>()) { context.delete(model) }
@@ -357,7 +421,11 @@ class DependencyContainer: ObservableObject {
             await imageManager.deleteImage(recipeId: recipeID)
             await imageSyncManager.removeAllPendingUploads(recipeID)
         }
+        for collectionID in collectionIDs {
+            await collectionImageManager.deleteImage(collectionId: collectionID)
+        }
         await operationQueueService.removeAllOperations()
+        await operationQueueService.clearDeadLetteredOperations()
         try await recipeImportInboxStore.removeAll()
         CookSessionSharedStore.clear()
     }
@@ -368,22 +436,11 @@ class DependencyContainer: ObservableObject {
     }
 
     /// Create container with in-memory storage (for previews/testing)
-    static func preview(recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore()) -> DependencyContainer {
-        let schema = Schema([
-            RecipeModel.self,
-            DeletedRecipeModel.self,
-            DeletedCollectionModel.self,
-            GroceryListModel.self,
-            GroceryItemModel.self,
-            CookingHistoryModel.self,
-            UserModel.self,
-            SharedRecipeModel.self,
-            ConnectionModel.self,
-            CollectionModel.self,
-            CollectionMembershipModel.self,
-            SavedRecipeReferenceModel.self,
-            SavedCollectionReferenceModel.self
-        ])
+    static func preview(
+        recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore(),
+        collectionImageManager: CollectionImageManagerV2? = nil
+    ) -> DependencyContainer {
+        let schema = CauldronPersistenceSchema.make()
 
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         guard let container = try? ModelContainer(for: schema, configurations: [config]) else {
@@ -392,27 +449,15 @@ class DependencyContainer: ObservableObject {
 
         return DependencyContainer(
             modelContainer: container,
-            recipeImportInboxStore: recipeImportInboxStore
+            recipeImportInboxStore: recipeImportInboxStore,
+            allowsUnverifiedArchiveRestore: true,
+            collectionImageManager: collectionImageManager
         )
     }
     
     /// Create container with persistent storage
     static func persistent() throws -> DependencyContainer {
-        let schema = Schema([
-            RecipeModel.self,
-            DeletedRecipeModel.self,
-            DeletedCollectionModel.self,
-            GroceryListModel.self,
-            GroceryItemModel.self,
-            CookingHistoryModel.self,
-            UserModel.self,
-            SharedRecipeModel.self,
-            ConnectionModel.self,
-            CollectionModel.self,
-            CollectionMembershipModel.self,
-            SavedRecipeReferenceModel.self,
-            SavedCollectionReferenceModel.self
-        ])
+        let schema = CauldronPersistenceSchema.make()
 
         // Ensure Application Support directory exists
         let fileManager = FileManager.default

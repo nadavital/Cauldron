@@ -16,12 +16,22 @@ final class DeletedRecipeModel {
     // CloudKit requires all attributes to be optional or have default values
     // Unique constraint removed as CloudKit doesn't support it
     var recipeId: UUID?
+    /// The account whose private library deletion this tombstone belongs to.
+    /// Optional so stores created before account-scoped tombstones still open.
+    var ownerId: UUID?
     var deletedAt: Date?
     var cloudRecordName: String?
     var sourceDeviceId: String?
 
-    init(recipeId: UUID, deletedAt: Date, cloudRecordName: String?, sourceDeviceId: String? = nil) {
+    init(
+        recipeId: UUID,
+        ownerId: UUID? = nil,
+        deletedAt: Date,
+        cloudRecordName: String?,
+        sourceDeviceId: String? = nil
+    ) {
         self.recipeId = recipeId
+        self.ownerId = ownerId
         self.deletedAt = deletedAt
         self.cloudRecordName = cloudRecordName
         self.sourceDeviceId = sourceDeviceId

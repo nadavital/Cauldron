@@ -124,6 +124,11 @@ Temporary Items
 *.swiftmodule
 *.swiftdoc
 
+# SwiftData/SQLite transient sidecars. Committed fixtures must be copied only
+# after a clean close and should contain the durable store itself.
+*.store-shm
+*.store-wal
+
 # Xcode Patch
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj

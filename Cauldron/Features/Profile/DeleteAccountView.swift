@@ -113,7 +113,8 @@ struct DeleteAccountView: View {
         let deletionLease = await AccountDeletionGate.shared.begin(ownerID: userId)
 
         do {
-            AppLogger.general.info("🗑️ Starting account deletion for user: \(userId)")
+            try await AccountDeletionGate.withDeletionAuthority(deletionLease) {
+                AppLogger.general.info("🗑️ Starting account deletion for user: \(userId)")
 
             if deletingUser.cloudRecordName != nil {
                 // Remove hosted snapshots while their management capability is available.
@@ -174,13 +175,19 @@ struct DeleteAccountView: View {
             // boundary; generic timer donations and App Shortcuts remain.
             await RecipeIntentDonation.reconcileAccountBoundary(currentOwnerID: nil)
 
-            AppLogger.general.info("✅ Account deletion complete")
+                AppLogger.general.info("✅ Account deletion complete")
+            }
+
+            await AccountDeletionGate.shared.end(deletionLease)
 
             // Dismiss view - user will be returned to onboarding
             dismiss()
 
         } catch {
             AppLogger.general.error("❌ Account deletion failed: \(error.localizedDescription)")
+            // Reopen normal publication before attempting compensating share
+            // restoration; the deletion-authorized scope ended with the throw.
+            await AccountDeletionGate.shared.end(deletionLease)
             if deletingUser.cloudRecordName != nil {
                 do {
                     try await dependencies.externalShareService.restoreAccountShareMetadata(for: deletingUser)
@@ -191,7 +198,6 @@ struct DeleteAccountView: View {
             errorMessage = "Account deletion did not finish. No deleted web shares were restored; retry deletion to complete cleanup. \(error.localizedDescription)"
             showError = true
         }
-        await AccountDeletionGate.shared.end(deletionLease)
     }
 }
 

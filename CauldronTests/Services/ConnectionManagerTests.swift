@@ -341,6 +341,133 @@ final class ConnectionManagerTests: XCTestCase {
 
     // MARK: - Operation Queue Integration
 
+    func testConnectionQueuePolicyAllowsOnlyMatchingOwnerAndAccountGeneration() {
+        let ownerId = UUID()
+        let revision = UUID()
+        let connection = Connection(
+            id: UUID(),
+            fromUserId: ownerId,
+            toUserId: UUID(),
+            status: .pending
+        )
+        let payload = QueuedConnectionContext(connection: connection, actorUserId: ownerId)
+        let operation = SyncOperation(
+            type: .create,
+            entityType: .connection,
+            entityId: connection.id,
+            ownerId: ownerId,
+            accountRevision: revision
+        )
+
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: operation,
+                payload: payload,
+                currentUserId: ownerId,
+                currentScope: SyncOperationAccountScope(ownerId: ownerId, revision: revision)
+            ),
+            .allowed
+        )
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: operation,
+                payload: payload,
+                currentUserId: UUID(),
+                currentScope: SyncOperationAccountScope(ownerId: UUID(), revision: UUID())
+            ),
+            .deferred
+        )
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: operation,
+                payload: payload,
+                currentUserId: ownerId,
+                currentScope: SyncOperationAccountScope(ownerId: ownerId, revision: UUID())
+            ),
+            .deferred
+        )
+    }
+
+    func testConnectionQueuePolicyDefersSwitchAwayAndLegacyGenerationReplay() {
+        let ownerA = UUID()
+        let ownerB = UUID()
+        let revisionA = UUID()
+        let connection = Connection(
+            id: UUID(),
+            fromUserId: ownerA,
+            toUserId: ownerB,
+            status: .pending
+        )
+        let operation = SyncOperation(
+            type: .create,
+            entityType: .connection,
+            entityId: connection.id,
+            ownerId: ownerA,
+            accountRevision: revisionA
+        )
+        let payload = QueuedConnectionContext(connection: connection, actorUserId: ownerA)
+
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: operation,
+                payload: payload,
+                currentUserId: ownerB,
+                currentScope: SyncOperationAccountScope(ownerId: ownerB, revision: UUID())
+            ),
+            .deferred
+        )
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: operation,
+                payload: payload,
+                currentUserId: ownerA,
+                currentScope: SyncOperationAccountScope(ownerId: ownerA, revision: UUID())
+            ),
+            .deferred
+        )
+    }
+
+    func testConnectionQueuePolicyMigratesUnambiguousLegacyWorkButRejectsAmbiguousDelete() {
+        let ownerId = UUID()
+        let otherId = UUID()
+        let connection = Connection(
+            id: UUID(),
+            fromUserId: ownerId,
+            toUserId: otherId,
+            status: .pending
+        )
+        let scope = SyncOperationAccountScope(ownerId: ownerId, revision: UUID())
+        let legacyCreate = SyncOperation(
+            type: .create,
+            entityType: .connection,
+            entityId: connection.id
+        )
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: legacyCreate,
+                payload: QueuedConnectionContext(connection: connection, actorUserId: nil),
+                currentUserId: ownerId,
+                currentScope: scope
+            ),
+            .migrateLegacy
+        )
+
+        let legacyDelete = SyncOperation(
+            type: .delete,
+            entityType: .connection,
+            entityId: connection.id
+        )
+        XCTAssertEqual(
+            ConnectionOperationAccountPolicy.decision(
+                operation: legacyDelete,
+                payload: QueuedConnectionContext(connection: connection, actorUserId: nil),
+                currentUserId: ownerId,
+                currentScope: scope
+            ),
+            .reject
+        )
+    }
+
     func testOperationQueueSupportsConnectionEntityPayload() async throws {
         let (_, dependencies, _) = makeConnectionManager()
 
@@ -388,6 +515,36 @@ final class ConnectionManagerTests: XCTestCase {
         )
 
         XCTAssertEqual(queued?.status, .inProgress)
+    }
+
+    func testOperationQueueRetryByOperationIdCannotReviveOtherAccountsCollision() async throws {
+        let queue = OperationQueueService()
+        let connectionId = UUID()
+        let ownerA = UUID()
+        let ownerB = UUID()
+        let operationA = await queue.addOperation(
+            type: .create,
+            entityType: .connection,
+            entityId: connectionId,
+            ownerId: ownerA,
+            accountRevision: UUID()
+        )
+        let operationB = await queue.addOperation(
+            type: .delete,
+            entityType: .connection,
+            entityId: connectionId,
+            ownerId: ownerB,
+            accountRevision: UUID()
+        )
+        await queue.markFailed(operationId: operationA, error: "offline")
+        await queue.markFailed(operationId: operationB, error: "offline")
+
+        await queue.retryOperation(operationId: operationB)
+
+        let ownerAOperation = await queue.getOperation(operationId: operationA)
+        let ownerBOperation = await queue.getOperation(operationId: operationB)
+        XCTAssertEqual(ownerAOperation?.status, .failed)
+        XCTAssertEqual(ownerBOperation?.status, .pending)
     }
 
     func testOperationQueueRetryOperationByEntity() async throws {

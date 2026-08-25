@@ -6,7 +6,12 @@
 import Foundation
 
 enum ExternalShareURLClassifier {
-    private static let legacyShareTypes = Set(["recipe", "profile", "collection"])
+    enum Route: Equatable {
+        case recipe(String)
+        case profile(String)
+        case collection(String)
+    }
+
     private static let allowedHosts = Set([
         "cauldron-f900a.web.app",
         "cauldron-f900a.firebaseapp.com"
@@ -19,14 +24,42 @@ enum ExternalShareURLClassifier {
             return false
         }
 
-        let pathComponents = url.pathComponents
-        guard pathComponents.count >= 3 else { return false }
+        return route(from: url) != nil
+    }
 
-        let route = pathComponents[1]
-        if legacyShareTypes.contains(route) {
-            return pathComponents.count == 3
+    static func route(from url: URL) -> Route? {
+        let components = url.pathComponents.filter { $0 != "/" }
+        switch url.scheme?.lowercased() {
+        case "https":
+            guard let host = url.host?.lowercased(), allowedHosts.contains(host) else { return nil }
+            if components.count == 3, components[0] == "u" {
+                let recipeID = components[2]
+                return recipeID.isEmpty ? nil : .recipe(recipeID)
+            }
+            guard components.count == 2 else { return nil }
+            let identity = components[1]
+            guard !identity.isEmpty else { return nil }
+            if components[0] == "u" { return .profile(identity) }
+            return legacyRoute(type: components[0], identity: identity)
+        case "cauldron":
+            guard url.host?.lowercased() == "import", components.count == 2 else { return nil }
+            return legacyRoute(type: components[0], identity: components[1])
+        default:
+            return nil
         }
+    }
 
-        return route == "u" && (pathComponents.count == 3 || pathComponents.count == 4)
+    private static func legacyRoute(type: String, identity: String) -> Route? {
+        guard !identity.isEmpty else { return nil }
+        switch type {
+        case "recipe":
+            return .recipe(identity)
+        case "profile":
+            return .profile(identity)
+        case "collection":
+            return .collection(identity)
+        default:
+            return nil
+        }
     }
 }

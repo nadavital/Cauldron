@@ -15,21 +15,7 @@ struct TestModelContainer {
     /// Create an in-memory ModelContainer with all Cauldron models
     /// This container will not persist data between test runs
     static func create() throws -> ModelContainer {
-        let schema = Schema([
-            RecipeModel.self,
-            CollectionModel.self,
-            CollectionMembershipModel.self,
-            DeletedRecipeModel.self,
-            DeletedCollectionModel.self,
-            ConnectionModel.self,
-            UserModel.self,
-            SharedRecipeModel.self,
-            GroceryListModel.self,
-            GroceryItemModel.self,
-            CookingHistoryModel.self,
-            SavedRecipeReferenceModel.self,
-            SavedCollectionReferenceModel.self
-        ])
+        let schema = CauldronPersistenceSchema.make()
 
         let configuration = ModelConfiguration(
             isStoredInMemoryOnly: true,

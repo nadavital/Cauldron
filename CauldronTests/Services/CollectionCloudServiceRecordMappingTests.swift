@@ -207,7 +207,12 @@ final class CollectionCloudServiceRecordMappingTests: XCTestCase {
 
         XCTAssertEqual(records.count, edges.count)
         for (record, edge) in zip(records, edges) {
-            XCTAssertEqual(
+            XCTAssertTrue(
+                record.recordID.recordName.hasPrefix(
+                    "membership_\(edge.collectionId.uuidString)_\(edge.recipeId.uuidString)_"
+                )
+            )
+            XCTAssertNotEqual(
                 record.recordID,
                 CollectionCloudService.membershipRecordID(
                     collectionId: edge.collectionId,
@@ -217,5 +222,432 @@ final class CollectionCloudServiceRecordMappingTests: XCTestCase {
             let decodedEdge = try await service.membershipEdge(from: record)
             XCTAssertEqual(decodedEdge, edge)
         }
+    }
+
+    func testCanonicalUserAuthorityAcceptsCurrentAndLegacyRecordNames() {
+        let userId = UUID().uuidString
+        let identity = "_abc123"
+
+        XCTAssertEqual(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: "user_\(identity)",
+                storedUserID: userId,
+                creatorRecordName: identity,
+                expectedUserID: userId,
+                currentIdentityRecordName: nil
+            ),
+            identity
+        )
+        XCTAssertEqual(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: identity,
+                storedUserID: userId,
+                creatorRecordName: identity,
+                expectedUserID: userId,
+                currentIdentityRecordName: nil
+            ),
+            identity
+        )
+    }
+
+    func testCanonicalUserAuthorityRejectsWritableOwnerSpoofAndNoncanonicalRecord() {
+        let expectedUserId = UUID().uuidString
+        let attackerIdentity = "_attacker"
+
+        XCTAssertNil(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: "user__victim",
+                storedUserID: expectedUserId,
+                creatorRecordName: attackerIdentity,
+                expectedUserID: expectedUserId,
+                currentIdentityRecordName: nil
+            )
+        )
+        XCTAssertNil(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: "user_\(attackerIdentity)",
+                storedUserID: UUID().uuidString,
+                creatorRecordName: attackerIdentity,
+                expectedUserID: expectedUserId,
+                currentIdentityRecordName: nil
+            )
+        )
+    }
+
+    func testCanonicalUserAuthorityResolvesCurrentUserAliasOnlyWithKnownIdentity() {
+        let userId = UUID().uuidString
+        let identity = "_current"
+
+        XCTAssertEqual(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: "user_\(identity)",
+                storedUserID: userId,
+                creatorRecordName: CKCurrentUserDefaultName,
+                expectedUserID: userId,
+                currentIdentityRecordName: identity
+            ),
+            identity
+        )
+        XCTAssertNil(
+            CollectionCloudService.canonicalUserAuthorityRecordName(
+                recordType: CloudKitCore.RecordType.user,
+                recordName: "user_\(identity)",
+                storedUserID: userId,
+                creatorRecordName: CKCurrentUserDefaultName,
+                expectedUserID: userId,
+                currentIdentityRecordName: nil
+            )
+        )
+    }
+
+    func testCollectionStateCreatorMustMatchCanonicalAuthority() {
+        let authority = "_owner"
+
+        XCTAssertTrue(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                authority,
+                authorityRecordName: authority,
+                currentIdentityRecordName: nil
+            )
+        )
+        XCTAssertFalse(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                "_attacker",
+                authorityRecordName: authority,
+                currentIdentityRecordName: nil
+            )
+        )
+        XCTAssertFalse(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                nil,
+                authorityRecordName: authority,
+                currentIdentityRecordName: nil
+            )
+        )
+        XCTAssertTrue(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                nil,
+                authorityRecordName: authority,
+                currentIdentityRecordName: nil,
+                permitsUnclaimedRecord: true
+            )
+        )
+    }
+
+    func testCurrentUserAliasCannotAuthorizeAnotherOwner() {
+        XCTAssertTrue(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                CKCurrentUserDefaultName,
+                authorityRecordName: "_current",
+                currentIdentityRecordName: "_current"
+            )
+        )
+        XCTAssertFalse(
+            CollectionCloudService.recordCreatorMatchesAuthority(
+                CKCurrentUserDefaultName,
+                authorityRecordName: "_friend",
+                currentIdentityRecordName: "_current"
+            )
+        )
+    }
+
+    func testNewStateRecordIDsCannotBePreclaimedThroughLegacyDeterministicAlias() {
+        let collectionID = UUID()
+        let recipeID = UUID()
+        let firstNonce = UUID()
+        let secondNonce = UUID()
+
+        let legacyCollection = CollectionCloudService.collectionRecordID(collectionId: collectionID)
+        let newCollection = CollectionCloudService.newCollectionRecordID(
+            collectionId: collectionID,
+            nonce: firstNonce
+        )
+        XCTAssertNotEqual(newCollection, legacyCollection)
+        XCTAssertEqual(legacyCollection.recordName, collectionID.uuidString)
+        XCTAssertEqual(
+            newCollection.recordName,
+            "collection_\(collectionID.uuidString)_\(firstNonce.uuidString)"
+        )
+
+        let legacyTombstone = CollectionCloudService.deletedCollectionRecordID(collectionId: collectionID)
+        let firstTombstone = CollectionCloudService.newDeletedCollectionRecordID(
+            collectionId: collectionID,
+            nonce: firstNonce
+        )
+        let secondTombstone = CollectionCloudService.newDeletedCollectionRecordID(
+            collectionId: collectionID,
+            nonce: secondNonce
+        )
+        XCTAssertNotEqual(firstTombstone, legacyTombstone)
+        XCTAssertNotEqual(firstTombstone, secondTombstone)
+        XCTAssertEqual(
+            firstTombstone.recordName,
+            "deletedCollection_\(collectionID.uuidString)_\(firstNonce.uuidString)"
+        )
+
+        let legacyMembership = CollectionCloudService.membershipRecordID(
+            collectionId: collectionID,
+            recipeId: recipeID
+        )
+        let newMembership = CollectionCloudService.newMembershipRecordID(
+            collectionId: collectionID,
+            recipeId: recipeID,
+            nonce: firstNonce
+        )
+        XCTAssertNotEqual(newMembership, legacyMembership)
+        XCTAssertEqual(
+            newMembership.recordName,
+            "membership_\(collectionID.uuidString)_\(recipeID.uuidString)_\(firstNonce.uuidString)"
+        )
+    }
+
+    func testCollectionRecordIdentityRequiresOwnerLogicalIDAndPhysicalRecordName() {
+        let identity = CollectionCloudIdentity(ownerId: UUID(), collectionId: UUID())
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: "physical-owner-record")
+        )
+        record["collectionId"] = identity.collectionId.uuidString as CKRecordValue
+        record["userId"] = identity.ownerId.uuidString as CKRecordValue
+
+        XCTAssertTrue(CollectionCloudService.collectionRecordMatchesIdentity(
+            record,
+            identity: identity,
+            expectedRecordName: "physical-owner-record"
+        ))
+        XCTAssertFalse(CollectionCloudService.collectionRecordMatchesIdentity(
+            record,
+            identity: CollectionCloudIdentity(ownerId: UUID(), collectionId: identity.collectionId),
+            expectedRecordName: "physical-owner-record"
+        ))
+        XCTAssertFalse(CollectionCloudService.collectionRecordMatchesIdentity(
+            record,
+            identity: identity,
+            expectedRecordName: "attacker-record"
+        ))
+    }
+
+    func testKnownPhysicalCollectionRecordSurvivesEmptyQueryIndexFallback() throws {
+        let identity = CollectionCloudIdentity(ownerId: UUID(), collectionId: UUID())
+        let expectedRecordName = "collection_\(identity.collectionId.uuidString)_\(UUID().uuidString)"
+        let directRecord = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: expectedRecordName)
+        )
+        directRecord["collectionId"] = identity.collectionId.uuidString as CKRecordValue
+        directRecord["userId"] = identity.ownerId.uuidString as CKRecordValue
+
+        let validated = try CollectionCloudService.validatedKnownCollectionRecord(
+            directRecord,
+            identity: identity,
+            expectedRecordName: expectedRecordName
+        )
+
+        XCTAssertEqual(validated.recordID.recordName, expectedRecordName)
+    }
+
+    func testKnownPhysicalCollectionRecordRejectsMismatchedLogicalIdentity() {
+        let identity = CollectionCloudIdentity(ownerId: UUID(), collectionId: UUID())
+        let expectedRecordName = "collection_\(identity.collectionId.uuidString)_\(UUID().uuidString)"
+        let directRecord = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: expectedRecordName)
+        )
+        directRecord["collectionId"] = identity.collectionId.uuidString as CKRecordValue
+        directRecord["userId"] = UUID().uuidString as CKRecordValue
+
+        XCTAssertThrowsError(try CollectionCloudService.validatedKnownCollectionRecord(
+            directRecord,
+            identity: identity,
+            expectedRecordName: expectedRecordName
+        ))
+    }
+
+    func testConflictSelectionUpdatesNewestRecordFromCanonicalCreatorOnly() {
+        let old = Date(timeIntervalSince1970: 100)
+        let new = Date(timeIntervalSince1970: 200)
+        let candidates = [
+            CreatorBoundRecordCandidate(
+                recordName: "owner-old",
+                creatorRecordName: "owner",
+                updatedAt: old
+            ),
+            CreatorBoundRecordCandidate(
+                recordName: "attacker-newest",
+                creatorRecordName: "attacker",
+                updatedAt: new.addingTimeInterval(100)
+            ),
+            CreatorBoundRecordCandidate(
+                recordName: "owner-new",
+                creatorRecordName: "owner",
+                updatedAt: new
+            ),
+        ]
+
+        XCTAssertEqual(
+            CollectionCloudService.preferredCreatorBoundRecordName(
+                candidates,
+                authorityRecordName: "owner"
+            ),
+            "owner-new"
+        )
+        XCTAssertNil(
+            CollectionCloudService.preferredCreatorBoundRecordName(
+                candidates,
+                authorityRecordName: "unknown"
+            )
+        )
+    }
+
+    func testCollectionCreatorTakesPriorityAndFallbackRequiresExactAuthenticatedCreator() {
+        XCTAssertTrue(CollectionCloudService.collectionStateCreatorIsAuthorized(
+            recordCreatorName: "collection-owner",
+            collectionCreatorName: "collection-owner",
+            fallbackAuthenticatedCreatorName: nil
+        ))
+        XCTAssertFalse(CollectionCloudService.collectionStateCreatorIsAuthorized(
+            recordCreatorName: "attacker",
+            collectionCreatorName: "collection-owner",
+            fallbackAuthenticatedCreatorName: "attacker"
+        ))
+        XCTAssertTrue(CollectionCloudService.collectionStateCreatorIsAuthorized(
+            recordCreatorName: "legacy-owner",
+            collectionCreatorName: nil,
+            fallbackAuthenticatedCreatorName: "legacy-owner"
+        ))
+        XCTAssertFalse(CollectionCloudService.collectionStateCreatorIsAuthorized(
+            recordCreatorName: "attacker",
+            collectionCreatorName: nil,
+            fallbackAuthenticatedCreatorName: "legacy-owner"
+        ))
+        XCTAssertFalse(CollectionCloudService.collectionStateCreatorIsAuthorized(
+            recordCreatorName: nil,
+            collectionCreatorName: nil,
+            fallbackAuthenticatedCreatorName: "legacy-owner"
+        ))
+    }
+
+    func testDuplicateLogicalMembershipRecordsPreferNewestState() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let collectionID = UUID()
+        let recipeID = UUID()
+        let ownerID = UUID()
+        let oldEdge = CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeID,
+            ownerId: ownerID,
+            status: .active,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            sortOrder: 1
+        )
+        let newEdge = CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeID,
+            ownerId: ownerID,
+            status: .removed,
+            updatedAt: Date(timeIntervalSince1970: 200),
+            sortOrder: 1
+        )
+        let oldRecord = CKRecord(
+            recordType: CloudKitCore.RecordType.collectionMembership,
+            recordID: CKRecord.ID(recordName: "old")
+        )
+        let newRecord = CKRecord(
+            recordType: CloudKitCore.RecordType.collectionMembership,
+            recordID: CKRecord.ID(recordName: "new")
+        )
+        await service.populateMembershipRecord(oldRecord, from: oldEdge)
+        await service.populateMembershipRecord(newRecord, from: newEdge)
+
+        let selected = CollectionCloudService.deduplicatedMembershipRecords([oldRecord, newRecord])
+        XCTAssertEqual(selected.map(\.recordID.recordName), ["new"])
+    }
+
+    func testPublicationLeaseWrapsWholeActualOperationDuringDeletionRace() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let ownerID = UUID()
+        let operationEntered = expectation(description: "publication operation entered")
+        let operationMayFinish = CollectionCloudServiceTestLatch()
+        let deletionFinished = CollectionCloudServiceTestFlag()
+
+        let publication = Task {
+            try await service.withPublicationLease(ownerID: ownerID) {
+                operationEntered.fulfill()
+                await operationMayFinish.wait()
+            }
+        }
+        await fulfillment(of: [operationEntered], timeout: 2)
+
+        let deletion = Task {
+            let lease = await AccountDeletionGate.shared.begin(ownerID: ownerID)
+            await deletionFinished.set()
+            return lease
+        }
+        for _ in 0..<100 {
+            if !(await AccountDeletionGate.shared.permitsWrite(ownerID: ownerID)) { break }
+            await Task.yield()
+        }
+
+        let permitsDuringDrain = await AccountDeletionGate.shared.permitsWrite(ownerID: ownerID)
+        let deletionFinishedBeforeRelease = await deletionFinished.value
+        XCTAssertFalse(permitsDuringDrain)
+        XCTAssertFalse(deletionFinishedBeforeRelease)
+
+        await operationMayFinish.open()
+        try await publication.value
+        let deletionLease = await deletion.value
+        let deletionFinishedAfterRelease = await deletionFinished.value
+        XCTAssertTrue(deletionFinishedAfterRelease)
+        await AccountDeletionGate.shared.end(deletionLease)
+    }
+
+    func testPublicationLeaseActualPathRejectsOperationAfterDeletionAdmissionCloses() async throws {
+        let service = CollectionCloudService(core: CloudKitCore())
+        let ownerID = UUID()
+        let deletionLease = await AccountDeletionGate.shared.begin(ownerID: ownerID)
+        let operationRan = CollectionCloudServiceTestFlag()
+
+        do {
+            try await service.withPublicationLease(ownerID: ownerID) {
+                await operationRan.set()
+            }
+            XCTFail("Expected deletion gate to reject publication")
+        } catch let error as CloudKitError {
+            XCTAssertEqual(error, .invalidRecord)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        let didRun = await operationRan.value
+        XCTAssertFalse(didRun)
+        await AccountDeletionGate.shared.end(deletionLease)
+    }
+}
+
+private actor CollectionCloudServiceTestLatch {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isOpen = false
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor CollectionCloudServiceTestFlag {
+    private(set) var value = false
+
+    func set() {
+        value = true
     }
 }

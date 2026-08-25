@@ -29,6 +29,8 @@ Guidance for coding agents working in this repository.
   - `cd firebase/functions && npm ci && npm test`
 - Firebase production dependency audit:
   - `cd firebase/functions && npm run audit:production`
+- Hosted public sharing contract:
+  - `cd firebase/functions && npm run monitor:hosted`
 - Simulator QA mode:
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
 
@@ -53,6 +55,8 @@ Guidance for coding agents working in this repository.
   - iPad layouts are first-class, not stretched iPhone views.
   - Mac app behavior is intentionally supported via Mac Catalyst target configuration.
 - Offline-first sync reliability matters:
+  - `CauldronPersistenceSchema` is the single source of truth for the shipping SwiftData model set; full-container tests and recovery probes must use it rather than duplicating the schema.
+  - Portable library restores are idempotent newest-wins merges: stable IDs are retained unless a foreign-owner or deletion-history collision requires deterministic remapping, ownership is rebound to the signed-in account, CloudKit record metadata is cleared, and absent destination recipes are not restored as collection memberships.
   - Operation queue + CloudKit sync paths should not be bypassed without a clear migration plan.
   - Deleted recipes are represented by durable private CloudKit `DeletedRecipe` tombstones; deletion wins over stale active recipe records.
   - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
@@ -62,6 +66,13 @@ Guidance for coding agents working in this repository.
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.
 
 ## Release/Update Checklist
+- CI uses GitHub's dedicated `xcode-27` preview runner and
+  `tools/ci/verify_xcode_27.sh` fails if its Xcode or iPhoneOS SDK major drifts.
+  PR/push checks warn when the preview build rotates; manually dispatched
+  release verification requires the exact Xcode build supplied in its input.
+- The scheduled hosted-sharing monitor is public/read-only and fails closed.
+  Keep its profile, recipe, and Bakery collection fixtures published; override
+  the corresponding repository variable before intentionally retiring one.
 - App versioning is managed in:
   - `/Users/nadav/Desktop/Cauldron/Cauldron.xcodeproj/project.pbxproj`
   - `MARKETING_VERSION` should be updated consistently across targets.

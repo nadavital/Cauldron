@@ -195,18 +195,25 @@ final class CollectionsListViewModel {
         }
 
         let references = try await dependencies.savedReferenceRepository.collectionReferences(for: currentUserId)
-        let savedSourceIds = Set(references.map(\.sourceCollectionId))
-        let representedSourceIds = Set(localCollections.compactMap { collection -> UUID? in
-            let sourceId = collection.sourceCollectionReferenceId
-            return collection.userId != currentUserId && savedSourceIds.contains(sourceId) ? sourceId : nil
+        let savedSourceIdentities = Set(references.map {
+            CollectionCloudIdentity(ownerId: $0.sourceOwnerId, collectionId: $0.sourceCollectionId)
         })
-        let missingSourceIds = references
-            .map(\.sourceCollectionId)
-            .filter { !representedSourceIds.contains($0) }
+        let representedSourceIdentities = Set(localCollections.compactMap { collection -> CollectionCloudIdentity? in
+            let identity = CollectionCloudIdentity(
+                ownerId: collection.originalCollectionOwnerId ?? collection.userId,
+                collectionId: collection.sourceCollectionReferenceId
+            )
+            return collection.userId != currentUserId && savedSourceIdentities.contains(identity) ? identity : nil
+        })
+        let missingSourceIdentities = references
+            .map { CollectionCloudIdentity(ownerId: $0.sourceOwnerId, collectionId: $0.sourceCollectionId) }
+            .filter { !representedSourceIdentities.contains($0) }
 
-        var fetchedSources: [UUID: Collection] = [:]
-        if !missingSourceIds.isEmpty {
-            fetchedSources = try await dependencies.collectionCloudService.fetchPublicCollections(ids: missingSourceIds)
+        var fetchedSources: [CollectionCloudIdentity: Collection] = [:]
+        if !missingSourceIdentities.isEmpty {
+            fetchedSources = try await dependencies.collectionCloudService.fetchPublicCollections(
+                identities: missingSourceIdentities
+            )
         }
 
         return Self.splitCollectionsForDisplay(
@@ -220,7 +227,7 @@ final class CollectionsListViewModel {
     nonisolated static func splitCollectionsForDisplay(
         localCollections: [Collection],
         savedReferences: [SavedCollectionReference],
-        fetchedSourceCollections: [UUID: Collection],
+        fetchedSourceCollections: [CollectionCloudIdentity: Collection],
         currentUserId: UUID?
     ) -> (owned: [Collection], saved: [Collection]) {
         guard let currentUserId else {
@@ -230,26 +237,35 @@ final class CollectionsListViewModel {
             )
         }
 
-        let savedSourceIds = Set(savedReferences.map(\.sourceCollectionId))
+        let savedSourceIdentities = Set(savedReferences.map {
+            CollectionCloudIdentity(ownerId: $0.sourceOwnerId, collectionId: $0.sourceCollectionId)
+        })
         let ownedCollections = localCollections
             .filter { $0.userId == currentUserId }
             .sorted { $0.updatedAt > $1.updatedAt }
 
-        var savedCollectionsBySourceId = localCollections.reduce(into: [UUID: Collection]()) { result, collection in
-            let sourceId = collection.sourceCollectionReferenceId
+        var savedCollectionsByIdentity = localCollections.reduce(into: [CollectionCloudIdentity: Collection]()) { result, collection in
+            let identity = CollectionCloudIdentity(
+                ownerId: collection.originalCollectionOwnerId ?? collection.userId,
+                collectionId: collection.sourceCollectionReferenceId
+            )
             guard collection.userId != currentUserId,
-                  savedSourceIds.contains(sourceId),
-                  result[sourceId] == nil else {
+                  savedSourceIdentities.contains(identity),
+                  result[identity] == nil else {
                 return
             }
-            result[sourceId] = collection
+            result[identity] = collection
         }
 
-        for (sourceId, collection) in fetchedSourceCollections where savedCollectionsBySourceId[sourceId] == nil {
-            savedCollectionsBySourceId[sourceId] = collection
+        for (identity, collection) in fetchedSourceCollections where savedCollectionsByIdentity[identity] == nil {
+            savedCollectionsByIdentity[identity] = collection
         }
 
-        let savedCollections = savedReferences.compactMap { savedCollectionsBySourceId[$0.sourceCollectionId] }
+        let savedCollections = savedReferences.compactMap {
+            savedCollectionsByIdentity[
+                CollectionCloudIdentity(ownerId: $0.sourceOwnerId, collectionId: $0.sourceCollectionId)
+            ]
+        }
         return (owned: ownedCollections, saved: savedCollections)
     }
 

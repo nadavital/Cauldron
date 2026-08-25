@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      expected_xcode_build:
+        description: Exact Xcode build required for this manual release verification
+        required: true
+        default: 27A5237l
 
 concurrency:
   group: production-readiness-${{ github.ref }}
@@ -12,6 +17,12 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  # PR/push CI accepts any Xcode 27 image so preview rotation cannot strand the
+  # repository. A manually dispatched release verification remains exact.
+  EXPECTED_XCODE_BUILD: ${{ inputs.expected_xcode_build || '27A5237l' }}
+  REQUIRE_EXACT_XCODE_BUILD: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
 
 jobs:
   firebase:
@@ -30,19 +41,22 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version-file: .java-version
       - run: npm ci
       - run: npm test
       - run: npm run audit:production
 
   ios:
     name: iOS 27 build and tests
+    # GitHub's dedicated Xcode 27 preview image exposes only its current Xcode
+    # 27 beta. The verification step fails clearly if the label ever drifts to
+    # another major SDK rather than silently compiling against the wrong one.
     runs-on: xcode-27
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Show toolchain
-        run: xcodebuild -version
+      - name: Verify Xcode 27 toolchain
+        run: tools/ci/verify_xcode_27.sh
       - name: Run iOS tests
         run: >-
           xcodebuild test
@@ -64,8 +78,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Show toolchain
-        run: xcodebuild -version
+      - name: Verify Xcode 27 toolchain
+        run: tools/ci/verify_xcode_27.sh
       - name: Run Mac Catalyst tests
         run: >-
           xcodebuild test

@@ -670,47 +670,21 @@ final class ExternalShareService: Sendable {
     func importFromShareURL(_ url: URL) async throws -> ImportedContent {
         logger.info("📥 Importing from share URL: \(url.absoluteString)")
 
-        let pathComponents = url.pathComponents.filter { $0 != "/" }
-        
-        // 1. Handle /u/{username}/{recipeId} (Recipe) and /u/{username} (Profile)
-        if let uIndex = pathComponents.firstIndex(of: "u") {
-            if uIndex + 2 < pathComponents.count {
-                // Format: .../u/username/recipeId
-                let shareId = pathComponents[uIndex + 2]
-                let shareData = try await fetchShareData(type: "recipe", shareId: shareId)
-                return try await convertToRecipe(shareData)
-            } else if uIndex + 1 < pathComponents.count {
-                // Format: .../u/username
-                // Note: We use the username component as the ID for lookup.
-                // The backend must support resolving profiles by username or ID.
-                let shareId = pathComponents[uIndex + 1]
-                let shareData = try await fetchShareData(type: "profile", shareId: shareId)
-                return try convertToProfile(shareData)
-            }
+        guard let route = ExternalShareURLClassifier.route(from: url) else {
+            logger.error("❌ Invalid or unsupported URL format: \(url.absoluteString)")
+            throw ExternalShareError.invalidResponse
         }
-        
-        // 2. Handle /collection/{collectionId}
-        if let cIndex = pathComponents.firstIndex(of: "collection"), cIndex + 1 < pathComponents.count {
-            let shareId = pathComponents[cIndex + 1]
-            let shareData = try await fetchShareData(type: "collection", shareId: shareId)
+        switch route {
+        case .recipe(let shareID):
+            let shareData = try await fetchShareData(type: "recipe", shareId: shareID)
+            return try await convertToRecipe(shareData)
+        case .profile(let shareID):
+            let shareData = try await fetchShareData(type: "profile", shareId: shareID)
+            return try convertToProfile(shareData)
+        case .collection(let shareID):
+            let shareData = try await fetchShareData(type: "collection", shareId: shareID)
             return try await convertToCollection(shareData)
         }
-        
-        // 3. Handle Legacy /recipe/{recipeId} or /profile/{userId}
-        if let rIndex = pathComponents.firstIndex(of: "recipe"), rIndex + 1 < pathComponents.count {
-            let shareId = pathComponents[rIndex + 1]
-            let shareData = try await fetchShareData(type: "recipe", shareId: shareId)
-            return try await convertToRecipe(shareData)
-        }
-        
-        if let pIndex = pathComponents.firstIndex(of: "profile"), pIndex + 1 < pathComponents.count {
-            let shareId = pathComponents[pIndex + 1]
-             let shareData = try await fetchShareData(type: "profile", shareId: shareId)
-            return try convertToProfile(shareData)
-        }
-
-        logger.error("❌ Invalid or unsupported URL format: \(url.absoluteString)")
-        throw ExternalShareError.invalidResponse
     }
 
     // MARK: - Private Helpers

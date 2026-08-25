@@ -54,7 +54,12 @@ final class CollectionsListViewModelTests: XCTestCase {
         let sections = CollectionsListViewModel.splitCollectionsForDisplay(
             localCollections: [ownedCollection, legacyCopiedCollection, unrelatedNonOwnedCollection],
             savedReferences: [savedReference],
-            fetchedSourceCollections: [sourceCollectionId: savedSourceCollection],
+            fetchedSourceCollections: [
+                CollectionCloudIdentity(
+                    ownerId: sourceOwnerId,
+                    collectionId: sourceCollectionId
+                ): savedSourceCollection
+            ],
             currentUserId: currentUserId
         )
 

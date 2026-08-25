@@ -32,7 +32,7 @@ struct ContentView: View {
     // When you ship a bug fix, leave this unchanged so no splash appears.
     /// Independent content gate so material release-note changes can be shown
     /// even when they ship within the same marketing version.
-    static let whatsNewContentVersion = "1.8.3"
+    static let whatsNewContentVersion = "1.8.4"
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
@@ -478,10 +478,14 @@ struct ContentView: View {
                 }
                 await PendingShareManager.shared.clearPendingURL(matching: url)
             } else if case .collection(let partialCollection, _) = content {
-                let collections = try await dependencies.collectionCloudService.fetchPublicCollections(
-                    ids: [partialCollection.id]
+                let identity = CollectionCloudIdentity(
+                    ownerId: partialCollection.userId,
+                    collectionId: partialCollection.id
                 )
-                guard let canonicalCollection = collections[partialCollection.id] else {
+                let collections = try await dependencies.collectionCloudService.fetchPublicCollections(
+                    identities: [identity]
+                )
+                guard let canonicalCollection = collections[identity] else {
                     throw ExternalShareError.invalidCollection
                 }
                 guard SharedContentAuthority.matches(

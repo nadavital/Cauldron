@@ -12,6 +12,53 @@ import SwiftData
 @MainActor
 final class CollectionRepositoryTests: XCTestCase {
 
+    func testCollectionOutboxResumesOnlyWhenSameCloudAccountIdentityReturns() async throws {
+        let ownerID = UUID()
+        let queue = OperationQueueService()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: UUID(),
+            ownerId: ownerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-account-a"
+        )
+        let queuedValue = await queue.getOperation(operationId: operationID)
+        let queued = try XCTUnwrap(queuedValue)
+        let returningScope = SyncOperationAccountScope(
+            ownerId: ownerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-account-a"
+        )
+
+        XCTAssertEqual(
+            SyncOperationAccountPolicy.decision(
+                operation: queued,
+                entityOwnerId: ownerID,
+                currentScope: SyncOperationAccountScope(
+                    ownerId: ownerID,
+                    revision: UUID(),
+                    cloudKitIdentity: "icloud-account-b"
+                )
+            ),
+            .deferred
+        )
+        XCTAssertEqual(
+            SyncOperationAccountPolicy.decision(
+                operation: queued,
+                entityOwnerId: ownerID,
+                currentScope: returningScope
+            ),
+            .migrateLegacy
+        )
+
+        let reboundValue = await queue.bindLegacyOperation(operationId: operationID, scope: returningScope)
+        let rebound = try XCTUnwrap(reboundValue)
+        XCTAssertEqual(rebound.accountIdentity, returningScope.cloudKitIdentity)
+        XCTAssertEqual(rebound.accountRevision, returningScope.revision)
+        XCTAssertEqual(rebound.status, .pending)
+    }
+
     var repository: CollectionRepository!
     var cloudKitCore: CloudKitCore!
     var collectionCloudService: CollectionCloudService!
@@ -70,6 +117,74 @@ final class CollectionRepositoryTests: XCTestCase {
     }
 
     // MARK: - Create Tests
+
+    func testCreateRequiresCompleteVerifiedScopeBeforeLocalCommit() async throws {
+        let isolatedQueue = OperationQueueService()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: isolatedQueue,
+            accountScopeProvider: { _ in nil },
+            enforcesVerifiedAccountScope: true
+        )
+        let collection = Collection.new(name: "Must not commit", userId: testUserId)
+
+        do {
+            try await scopedRepository.create(collection)
+            XCTFail("Expected account verification to block the mutation")
+        } catch CollectionRepositoryError.accountIdentityNotVerified {
+            // Expected: no partial local row and no nil-revision queue entry.
+        }
+
+        let persistedCollection = try await scopedRepository.fetch(
+            id: collection.id,
+            preferredOwnerId: testUserId
+        )
+        let queuedOperations = await isolatedQueue.getAllOperations()
+        XCTAssertNil(persistedCollection)
+        XCTAssertTrue(queuedOperations.isEmpty)
+    }
+
+    func testCreateAcceptsCompleteScopeBeforeLocalCommit() async throws {
+        let revision = UUID()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: OperationQueueService(),
+            accountScopeProvider: { ownerID in
+                SyncOperationAccountScope(ownerId: ownerID, revision: revision)
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let collection = Collection.new(name: "Verified commit", userId: testUserId)
+
+        try await scopedRepository.create(collection)
+
+        let persistedCollection = try await scopedRepository.fetch(
+            id: collection.id,
+            preferredOwnerId: testUserId
+        )
+        XCTAssertEqual(persistedCollection?.name, "Verified commit")
+    }
+
+    func testImmediateCoverMutationPrefersNewlySavedPhysicalRecordAndKeepsLegacyFallback() {
+        XCTAssertEqual(
+            CollectionRepository.coverMutationRecordName(
+                newlySavedRecordName: "collection-random-physical-id",
+                legacyRecordName: "legacy-uuid-id"
+            ),
+            "collection-random-physical-id"
+        )
+        XCTAssertEqual(
+            CollectionRepository.coverMutationRecordName(
+                newlySavedRecordName: nil,
+                legacyRecordName: "legacy-uuid-id"
+            ),
+            "legacy-uuid-id"
+        )
+    }
 
     func testCollectionDeletionSyncPolicyRequiresRemoteTombstoneBeforeActiveDelete() {
         XCTAssertTrue(CollectionDeletionSyncPolicy.canDeleteActiveRecord(tombstoneSaveError: nil))
@@ -381,7 +496,7 @@ final class CollectionRepositoryTests: XCTestCase {
         }
     }
 
-    func testUpdate_NonOwnedCollection_ThrowsNotAuthorized() async throws {
+    func testUpdate_NonOwnedCollection_IsIntentionallyNonDisclosing() async throws {
         // Given
         let ownerId = UUID()
         let otherUserId = UUID()
@@ -392,9 +507,9 @@ final class CollectionRepositoryTests: XCTestCase {
         // When/Then
         do {
             try await repository.update(collection.updated(name: "Should Not Save"))
-            XCTFail("Expected notAuthorized error")
-        } catch CollectionRepositoryError.notAuthorized {
-            // Expected error
+            XCTFail("Expected collectionNotFound error")
+        } catch CollectionRepositoryError.collectionNotFound {
+            // Intentionally indistinguishable from an absent collection.
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -455,7 +570,7 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertTrue(updated?.recipeIds.contains(recipeId3) ?? false)
     }
 
-    func testAddRecipe_ToNonOwnedCollection_ThrowsNotAuthorized() async throws {
+    func testAddRecipe_ToNonOwnedCollection_IsIntentionallyNonDisclosing() async throws {
         // Given
         let ownerId = UUID()
         let otherUserId = UUID()
@@ -466,9 +581,9 @@ final class CollectionRepositoryTests: XCTestCase {
         // When/Then
         do {
             try await repository.addRecipe(UUID(), to: collection.id)
-            XCTFail("Expected notAuthorized error")
-        } catch CollectionRepositoryError.notAuthorized {
-            // Expected error
+            XCTFail("Expected collectionNotFound error")
+        } catch CollectionRepositoryError.collectionNotFound {
+            // Intentionally indistinguishable from an absent collection.
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -644,7 +759,7 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(membershipEdges.first?.status, CollectionMembershipStatus.removed.rawValue)
     }
 
-    func testDelete_NonOwnedCollection_ThrowsNotAuthorized() async throws {
+    func testDelete_NonOwnedCollection_IsIntentionallyNonDisclosing() async throws {
         // Given
         let ownerId = UUID()
         let otherUserId = UUID()
@@ -655,9 +770,9 @@ final class CollectionRepositoryTests: XCTestCase {
         // When/Then
         do {
             try await repository.delete(id: collection.id)
-            XCTFail("Expected notAuthorized error")
-        } catch CollectionRepositoryError.notAuthorized {
-            // Expected error
+            XCTFail("Expected collectionNotFound error")
+        } catch CollectionRepositoryError.collectionNotFound {
+            // Intentionally indistinguishable from an absent collection.
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -732,6 +847,165 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(results.count, 0)
     }
 
+    // MARK: - Owner-Scoped Identity Tests
+
+    func testMembershipOverlayKeepsSameCollectionIDSeparatedByOwner() async throws {
+        let collectionID = UUID()
+        let ownerA = UUID()
+        let ownerB = UUID()
+        let recipeA = UUID()
+        let recipeB = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(try CollectionModel.from(Collection(
+            id: collectionID,
+            name: "Owner A",
+            userId: ownerA,
+            recipeIds: []
+        )))
+        context.insert(try CollectionModel.from(Collection(
+            id: collectionID,
+            name: "Owner B",
+            userId: ownerB,
+            recipeIds: []
+        )))
+        context.insert(CollectionMembershipModel.from(CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeA,
+            ownerId: ownerA,
+            status: .active,
+            sortOrder: 0,
+            sourceDeviceId: "owner-a"
+        )))
+        context.insert(CollectionMembershipModel.from(CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeB,
+            ownerId: ownerB,
+            status: .active,
+            sortOrder: 0,
+            sourceDeviceId: "owner-b"
+        )))
+        try context.save()
+
+        let fetchedA = try await repository.fetch(id: collectionID, preferredOwnerId: ownerA)
+        let fetchedB = try await repository.fetch(id: collectionID, preferredOwnerId: ownerB)
+
+        XCTAssertEqual(fetchedA?.name, "Owner A")
+        XCTAssertEqual(fetchedA?.recipeIds, [recipeA])
+        XCTAssertEqual(fetchedB?.name, "Owner B")
+        XCTAssertEqual(fetchedB?.recipeIds, [recipeB])
+    }
+
+    func testUpdateWithSameCollectionIDMutatesOnlyMatchingOwner() async throws {
+        let collectionID = UUID()
+        let ownerA = UUID()
+        let ownerB = UUID()
+        let context = ModelContext(modelContainer)
+        let collectionA = Collection(id: collectionID, name: "Owner A", userId: ownerA)
+        let collectionB = Collection(id: collectionID, name: "Owner B", userId: ownerB)
+        context.insert(try CollectionModel.from(collectionA))
+        context.insert(try CollectionModel.from(collectionB))
+        try context.save()
+        setCurrentUser(id: ownerA)
+
+        try await repository.update(
+            collectionA.updated(name: "Owner A Updated"),
+            queueCloudSync: false
+        )
+
+        let fetchedA = try await repository.fetch(id: collectionID, preferredOwnerId: ownerA)
+        let fetchedB = try await repository.fetch(id: collectionID, preferredOwnerId: ownerB)
+        XCTAssertEqual(fetchedA?.name, "Owner A Updated")
+        XCTAssertEqual(fetchedB?.name, "Owner B")
+    }
+
+    func testDeleteWithSameCollectionIDRemovesOnlyCurrentOwnersGraph() async throws {
+        let collectionID = UUID()
+        let ownerA = UUID()
+        let ownerB = UUID()
+        let recipeA = UUID()
+        let recipeB = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(try CollectionModel.from(Collection(
+            id: collectionID,
+            name: "Owner A",
+            userId: ownerA,
+            recipeIds: [recipeA]
+        )))
+        context.insert(try CollectionModel.from(Collection(
+            id: collectionID,
+            name: "Owner B",
+            userId: ownerB,
+            recipeIds: [recipeB]
+        )))
+        context.insert(CollectionMembershipModel.from(CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeA,
+            ownerId: ownerA,
+            status: .active,
+            sortOrder: 0,
+            sourceDeviceId: "owner-a"
+        )))
+        context.insert(CollectionMembershipModel.from(CollectionMembershipEdge(
+            collectionId: collectionID,
+            recipeId: recipeB,
+            ownerId: ownerB,
+            status: .active,
+            sortOrder: 0,
+            sourceDeviceId: "owner-b"
+        )))
+        try context.save()
+        setCurrentUser(id: ownerA)
+
+        try await repository.delete(id: collectionID)
+
+        let fetchedA = try await repository.fetch(id: collectionID, preferredOwnerId: ownerA)
+        let fetchedB = try await repository.fetch(id: collectionID, preferredOwnerId: ownerB)
+        XCTAssertNil(fetchedA)
+        XCTAssertEqual(fetchedB?.recipeIds, [recipeB])
+        let verificationContext = ModelContext(modelContainer)
+        let tombstones = try verificationContext.fetch(FetchDescriptor<DeletedCollectionModel>())
+        XCTAssertEqual(tombstones.map(\.ownerId), [ownerA])
+        let ownerBEdges = try verificationContext.fetch(
+            FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate { $0.collectionId == collectionID && $0.ownerId == ownerB }
+            )
+        )
+        XCTAssertEqual(ownerBEdges.count, 1)
+        XCTAssertEqual(ownerBEdges.first?.status, CollectionMembershipStatus.active.rawValue)
+    }
+
+    func testArchiveIdentityDispositionIgnoresOtherOwnersSameIDTombstone() async throws {
+        let collectionID = UUID()
+        let currentOwner = UUID()
+        let otherOwner = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(DeletedCollectionModel(
+            collectionId: collectionID,
+            ownerId: otherOwner,
+            deletedAt: Date(),
+            cloudRecordName: nil,
+            sourceDeviceId: "other-owner"
+        ))
+        try context.save()
+        setCurrentUser(id: currentOwner)
+
+        let dispositionWithOtherOwnerTombstone = try await repository
+            .archiveImportIdentityDisposition(collectionID: collectionID)
+        XCTAssertEqual(dispositionWithOtherOwnerTombstone, .preserveStableID)
+
+        context.insert(DeletedCollectionModel(
+            collectionId: collectionID,
+            ownerId: currentOwner,
+            deletedAt: Date(),
+            cloudRecordName: nil,
+            sourceDeviceId: "current-owner"
+        ))
+        try context.save()
+        let dispositionWithCurrentOwnerTombstone = try await repository
+            .archiveImportIdentityDisposition(collectionID: collectionID)
+        XCTAssertEqual(dispositionWithCurrentOwnerTombstone, .remapDeletedID)
+    }
+
     func testLegacyStoreFixtureOpensWithCurrentLocalSchema() throws {
         let committedFixture = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -763,7 +1037,27 @@ final class CollectionRepositoryTests: XCTestCase {
             }
         }
 
-        let schema = Schema([
+        let schema = CauldronPersistenceSchema.make()
+        let config = ModelConfiguration(
+            schema: schema,
+            url: storeURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
+        _ = try ModelContainer(for: schema, configurations: [config])
+    }
+
+    func testShippingSchemaMigratesPopulatedLegacyDurabilityGraphWithoutDataLoss() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CauldronPopulatedStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appendingPathComponent("default.store")
+        // This is the exact committed 1.5-era model set from 521f071. The model
+        // source files named in `legacySchema` remain byte-for-byte unchanged
+        // from that release. The set intentionally omits DeletedCollectionModel,
+        // which was added later.
+        let legacySchema = Schema([
             RecipeModel.self,
             DeletedRecipeModel.self,
             GroceryListModel.self,
@@ -777,12 +1071,134 @@ final class CollectionRepositoryTests: XCTestCase {
             SavedRecipeReferenceModel.self,
             SavedCollectionReferenceModel.self
         ])
-        let config = ModelConfiguration(
-            schema: schema,
+        let legacyConfiguration = ModelConfiguration(
+            schema: legacySchema,
             url: storeURL,
             allowsSave: true,
             cloudKitDatabase: .none
         )
-        _ = try ModelContainer(for: schema, configurations: [config])
+
+        let ownerID = UUID()
+        let recipeID = UUID()
+        let collectionID = UUID()
+        let sourceRecipeID = UUID()
+        let sourceCollectionID = UUID()
+        let timestamp = Date(timeIntervalSince1970: 1_701_234_567)
+        let ingredientsBlob = try JSONEncoder().encode([Ingredient(name: "Durable carrot")])
+        let stepsBlob = try JSONEncoder().encode([CookStep(index: 0, text: "Keep every byte.")])
+        let tagsBlob = try JSONEncoder().encode([Tag(name: "Fixture")])
+        let relatedBlob = try JSONEncoder().encode([sourceRecipeID])
+        let recipeIDsBlob = try JSONEncoder().encode([recipeID])
+        let quantityBlob = try JSONEncoder().encode(Quantity(value: 2, unit: .cup))
+
+        do {
+            let container = try ModelContainer(for: legacySchema, configurations: [legacyConfiguration])
+            let context = ModelContext(container)
+            context.insert(RecipeModel(
+                id: recipeID,
+                title: "Populated fixture recipe",
+                ingredientsBlob: ingredientsBlob,
+                stepsBlob: stepsBlob,
+                tagsBlob: tagsBlob,
+                relatedRecipeIdsBlob: relatedBlob,
+                notes: "Migration sentinel",
+                ownerId: ownerID,
+                createdAt: timestamp.addingTimeInterval(-100),
+                updatedAt: timestamp
+            ))
+            context.insert(CollectionModel(
+                id: collectionID,
+                name: "Populated fixture collection",
+                userId: ownerID,
+                recipeIdsBlob: recipeIDsBlob,
+                createdAt: timestamp.addingTimeInterval(-50),
+                updatedAt: timestamp
+            ))
+            context.insert(CollectionMembershipModel(
+                collectionId: collectionID,
+                recipeId: recipeID,
+                ownerId: ownerID,
+                status: CollectionMembershipStatus.active.rawValue,
+                updatedAt: timestamp,
+                sortOrder: 7,
+                sourceDeviceId: "fixture-device"
+            ))
+            context.insert(DeletedRecipeModel(
+                recipeId: UUID(),
+                deletedAt: timestamp,
+                cloudRecordName: "deleted-recipe",
+                sourceDeviceId: "fixture-device"
+            ))
+            context.insert(SavedRecipeReferenceModel(
+                userId: ownerID,
+                sourceRecipeId: sourceRecipeID,
+                sourceOwnerId: UUID(),
+                materializedRecipeId: recipeID,
+                savedAt: timestamp,
+                sourceRecipeUpdatedAt: timestamp,
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            context.insert(SavedCollectionReferenceModel(
+                userId: ownerID,
+                sourceCollectionId: sourceCollectionID,
+                sourceOwnerId: UUID(),
+                sourceCollectionName: "Source collection",
+                savedAt: timestamp,
+                sourceCollectionUpdatedAt: timestamp,
+                createdAt: timestamp,
+                updatedAt: timestamp
+            ))
+            let groceryItem = GroceryItemModel(
+                name: "Durable milk",
+                quantityBlob: quantityBlob,
+                isChecked: true,
+                recipeID: recipeID.uuidString,
+                recipeName: "Populated fixture recipe",
+                addedOrder: 4,
+                aiCategory: "Dairy"
+            )
+            context.insert(GroceryListModel(
+                title: "Fixture groceries",
+                createdAt: timestamp,
+                items: [groceryItem]
+            ))
+            try context.save()
+        }
+
+        let shippingSchema = CauldronPersistenceSchema.make()
+        let shippingConfiguration = ModelConfiguration(
+            schema: shippingSchema,
+            url: storeURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
+        let reopened = try ModelContainer(for: shippingSchema, configurations: [shippingConfiguration])
+        let context = ModelContext(reopened)
+        let recipe = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
+        XCTAssertEqual(recipe.ingredientsBlob, ingredientsBlob)
+        XCTAssertEqual(recipe.stepsBlob, stepsBlob)
+        XCTAssertEqual(recipe.relatedRecipeIdsBlob, relatedBlob)
+        XCTAssertEqual(recipe.updatedAt, timestamp)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CollectionModel>()).first?.recipeIdsBlob, recipeIDsBlob)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<CollectionMembershipModel>()).first?.sortOrder, 7)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<DeletedRecipeModel>()).first?.deletedAt, timestamp)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<DeletedCollectionModel>()).isEmpty)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<SavedRecipeReferenceModel>()).first?.materializedRecipeId, recipeID)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<SavedCollectionReferenceModel>()).first?.sourceCollectionId, sourceCollectionID)
+        let groceries = try context.fetch(FetchDescriptor<GroceryListModel>())
+        XCTAssertEqual(groceries.first?.items?.first?.quantityBlob, quantityBlob)
+        XCTAssertEqual(groceries.first?.items?.first?.isChecked, true)
+
+        // Prove the newly added shipping model is writable after migration.
+        context.insert(DeletedCollectionModel(
+            collectionId: collectionID,
+            ownerId: ownerID,
+            deletedAt: timestamp,
+            cloudRecordName: "deleted-collection",
+            sourceDeviceId: "fixture-device"
+        ))
+        try context.save()
+        XCTAssertEqual(try context.fetch(FetchDescriptor<DeletedCollectionModel>()).first?.deletedAt, timestamp)
     }
 }

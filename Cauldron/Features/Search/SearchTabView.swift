@@ -34,7 +34,14 @@ struct SearchTabView: View {
     }
 
     private var isRegularWidth: Bool {
+        #if targetEnvironment(macCatalyst)
+        // The app already provides a primary Mac sidebar. A second search split
+        // view wastes most of the window and leaves results stranded in a nested
+        // detail column, so Search uses one full-width navigation workspace.
+        return false
+        #else
         horizontalSizeClass == .regular
+        #endif
     }
 
     var body: some View {
@@ -179,6 +186,9 @@ struct SearchTabView: View {
                     text: $searchText
                 )
                 .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    recordCurrentRecipeSearch()
+                }
             }
             .padding(.horizontal)
             .padding(.top, 12)
@@ -238,6 +248,8 @@ struct SearchTabView: View {
                 } label: {
                     ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
                 }
+                .accessibilityLabel("Profile and settings")
+                .accessibilityHint("Opens your profile and app settings")
             }
         }
     }

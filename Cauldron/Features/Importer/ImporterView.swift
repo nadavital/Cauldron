@@ -153,6 +153,23 @@ struct ImporterView: View {
                 Text("Choose a photo source for recipe image import.")
             }
         }
+        .frame(minWidth: catalystMinimumWidth, minHeight: catalystMinimumHeight)
+    }
+
+    private var catalystMinimumWidth: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        720
+        #else
+        nil
+        #endif
+    }
+
+    private var catalystMinimumHeight: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        620
+        #else
+        nil
+        #endif
     }
 
     private var generateActionButton: some View {

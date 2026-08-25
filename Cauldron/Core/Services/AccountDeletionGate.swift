@@ -6,6 +6,8 @@ import Foundation
 actor AccountDeletionGate {
     static let shared = AccountDeletionGate()
 
+    @TaskLocal private static var authorizedDeletionLease: DeletionLease?
+
     struct PublicationLease: Sendable, Hashable {
         fileprivate let id: UUID
         fileprivate let ownerID: UUID
@@ -40,14 +42,33 @@ actor AccountDeletionGate {
 
     func permitsWrite(ownerID: UUID?) -> Bool {
         guard let ownerID else { return false }
+        if let authority = Self.authorizedDeletionLease,
+           authority.ownerID == ownerID,
+           deletionLeases[ownerID]?.contains(authority.id) == true {
+            return true
+        }
         return deletionLeases[ownerID]?.isEmpty ?? true
+    }
+
+    /// Runs the deleting account's own cleanup while admission remains closed
+    /// to every unrelated task. Task-local authority follows structured child
+    /// tasks but is not available to work that began before deletion.
+    nonisolated static func withDeletionAuthority<T: Sendable>(
+        _ lease: DeletionLease,
+        operation: @escaping @Sendable () async throws -> T
+    ) async rethrows -> T {
+        try await $authorizedDeletionLease.withValue(lease, operation: operation)
     }
 
     /// Acquires authority across the full awaited publication. Deletion first
     /// closes admission, then waits for every already-issued lease to drain
     /// before taking its remote inventory.
     func acquirePublicationLease(ownerID: UUID?) -> PublicationLease? {
-        guard let ownerID, deletionLeases[ownerID]?.isEmpty ?? true else { return nil }
+        guard let ownerID else { return nil }
+        let hasDeletionAuthority = Self.authorizedDeletionLease.map {
+            $0.ownerID == ownerID && deletionLeases[ownerID]?.contains($0.id) == true
+        } ?? false
+        guard hasDeletionAuthority || (deletionLeases[ownerID]?.isEmpty ?? true) else { return nil }
         let lease = PublicationLease(id: UUID(), ownerID: ownerID)
         activeLeases[ownerID, default: []].insert(lease.id)
         return lease

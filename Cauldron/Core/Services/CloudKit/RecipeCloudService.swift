@@ -44,6 +44,18 @@ struct DeletedRecipeTombstone: Sendable, Equatable {
     }
 }
 
+nonisolated enum RecipePublicationAuthorizationPolicy {
+    static func authorize(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext,
+        validator: @Sendable (VerifiedAccountMutationContext) async -> Bool
+    ) async throws {
+        guard context.ownerID == ownerID, await validator(context) else {
+            throw UserSessionError.accountChanged
+        }
+    }
+}
+
 /// CloudKit service for recipe-related operations.
 ///
 /// Handles:
@@ -55,9 +67,18 @@ actor RecipeCloudService {
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "RecipeCloudService")
     private let maxDurableRecordSaveAttempts = 3
+    private let publicationAuthorizer: @Sendable (VerifiedAccountMutationContext) async -> Bool
 
-    init(core: CloudKitCore) {
+    init(
+        core: CloudKitCore,
+        publicationAuthorizer: (@Sendable (VerifiedAccountMutationContext) async -> Bool)? = nil
+    ) {
         self.core = core
+        self.publicationAuthorizer = publicationAuthorizer ?? { context in
+            await MainActor.run {
+                CurrentUserSession.shared.permitsMutation(context)
+            }
+        }
     }
 
     nonisolated static func privateRecipeRecordID(recordName: String, zoneID: CKRecordZone.ID) -> CKRecord.ID {
@@ -82,7 +103,12 @@ actor RecipeCloudService {
 
     /// Save recipe to CloudKit private database
     /// ALL recipes go to PRIVATE database (for owner's backup/sync)
-    func saveRecipe(_ recipe: Recipe, ownerId: UUID) async throws {
+    func saveRecipe(
+        _ recipe: Recipe,
+        ownerId: UUID,
+        authorizationContext: VerifiedAccountMutationContext
+    ) async throws {
+        try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
         let db = try await core.getPrivateDatabase()
         let zoneID = try await core.getCustomZoneID()
 
@@ -108,6 +134,7 @@ actor RecipeCloudService {
                 throw CloudKitError.invalidRecord
             }
             defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
             _ = try await db.save(record)
         } catch let error as CKError {
             logger.error("❌ CloudKit save failed for '\(recipe.title)': \(error.localizedDescription)")
@@ -192,7 +219,15 @@ actor RecipeCloudService {
     }
 
     /// Delete recipe from private database
-    func deleteRecipe(_ recipe: Recipe) async throws {
+    func deleteRecipe(
+        _ recipe: Recipe,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        guard let ownerID = recipe.ownerId else { throw CloudKitError.invalidRecord }
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerID,
+            provided: authorizationContext
+        )
         guard let cloudRecordName = recipe.cloudRecordName else {
             logger.warning("Cannot delete recipe from CloudKit: no cloud record name")
             return
@@ -203,6 +238,7 @@ actor RecipeCloudService {
         let database = try await core.getPrivateDatabase()
 
         do {
+            try await authorizeMutation(ownerID: ownerID, context: authorizationContext)
             try await database.deleteRecord(withID: recordID)
             logger.info("Deleted recipe from CloudKit private database: \(recipe.title)")
         } catch let error as CKError {
@@ -217,18 +253,34 @@ actor RecipeCloudService {
     /// Deletes a private recipe by its durable CloudKit record name. Account
     /// deletion uses this to resume cleanup when a prior attempt saved the
     /// tombstone but stopped before deleting the active record.
-    func deletePrivateRecipeRecord(named cloudRecordName: String) async throws {
+    func deletePrivateRecipeRecord(
+        named cloudRecordName: String,
+        ownerID: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerID,
+            provided: authorizationContext
+        )
         let zoneID = try await core.getCustomZoneID()
         let recordID = Self.privateRecipeRecordID(recordName: cloudRecordName, zoneID: zoneID)
         let database = try await core.getPrivateDatabase()
         do {
+            try await authorizeMutation(ownerID: ownerID, context: authorizationContext)
             _ = try await database.deleteRecord(withID: recordID)
         } catch let error as CKError where error.code == .unknownItem {
             return
         }
     }
 
-    func saveDeletedRecipeTombstone(_ tombstone: DeletedRecipeTombstone) async throws {
+    func saveDeletedRecipeTombstone(
+        _ tombstone: DeletedRecipeTombstone,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: tombstone.ownerId,
+            provided: authorizationContext
+        )
         let zoneID = try await core.getCustomZoneID()
         let db = try await core.getPrivateDatabase()
         let recordID = Self.deletedRecipeRecordID(recipeId: tombstone.recipeId, zoneID: zoneID)
@@ -242,6 +294,7 @@ actor RecipeCloudService {
         for attempt in 1...maxDurableRecordSaveAttempts {
             populateDeletedRecipeRecord(record, from: tombstoneToSave)
             do {
+                try await authorizeMutation(ownerID: tombstone.ownerId, context: authorizationContext)
                 _ = try await db.save(record)
                 logger.info("Saved deleted recipe tombstone: \(tombstone.recipeId)")
                 return
@@ -311,11 +364,23 @@ actor RecipeCloudService {
     // MARK: - Public Database Operations
 
     /// Copy recipe to PUBLIC database when visibility != .private
-    func copyRecipeToPublic(_ recipe: Recipe) async throws {
+    func copyRecipeToPublic(
+        _ recipe: Recipe,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
         guard recipe.visibility != .privateRecipe else {
             logger.info("Recipe is private, skipping PUBLIC database copy")
             return
         }
+
+        guard let ownerId = recipe.ownerId else {
+            logger.error("Cannot copy recipe to PUBLIC: missing ownerId")
+            throw CloudKitError.invalidRecord
+        }
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: recipe.id.uuidString)
@@ -326,17 +391,13 @@ actor RecipeCloudService {
             recordType: CloudKitCore.RecordType.sharedRecipe
         )
 
-        guard let ownerId = recipe.ownerId else {
-            logger.error("Cannot copy recipe to PUBLIC: missing ownerId")
-            throw CloudKitError.invalidRecord
-        }
-
         populateRecipeRecord(record, from: recipe, ownerId: ownerId, includesUserPrivateState: false)
 
         guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
             throw CloudKitError.invalidRecord
         }
         defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+        try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
         _ = try await db.save(record)
         logger.info("✅ Successfully copied recipe to PUBLIC database")
     }
@@ -496,13 +557,24 @@ actor RecipeCloudService {
     /// records owned by another iCloud account may not be writable from this app
     /// instance, but records the current user owns will also be republished by
     /// the repository migration path.
-    func backfillPublicRecipeSearchMetadata(limit: Int = .max) async throws -> PublicRecipeSearchMetadataBackfillSummary {
+    func backfillPublicRecipeSearchMetadata(
+        ownerID: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil,
+        limit: Int = .max
+    ) async throws -> PublicRecipeSearchMetadataBackfillSummary {
         guard limit > 0 else {
             return PublicRecipeSearchMetadataBackfillSummary(scanned: 0, updated: 0, alreadyCurrent: 0, failed: 0, mayHaveMore: false)
         }
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerID,
+            provided: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
-        let predicate = NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "ownerId == %@", ownerID.uuidString),
+            NSPredicate(format: "visibility == %@", RecipeVisibility.publicRecipe.rawValue),
+        ])
         let query = CKQuery(recordType: CloudKitCore.RecordType.sharedRecipe, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
 
@@ -549,11 +621,16 @@ actor RecipeCloudService {
 
                 do {
                     let fullRecord = try await db.record(for: record.recordID)
+                    guard try Self.ownerID(from: fullRecord) == ownerID else {
+                        failed += 1
+                        continue
+                    }
                     guard updateSearchMetadataFields(on: fullRecord) else {
                         alreadyCurrent += 1
                         continue
                     }
 
+                    try await authorizeMutation(ownerID: ownerID, context: authorizationContext)
                     _ = try await db.save(fullRecord)
                     updated += 1
                 } catch {
@@ -763,13 +840,23 @@ actor RecipeCloudService {
     }
 
     /// Delete recipe from PUBLIC database
-    func deletePublicRecipe(recipeId: UUID) async throws {
+    func deletePublicRecipe(
+        recipeId: UUID,
+        ownerID: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
         logger.info("🗑️ Deleting recipe from PUBLIC database: \(recipeId)")
+
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerID,
+            provided: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
         let recordID = CKRecord.ID(recordName: recipeId.uuidString)
 
         do {
+            try await authorizeMutation(ownerID: ownerID, context: authorizationContext)
             try await db.deleteRecord(withID: recordID)
             logger.info("✅ Deleted recipe from PUBLIC database")
         } catch let error as CKError where error.code == .unknownItem {
@@ -779,7 +866,14 @@ actor RecipeCloudService {
 
     /// Removes every public recipe record created by the signed-in iCloud
     /// identity for this app owner, including records absent from this device.
-    func deleteAllPublicRecipesOwnedByCurrentUser(ownerId: UUID) async throws {
+    func deleteAllPublicRecipesOwnedByCurrentUser(
+        ownerId: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
         let db = try await core.getPublicDatabase()
         let currentIdentity = try await core.getCurrentUserRecordID()
         let query = CKQuery(
@@ -804,6 +898,7 @@ actor RecipeCloudService {
                     continue
                 }
                 do {
+                    try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
                     try await db.deleteRecord(withID: record.recordID)
                 } catch let error as CKError where error.code == .unknownItem {
                     continue
@@ -1000,8 +1095,19 @@ actor RecipeCloudService {
         recipeId: UUID,
         imageData: Data,
         toPublic: Bool,
-        privateRecordName: String? = nil
+        privateRecordName: String? = nil,
+        ownerID: UUID? = nil,
+        authorizationContext: VerifiedAccountMutationContext? = nil
     ) async throws -> String {
+        let requestedAuthorization: VerifiedAccountMutationContext?
+        if let ownerID {
+            requestedAuthorization = try await resolvedAuthorizationContext(
+                ownerID: ownerID,
+                provided: authorizationContext
+            )
+        } else {
+            requestedAuthorization = nil
+        }
         let optimizedData = try await core.optimizeImageForCloudKit(imageData)
 
         let tempURL = FileManager.default.temporaryDirectory
@@ -1030,9 +1136,20 @@ actor RecipeCloudService {
 
         do {
             let record = try await database.record(for: recordID)
+            let resolvedOwnerID = try ownerID ?? Self.ownerID(from: record)
+            let resolvedAuthorization: VerifiedAccountMutationContext
+            if let requestedAuthorization {
+                resolvedAuthorization = requestedAuthorization
+            } else {
+                resolvedAuthorization = try await resolvedAuthorizationContext(
+                    ownerID: resolvedOwnerID,
+                    provided: authorizationContext
+                )
+            }
             record["imageAsset"] = asset
             record["imageModifiedAt"] = Date() as CKRecordValue
 
+            try await authorizeMutation(ownerID: resolvedOwnerID, context: resolvedAuthorization)
             let savedRecord = try await database.save(record)
             return savedRecord.recordID.recordName
 
@@ -1089,9 +1206,21 @@ actor RecipeCloudService {
     func deleteImageAsset(
         recipeId: UUID,
         fromPublic: Bool,
-        privateRecordName: String? = nil
+        privateRecordName: String? = nil,
+        ownerID: UUID? = nil,
+        authorizationContext: VerifiedAccountMutationContext? = nil
     ) async throws {
         logger.info("🗑️ Deleting image asset for recipe: \(recipeId)")
+
+        let requestedAuthorization: VerifiedAccountMutationContext?
+        if let ownerID {
+            requestedAuthorization = try await resolvedAuthorizationContext(
+                ownerID: ownerID,
+                provided: authorizationContext
+            )
+        } else {
+            requestedAuthorization = nil
+        }
 
         let database: CKDatabase
         let recordID: CKRecord.ID
@@ -1107,9 +1236,20 @@ actor RecipeCloudService {
 
         do {
             let record = try await database.record(for: recordID)
+            let resolvedOwnerID = try ownerID ?? Self.ownerID(from: record)
+            let resolvedAuthorization: VerifiedAccountMutationContext
+            if let requestedAuthorization {
+                resolvedAuthorization = requestedAuthorization
+            } else {
+                resolvedAuthorization = try await resolvedAuthorizationContext(
+                    ownerID: resolvedOwnerID,
+                    provided: authorizationContext
+                )
+            }
             record["imageAsset"] = nil
             record["imageModifiedAt"] = nil
 
+            try await authorizeMutation(ownerID: resolvedOwnerID, context: resolvedAuthorization)
             _ = try await database.save(record)
             logger.info("✅ Deleted image asset")
 
@@ -1123,6 +1263,50 @@ actor RecipeCloudService {
     }
 
     // MARK: - Private Helpers
+
+    private func resolvedAuthorizationContext(
+        ownerID: UUID,
+        provided: VerifiedAccountMutationContext?
+    ) async throws -> VerifiedAccountMutationContext {
+        if let provided {
+            try await authorizeMutation(ownerID: ownerID, context: provided)
+            return provided
+        }
+        guard let context = await MainActor.run(body: {
+            CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerID)
+        }) else {
+            throw UserSessionError.accountChanged
+        }
+        return context
+    }
+
+    private func authorizeMutation(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await RecipePublicationAuthorizationPolicy.authorize(
+            ownerID: ownerID,
+            context: context,
+            validator: publicationAuthorizer
+        )
+    }
+
+#if DEBUG
+    func validateMutationAuthorization(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await authorizeMutation(ownerID: ownerID, context: context)
+    }
+#endif
+
+    private nonisolated static func ownerID(from record: CKRecord) throws -> UUID {
+        guard let rawOwnerID = record["ownerId"] as? String,
+              let ownerID = UUID(uuidString: rawOwnerID) else {
+            throw CloudKitError.invalidRecord
+        }
+        return ownerID
+    }
 
     private func fetchOrCreateRecord(
         in database: CKDatabase,

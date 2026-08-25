@@ -30,20 +30,36 @@ private nonisolated struct SavedReferenceReconciliationChanges: Sendable {
 }
 
 actor SavedReferenceRepository {
+    typealias AccountScopeProvider = @Sendable (UUID) async -> SyncOperationAccountScope?
+    typealias AccountScopeValidator = @Sendable (SyncOperationAccountScope) async -> Bool
+    typealias LocalMutationCommitHook = @Sendable () async throws -> Void
+
     private let modelContainer: ModelContainer
     private let savedReferenceCloudService: SavedReferenceCloudService?
     private let operationQueueService: OperationQueueService?
+    private let accountScopeProvider: AccountScopeProvider?
+    private let accountScopeValidator: AccountScopeValidator?
+    private let localMutationCommitHook: LocalMutationCommitHook?
+    private let queueMutationsDuringTests: Bool
     private let logger = Logger(subsystem: "com.cauldron", category: "SavedReferenceRepository")
     private var operationQueueReplayTask: Task<Void, Never>?
 
     init(
         modelContainer: ModelContainer,
         savedReferenceCloudService: SavedReferenceCloudService? = nil,
-        operationQueueService: OperationQueueService? = nil
+        operationQueueService: OperationQueueService? = nil,
+        accountScopeProvider: AccountScopeProvider? = nil,
+        accountScopeValidator: AccountScopeValidator? = nil,
+        localMutationCommitHook: LocalMutationCommitHook? = nil,
+        queueMutationsDuringTests: Bool = false
     ) {
         self.modelContainer = modelContainer
         self.savedReferenceCloudService = savedReferenceCloudService
         self.operationQueueService = operationQueueService
+        self.accountScopeProvider = accountScopeProvider
+        self.accountScopeValidator = accountScopeValidator
+        self.localMutationCommitHook = localMutationCommitHook
+        self.queueMutationsDuringTests = queueMutationsDuringTests
 
         if !RuntimeEnvironment.isRunningTests,
            !RuntimeEnvironment.isSimulatorQAMode,
@@ -59,6 +75,7 @@ actor SavedReferenceRepository {
         originalCreatorName: String?,
         materializedRecipeId: UUID? = nil
     ) async throws -> (reference: SavedRecipeReference, reusedExistingReference: Bool) {
+        let accountScope = try await mutationAccountScope(userID: userId)
         let sourceRecipeId = sourceRecipe.relatedGraphReferenceID
         if let existing = try await recipeReference(userId: userId, sourceRecipeId: sourceRecipeId) {
             if let materializedRecipeId,
@@ -87,10 +104,19 @@ actor SavedReferenceRepository {
             updatedAt: now
         )
 
+        try await validateMutationAccountScope(accountScope)
+        let operationID = try await enqueueSavedRecipeReferenceSync(reference, type: .create, accountScope: accountScope)
         let context = ModelContext(modelContainer)
-        context.insert(SavedRecipeReferenceModel.from(reference))
-        try context.save()
-        let operationID = await enqueueSavedRecipeReferenceSync(reference, type: .create)
+        do {
+            try await validateMutationAccountScope(accountScope)
+            context.insert(SavedRecipeReferenceModel.from(reference))
+            try await localMutationCommitHook?()
+            try await validateMutationAccountScope(accountScope)
+            try context.save()
+        } catch {
+            await compensateFailedLocalMutation(operationID: operationID)
+            throw error
+        }
         syncRecipeReferenceToCloud(reference, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "saved", reference: reference)
         logger.info("Saved recipe reference: \(sourceRecipeId)")
@@ -118,6 +144,7 @@ actor SavedReferenceRepository {
 
     @discardableResult
     func deleteRecipeReference(userId: UUID, sourceRecipeId: UUID) async throws -> Bool {
+        let accountScope = try await mutationAccountScope(userID: userId)
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<SavedRecipeReferenceModel>(
             predicate: #Predicate { model in
@@ -130,9 +157,18 @@ actor SavedReferenceRepository {
         }
 
         let reference = model.toDomain()
-        context.delete(model)
-        try context.save()
-        let operationID = await enqueueSavedRecipeReferenceSync(reference, type: .delete)
+        try await validateMutationAccountScope(accountScope)
+        let operationID = try await enqueueSavedRecipeReferenceSync(reference, type: .delete, accountScope: accountScope)
+        do {
+            try await validateMutationAccountScope(accountScope)
+            context.delete(model)
+            try await localMutationCommitHook?()
+            try await validateMutationAccountScope(accountScope)
+            try context.save()
+        } catch {
+            await compensateFailedLocalMutation(operationID: operationID)
+            throw error
+        }
         deleteRecipeReferenceFromCloud(reference, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "removed", reference: reference)
         return true
@@ -140,6 +176,7 @@ actor SavedReferenceRepository {
 
     @discardableResult
     func updateRecipeReference(_ reference: SavedRecipeReference) async throws -> SavedRecipeReference {
+        let accountScope = try await mutationAccountScope(userID: reference.userId)
         let context = ModelContext(modelContainer)
         let referenceId = reference.id
         let descriptor = FetchDescriptor<SavedRecipeReferenceModel>(
@@ -150,16 +187,25 @@ actor SavedReferenceRepository {
             throw SavedReferenceRepositoryError.referenceNotFound
         }
 
-        model.sourceOwnerId = reference.sourceOwnerId
-        model.sourceRecipeName = reference.sourceRecipeName
-        model.originalCreatorName = reference.originalCreatorName
-        model.materializedRecipeId = reference.materializedRecipeId
-        model.cloudRecordName = reference.cloudRecordName
-        model.sourceRecipeUpdatedAt = reference.sourceRecipeUpdatedAt
-        model.updatedAt = reference.updatedAt
-        try context.save()
+        try await validateMutationAccountScope(accountScope)
+        let operationID = try await enqueueSavedRecipeReferenceSync(reference, type: .update, accountScope: accountScope)
+        do {
+            try await validateMutationAccountScope(accountScope)
+            model.sourceOwnerId = reference.sourceOwnerId
+            model.sourceRecipeName = reference.sourceRecipeName
+            model.originalCreatorName = reference.originalCreatorName
+            model.materializedRecipeId = reference.materializedRecipeId
+            model.cloudRecordName = reference.cloudRecordName
+            model.sourceRecipeUpdatedAt = reference.sourceRecipeUpdatedAt
+            model.updatedAt = reference.updatedAt
+            try await localMutationCommitHook?()
+            try await validateMutationAccountScope(accountScope)
+            try context.save()
+        } catch {
+            await compensateFailedLocalMutation(operationID: operationID)
+            throw error
+        }
         let updated = model.toDomain()
-        let operationID = await enqueueSavedRecipeReferenceSync(updated, type: .update)
         syncRecipeReferenceToCloud(updated, operationID: operationID)
         postSavedRecipeReferenceChanged(changeType: "saved", reference: updated)
         return updated
@@ -169,6 +215,7 @@ actor SavedReferenceRepository {
         sourceCollection: Collection,
         userId: UUID
     ) async throws -> (reference: SavedCollectionReference, reusedExistingReference: Bool) {
+        let accountScope = try await mutationAccountScope(userID: userId)
         let sourceCollectionId = sourceCollection.sourceCollectionReferenceId
         if let existing = try await collectionReference(userId: userId, sourceCollectionId: sourceCollectionId) {
             return (existing, true)
@@ -190,10 +237,19 @@ actor SavedReferenceRepository {
             updatedAt: now
         )
 
+        try await validateMutationAccountScope(accountScope)
+        let operationID = try await enqueueSavedCollectionReferenceSync(reference, type: .create, accountScope: accountScope)
         let context = ModelContext(modelContainer)
-        context.insert(SavedCollectionReferenceModel.from(reference))
-        try context.save()
-        let operationID = await enqueueSavedCollectionReferenceSync(reference, type: .create)
+        do {
+            try await validateMutationAccountScope(accountScope)
+            context.insert(SavedCollectionReferenceModel.from(reference))
+            try await localMutationCommitHook?()
+            try await validateMutationAccountScope(accountScope)
+            try context.save()
+        } catch {
+            await compensateFailedLocalMutation(operationID: operationID)
+            throw error
+        }
         syncCollectionReferenceToCloud(reference, operationID: operationID)
         postSavedCollectionReferenceChanged(changeType: "saved", reference: reference, collection: sourceCollection)
         logger.info("Saved collection reference: \(sourceCollectionId)")
@@ -221,6 +277,7 @@ actor SavedReferenceRepository {
 
     @discardableResult
     func deleteCollectionReference(userId: UUID, sourceCollectionId: UUID) async throws -> Bool {
+        let accountScope = try await mutationAccountScope(userID: userId)
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<SavedCollectionReferenceModel>(
             predicate: #Predicate { model in
@@ -233,9 +290,18 @@ actor SavedReferenceRepository {
         }
 
         let reference = model.toDomain()
-        context.delete(model)
-        try context.save()
-        let operationID = await enqueueSavedCollectionReferenceSync(reference, type: .delete)
+        try await validateMutationAccountScope(accountScope)
+        let operationID = try await enqueueSavedCollectionReferenceSync(reference, type: .delete, accountScope: accountScope)
+        do {
+            try await validateMutationAccountScope(accountScope)
+            context.delete(model)
+            try await localMutationCommitHook?()
+            try await validateMutationAccountScope(accountScope)
+            try context.save()
+        } catch {
+            await compensateFailedLocalMutation(operationID: operationID)
+            throw error
+        }
         deleteCollectionReferenceFromCloud(reference, operationID: operationID)
         postSavedCollectionReferenceChanged(changeType: "removed", reference: reference)
         return true
@@ -243,13 +309,17 @@ actor SavedReferenceRepository {
 
     func syncFromCloudKit(userId: UUID) async throws {
         guard let savedReferenceCloudService else { return }
+        let accountScope = try await beginReconciliation(userID: userId)
+        try await validateReconciliation(accountScope)
 
         let remoteRecipeReferences: [SavedRecipeReference]
         let remoteCollectionReferences: [SavedCollectionReference]
 
         do {
             remoteRecipeReferences = try await savedReferenceCloudService.fetchRecipeReferences(for: userId)
+            try await validateReconciliation(accountScope)
             remoteCollectionReferences = try await savedReferenceCloudService.fetchCollectionReferences(for: userId)
+            try await validateReconciliation(accountScope)
         } catch SavedReferenceCloudServiceError.recordTypeUnavailable {
             logger.info("Saved reference CloudKit schema is unavailable; skipping reference reconciliation")
             return
@@ -257,6 +327,7 @@ actor SavedReferenceRepository {
 
         let context = ModelContext(modelContainer)
         let pendingReferenceOperations = await pendingReferenceOperations()
+        try await validateReconciliation(accountScope)
         let effectiveRemoteRecipeReferences = Self.remoteRecipeReferences(
             remoteRecipeReferences,
             excludingPendingDeletes: pendingReferenceOperations,
@@ -282,7 +353,8 @@ actor SavedReferenceRepository {
             userId: userId,
             remoteRecipeReferences: effectiveRemoteRecipeReferences,
             remoteCollectionReferences: effectiveRemoteCollectionReferences,
-            context: context
+            context: context,
+            accountScope: accountScope
         )
         changes.addedRecipeReferences = Self.appliedRemoteRecipeReferenceChanges(
             effectiveRemoteRecipeReferences,
@@ -291,7 +363,9 @@ actor SavedReferenceRepository {
         changes.addedCollectionReferences = effectiveRemoteCollectionReferences.filter {
             !localCollectionSourceIds.contains($0.sourceCollectionId)
         }
+        try await validateReconciliation(accountScope)
         try context.save()
+        try await validateReconciliation(accountScope)
         postReconciliationChanges(changes)
     }
 
@@ -300,67 +374,153 @@ actor SavedReferenceRepository {
         remoteRecipeReferences: [SavedRecipeReference],
         remoteCollectionReferences: [SavedCollectionReference]
     ) async throws {
+        let accountScope = try await beginReconciliation(userID: userId)
+        try await validateReconciliation(accountScope)
         let context = ModelContext(modelContainer)
         let changes = try await reconcileLocalReferences(
             userId: userId,
             remoteRecipeReferences: remoteRecipeReferences,
             remoteCollectionReferences: remoteCollectionReferences,
-            context: context
+            context: context,
+            accountScope: accountScope
         )
+        try await validateReconciliation(accountScope)
         try context.save()
+        try await validateReconciliation(accountScope)
         postReconciliationChanges(changes)
     }
 
     func forceSyncAllReferencesToCloud(userId: UUID) async throws {
         guard let savedReferenceCloudService else { return }
+        let authorizationContext = try await verifiedMutationContext(userID: userId)
 
         let recipeReferences = try await recipeReferences(for: userId)
         let collectionReferences = try await collectionReferences(for: userId)
 
         for reference in recipeReferences {
-            try await savedReferenceCloudService.saveRecipeReference(reference)
+            try await savedReferenceCloudService.saveRecipeReference(
+                reference,
+                authorizationContext: authorizationContext
+            )
         }
         for reference in collectionReferences {
-            try await savedReferenceCloudService.saveCollectionReference(reference)
+            try await savedReferenceCloudService.saveCollectionReference(
+                reference,
+                authorizationContext: authorizationContext
+            )
         }
     }
 
     private func enqueueSavedRecipeReferenceSync(
         _ reference: SavedRecipeReference,
-        type: SyncOperationType
-    ) async -> UUID? {
-        guard !RuntimeEnvironment.isRunningTests,
-              !RuntimeEnvironment.isSimulatorQAMode,
-              let operationQueueService,
-              let payload = try? JSONEncoder().encode(reference) else {
+        type: SyncOperationType,
+        accountScope: SyncOperationAccountScope?
+    ) async throws -> UUID? {
+        guard shouldQueueMutations else {
             return nil
+        }
+        guard let operationQueueService else { throw SavedReferenceRepositoryError.operationQueueUnavailable }
+        let payload: Data
+        do {
+            payload = try JSONEncoder().encode(reference)
+        } catch {
+            throw SavedReferenceRepositoryError.operationPayloadEncodingFailed
         }
 
         return await operationQueueService.addOperation(
             type: type,
             entityType: .savedRecipeReference,
             entityId: reference.id,
-            payload: payload
+            payload: payload,
+            ownerId: reference.userId,
+            accountRevision: accountScope?.revision,
+            accountIdentity: accountScope?.cloudKitIdentity
         )
     }
 
     private func enqueueSavedCollectionReferenceSync(
         _ reference: SavedCollectionReference,
-        type: SyncOperationType
-    ) async -> UUID? {
-        guard !RuntimeEnvironment.isRunningTests,
-              !RuntimeEnvironment.isSimulatorQAMode,
-              let operationQueueService,
-              let payload = try? JSONEncoder().encode(reference) else {
+        type: SyncOperationType,
+        accountScope: SyncOperationAccountScope?
+    ) async throws -> UUID? {
+        guard shouldQueueMutations else {
             return nil
+        }
+        guard let operationQueueService else { throw SavedReferenceRepositoryError.operationQueueUnavailable }
+        let payload: Data
+        do {
+            payload = try JSONEncoder().encode(reference)
+        } catch {
+            throw SavedReferenceRepositoryError.operationPayloadEncodingFailed
         }
 
         return await operationQueueService.addOperation(
             type: type,
             entityType: .savedCollectionReference,
             entityId: reference.id,
-            payload: payload
+            payload: payload,
+            ownerId: reference.userId,
+            accountRevision: accountScope?.revision,
+            accountIdentity: accountScope?.cloudKitIdentity
         )
+    }
+
+    private var shouldQueueMutations: Bool {
+        !RuntimeEnvironment.isSimulatorQAMode &&
+            (!RuntimeEnvironment.isRunningTests || queueMutationsDuringTests)
+    }
+
+    private func compensateFailedLocalMutation(operationID: UUID?) async {
+        guard let operationID else { return }
+        await operationQueueService?.removeOperation(operationId: operationID)
+    }
+
+    private func beginReconciliation(userID: UUID) async throws -> SyncOperationAccountScope? {
+        if let accountScopeProvider {
+            guard let scope = await accountScopeProvider(userID) else {
+                throw UserSessionError.accountChanged
+            }
+            return scope
+        }
+        guard !RuntimeEnvironment.isRunningTests, !RuntimeEnvironment.isSimulatorQAMode else {
+            return nil
+        }
+        guard let scope = await MainActor.run(body: {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: userID)
+        }) else { throw UserSessionError.accountChanged }
+        return scope
+    }
+
+    private func validateReconciliation(_ accountScope: SyncOperationAccountScope?) async throws {
+        guard let accountScope else { return }
+        let isCurrent: Bool
+        if let accountScopeValidator {
+            isCurrent = await accountScopeValidator(accountScope)
+        } else {
+            isCurrent = await MainActor.run {
+                CurrentUserSession.shared.syncOperationAccountScope(ownerID: accountScope.ownerId) == accountScope
+            }
+        }
+        guard isCurrent else { throw UserSessionError.accountChanged }
+    }
+
+    private func mutationAccountScope(userID: UUID) async throws -> SyncOperationAccountScope? {
+        guard !RuntimeEnvironment.isRunningTests,
+              !RuntimeEnvironment.isSimulatorQAMode,
+              savedReferenceCloudService != nil,
+              operationQueueService != nil else { return nil }
+        guard let scope = await MainActor.run(body: {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: userID)
+        }) else { throw UserSessionError.accountChanged }
+        return scope
+    }
+
+    private func validateMutationAccountScope(_ accountScope: SyncOperationAccountScope?) async throws {
+        guard let accountScope else { return }
+        let currentScope = await MainActor.run {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: accountScope.ownerId)
+        }
+        guard currentScope == accountScope else { throw UserSessionError.accountChanged }
     }
 
     private func startOperationQueueReplayTask() {
@@ -397,8 +557,6 @@ actor SavedReferenceRepository {
             return
         }
 
-        await operationQueueService.markInProgress(operationId: operation.id)
-
         do {
             switch operation.entityType {
             case .savedRecipeReference:
@@ -406,10 +564,19 @@ actor SavedReferenceRepository {
                     throw SavedReferenceRepositoryError.missingOperationPayload
                 }
                 let reference = try JSONDecoder().decode(SavedRecipeReference.self, from: payload)
+                guard await authorizeSavedReferenceReplay(operation, entityOwnerId: reference.userId) else { return }
+                let authorizationContext = try await verifiedMutationContext(userID: reference.userId)
+                await operationQueueService.markInProgress(operationId: operation.id)
                 if operation.type == .delete {
-                    try await savedReferenceCloudService.deleteRecipeReference(reference)
+                    try await savedReferenceCloudService.deleteRecipeReference(
+                        reference,
+                        authorizationContext: authorizationContext
+                    )
                 } else {
-                    try await savedReferenceCloudService.saveRecipeReference(reference)
+                    try await savedReferenceCloudService.saveRecipeReference(
+                        reference,
+                        authorizationContext: authorizationContext
+                    )
                 }
 
             case .savedCollectionReference:
@@ -417,10 +584,19 @@ actor SavedReferenceRepository {
                     throw SavedReferenceRepositoryError.missingOperationPayload
                 }
                 let reference = try JSONDecoder().decode(SavedCollectionReference.self, from: payload)
+                guard await authorizeSavedReferenceReplay(operation, entityOwnerId: reference.userId) else { return }
+                let authorizationContext = try await verifiedMutationContext(userID: reference.userId)
+                await operationQueueService.markInProgress(operationId: operation.id)
                 if operation.type == .delete {
-                    try await savedReferenceCloudService.deleteCollectionReference(reference)
+                    try await savedReferenceCloudService.deleteCollectionReference(
+                        reference,
+                        authorizationContext: authorizationContext
+                    )
                 } else {
-                    try await savedReferenceCloudService.saveCollectionReference(reference)
+                    try await savedReferenceCloudService.saveCollectionReference(
+                        reference,
+                        authorizationContext: authorizationContext
+                    )
                 }
 
             default:
@@ -434,6 +610,55 @@ actor SavedReferenceRepository {
                 error: "Saved reference replay failed: \(error.localizedDescription)"
             )
         }
+    }
+
+    private func replaySavedReferenceOperation(operationId: UUID) async {
+        guard let operationQueueService,
+              let operation = await operationQueueService.getOperation(operationId: operationId) else {
+            return
+        }
+        await replaySavedReferenceOperation(operation)
+    }
+
+    private func authorizeSavedReferenceReplay(
+        _ operation: SyncOperation,
+        entityOwnerId: UUID
+    ) async -> Bool {
+        let currentScope = await MainActor.run {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: entityOwnerId)
+        }
+        switch SyncOperationAccountPolicy.decision(
+            operation: operation,
+            entityOwnerId: entityOwnerId,
+            currentScope: currentScope
+        ) {
+        case .allowed:
+            return true
+        case .migrateLegacy:
+            guard let currentScope else { return false }
+            _ = await operationQueueService?.bindLegacyOperation(
+                operationId: operation.id,
+                scope: currentScope
+            )
+            return true
+        case .deferred:
+            return false
+        case .reject:
+            await operationQueueService?.quarantineOperation(
+                operationId: operation.id,
+                error: "Saved reference operation belongs to another account generation"
+            )
+            return false
+        }
+    }
+
+    private func verifiedMutationContext(userID: UUID) async throws -> VerifiedAccountMutationContext {
+        guard let context = await MainActor.run(body: {
+            CurrentUserSession.shared.verifiedMutationContext(ownerID: userID)
+        }) else {
+            throw UserSessionError.accountChanged
+        }
+        return context
     }
 
     private func upsertRecipeReference(
@@ -496,11 +721,14 @@ actor SavedReferenceRepository {
         userId: UUID,
         remoteRecipeReferences: [SavedRecipeReference],
         remoteCollectionReferences: [SavedCollectionReference],
-        context: ModelContext
+        context: ModelContext,
+        accountScope: SyncOperationAccountScope?
     ) async throws -> SavedReferenceReconciliationChanges {
         var changes = SavedReferenceReconciliationChanges()
         let pendingRecipeReferenceIds = await pendingReferenceEntityIds(entityType: .savedRecipeReference)
+        try await validateReconciliation(accountScope)
         let pendingCollectionReferenceIds = await pendingReferenceEntityIds(entityType: .savedCollectionReference)
+        try await validateReconciliation(accountScope)
 
         let remoteRecipeSourceIds = Set(remoteRecipeReferences.map(\.sourceRecipeId))
         for model in try fetchRecipeReferenceModels(userId: userId, context: context) {
@@ -692,95 +920,55 @@ actor SavedReferenceRepository {
         return await operationQueueService.getAllOperations()
     }
 
-    private nonisolated func syncRecipeReferenceToCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
+    private func syncRecipeReferenceToCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
-              let savedReferenceCloudService else {
+              savedReferenceCloudService != nil else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+        Task { [weak self] in
             guard let operationID else { return }
-            await operationQueueService?.markInProgress(operationId: operationID)
-            do {
-                try await savedReferenceCloudService.saveRecipeReference(reference)
-                await operationQueueService?.markCompleted(operationId: operationID)
-            } catch {
-                await operationQueueService?.markFailed(
-                    operationId: operationID,
-                    error: "Saved recipe reference sync failed: \(error.localizedDescription)"
-                )
-                AppLogger.general.error("Failed to sync saved recipe reference: \(error.localizedDescription)")
-            }
+            await self?.replaySavedReferenceOperation(operationId: operationID)
         }
     }
 
-    private nonisolated func deleteRecipeReferenceFromCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
+    private func deleteRecipeReferenceFromCloud(_ reference: SavedRecipeReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
-              let savedReferenceCloudService else {
+              savedReferenceCloudService != nil else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+        Task { [weak self] in
             guard let operationID else { return }
-            await operationQueueService?.markInProgress(operationId: operationID)
-            do {
-                try await savedReferenceCloudService.deleteRecipeReference(reference)
-                await operationQueueService?.markCompleted(operationId: operationID)
-            } catch {
-                await operationQueueService?.markFailed(
-                    operationId: operationID,
-                    error: "Saved recipe reference delete failed: \(error.localizedDescription)"
-                )
-                AppLogger.general.error("Failed to delete saved recipe reference: \(error.localizedDescription)")
-            }
+            await self?.replaySavedReferenceOperation(operationId: operationID)
         }
     }
 
-    private nonisolated func syncCollectionReferenceToCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
+    private func syncCollectionReferenceToCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
-              let savedReferenceCloudService else {
+              savedReferenceCloudService != nil else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+        Task { [weak self] in
             guard let operationID else { return }
-            await operationQueueService?.markInProgress(operationId: operationID)
-            do {
-                try await savedReferenceCloudService.saveCollectionReference(reference)
-                await operationQueueService?.markCompleted(operationId: operationID)
-            } catch {
-                await operationQueueService?.markFailed(
-                    operationId: operationID,
-                    error: "Saved collection reference sync failed: \(error.localizedDescription)"
-                )
-                AppLogger.general.error("Failed to sync saved collection reference: \(error.localizedDescription)")
-            }
+            await self?.replaySavedReferenceOperation(operationId: operationID)
         }
     }
 
-    private nonisolated func deleteCollectionReferenceFromCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
+    private func deleteCollectionReferenceFromCloud(_ reference: SavedCollectionReference, operationID: UUID?) {
         guard !RuntimeEnvironment.isRunningTests,
               !RuntimeEnvironment.isSimulatorQAMode,
-              let savedReferenceCloudService else {
+              savedReferenceCloudService != nil else {
             return
         }
 
-        Task.detached { [savedReferenceCloudService, operationQueueService, reference, operationID] in
+        Task { [weak self] in
             guard let operationID else { return }
-            await operationQueueService?.markInProgress(operationId: operationID)
-            do {
-                try await savedReferenceCloudService.deleteCollectionReference(reference)
-                await operationQueueService?.markCompleted(operationId: operationID)
-            } catch {
-                await operationQueueService?.markFailed(
-                    operationId: operationID,
-                    error: "Saved collection reference delete failed: \(error.localizedDescription)"
-                )
-                AppLogger.general.error("Failed to delete saved collection reference: \(error.localizedDescription)")
-            }
+            await self?.replaySavedReferenceOperation(operationId: operationID)
         }
     }
 }
@@ -789,6 +977,8 @@ enum SavedReferenceRepositoryError: LocalizedError {
     case referenceNotFound
     case missingOperationPayload
     case unsupportedOperation
+    case operationQueueUnavailable
+    case operationPayloadEncodingFailed
 
     var errorDescription: String? {
         switch self {
@@ -798,6 +988,10 @@ enum SavedReferenceRepositoryError: LocalizedError {
             "Saved reference operation is missing its payload."
         case .unsupportedOperation:
             "Unsupported saved reference operation."
+        case .operationQueueUnavailable:
+            "Saved reference sync queue is unavailable."
+        case .operationPayloadEncodingFailed:
+            "Saved reference operation could not be encoded."
         }
     }
 }

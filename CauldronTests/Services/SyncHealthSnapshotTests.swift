@@ -8,6 +8,10 @@ final class SyncHealthSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot(status: .pending, now: now).status, .waiting)
         XCTAssertEqual(snapshot(status: .inProgress, now: now).status, .syncing)
         XCTAssertEqual(snapshot(status: .failed, now: now).status, .waiting)
+        XCTAssertEqual(
+            SyncHealthSnapshot.make(operations: [], deadLetterCount: 1, now: now).status,
+            .actionRequired
+        )
     }
 
     func testFailedTakesPriorityAndOldestAgeIsReported() {
@@ -35,6 +39,24 @@ final class SyncHealthSnapshotTests: XCTestCase {
             SyncHealthSnapshot.make(operations: [operation]).status,
             .waiting
         )
+    }
+
+    func testDeadLetterTakesPriorityOverActiveSync() {
+        let operation = SyncOperation(
+            type: .update,
+            entityType: .recipe,
+            entityId: UUID(),
+            status: .inProgress
+        )
+
+        let snapshot = SyncHealthSnapshot.make(
+            operations: [operation],
+            deadLetterCount: 2
+        )
+
+        XCTAssertEqual(snapshot.status, .actionRequired)
+        XCTAssertEqual(snapshot.deadLetterCount, 2)
+        XCTAssertEqual(snapshot.pendingCount, 1)
     }
 
     private func snapshot(status: OperationStatus, now: Date) -> SyncHealthSnapshot {

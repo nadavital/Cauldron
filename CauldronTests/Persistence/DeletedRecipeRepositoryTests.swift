@@ -2,362 +2,202 @@
 //  DeletedRecipeRepositoryTests.swift
 //  CauldronTests
 //
-//  Created on November 13, 2025.
-//
 
-import XCTest
 import SwiftData
+import XCTest
 @testable import Cauldron
 
 @MainActor
 final class DeletedRecipeRepositoryTests: XCTestCase {
-
-    var repository: DeletedRecipeRepository!
-    var modelContainer: ModelContainer!
-
-    // MARK: - Setup & Teardown
+    private var repository: DeletedRecipeRepository!
+    private var modelContainer: ModelContainer!
+    private var ownerId: UUID!
 
     override func setUp() async throws {
         try await super.setUp()
-
-        // Create in-memory model container for testing
         modelContainer = try TestModelContainer.create(with: [DeletedRecipeModel.self])
-
-        // Initialize repository
         repository = DeletedRecipeRepository(modelContainer: modelContainer)
+        ownerId = UUID()
     }
 
     override func tearDown() async throws {
+        ownerId = nil
         repository = nil
         modelContainer = nil
         try await super.tearDown()
     }
 
-    // MARK: - Mark as Deleted Tests
-
-    func testMarkAsDeleted_CreatesTombstone() async throws {
-        // Given
-        let recipeId = UUID()
-        let cloudRecordName = "test-recipe-123"
-
-        // When
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: cloudRecordName)
-
-        // Then
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted)
-    }
-
-    func testMarkAsDeleted_WithNilCloudRecordName() async throws {
-        // Given
-        let recipeId = UUID()
-
-        // When
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: nil)
-
-        // Then
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted)
-    }
-
-    func testMarkAsDeleted_DuplicateCall_DoesNotCreateDuplicate() async throws {
-        // Given
-        let recipeId = UUID()
-        let cloudRecordName = "test-recipe-123"
-
-        // When
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: cloudRecordName)
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: cloudRecordName)
-
-        // Then
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-        let count = deletedIds.filter { $0 == recipeId }.count
-        XCTAssertEqual(count, 1, "Should only have one tombstone for the recipe")
-    }
-
-    func testMarkAsDeleted_ExistingTombstonePreservesNewestDeletedAtAndCloudRecordName() async throws {
-        // Given
+    func testMarkAsDeletedCreatesOneOwnerScopedTombstoneAndKeepsNewestMetadata() async throws {
         let recipeId = UUID()
         let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
         let newerDate = Date(timeIntervalSince1970: 1_700_000_500)
 
-        // When
         try await repository.markAsDeleted(
             recipeId: recipeId,
+            ownerId: ownerId,
             cloudRecordName: "private-record",
             deletedAt: olderDate
         )
         try await repository.markAsDeleted(
             recipeId: recipeId,
+            ownerId: ownerId,
             cloudRecordName: nil,
             deletedAt: newerDate
         )
 
-        // Then
-        let context = ModelContext(modelContainer)
-        let tombstones = try context.fetch(FetchDescriptor<DeletedRecipeModel>())
-
+        let tombstones = try ModelContext(modelContainer).fetch(FetchDescriptor<DeletedRecipeModel>())
         XCTAssertEqual(tombstones.count, 1)
         XCTAssertEqual(tombstones.first?.recipeId, recipeId)
+        XCTAssertEqual(tombstones.first?.ownerId, ownerId)
         XCTAssertEqual(tombstones.first?.deletedAt, newerDate)
         XCTAssertEqual(tombstones.first?.cloudRecordName, "private-record")
     }
 
-    func testMarkAsDeleted_MultipleRecipes() async throws {
-        // Given
-        let recipeId1 = UUID()
-        let recipeId2 = UUID()
-        let recipeId3 = UUID()
-
-        // When
-        try await repository.markAsDeleted(recipeId: recipeId1, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId2, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId3, cloudRecordName: nil)
-
-        // Then
-        let isDeleted1 = try await repository.isDeleted(recipeId: recipeId1)
-        let isDeleted2 = try await repository.isDeleted(recipeId: recipeId2)
-        let isDeleted3 = try await repository.isDeleted(recipeId: recipeId3)
-        XCTAssertTrue(isDeleted1)
-        XCTAssertTrue(isDeleted2)
-        XCTAssertTrue(isDeleted3)
-
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-        XCTAssertEqual(deletedIds.count, 3)
-    }
-
-    // MARK: - Is Deleted Tests
-
-    func testIsDeleted_ReturnsTrueForDeletedRecipe() async throws {
-        // Given
+    func testSameRecipeIdIsIndependentAcrossOwners() async throws {
         let recipeId = UUID()
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: nil)
-
-        // When
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-
-        // Then
-        XCTAssertTrue(isDeleted)
-    }
-
-    func testIsDeleted_ReturnsFalseForNonDeletedRecipe() async throws {
-        // Given
-        let recipeId = UUID()
-
-        // When
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-
-        // Then
-        XCTAssertFalse(isDeleted)
-    }
-
-    func testIsDeleted_AfterUnmark_ReturnsFalse() async throws {
-        // Given
-        let recipeId = UUID()
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: nil)
-
-        // When
-        try await repository.unmarkAsDeleted(recipeId: recipeId)
-
-        // Then
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertFalse(isDeleted)
-    }
-
-    // MARK: - Unmark as Deleted Tests
-
-    func testUnmarkAsDeleted_RemovesTombstone() async throws {
-        // Given
-        let recipeId = UUID()
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: nil)
-
-        // When
-        try await repository.unmarkAsDeleted(recipeId: recipeId)
-
-        // Then
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertFalse(isDeleted)
-
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-        XCTAssertFalse(deletedIds.contains(recipeId))
-    }
-
-    func testUnmarkAsDeleted_NonExistentRecipe_DoesNotThrow() async throws {
-        // Given
-        let recipeId = UUID()
-
-        // When/Then - Should not throw
-        try await repository.unmarkAsDeleted(recipeId: recipeId)
-    }
-
-    func testUnmarkAsDeleted_RemovesOnlySpecifiedRecipe() async throws {
-        // Given
-        let recipeId1 = UUID()
-        let recipeId2 = UUID()
-        let recipeId3 = UUID()
-        try await repository.markAsDeleted(recipeId: recipeId1, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId2, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId3, cloudRecordName: nil)
-
-        // When
-        try await repository.unmarkAsDeleted(recipeId: recipeId2)
-
-        // Then
-        let isDeleted1 = try await repository.isDeleted(recipeId: recipeId1)
-        let isDeleted2 = try await repository.isDeleted(recipeId: recipeId2)
-        let isDeleted3 = try await repository.isDeleted(recipeId: recipeId3)
-        XCTAssertTrue(isDeleted1)
-        XCTAssertFalse(isDeleted2)
-        XCTAssertTrue(isDeleted3)
-    }
-
-    // MARK: - Cleanup Old Tombstones Tests
-
-    func testCleanupOldTombstones_RemovesOldTombstones() async throws {
-        // Given - Create a tombstone with a very old date
-        let oldRecipeId = UUID()
-        let context = ModelContext(modelContainer)
-
-        let oldDate = Date().addingTimeInterval(-31 * 24 * 60 * 60) // 31 days ago
-        let oldTombstone = DeletedRecipeModel(
-            recipeId: oldRecipeId,
-            deletedAt: oldDate,
-            cloudRecordName: nil
-        )
-        context.insert(oldTombstone)
-        try context.save()
-
-        // Create a recent tombstone
-        let recentRecipeId = UUID()
-        try await repository.markAsDeleted(recipeId: recentRecipeId, cloudRecordName: nil)
-
-        // When
-        try await repository.cleanupOldTombstones()
-
-        // Then
-        let oldIsDeleted = try await repository.isDeleted(recipeId: oldRecipeId)
-        let recentIsDeleted = try await repository.isDeleted(recipeId: recentRecipeId)
-        XCTAssertFalse(oldIsDeleted, "Old tombstone should be removed")
-        XCTAssertTrue(recentIsDeleted, "Recent tombstone should remain")
-    }
-
-    func testCleanupOldTombstones_KeepsRecentTombstones() async throws {
-        // Given
-        let recipeId = UUID()
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: nil)
-
-        // When
-        try await repository.cleanupOldTombstones()
-
-        // Then
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted, "Recent tombstone should not be removed")
-    }
-
-    func testCleanupOldTombstones_WithNoTombstones_DoesNotThrow() async throws {
-        // When/Then - Should not throw
-        try await repository.cleanupOldTombstones()
-
-        // Verify no tombstones exist
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-        XCTAssertEqual(deletedIds.count, 0)
-    }
-
-    func testCleanupOldTombstones_ExactlyThirtyDaysOld_IsKept() async throws {
-        // Given - Create tombstone exactly 30 days old (minus 1 second to avoid timing edge case)
-        let recipeId = UUID()
-        let context = ModelContext(modelContainer)
-
-        // Use 30 days minus 1 second to ensure we're safely within the 30-day window
-        let thirtyDaysAgo = Date().addingTimeInterval((-30 * 24 * 60 * 60) + 1)
-        let tombstone = DeletedRecipeModel(
+        let otherOwnerId = UUID()
+        try await repository.markAsDeleted(
             recipeId: recipeId,
-            deletedAt: thirtyDaysAgo,
-            cloudRecordName: nil
+            ownerId: ownerId,
+            cloudRecordName: "owner-a"
         )
-        context.insert(tombstone)
+        try await repository.markAsDeleted(
+            recipeId: recipeId,
+            ownerId: otherOwnerId,
+            cloudRecordName: "owner-b"
+        )
+
+        let ownerAInitiallyDeleted = try await repository.isDeleted(recipeId: recipeId, ownerId: ownerId)
+        let ownerBInitiallyDeleted = try await repository.isDeleted(recipeId: recipeId, ownerId: otherOwnerId)
+        XCTAssertTrue(ownerAInitiallyDeleted)
+        XCTAssertTrue(ownerBInitiallyDeleted)
+
+        try await repository.unmarkAsDeleted(recipeId: recipeId, ownerId: ownerId)
+
+        let ownerADeleted = try await repository.isDeleted(recipeId: recipeId, ownerId: ownerId)
+        let ownerBDeleted = try await repository.isDeleted(recipeId: recipeId, ownerId: otherOwnerId)
+        let ownerBDeletedIDs = try await repository.fetchAllDeletedRecipeIds(ownerId: otherOwnerId)
+        XCTAssertFalse(ownerADeleted)
+        XCTAssertTrue(ownerBDeleted)
+        XCTAssertEqual(ownerBDeletedIDs, [recipeId])
+    }
+
+    func testFetchAndUnmarkAffectOnlyRequestedRecipeForOwner() async throws {
+        let recipeIds = [UUID(), UUID(), UUID()]
+        for recipeId in recipeIds {
+            try await repository.markAsDeleted(
+                recipeId: recipeId,
+                ownerId: ownerId,
+                cloudRecordName: nil
+            )
+        }
+
+        try await repository.unmarkAsDeleted(recipeId: recipeIds[1], ownerId: ownerId)
+
+        let remaining = Set(try await repository.fetchAllDeletedRecipeIds(ownerId: ownerId))
+        XCTAssertEqual(remaining, [recipeIds[0], recipeIds[2]])
+        let removedRecipeIsDeleted = try await repository.isDeleted(
+            recipeId: recipeIds[1],
+            ownerId: ownerId
+        )
+        XCTAssertFalse(removedRecipeIsDeleted)
+    }
+
+    func testCleanupOldTombstonesDoesNotDeleteAnotherOwnersRows() async throws {
+        let oldRecipeId = UUID()
+        let recentRecipeId = UUID()
+        let otherOwnerId = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(DeletedRecipeModel(
+            recipeId: oldRecipeId,
+            ownerId: ownerId,
+            deletedAt: Date().addingTimeInterval(-31 * 24 * 60 * 60),
+            cloudRecordName: nil
+        ))
+        context.insert(DeletedRecipeModel(
+            recipeId: oldRecipeId,
+            ownerId: otherOwnerId,
+            deletedAt: Date().addingTimeInterval(-31 * 24 * 60 * 60),
+            cloudRecordName: nil
+        ))
+        context.insert(DeletedRecipeModel(
+            recipeId: recentRecipeId,
+            ownerId: ownerId,
+            deletedAt: Date().addingTimeInterval((-30 * 24 * 60 * 60) + 2),
+            cloudRecordName: nil
+        ))
         try context.save()
 
-        // When
-        try await repository.cleanupOldTombstones()
+        try await repository.cleanupOldTombstones(ownerId: ownerId)
 
-        // Then - 30 days is NOT older than 30 days, so it should be kept
-        let isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted, "Exactly 30-day-old tombstone should be kept")
+        let ownerAOldDeleted = try await repository.isDeleted(recipeId: oldRecipeId, ownerId: ownerId)
+        let ownerBOldDeleted = try await repository.isDeleted(recipeId: oldRecipeId, ownerId: otherOwnerId)
+        let ownerARecentDeleted = try await repository.isDeleted(recipeId: recentRecipeId, ownerId: ownerId)
+        XCTAssertFalse(ownerAOldDeleted)
+        XCTAssertTrue(ownerBOldDeleted)
+        XCTAssertTrue(ownerARecentDeleted)
     }
 
-    // MARK: - Fetch All Deleted Recipe IDs Tests
-
-    func testFetchAllDeletedRecipeIds_EmptyList() async throws {
-        // When
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-
-        // Then
-        XCTAssertEqual(deletedIds.count, 0)
-    }
-
-    func testFetchAllDeletedRecipeIds_ReturnsAllIds() async throws {
-        // Given
-        let recipeId1 = UUID()
-        let recipeId2 = UUID()
-        let recipeId3 = UUID()
-
-        try await repository.markAsDeleted(recipeId: recipeId1, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId2, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId3, cloudRecordName: nil)
-
-        // When
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-
-        // Then
-        XCTAssertEqual(deletedIds.count, 3)
-        XCTAssertTrue(deletedIds.contains(recipeId1))
-        XCTAssertTrue(deletedIds.contains(recipeId2))
-        XCTAssertTrue(deletedIds.contains(recipeId3))
-    }
-
-    func testFetchAllDeletedRecipeIds_AfterUnmark_DoesNotIncludeUnmarked() async throws {
-        // Given
-        let recipeId1 = UUID()
-        let recipeId2 = UUID()
-
-        try await repository.markAsDeleted(recipeId: recipeId1, cloudRecordName: nil)
-        try await repository.markAsDeleted(recipeId: recipeId2, cloudRecordName: nil)
-        try await repository.unmarkAsDeleted(recipeId: recipeId1)
-
-        // When
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-
-        // Then
-        XCTAssertEqual(deletedIds.count, 1)
-        XCTAssertFalse(deletedIds.contains(recipeId1))
-        XCTAssertTrue(deletedIds.contains(recipeId2))
-    }
-
-    // MARK: - Integration Tests
-
-    func testFullWorkflow_MarkUnmarkMark() async throws {
-        // Given
+    func testLegacyOwnerlessMigrationRunsOnceAndCannotBeReadByNextAccount() async throws {
         let recipeId = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(DeletedRecipeModel(
+            recipeId: recipeId,
+            deletedAt: Date(),
+            cloudRecordName: "legacy"
+        ))
+        try context.save()
+        let defaults = try makeDefaults()
 
-        // Mark as deleted
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: "record-1")
-        var isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted)
+        try await repository.migrateLegacyOwnerlessTombstones(to: ownerId, defaults: defaults)
+        try await repository.migrateLegacyOwnerlessTombstones(to: UUID(), defaults: defaults)
 
-        // Unmark (user re-adds recipe)
-        try await repository.unmarkAsDeleted(recipeId: recipeId)
-        isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertFalse(isDeleted)
+        let isDeletedByMigratedOwner = try await repository.isDeleted(recipeId: recipeId, ownerId: ownerId)
+        XCTAssertTrue(isDeletedByMigratedOwner)
+        XCTAssertEqual(
+            defaults.integer(forKey: DeletedRecipeRepository.legacyOwnerMigrationVersionKey),
+            DeletedRecipeRepository.legacyOwnerMigrationVersion
+        )
+        XCTAssertEqual(
+            defaults.string(forKey: DeletedRecipeRepository.legacyOwnerMigrationOwnerKey),
+            ownerId.uuidString
+        )
+    }
 
-        // Mark as deleted again
-        try await repository.markAsDeleted(recipeId: recipeId, cloudRecordName: "record-2")
-        isDeleted = try await repository.isDeleted(recipeId: recipeId)
-        XCTAssertTrue(isDeleted)
+    func testLegacyMigrationCoalescesOwnerlessAndAlreadyOwnedDuplicates() async throws {
+        let recipeId = UUID()
+        let olderDate = Date(timeIntervalSince1970: 100)
+        let newerDate = Date(timeIntervalSince1970: 200)
+        let context = ModelContext(modelContainer)
+        context.insert(DeletedRecipeModel(
+            recipeId: recipeId,
+            ownerId: ownerId,
+            deletedAt: olderDate,
+            cloudRecordName: "owned"
+        ))
+        context.insert(DeletedRecipeModel(
+            recipeId: recipeId,
+            deletedAt: newerDate,
+            cloudRecordName: "legacy"
+        ))
+        try context.save()
 
-        // Verify only one tombstone exists
-        let deletedIds = try await repository.fetchAllDeletedRecipeIds()
-        let count = deletedIds.filter { $0 == recipeId }.count
-        XCTAssertEqual(count, 1)
+        try await repository.migrateLegacyOwnerlessTombstones(
+            to: ownerId,
+            defaults: try makeDefaults()
+        )
+
+        let rows = try ModelContext(modelContainer).fetch(FetchDescriptor<DeletedRecipeModel>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.ownerId, ownerId)
+        XCTAssertEqual(rows.first?.deletedAt, newerDate)
+        XCTAssertEqual(rows.first?.cloudRecordName, "owned")
+    }
+
+    private func makeDefaults() throws -> UserDefaults {
+        let suiteName = "DeletedRecipeRepositoryTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }

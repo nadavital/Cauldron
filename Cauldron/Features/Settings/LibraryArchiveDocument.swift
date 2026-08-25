@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
-    static let cauldronLibraryArchive = UTType(exportedAs: "app.cauldron.library-archive")
+    static let cauldronLibraryArchive = UTType(exportedAs: "Nadav.Cauldron.library-archive")
 }
 
 struct LibraryArchiveDocument: FileDocument {

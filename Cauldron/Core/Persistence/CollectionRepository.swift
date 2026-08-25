@@ -60,17 +60,34 @@ nonisolated enum CollectionDeleteReplayPolicy {
     }
 }
 
+/// Archive restores must not reuse an identity that deletion-wins sync has
+/// retired. Keeping this decision in the repository prevents callers from
+/// deleting tombstones as an accidental resurrection mechanism.
+nonisolated enum CollectionArchiveImportIdentityDisposition: Equatable, Sendable {
+    case preserveStableID
+    case remapDeletedID
+}
+
+private nonisolated struct CollectionOwnerKey: Hashable, Sendable {
+    let collectionId: UUID
+    let ownerId: UUID
+}
+
 /// Thread-safe repository for Collection operations
 actor CollectionRepository {
+    typealias AccountScopeProvider = @MainActor @Sendable (UUID) -> SyncOperationAccountScope?
+
     private let modelContainer: ModelContainer
     private let cloudKitCore: CloudKitCore
     private let collectionCloudService: CollectionCloudService
     private let operationQueueService: OperationQueueService
     private let externalShareService: ExternalShareService?
+    private let accountScopeProvider: AccountScopeProvider
+    private let enforcesVerifiedAccountScope: Bool
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
     // Track collections pending sync
-    private var pendingSyncCollections = Set<UUID>()
+    private var pendingSyncCollections = Set<CollectionOwnerKey>()
     private var operationQueueReplayTask: Task<Void, Never>?
 
     struct CollectionDeletePayload: Codable, Sendable {
@@ -83,13 +100,19 @@ actor CollectionRepository {
         cloudKitCore: CloudKitCore,
         collectionCloudService: CollectionCloudService,
         operationQueueService: OperationQueueService,
-        externalShareService: ExternalShareService? = nil
+        externalShareService: ExternalShareService? = nil,
+        accountScopeProvider: @escaping AccountScopeProvider = { ownerID in
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: ownerID)
+        },
+        enforcesVerifiedAccountScope: Bool = !RuntimeEnvironment.isRunningTests
     ) {
         self.modelContainer = modelContainer
         self.cloudKitCore = cloudKitCore
         self.collectionCloudService = collectionCloudService
         self.operationQueueService = operationQueueService
         self.externalShareService = externalShareService
+        self.accountScopeProvider = accountScopeProvider
+        self.enforcesVerifiedAccountScope = enforcesVerifiedAccountScope
 
         if !RuntimeEnvironment.isRunningTests {
             setupRecipeVisibilityObserver()
@@ -116,11 +139,30 @@ actor CollectionRepository {
         return collection.userId == currentUserId
     }
 
-    private func assertCanModify(_ collection: Collection) async throws {
+    private func assertCanModify(
+        _ collection: Collection,
+        discloseExistingRecord: Bool = true
+    ) async throws {
         guard await canModify(collection) else {
             logger.warning("Blocked mutation of non-owned collection: \(collection.id)")
-            throw CollectionRepositoryError.notAuthorized
+            throw discloseExistingRecord
+                ? CollectionRepositoryError.notAuthorized
+                : CollectionRepositoryError.collectionNotFound
         }
+    }
+
+    private func verifiedAccountScope(for ownerID: UUID) async throws -> SyncOperationAccountScope {
+        if let scope = await accountScopeProvider(ownerID), scope.ownerId == ownerID {
+            return scope
+        }
+        guard !enforcesVerifiedAccountScope else {
+            logger.warning("Blocked collection mutation without a verified account scope")
+            throw CollectionRepositoryError.accountIdentityNotVerified
+        }
+
+        // Existing local-only tests intentionally bypass live session setup.
+        // Production repositories always enforce the verified provider above.
+        return SyncOperationAccountScope(ownerId: ownerID, revision: UUID())
     }
 
     /// Setup observer for recipe visibility changes
@@ -154,6 +196,7 @@ actor CollectionRepository {
     /// Create a new collection (optimistic - returns immediately)
     func create(_ collection: Collection) async throws {
         try await assertCanModify(collection)
+        let accountScope = try await verifiedAccountScope(for: collection.userId)
 
         // 1. Save locally (immediate)
         let context = ModelContext(modelContainer)
@@ -187,20 +230,34 @@ actor CollectionRepository {
         let operationID = await operationQueueService.addOperation(
             type: .create,
             entityType: .collection,
-            entityId: collection.id
+            entityId: collection.id,
+            ownerId: collection.userId,
+            accountRevision: accountScope.revision,
+            accountIdentity: accountScope.cloudKitIdentity
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, collection, operationID] in
-            guard let self = self else { return }
+        Task.detached { [weak self, collection, operationID, operationQueueService] in
+            guard let self else {
+                await operationQueueService.markFailed(operationId: operationID, error: "Collection repository unavailable")
+                return
+            }
+
+            guard await self.authorizeCollectionReplay(operationID: operationID, entityOwnerId: collection.userId) else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: operationID)
 
             // Sync to CloudKit PUBLIC database (for sharing)
             await self.syncCollectionToCloudKit(collection)
-            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
-            let metadataPending = await self.isPendingSync(collectionId: collection.id)
+            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(
+                collectionId: collection.id,
+                ownerId: collection.userId
+            )
+            let metadataPending = await self.isPendingSync(
+                collectionId: collection.id,
+                ownerId: collection.userId
+            )
 
             if metadataPending || !membershipSynced {
                 await self.operationQueueService.markFailed(
@@ -285,15 +342,43 @@ actor CollectionRepository {
         return try applyMembershipOverlay(to: models.map { try $0.toDomain() }, context: context).first
     }
 
+    func archiveImportIdentityDisposition(
+        collectionID: UUID
+    ) async throws -> CollectionArchiveImportIdentityDisposition {
+        guard let ownerId = await MainActor.run(body: { CurrentUserSession.shared.userId }) else {
+            return .preserveStableID
+        }
+        if try localDeletedCollectionTombstone(collectionId: collectionID, ownerId: ownerId) != nil {
+            return .remapDeletedID
+        }
+        return .preserveStableID
+    }
+
     /// Fetch a specific collection by ID
     func fetch(id: UUID) async throws -> Collection? {
+        let currentUserId = await MainActor.run { CurrentUserSession.shared.userId }
+        return try await fetch(id: id, preferredOwnerId: currentUserId)
+    }
+
+    internal func fetch(id: UUID, preferredOwnerId: UUID?) async throws -> Collection? {
         let context = ModelContext(modelContainer)
         let predicate = #Predicate<CollectionModel> { model in
             model.id == id
         }
         let descriptor = FetchDescriptor(predicate: predicate)
 
-        guard let model = try context.fetch(descriptor).first else {
+        let models = try context.fetch(descriptor)
+        let model: CollectionModel?
+        if let preferredOwnerId {
+            model = models
+                .filter { $0.userId == preferredOwnerId }
+                .max(by: { $0.updatedAt < $1.updatedAt })
+        } else {
+            let owners = Set(models.map(\.userId))
+            model = owners.count <= 1 ? models.max(by: { $0.updatedAt < $1.updatedAt }) : nil
+        }
+
+        guard let model else {
             return nil
         }
 
@@ -328,8 +413,10 @@ actor CollectionRepository {
         let context = ModelContext(modelContainer)
 
         // Find existing model
+        let collectionId = collection.id
+        let collectionOwnerId = collection.userId
         let predicate = #Predicate<CollectionModel> { model in
-            model.id == collection.id
+            model.id == collectionId && model.userId == collectionOwnerId
         }
         let descriptor = FetchDescriptor(predicate: predicate)
 
@@ -363,7 +450,12 @@ actor CollectionRepository {
         let oldCoverImagePath = existingModel.coverImagePath
         let oldCloudCoverImageRecordName = existingModel.cloudCoverImageRecordName
         let oldCoverImageModifiedAt = existingModel.coverImageModifiedAt
-        try await assertCanModify(oldCollection)
+        // An ID plus an attacker-supplied owner must not disclose whether a
+        // different account owns that logical collection.
+        try await assertCanModify(oldCollection, discloseExistingRecord: false)
+        let accountScope = queueCloudSync
+            ? try await verifiedAccountScope(for: collection.userId)
+            : nil
 
         // 1. Update locally (immediate)
         let updatedModel = try CollectionModel.from(collection)
@@ -405,6 +497,13 @@ actor CollectionRepository {
 
         try context.save()
         // Updated collection in local database
+
+        guard let persistedCollection = try await fetch(
+            id: collection.id,
+            preferredOwnerId: collection.userId
+        ) else {
+            throw CollectionRepositoryError.collectionNotFound
+        }
 
         // Verify the save by reading it back
         let verifyDescriptor = FetchDescriptor(predicate: predicate)
@@ -463,26 +562,56 @@ actor CollectionRepository {
         }
 
         // 2. Queue operation for background sync
+        guard let accountScope else {
+            throw CollectionRepositoryError.accountIdentityNotVerified
+        }
         let operationID = await operationQueueService.addOperation(
             type: .update,
             entityType: .collection,
-            entityId: collection.id
+            entityId: persistedCollection.id,
+            ownerId: persistedCollection.userId,
+            accountRevision: accountScope.revision,
+            accountIdentity: accountScope.cloudKitIdentity
         )
 
         // 3. Trigger sync in background (non-blocking)
-        Task.detached { [weak self, collection, operationID] in
-            guard let self = self else { return }
+        Task.detached { [weak self, persistedCollection, operationID, operationQueueService] in
+            guard let self else {
+                await operationQueueService.markFailed(operationId: operationID, error: "Collection repository unavailable")
+                return
+            }
+
+            guard await self.authorizeCollectionReplay(operationID: operationID, entityOwnerId: persistedCollection.userId) else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: operationID)
-            guard let latestCollection = try? await self.fetch(id: collection.id),
-                  latestCollection.updatedAt == collection.updatedAt,
-                  latestCollection.visibility == collection.visibility else { return }
+            guard let latestCollection = try? await self.fetch(
+                id: persistedCollection.id,
+                preferredOwnerId: persistedCollection.userId
+            ) else {
+                await operationQueueService.markCompleted(operationId: operationID)
+                return
+            }
+            guard QueuedMutationFreshnessPolicy.matchesPersistedMutation(
+                persistedUpdatedAt: latestCollection.updatedAt,
+                persistedVisibility: latestCollection.visibility,
+                expectedUpdatedAt: persistedCollection.updatedAt,
+                expectedVisibility: persistedCollection.visibility
+            ) else {
+                await operationQueueService.markCompleted(operationId: operationID)
+                return
+            }
 
             // Sync to CloudKit
             await self.syncCollectionToCloudKit(latestCollection)
-            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(collectionId: latestCollection.id)
-            let metadataPending = await self.isPendingSync(collectionId: latestCollection.id)
+            let membershipSynced = await self.syncPendingMembershipEdgesToCloudKit(
+                collectionId: latestCollection.id,
+                ownerId: latestCollection.userId
+            )
+            let metadataPending = await self.isPendingSync(
+                collectionId: latestCollection.id,
+                ownerId: latestCollection.userId
+            )
 
             if metadataPending || !membershipSynced {
                 await self.operationQueueService.markFailed(
@@ -603,10 +732,13 @@ actor CollectionRepository {
         let membershipModels = try context.fetch(FetchDescriptor<CollectionMembershipModel>())
         guard !membershipModels.isEmpty else { return collections }
 
-        let edgesByCollection = Dictionary(grouping: membershipModels.map { $0.toDomain() }, by: \.collectionId)
+        let edgesByCollection = Dictionary(grouping: membershipModels.map { $0.toDomain() }) {
+            CollectionOwnerKey(collectionId: $0.collectionId, ownerId: $0.ownerId)
+        }
 
         return collections.map { collection in
-            guard let edges = edgesByCollection[collection.id], !edges.isEmpty else {
+            let key = CollectionOwnerKey(collectionId: collection.id, ownerId: collection.userId)
+            guard let edges = edgesByCollection[key], !edges.isEmpty else {
                 return collection
             }
 
@@ -660,9 +792,12 @@ actor CollectionRepository {
     ) throws {
         let collectionId = edge.collectionId
         let recipeId = edge.recipeId
+        let ownerId = edge.ownerId
         let descriptor = FetchDescriptor<CollectionMembershipModel>(
             predicate: #Predicate { model in
-                model.collectionId == collectionId && model.recipeId == recipeId
+                model.collectionId == collectionId &&
+                    model.recipeId == recipeId &&
+                    model.ownerId == ownerId
             }
         )
 
@@ -696,10 +831,12 @@ actor CollectionRepository {
         }
     }
 
-    private func localMembershipEdges(collectionId: UUID) throws -> [CollectionMembershipEdge] {
+    private func localMembershipEdges(collectionId: UUID, ownerId: UUID) throws -> [CollectionMembershipEdge] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionMembershipModel>(
-            predicate: #Predicate { $0.collectionId == collectionId }
+            predicate: #Predicate {
+                $0.collectionId == collectionId && $0.ownerId == ownerId
+            }
         )
         return try context.fetch(descriptor).map { $0.toDomain() }
     }
@@ -708,8 +845,14 @@ actor CollectionRepository {
         _ tombstone: DeletedCollectionTombstone,
         context: ModelContext
     ) throws {
-        let descriptor = FetchDescriptor<DeletedCollectionModel>()
-        let existing = try context.fetch(descriptor).first { $0.collectionId == tombstone.collectionId }
+        let collectionId = tombstone.collectionId
+        let ownerId = tombstone.ownerId
+        let descriptor = FetchDescriptor<DeletedCollectionModel>(
+            predicate: #Predicate {
+                $0.collectionId == collectionId && $0.ownerId == ownerId
+            }
+        )
+        let existing = try context.fetch(descriptor).first
 
         if let existing {
             guard existing.deletedAt == nil || existing.deletedAt! <= tombstone.deletedAt else {
@@ -734,10 +877,13 @@ actor CollectionRepository {
         }
     }
 
-    private func localDeletedCollectionTombstone(collectionId: UUID) throws -> DeletedCollectionTombstone? {
+    private func localDeletedCollectionTombstone(
+        collectionId: UUID,
+        ownerId: UUID
+    ) throws -> DeletedCollectionTombstone? {
         let context = ModelContext(modelContainer)
         return try localDeletedCollectionTombstones(context: context)
-            .first { $0.collectionId == collectionId }
+            .first { $0.collectionId == collectionId && $0.ownerId == ownerId }
     }
 
     private func localDeletedCollectionTombstones(context: ModelContext) throws -> [DeletedCollectionTombstone] {
@@ -765,8 +911,9 @@ actor CollectionRepository {
         context: ModelContext
     ) throws {
         let collectionId = tombstone.collectionId
+        let ownerId = tombstone.ownerId
         let descriptor = FetchDescriptor<CollectionModel>(
-            predicate: #Predicate { $0.id == collectionId }
+            predicate: #Predicate { $0.id == collectionId && $0.userId == ownerId }
         )
 
         guard let model = try context.fetch(descriptor).first else { return }
@@ -816,13 +963,23 @@ actor CollectionRepository {
     /// Delete a collection (optimistic - returns immediately)
     func delete(id: UUID) async throws {
         let context = ModelContext(modelContainer)
-
-        let predicate = #Predicate<CollectionModel> { model in
-            model.id == id
+        let currentUserId = await MainActor.run { CurrentUserSession.shared.userId }
+        let matchingModels = try context.fetch(
+            FetchDescriptor<CollectionModel>(predicate: #Predicate { $0.id == id })
+        )
+        let model: CollectionModel?
+        if let currentUserId {
+            model = matchingModels
+                .filter { $0.userId == currentUserId }
+                .max(by: { $0.updatedAt < $1.updatedAt })
+        } else {
+            let owners = Set(matchingModels.map(\.userId))
+            model = owners.count <= 1
+                ? matchingModels.max(by: { $0.updatedAt < $1.updatedAt })
+                : nil
         }
-        let descriptor = FetchDescriptor(predicate: predicate)
 
-        guard let model = try context.fetch(descriptor).first else {
+        guard let model else {
             throw CollectionRepositoryError.collectionNotFound
         }
 
@@ -831,6 +988,7 @@ actor CollectionRepository {
             context: context
         ).first ?? model.toDomain()
         try await assertCanModify(collection)
+        let accountScope = try await verifiedAccountScope(for: collection.userId)
         let deletedAt = Date()
         let tombstone = DeletedCollectionTombstone(
             collectionId: collection.id,
@@ -869,12 +1027,20 @@ actor CollectionRepository {
             payload: try? JSONEncoder().encode(CollectionDeletePayload(
                 collectionId: id,
                 ownerId: collection.userId
-            ))
+            )),
+            ownerId: collection.userId,
+            accountRevision: accountScope.revision,
+            accountIdentity: accountScope.cloudKitIdentity
         )
 
         // 3. Trigger CloudKit deletion in background (non-blocking)
-        Task.detached { [weak self, tombstone, removedMembershipEdges] in
-            guard let self = self else { return }
+        Task.detached { [weak self, tombstone, removedMembershipEdges, operationQueueService] in
+            guard let self else {
+                await operationQueueService.markFailed(operationId: operationID, error: "Collection repository unavailable")
+                return
+            }
+
+            guard await self.authorizeCollectionReplay(operationID: operationID, entityOwnerId: tombstone.ownerId) else { return }
 
             // Mark operation as in progress
             await self.operationQueueService.markInProgress(operationId: operationID)
@@ -901,9 +1067,15 @@ actor CollectionRepository {
         }
     }
 
-    private func deleteLocalMembershipEdges(collectionId: UUID, context: ModelContext) throws {
+    private func deleteLocalMembershipEdges(
+        collectionId: UUID,
+        ownerId: UUID,
+        context: ModelContext
+    ) throws {
         let descriptor = FetchDescriptor<CollectionMembershipModel>(
-            predicate: #Predicate { $0.collectionId == collectionId }
+            predicate: #Predicate {
+                $0.collectionId == collectionId && $0.ownerId == ownerId
+            }
         )
         for model in try context.fetch(descriptor) {
             context.delete(model)
@@ -929,6 +1101,7 @@ actor CollectionRepository {
 
     /// Sync collection to CloudKit PUBLIC database
     private func syncCollectionToCloudKit(_ collection: Collection) async {
+        let ownerKey = CollectionOwnerKey(collectionId: collection.id, ownerId: collection.userId)
         guard await AccountDeletionGate.shared.permitsWrite(ownerID: collection.userId) else {
             return
         }
@@ -941,7 +1114,7 @@ actor CollectionRepository {
                 )
             } catch {
                 logger.error("Web collection unpublish failed for '\(collection.name)': \(error.localizedDescription)")
-                pendingSyncCollections.insert(collection.id)
+                pendingSyncCollections.insert(ownerKey)
                 return
             }
         }
@@ -950,30 +1123,47 @@ actor CollectionRepository {
 
         guard isAvailable else {
             logger.warning("⚠️ CloudKit not available - collection will sync later: \(collection.name)")
-            pendingSyncCollections.insert(collection.id)
+            pendingSyncCollections.insert(ownerKey)
             return
         }
 
         do {
-            if let tombstone = try localDeletedCollectionTombstone(collectionId: collection.id) {
-                let removedEdges = try localMembershipEdges(collectionId: collection.id)
+            if let tombstone = try localDeletedCollectionTombstone(
+                collectionId: collection.id,
+                ownerId: collection.userId
+            ) {
+                let removedEdges = try localMembershipEdges(
+                    collectionId: collection.id,
+                    ownerId: collection.userId
+                )
                 try await syncCollectionDeletionToCloudKit(
                     tombstone: tombstone,
                     removedMembershipEdges: removedEdges
                 )
-                pendingSyncCollections.remove(collection.id)
+                pendingSyncCollections.remove(ownerKey)
                 return
             }
 
             // Always sync the freshest local state to reduce stale change-tag conflicts.
-            guard let collectionToSync = try await fetch(id: collection.id) else {
-                pendingSyncCollections.remove(collection.id)
+            guard let collectionToSync = try await fetch(
+                id: collection.id,
+                preferredOwnerId: collection.userId
+            ) else {
+                pendingSyncCollections.remove(ownerKey)
                 return
             }
 
             // Syncing collection to CloudKit
-            try await collectionCloudService.saveCollection(collectionToSync)
-            try await syncCoverImageIfNeeded(for: collectionToSync)
+            let savedRecordName = try await collectionCloudService.saveCollection(collectionToSync)
+            try persistCloudRecordName(
+                savedRecordName,
+                collectionId: collectionToSync.id,
+                ownerId: collectionToSync.userId
+            )
+            try await syncCoverImageIfNeeded(
+                for: collectionToSync,
+                savedRecordName: savedRecordName
+            )
             if collectionToSync.visibility == .publicRecipe,
                let externalShareService {
                 let didUpdateWebSnapshot = await externalShareService.updateCollectionShareMetadata(
@@ -981,22 +1171,25 @@ actor CollectionRepository {
                     recipeIds: collectionToSync.recipeIds
                 )
                 if !didUpdateWebSnapshot {
-                    pendingSyncCollections.insert(collectionToSync.id)
+                    pendingSyncCollections.insert(ownerKey)
                     return
                 }
             }
             // Successfully synced collection to CloudKit
 
             // Remove from pending if it was there
-            pendingSyncCollections.remove(collectionToSync.id)
+            pendingSyncCollections.remove(ownerKey)
         } catch {
             logger.error("❌ CloudKit sync failed for collection '\(collection.name)': \(error.localizedDescription)")
             logger.error("❌ Error details: \(error)")
-            pendingSyncCollections.insert(collection.id)
+            pendingSyncCollections.insert(ownerKey)
         }
     }
 
-    private func syncCoverImageIfNeeded(for collection: Collection) async throws {
+    private func syncCoverImageIfNeeded(
+        for collection: Collection,
+        savedRecordName: String
+    ) async throws {
         guard collection.coverImageType == .customImage,
               let coverImageURL = collection.coverImageURL else {
             return
@@ -1012,24 +1205,60 @@ actor CollectionRepository {
         let imageData = try Data(contentsOf: coverImageURL)
         let uploadedRecordName = try await collectionCloudService.uploadCollectionCoverImage(
             collectionId: collection.id,
+            ownerId: collection.userId,
+            expectedRecordName: Self.coverMutationRecordName(
+                newlySavedRecordName: savedRecordName,
+                legacyRecordName: collection.cloudCoverImageRecordName
+            ),
             imageData: imageData
         )
         try await markCoverImageUploaded(
             collectionId: collection.id,
+            ownerId: collection.userId,
             recordName: uploadedRecordName,
             modifiedAt: Date()
         )
     }
 
+    nonisolated static func coverMutationRecordName(
+        newlySavedRecordName: String?,
+        legacyRecordName: String?
+    ) -> String? {
+        if let newlySavedRecordName, !newlySavedRecordName.isEmpty {
+            return newlySavedRecordName
+        }
+        return legacyRecordName
+    }
+
+    private func persistCloudRecordName(
+        _ recordName: String,
+        collectionId: UUID,
+        ownerId: UUID
+    ) throws {
+        guard !recordName.isEmpty else { throw CollectionRepositoryError.invalidData }
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate {
+                $0.id == collectionId && $0.userId == ownerId
+            }
+        )
+        guard let model = try context.fetch(descriptor).first else {
+            throw CollectionRepositoryError.collectionNotFound
+        }
+        model.cloudRecordName = recordName
+        try context.save()
+    }
+
     private func markCoverImageUploaded(
         collectionId: UUID,
+        ownerId: UUID,
         recordName: String,
         modifiedAt: Date
     ) async throws {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<CollectionModel>(
             predicate: #Predicate { model in
-                model.id == collectionId
+                model.id == collectionId && model.userId == ownerId
             }
         )
 
@@ -1042,14 +1271,19 @@ actor CollectionRepository {
         try context.save()
     }
 
-    private func syncPendingMembershipEdgesToCloudKit(collectionId: UUID) async -> Bool {
+    private func syncPendingMembershipEdgesToCloudKit(
+        collectionId: UUID,
+        ownerId: UUID
+    ) async -> Bool {
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else { return false }
 
         do {
             let context = ModelContext(modelContainer)
             let descriptor = FetchDescriptor<CollectionMembershipModel>(
-                predicate: #Predicate { $0.collectionId == collectionId }
+                predicate: #Predicate {
+                    $0.collectionId == collectionId && $0.ownerId == ownerId
+                }
             )
             let edges = try context.fetch(descriptor).map { $0.toDomain() }
             try await collectionCloudService.saveMembershipEdges(edges)
@@ -1096,7 +1330,11 @@ actor CollectionRepository {
             }
         }
 
-        try await collectionCloudService.deleteCollection(tombstone.collectionId)
+        try await collectionCloudService.deleteCollection(
+            tombstone.collectionId,
+            ownerId: tombstone.ownerId,
+            expectedRecordName: tombstone.cloudRecordName
+        )
 
         if let deferredError {
             throw deferredError
@@ -1108,8 +1346,10 @@ actor CollectionRepository {
         return ckError.code == .unknownItem || ckError.errorCode == 11 || ckError.code == .invalidArguments
     }
 
-    private func isPendingSync(collectionId: UUID) -> Bool {
-        pendingSyncCollections.contains(collectionId)
+    private func isPendingSync(collectionId: UUID, ownerId: UUID) -> Bool {
+        pendingSyncCollections.contains(
+            CollectionOwnerKey(collectionId: collectionId, ownerId: ownerId)
+        )
     }
 
     private func startOperationQueueReplayTask() {
@@ -1147,14 +1387,29 @@ actor CollectionRepository {
     }
 
     private func replayCollectionOperation(_ operation: SyncOperation) async {
-        await operationQueueService.markInProgress(operationId: operation.id)
-
         switch operation.type {
         case .create, .update:
             do {
-                guard let collection = try await fetch(id: operation.entityId) else {
-                    if let tombstone = try localDeletedCollectionTombstone(collectionId: operation.entityId) {
-                        let removedEdges = try localMembershipEdges(collectionId: operation.entityId)
+                guard let replayOwnerId = await replayOwnerId(for: operation) else {
+                    return
+                }
+                guard await authorizeCollectionReplay(operation, entityOwnerId: replayOwnerId) else {
+                    return
+                }
+
+                guard let collection = try await fetch(
+                    id: operation.entityId,
+                    preferredOwnerId: replayOwnerId
+                ) else {
+                    if let tombstone = try localDeletedCollectionTombstone(
+                        collectionId: operation.entityId,
+                        ownerId: replayOwnerId
+                    ) {
+                        await operationQueueService.markInProgress(operationId: operation.id)
+                        let removedEdges = try localMembershipEdges(
+                            collectionId: operation.entityId,
+                            ownerId: replayOwnerId
+                        )
                         try await syncCollectionDeletionToCloudKit(
                             tombstone: tombstone,
                             removedMembershipEdges: removedEdges
@@ -1164,9 +1419,15 @@ actor CollectionRepository {
                     return
                 }
 
+                await operationQueueService.markInProgress(operationId: operation.id)
+
                 await syncCollectionToCloudKit(collection)
-                let membershipSynced = await syncPendingMembershipEdgesToCloudKit(collectionId: collection.id)
-                if pendingSyncCollections.contains(operation.entityId) || !membershipSynced {
+                let membershipSynced = await syncPendingMembershipEdgesToCloudKit(
+                    collectionId: collection.id,
+                    ownerId: collection.userId
+                )
+                let key = CollectionOwnerKey(collectionId: collection.id, ownerId: collection.userId)
+                if pendingSyncCollections.contains(key) || !membershipSynced {
                     await operationQueueService.markFailed(
                         operationId: operation.id,
                         error: "Collection replay sync incomplete"
@@ -1183,8 +1444,18 @@ actor CollectionRepository {
 
         case .delete:
             do {
+                let payload = operation.payload.flatMap {
+                    try? JSONDecoder().decode(CollectionDeletePayload.self, from: $0)
+                }
+                let currentUserId = await MainActor.run { CurrentUserSession.shared.userId }
+                guard let replayOwnerId = payload?.ownerId ?? operation.ownerId ?? currentUserId else {
+                    return
+                }
                 let tombstone = CollectionDeleteReplayPolicy.tombstoneForReplay(
-                    localTombstone: try localDeletedCollectionTombstone(collectionId: operation.entityId),
+                    localTombstone: try localDeletedCollectionTombstone(
+                        collectionId: operation.entityId,
+                        ownerId: replayOwnerId
+                    ),
                     payloadData: operation.payload,
                     defaultDeletedAt: Date()
                 )
@@ -1192,7 +1463,13 @@ actor CollectionRepository {
                     throw CollectionRepositoryError.invalidData
                 }
 
-                let removedEdges = try localMembershipEdges(collectionId: operation.entityId)
+                guard await authorizeCollectionReplay(operation, entityOwnerId: tombstone.ownerId) else { return }
+                await operationQueueService.markInProgress(operationId: operation.id)
+
+                let removedEdges = try localMembershipEdges(
+                    collectionId: operation.entityId,
+                    ownerId: tombstone.ownerId
+                )
                 try await syncCollectionDeletionToCloudKit(
                     tombstone: tombstone,
                     removedMembershipEdges: removedEdges
@@ -1206,11 +1483,61 @@ actor CollectionRepository {
             }
 
         case .acceptConnection, .rejectConnection:
+            await operationQueueService.markInProgress(operationId: operation.id)
             await operationQueueService.markFailed(
                 operationId: operation.id,
                 error: "Unsupported collection queue operation: \(operation.type.rawValue)"
             )
         }
+    }
+
+    private func replayOwnerId(for operation: SyncOperation) async -> UUID? {
+        if let ownerId = operation.ownerId {
+            return ownerId
+        }
+        return await MainActor.run { CurrentUserSession.shared.userId }
+    }
+
+    private func authorizeCollectionReplay(
+        _ operation: SyncOperation,
+        entityOwnerId: UUID
+    ) async -> Bool {
+        let currentScope = await MainActor.run {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: entityOwnerId)
+        }
+        switch SyncOperationAccountPolicy.decision(
+            operation: operation,
+            entityOwnerId: entityOwnerId,
+            currentScope: currentScope
+        ) {
+        case .allowed:
+            return true
+        case .migrateLegacy:
+            guard let currentScope else { return false }
+            _ = await operationQueueService.bindLegacyOperation(
+                operationId: operation.id,
+                scope: currentScope
+            )
+            return true
+        case .deferred:
+            return false
+        case .reject:
+            await operationQueueService.quarantineOperation(
+                operationId: operation.id,
+                error: "Collection operation belongs to another account generation"
+            )
+            return false
+        }
+    }
+
+    private func authorizeCollectionReplay(
+        operationID: UUID,
+        entityOwnerId: UUID
+    ) async -> Bool {
+        guard let operation = await operationQueueService.getOperation(operationId: operationID) else {
+            return false
+        }
+        return await authorizeCollectionReplay(operation, entityOwnerId: entityOwnerId)
     }
 
     // MARK: - Recipe Visibility Change Handling
@@ -1263,9 +1590,11 @@ actor CollectionRepository {
 
         do {
             let snapshot = try await collectionCloudService.fetchSyncSnapshot(forUserId: userId)
-            let remoteDeletedCollections = snapshot.deletedCollections
-            let cloudCollections = snapshot.collections
-            let cloudMembershipEdges = snapshot.membershipEdges
+            // Treat the requested owner as the sync boundary even if a backend
+            // query or malformed legacy record returns a cross-owner row.
+            let remoteDeletedCollections = snapshot.deletedCollections.filter { $0.ownerId == userId }
+            let cloudCollections = snapshot.collections.filter { $0.userId == userId }
+            let cloudMembershipEdges = snapshot.membershipEdges.filter { $0.ownerId == userId }
             let context = ModelContext(modelContainer)
             let localCollectionModels = try context.fetch(
                 FetchDescriptor<CollectionModel>(predicate: #Predicate { $0.userId == userId })
@@ -1323,7 +1652,9 @@ actor CollectionRepository {
                 }
             }
             let deletedCollectionIds = Set(
-                try localDeletedCollectionTombstones(context: context).map(\.collectionId)
+                try localDeletedCollectionTombstones(context: context)
+                    .filter { $0.ownerId == userId }
+                    .map(\.collectionId)
             )
             let activeCloudMembershipEdges = cloudMembershipEdges.filter {
                 !deletedCollectionIds.contains($0.collectionId)
@@ -1342,10 +1673,16 @@ actor CollectionRepository {
                 guard !deletedCollectionIds.contains(cloudCollection.id) else {
                     logger.info("Skipping collection suppressed by deleted collection tombstone: \(cloudCollection.id)")
                     if let tombstone = CollectionDeleteReplayPolicy.tombstoneForSuppressedActiveRecord(
-                        localTombstone: try localDeletedCollectionTombstone(collectionId: cloudCollection.id),
+                        localTombstone: try localDeletedCollectionTombstone(
+                            collectionId: cloudCollection.id,
+                            ownerId: userId
+                        ),
                         remoteTombstone: remoteDeletedByCollectionId[cloudCollection.id]
                     ) {
-                        let removedEdges = try localMembershipEdges(collectionId: cloudCollection.id)
+                        let removedEdges = try localMembershipEdges(
+                            collectionId: cloudCollection.id,
+                            ownerId: userId
+                        )
                         do {
                             try await syncCollectionDeletionToCloudKit(
                                 tombstone: tombstone,
@@ -1442,6 +1779,7 @@ actor CollectionRepository {
         // Delete each collection and wait for CloudKit cleanup before account deletion continues.
         for item in collectionsToDelete {
             let collection = item.collection
+            let accountScope = try await verifiedAccountScope(for: collection.userId)
             let deletedAt = Date()
             let tombstone = DeletedCollectionTombstone(
                 collectionId: collection.id,
@@ -1475,7 +1813,10 @@ actor CollectionRepository {
             let operationID = await operationQueueService.addOperation(
                 type: .delete,
                 entityType: .collection,
-                entityId: collection.id
+                entityId: collection.id,
+                ownerId: collection.userId,
+                accountRevision: accountScope.revision,
+                accountIdentity: accountScope.cloudKitIdentity
             )
             await operationQueueService.markInProgress(operationId: operationID)
 
@@ -1508,7 +1849,11 @@ actor CollectionRepository {
                     )
                 }
                 try await collectionCloudService.saveDeletedCollectionTombstone(tombstone)
-                try await collectionCloudService.deleteCollection(tombstone.collectionId)
+                try await collectionCloudService.deleteCollection(
+                    tombstone.collectionId,
+                    ownerId: tombstone.ownerId,
+                    expectedRecordName: tombstone.cloudRecordName
+                )
                 try await collectionCloudService.deleteMembershipEdges(
                     forCollectionId: tombstone.collectionId,
                     ownerId: tombstone.ownerId
@@ -1531,6 +1876,7 @@ enum CollectionRepositoryError: LocalizedError {
     case collectionNotFound
     case invalidData
     case notAuthorized
+    case accountIdentityNotVerified
 
     var errorDescription: String? {
         switch self {
@@ -1540,6 +1886,8 @@ enum CollectionRepositoryError: LocalizedError {
             return "Invalid collection data"
         case .notAuthorized:
             return "You can only edit your own collections"
+        case .accountIdentityNotVerified:
+            return "Your iCloud account is still being verified. Please try again."
         }
     }
 }

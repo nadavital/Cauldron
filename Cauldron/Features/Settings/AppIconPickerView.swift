@@ -21,14 +21,21 @@ struct AppIconPickerView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    // Progress header with share CTA
-                    progressHeader
-
-                    // Icons grid
-                    iconsGrid
+                if iconManager.supportsAlternateIcons {
+                    VStack(spacing: 16) {
+                        progressHeader
+                        iconsGrid
+                    }
+                    .padding()
+                } else {
+                    ContentUnavailableView(
+                        "App Icons Unavailable",
+                        systemImage: "app.dashed",
+                        description: Text("This device does not support changing the Cauldron app icon.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 360)
+                    .padding()
                 }
-                .padding()
             }
             .background(Color.cauldronBackground.ignoresSafeArea())
             .navigationTitle("App Icons")

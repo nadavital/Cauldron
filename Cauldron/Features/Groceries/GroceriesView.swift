@@ -91,6 +91,8 @@ struct GroceriesView: View {
                         } label: {
                             ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
                         }
+                        .accessibilityLabel("Profile and settings")
+                        .accessibilityHint("Opens your profile and app settings")
                     }
                 }
             }

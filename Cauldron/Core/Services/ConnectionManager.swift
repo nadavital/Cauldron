@@ -42,14 +42,76 @@ struct ManagedConnection: Equatable, Identifiable {
     var isAccepted: Bool { connection.isAccepted }
 }
 
-private struct QueuedConnectionPayload: Codable {
+struct QueuedConnectionPayload: Codable {
     let connection: Connection
     let actorUserId: UUID
 }
 
-private struct QueuedConnectionContext {
+struct QueuedConnectionContext {
     let connection: Connection
     let actorUserId: UUID?
+}
+
+nonisolated enum ConnectionOperationAccountPolicy {
+    static func decision(
+        operation: SyncOperation,
+        payload: QueuedConnectionContext,
+        currentUserId: UUID,
+        currentScope: SyncOperationAccountScope?
+    ) -> SyncOperationAccountDecision {
+        if let actorUserId = payload.actorUserId,
+           currentScope?.ownerId != actorUserId {
+            return .deferred
+        }
+        guard payload.actorUserId.map({ $0 == currentUserId }) ?? true else {
+            return .reject
+        }
+
+        let actionIsAuthorized: Bool
+        switch operation.type {
+        case .create:
+            actionIsAuthorized = payload.connection.fromUserId == currentUserId
+        case .acceptConnection, .rejectConnection, .update:
+            actionIsAuthorized = payload.connection.toUserId == currentUserId
+        case .delete:
+            actionIsAuthorized = payload.connection.fromUserId == currentUserId ||
+                payload.connection.toUserId == currentUserId
+        }
+        guard actionIsAuthorized else { return .reject }
+
+        // A pre-scope delete does not say which participant initiated it. It
+        // must not be adopted merely because the other participant later signs
+        // in on the same installation.
+        if operation.type == .delete,
+           payload.actorUserId == nil,
+           operation.ownerId == nil,
+           operation.accountRevision == nil {
+            return .reject
+        }
+
+        let validatedActorId: UUID?
+        if let actorUserId = payload.actorUserId {
+            validatedActorId = actorUserId
+        } else if let queuedOwnerId = operation.ownerId {
+            validatedActorId = queuedOwnerId
+        } else {
+            switch operation.type {
+            case .create:
+                validatedActorId = payload.connection.fromUserId
+            case .acceptConnection, .rejectConnection, .update:
+                validatedActorId = payload.connection.toUserId
+            case .delete:
+                validatedActorId = nil
+            }
+        }
+
+        guard validatedActorId == currentUserId else { return .reject }
+        return SyncOperationAccountPolicy.decision(
+            operation: operation,
+            entityOwnerId: currentUserId,
+            currentScope: currentScope
+        )
+    }
 }
 
 /// Errors that can occur during connection operations
@@ -201,13 +263,18 @@ class ConnectionManager: ObservableObject {
         guard connection.toUserId == actorUserId else {
             throw ConnectionError.permissionDenied
         }
+        let accountScope = try accountScopeForNewOperation(actorUserId: actorUserId)
 
         // Idempotency guard: ignore duplicate accepts while already accepted/syncing.
         if let existing = connections[connection.id], existing.connection.status == .accepted {
             return
         }
 
-        if await hasQueuedConnectionOperation(type: .acceptConnection, for: connection.id) {
+        if await hasQueuedConnectionOperation(
+            type: .acceptConnection,
+            for: connection.id,
+            actorUserId: actorUserId
+        ) {
             return
         }
         guard currentUserId == actorUserId, sessionRevision == capturedSessionRevision else {
@@ -250,12 +317,14 @@ class ConnectionManager: ObservableObject {
             updateBadgeCount()
             return
         }
+        guard let accountScope else { throw ConnectionError.permissionDenied }
 
         // Queue CloudKit sync via shared queue service
         await enqueueConnectionOperation(
             type: .acceptConnection,
             connection: acceptedConnection,
-            actorUserId: actorUserId
+            actorUserId: actorUserId,
+            accountScope: accountScope
         )
 
         // Update badge count (one less pending request)
@@ -268,6 +337,7 @@ class ConnectionManager: ObservableObject {
         guard connection.toUserId == actorUserId else {
             throw ConnectionError.permissionDenied
         }
+        let accountScope = try accountScopeForNewOperation(actorUserId: actorUserId)
 
         suppressConnection(connection.id, for: actorUserId)
 
@@ -283,12 +353,14 @@ class ConnectionManager: ObservableObject {
             updateBadgeCount()
             return
         }
+        guard let accountScope else { throw ConnectionError.permissionDenied }
 
         // Queue CloudKit delete in background (rejection = deletion for cleaner UX)
         await enqueueConnectionOperation(
             type: .rejectConnection,
             connection: connection,
-            actorUserId: actorUserId
+            actorUserId: actorUserId,
+            accountScope: accountScope
         )
 
         // Update badge count (one less pending request)
@@ -298,6 +370,7 @@ class ConnectionManager: ObservableObject {
     /// Send a connection request (optimistic update)
     func sendConnectionRequest(to userId: UUID, user: User) async throws {
         let actorUserId = currentUserId
+        let accountScope = try accountScopeForNewOperation(actorUserId: actorUserId)
         // Check if there's an existing connection (including rejected ones)
         if let existingConnection = connectionStatus(with: userId) {
             let conn = existingConnection.connection
@@ -356,9 +429,15 @@ class ConnectionManager: ObservableObject {
             )
             return
         }
+        guard let accountScope else { throw ConnectionError.permissionDenied }
 
         // Queue CloudKit sync via shared queue service
-        await enqueueConnectionOperation(type: .create, connection: connection, actorUserId: actorUserId)
+        await enqueueConnectionOperation(
+            type: .create,
+            connection: connection,
+            actorUserId: actorUserId,
+            accountScope: accountScope
+        )
     }
 
     /// Get connection status with a specific user
@@ -373,7 +452,32 @@ class ConnectionManager: ObservableObject {
     func retryFailedOperation(connectionId: UUID) async {
         syncErrors.removeValue(forKey: connectionId)
 
-        if let _ = await dependencies.operationQueueService.retryOperation(entityId: connectionId, entityType: .connection) {
+        guard isCloudSyncEnabled else { return }
+        let actorUserId = currentUserId
+        guard let accountScope = CurrentUserSession.shared.syncOperationAccountScope(ownerID: actorUserId) else {
+            syncErrors[connectionId] = .permissionDenied
+            return
+        }
+
+        let queuedOperations = await queuedConnectionOperations(for: connectionId)
+        for operation in queuedOperations {
+            guard let payload = await connectionPayload(from: operation) else {
+                await dependencies.operationQueueService.quarantineOperation(
+                    operationId: operation.id,
+                    error: "Connection operation has no locally validated payload"
+                )
+                continue
+            }
+            guard await authorizeConnectionOperation(
+                operation,
+                payload: payload,
+                userId: actorUserId
+            ) else {
+                continue
+            }
+            guard await dependencies.operationQueueService.retryOperation(operationId: operation.id) != nil else {
+                continue
+            }
             if let managedConnection = connections[connectionId] {
                 connections[connectionId] = ManagedConnection(
                     connection: managedConnection.connection,
@@ -397,7 +501,8 @@ class ConnectionManager: ObservableObject {
         await enqueueConnectionOperation(
             type: operationType,
             connection: managedConnection.connection,
-            actorUserId: currentUserId
+            actorUserId: actorUserId,
+            accountScope: accountScope
         )
     }
 
@@ -422,6 +527,7 @@ class ConnectionManager: ObservableObject {
         guard connection.fromUserId == actorUserId || connection.toUserId == actorUserId else {
             throw ConnectionError.permissionDenied
         }
+        let accountScope = try accountScopeForNewOperation(actorUserId: actorUserId)
         suppressConnection(connection.id, for: actorUserId)
         // Remove from local state immediately (optimistic)
         connections.removeValue(forKey: connection.id)
@@ -434,10 +540,24 @@ class ConnectionManager: ObservableObject {
         }
 
         guard isCloudSyncEnabled else { return }
-        await enqueueConnectionOperation(type: .delete, connection: connection, actorUserId: actorUserId)
+        guard let accountScope else { throw ConnectionError.permissionDenied }
+        await enqueueConnectionOperation(
+            type: .delete,
+            connection: connection,
+            actorUserId: actorUserId,
+            accountScope: accountScope
+        )
     }
 
     // MARK: - Private Methods
+
+    private func accountScopeForNewOperation(actorUserId: UUID) throws -> SyncOperationAccountScope? {
+        guard isCloudSyncEnabled else { return nil }
+        guard let scope = CurrentUserSession.shared.syncOperationAccountScope(ownerID: actorUserId) else {
+            throw ConnectionError.permissionDenied
+        }
+        return scope
+    }
 
     /// Load connections from local cache
     private func loadFromCache(userId: UUID) async {
@@ -458,7 +578,7 @@ class ConnectionManager: ObservableObject {
                     continue
                 }
 
-                let syncState = await syncStateForConnection(connection.id)
+                let syncState = await syncStateForConnection(connection.id, userId: userId)
                 guard isCurrentLoadValid(for: userId) else { return }
                 loadedConnections[connection.id] = ManagedConnection(
                     connection: connection,
@@ -552,7 +672,7 @@ class ConnectionManager: ObservableObject {
                 guard isCurrentLoadValid(for: userId) else { return }
 
                 // Don't override optimistic local states while an operation is queued.
-                if !(await hasQueuedConnectionOperation(for: connection.id)) {
+                if !(await hasQueuedConnectionOperation(for: connection.id, actorUserId: userId)) {
                     guard isCurrentLoadValid(for: userId) else { return }
                     connections[connection.id] = ManagedConnection(
                         connection: connection,
@@ -567,7 +687,7 @@ class ConnectionManager: ObservableObject {
 
             for deletedId in deletedConnectionIds {
                 // Skip if operation is currently queued for this connection
-                if await hasQueuedConnectionOperation(for: deletedId) {
+                if await hasQueuedConnectionOperation(for: deletedId, actorUserId: userId) {
                     continue
                 }
                 guard isCurrentLoadValid(for: userId) else { return }
@@ -606,7 +726,8 @@ class ConnectionManager: ObservableObject {
             await processQueuedConnectionOperation(connectionId: operation.entityId)
 
         case .operationStarted(let operation):
-            guard operation.entityType == .connection else { return }
+            guard operation.entityType == .connection,
+                  operation.ownerId == loadedUserId else { return }
             if let managed = connections[operation.entityId] {
                 connections[operation.entityId] = ManagedConnection(
                     connection: managed.connection,
@@ -615,7 +736,8 @@ class ConnectionManager: ObservableObject {
             }
 
         case .operationFailed(let operation):
-            guard operation.entityType == .connection else { return }
+            guard operation.entityType == .connection,
+                  operation.ownerId == loadedUserId else { return }
             if let managed = connections[operation.entityId] {
                 connections[operation.entityId] = ManagedConnection(
                     connection: managed.connection,
@@ -637,8 +759,18 @@ class ConnectionManager: ObservableObject {
 
         for operation in operations {
             guard isCurrentLoadValid(for: userId) else { return }
-            guard let payload = await connectionPayload(from: operation),
-                  operationBelongsToUser(operation, payload: payload, userId: userId) else {
+            guard let payload = await connectionPayload(from: operation) else {
+                await dependencies.operationQueueService.quarantineOperation(
+                    operationId: operation.id,
+                    error: "Connection operation has no locally validated payload"
+                )
+                continue
+            }
+            guard await authorizeConnectionOperation(
+                operation,
+                payload: payload,
+                userId: userId
+            ) else {
                 continue
             }
             await processQueuedConnectionOperation(connectionId: operation.entityId)
@@ -648,7 +780,8 @@ class ConnectionManager: ObservableObject {
     private func enqueueConnectionOperation(
         type: SyncOperationType,
         connection: Connection,
-        actorUserId: UUID
+        actorUserId: UUID,
+        accountScope: SyncOperationAccountScope
     ) async {
         let payload = try? JSONEncoder().encode(
             QueuedConnectionPayload(connection: connection, actorUserId: actorUserId)
@@ -658,7 +791,10 @@ class ConnectionManager: ObservableObject {
             type: type,
             entityType: .connection,
             entityId: connection.id,
-            payload: payload
+            payload: payload,
+            ownerId: accountScope.ownerId,
+            accountRevision: accountScope.revision,
+            accountIdentity: accountScope.cloudKitIdentity
         )
 
         if loadedUserId == actorUserId, CurrentUserSession.shared.userId == actorUserId {
@@ -668,36 +804,73 @@ class ConnectionManager: ObservableObject {
     }
 
     private func queuedConnectionOperation(for connectionId: UUID) async -> SyncOperation? {
-        let operations = await dependencies.operationQueueService.getOperations(for: connectionId)
+        (await queuedConnectionOperations(for: connectionId)).first
+    }
+
+    private func queuedConnectionOperations(for connectionId: UUID) async -> [SyncOperation] {
+        await dependencies.operationQueueService.getOperations(for: connectionId)
             .filter { $0.entityType == .connection }
             .sorted {
                 if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
                 return $0.id.uuidString < $1.id.uuidString
             }
-
-        return operations.first
     }
 
     private func hasQueuedConnectionOperation(
         type: SyncOperationType,
-        for connectionId: UUID
+        for connectionId: UUID,
+        actorUserId: UUID
     ) async -> Bool {
-        await dependencies.operationQueueService.getOperations(for: connectionId)
-            .contains { $0.entityType == .connection && $0.type == type && $0.status != .completed }
+        let operations = await dependencies.operationQueueService.getOperations(for: connectionId)
+        for operation in operations where operation.entityType == .connection &&
+            operation.type == type && operation.status != .completed {
+            if operation.ownerId == actorUserId { return true }
+            if operation.ownerId == nil,
+               operation.accountRevision == nil,
+               let payload = await connectionPayload(from: operation),
+               operationBelongsToUser(operation, payload: payload, userId: actorUserId) {
+                return true
+            }
+        }
+        return false
     }
 
-    private func hasQueuedConnectionOperation(for connectionId: UUID) async -> Bool {
-        guard let operation = await queuedConnectionOperation(for: connectionId) else {
-            return false
+    private func hasQueuedConnectionOperation(
+        for connectionId: UUID,
+        actorUserId: UUID
+    ) async -> Bool {
+        let operations = await dependencies.operationQueueService.getOperations(for: connectionId)
+        for operation in operations where operation.entityType == .connection && operation.status != .completed {
+            if operation.ownerId == actorUserId { return true }
+            if operation.ownerId == nil,
+               operation.accountRevision == nil,
+               let payload = await connectionPayload(from: operation),
+               operationBelongsToUser(operation, payload: payload, userId: actorUserId) {
+                return true
+            }
         }
-
-        return operation.status != .completed
+        return false
     }
 
-    private func syncStateForConnection(_ connectionId: UUID) async -> ConnectionSyncState {
-        guard let operation = await queuedConnectionOperation(for: connectionId) else {
-            return .synced
+    private func syncStateForConnection(
+        _ connectionId: UUID,
+        userId: UUID
+    ) async -> ConnectionSyncState {
+        var selectedOperation: SyncOperation?
+        for operation in await queuedConnectionOperations(for: connectionId) {
+            if operation.ownerId == userId {
+                selectedOperation = operation
+                break
+            }
+            if operation.ownerId == nil,
+               operation.accountRevision == nil,
+               let payload = await connectionPayload(from: operation),
+               operationBelongsToUser(operation, payload: payload, userId: userId) {
+                selectedOperation = operation
+                break
+            }
         }
+        guard let operation = selectedOperation else { return .synced }
 
         switch operation.status {
         case .inProgress:
@@ -743,13 +916,17 @@ class ConnectionManager: ObservableObject {
         }
 
         guard let payload = await connectionPayload(from: operation) else {
-            await dependencies.operationQueueService.markFailed(
+            await dependencies.operationQueueService.quarantineOperation(
                 operationId: operation.id,
-                error: "Missing connection payload for queued operation"
+                error: "Connection operation has no locally validated payload"
             )
             return
         }
-        guard operationBelongsToUser(operation, payload: payload, userId: sessionUserId) else {
+        guard await authorizeConnectionOperation(
+            operation,
+            payload: payload,
+            userId: sessionUserId
+        ) else {
             return
         }
         let connection = payload.connection
@@ -896,6 +1073,41 @@ class ConnectionManager: ObservableObject {
 
         guard actionIsAuthorized else { return false }
         return payload.actorUserId.map { $0 == userId } ?? true
+    }
+
+    private func authorizeConnectionOperation(
+        _ operation: SyncOperation,
+        payload: QueuedConnectionContext,
+        userId: UUID
+    ) async -> Bool {
+        let currentScope = CurrentUserSession.shared.syncOperationAccountScope(ownerID: userId)
+        switch ConnectionOperationAccountPolicy.decision(
+            operation: operation,
+            payload: payload,
+            currentUserId: userId,
+            currentScope: currentScope
+        ) {
+        case .allowed:
+            return true
+        case .migrateLegacy:
+            guard let currentScope else { return false }
+            guard let migrated = await dependencies.operationQueueService.bindLegacyOperation(
+                operationId: operation.id,
+                scope: currentScope
+            ), migrated.ownerId == currentScope.ownerId,
+               migrated.accountRevision == currentScope.revision else {
+                return false
+            }
+            return true
+        case .deferred:
+            return false
+        case .reject:
+            await dependencies.operationQueueService.quarantineOperation(
+                operationId: operation.id,
+                error: "Connection operation belongs to another account generation"
+            )
+            return false
+        }
     }
 
     // MARK: - Badge Management

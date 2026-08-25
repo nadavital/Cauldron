@@ -7,6 +7,7 @@
 
 import Foundation
 import CloudKit
+import CryptoKit
 import os
 
 struct DeletedCollectionTombstone: Sendable, Equatable {
@@ -42,6 +43,17 @@ struct CollectionSyncSnapshot: Sendable {
     let deletedCollections: [DeletedCollectionTombstone]
 }
 
+nonisolated struct CreatorBoundRecordCandidate: Equatable, Sendable {
+    let recordName: String
+    let creatorRecordName: String?
+    let updatedAt: Date
+}
+
+nonisolated struct CollectionCloudIdentity: Hashable, Sendable {
+    let ownerId: UUID
+    let collectionId: UUID
+}
+
 /// CloudKit service for collection-related operations.
 ///
 /// Handles:
@@ -49,12 +61,27 @@ struct CollectionSyncSnapshot: Sendable {
 /// - Collection reference management (saved collections)
 /// - Cover image upload/download
 actor CollectionCloudService {
+    private enum CollectionCreatorLookup {
+        case absent
+        case authorized(String)
+        case invalid
+    }
+
     private let core: CloudKitCore
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionCloudService")
     private let maxSaveAttempts = 3
+    private let publicationAuthorizer: @Sendable (VerifiedAccountMutationContext) async -> Bool
 
-    init(core: CloudKitCore) {
+    init(
+        core: CloudKitCore,
+        publicationAuthorizer: (@Sendable (VerifiedAccountMutationContext) async -> Bool)? = nil
+    ) {
         self.core = core
+        self.publicationAuthorizer = publicationAuthorizer ?? { context in
+            await MainActor.run {
+                CurrentUserSession.shared.permitsMutation(context)
+            }
+        }
     }
 
     // MARK: - Account Status (delegated to core)
@@ -70,16 +97,58 @@ actor CollectionCloudService {
     // MARK: - Collection CRUD
 
     /// Save collection to PUBLIC database
-    func saveCollection(_ collection: Collection) async throws {
+    @discardableResult
+    func saveCollection(
+        _ collection: Collection,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws -> String {
         logger.info("💾 Saving collection: \(collection.name)")
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: collection.userId,
+            provided: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: collection.id.uuidString)
+        let currentIdentity = try await validatedCurrentOwnerIdentity(for: collection.userId, in: db)
+        let existingRecords = try await fetchCollectionRecords(
+            collectionId: collection.id,
+            ownerId: collection.userId,
+            expectedRecordName: collection.cloudRecordName,
+            in: db
+        )
+        let knownRecordName = collection.cloudRecordName.flatMap { expectedName in
+            existingRecords.first(where: { record in
+                record.recordID.recordName == expectedName &&
+                    Self.recordCreatorMatchesAuthority(
+                        record.creatorUserRecordID?.recordName,
+                        authorityRecordName: currentIdentity.recordName,
+                        currentIdentityRecordName: currentIdentity.recordName
+                    )
+            })?.recordID.recordName
+        }
+        let recordID = (knownRecordName ?? Self.preferredCreatorBoundRecordName(
+            existingRecords.map {
+                CreatorBoundRecordCandidate(
+                    recordName: $0.recordID.recordName,
+                    creatorRecordName: $0.creatorUserRecordID?.recordName == CKCurrentUserDefaultName
+                        ? currentIdentity.recordName
+                        : $0.creatorUserRecordID?.recordName,
+                    updatedAt: ($0["updatedAt"] as? Date) ?? .distantPast
+                )
+            },
+            authorityRecordName: currentIdentity.recordName
+        )).map(CKRecord.ID.init(recordName:))
+            ?? Self.newCollectionRecordID(collectionId: collection.id)
         var conflictCandidate: CKRecord?
 
         if try await isSuppressedByDeletedCollectionTombstone(collection, in: db) {
             logger.warning("Skipping save for collection suppressed by deleted tombstone: \(collection.id)")
-            try await deleteCollectionRecordIfPresent(collection.id, in: db)
+            try await deleteCollectionRecordIfPresent(
+                collection.id,
+                ownerId: collection.userId,
+                authorizationContext: authorizationContext,
+                in: db
+            )
             throw CloudKitError.invalidRecord
         }
 
@@ -89,6 +158,15 @@ actor CollectionCloudService {
                 record = conflictCandidate
             } else {
                 record = try await fetchOrCreateCollectionRecord(recordID: recordID, in: db)
+            }
+            guard Self.recordCreatorMatchesAuthority(
+                record.creatorUserRecordID?.recordName,
+                authorityRecordName: currentIdentity.recordName,
+                currentIdentityRecordName: currentIdentity.recordName,
+                permitsUnclaimedRecord: true
+            ) else {
+                logger.error("Refusing to overwrite a Collection record claimed by another CloudKit creator")
+                throw CloudKitError.invalidRecord
             }
 
             let shouldClearMissingOptionalFields = conflictCandidate == nil
@@ -103,14 +181,23 @@ actor CollectionCloudService {
                     throw CloudKitError.invalidRecord
                 }
                 defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-                _ = try await db.save(record)
+                try await authorizeMutation(ownerID: collection.userId, context: authorizationContext)
+                let savedRecord = try await db.save(record)
                 logger.info("✅ Saved collection to PUBLIC database")
-                return
+                return savedRecord.recordID.recordName
             } catch let error as CKError where error.code == .serverRecordChanged {
                 let serverRecord = error.userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord
                 guard let serverRecord else {
                     logger.error("❌ Conflict without server record payload for collection: \(collection.name)")
                     throw error
+                }
+                guard Self.recordCreatorMatchesAuthority(
+                    serverRecord.creatorUserRecordID?.recordName,
+                    authorityRecordName: currentIdentity.recordName,
+                    currentIdentityRecordName: currentIdentity.recordName
+                ) else {
+                    logger.error("Refusing Collection conflict recovery against another CloudKit creator")
+                    throw CloudKitError.invalidRecord
                 }
 
                 logger.warning("⚠️ Save conflict for collection '\(collection.name)', retrying (\(attempt)/\(self.maxSaveAttempts))")
@@ -152,7 +239,6 @@ actor CollectionCloudService {
     private func fetchCollectionsWithoutOverlay(forUserId userId: UUID) async throws -> [Collection] {
 
         let db = try await core.getPublicDatabase()
-        let currentIdentity = try await core.getCurrentUserRecordID()
         let predicate = NSPredicate(format: "userId == %@", userId.uuidString)
         let query = CKQuery(recordType: CloudKitCore.RecordType.collection, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "updatedAt", ascending: false)]
@@ -171,8 +257,12 @@ actor CollectionCloudService {
 
                 for (_, result) in results.matchResults {
                     let record = try result.get()
-                    guard record.creatorUserRecordID == currentIdentity else { continue }
-                    collections.append(try collectionFromRecord(record))
+                    guard let collection = try? collectionFromRecord(record),
+                          collection.userId == userId,
+                          try await collectionRecordIsOwnerAuthenticated(record, in: db) else {
+                        continue
+                    }
+                    collections.append(collection)
                 }
 
                 cursor = results.queryCursor
@@ -185,7 +275,7 @@ actor CollectionCloudService {
             throw error
         }
 
-        return collections
+        return deduplicatedAndSortedCollections(collections)
     }
 
     /// Fetch shared collections from friends
@@ -207,7 +297,9 @@ actor CollectionCloudService {
 
                 let records = try await fetchAllRecords(matching: query, in: db)
                 for record in records {
-                    guard let collection = try? collectionFromRecord(record) else { continue }
+                    guard let collection = try? collectionFromRecord(record),
+                          friendIds.contains(collection.userId),
+                          try await collectionRecordIsOwnerAuthenticated(record, in: db) else { continue }
                     collections.append(collection)
                 }
             }
@@ -244,7 +336,9 @@ actor CollectionCloudService {
 
                 let records = try await fetchAllRecords(matching: query, in: db)
                 for record in records {
-                    guard let collection = try? collectionFromRecord(record) else { continue }
+                    guard let collection = try? collectionFromRecord(record),
+                          ownerIds.contains(collection.userId),
+                          try await collectionRecordIsOwnerAuthenticated(record, in: db) else { continue }
                     collections.append(collection)
                 }
             }
@@ -261,64 +355,165 @@ actor CollectionCloudService {
         }
     }
 
-    func fetchPublicCollections(ids: [UUID]) async throws -> [UUID: Collection] {
-        let uniqueIds = Array(Set(ids))
-        guard !uniqueIds.isEmpty else { return [:] }
+    func fetchPublicCollections(
+        identities: [CollectionCloudIdentity]
+    ) async throws -> [CollectionCloudIdentity: Collection] {
+        let uniqueIdentities = Array(Set(identities))
+        guard !uniqueIdentities.isEmpty else { return [:] }
 
         let db = try await core.getPublicDatabase()
-        var collections: [Collection] = []
+        var collectionsByIdentity: [CollectionCloudIdentity: Collection] = [:]
 
-        for id in uniqueIds {
-            let recordID = CKRecord.ID(recordName: id.uuidString)
+        for identity in uniqueIdentities {
             do {
-                let record = try await db.record(for: recordID)
-                let collection = try collectionFromRecord(record)
-                guard collection.visibility != .privateRecipe else { continue }
-                collections.append(collection)
-            } catch let error as CKError where error.code == .unknownItem {
-                continue
+                for record in try await fetchCollectionRecords(
+                    collectionId: identity.collectionId,
+                    ownerId: identity.ownerId,
+                    in: db
+                ) {
+                    let collection = try collectionFromRecord(record)
+                    guard collection.userId == identity.ownerId,
+                          collection.visibility != .privateRecipe,
+                          try await collectionRecordIsOwnerAuthenticated(record, in: db) else { continue }
+                    let existing = collectionsByIdentity[identity]
+                    if existing == nil || existing!.updatedAt < collection.updatedAt {
+                        collectionsByIdentity[identity] = collection
+                    }
+                }
             } catch {
-                logger.warning("Failed to fetch saved source collection \(id.uuidString): \(error.localizedDescription)")
+                logger.warning(
+                    "Failed to fetch saved source collection \(identity.collectionId.uuidString) " +
+                    "for owner \(identity.ownerId.uuidString): \(error.localizedDescription)"
+                )
                 throw error
             }
         }
 
-        let overlaidCollections = await applyMembershipOverlay(to: collections)
-        return Dictionary(uniqueKeysWithValues: overlaidCollections.map { ($0.id, $0) })
+        let overlaidCollections = await applyMembershipOverlay(to: Array(collectionsByIdentity.values))
+        return Dictionary(uniqueKeysWithValues: overlaidCollections.map {
+            (CollectionCloudIdentity(ownerId: $0.userId, collectionId: $0.id), $0)
+        })
     }
 
     /// Delete collection from PUBLIC database
-    func deleteCollection(_ collectionId: UUID, ownerId: UUID? = nil) async throws {
+    func deleteCollection(
+        _ collectionId: UUID,
+        ownerId: UUID,
+        expectedRecordName: String? = nil,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
         logger.info("🗑️ Deleting collection: \(collectionId)")
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
 
-        if let ownerId {
-            try await deleteMembershipEdges(forCollectionId: collectionId, ownerId: ownerId)
-        }
+        try await deleteMembershipEdges(
+            forCollectionId: collectionId,
+            ownerId: ownerId,
+            authorizationContext: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
-        try await deleteCollectionRecordIfPresent(collectionId, in: db)
+        try await deleteCollectionRecordIfPresent(
+            collectionId,
+            ownerId: ownerId,
+            expectedRecordName: expectedRecordName,
+            authorizationContext: authorizationContext,
+            in: db
+        )
     }
 
-    private func deleteCollectionRecordIfPresent(_ collectionId: UUID, in db: CKDatabase) async throws {
-        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
-
-        do {
-            try await db.deleteRecord(withID: recordID)
-            logger.info("✅ Deleted collection")
-        } catch let error as CKError where error.code == .unknownItem {
+    private func deleteCollectionRecordIfPresent(
+        _ collectionId: UUID,
+        ownerId: UUID,
+        expectedRecordName: String? = nil,
+        authorizationContext: VerifiedAccountMutationContext,
+        in db: CKDatabase
+    ) async throws {
+        let currentIdentity = try await core.getCurrentUserRecordID()
+        _ = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
+        let records = try await fetchCollectionRecords(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            expectedRecordName: expectedRecordName,
+            in: db
+        )
+            .filter {
+                Self.recordCreatorMatchesAuthority(
+                    $0.creatorUserRecordID?.recordName,
+                    authorityRecordName: currentIdentity.recordName,
+                    currentIdentityRecordName: currentIdentity.recordName
+                )
+            }
+        guard !records.isEmpty else {
             logger.info("Collection not found in CloudKit (already deleted): \(collectionId)")
+            return
         }
+        try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
+        try await deleteRecordIDs(records.map(\.recordID), in: db)
+        logger.info("✅ Deleted \(records.count) collection record(s)")
     }
 
     // MARK: - Collection Membership
+
+    nonisolated static func collectionRecordID(collectionId: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: collectionId.uuidString)
+    }
+
+    /// New Collection records use an unguessable physical name. The original
+    /// UUID-only name remains a compatibility alias for records created by
+    /// older versions, but a foreign preclaim can no longer block creation.
+    nonisolated static func newCollectionRecordID(
+        collectionId: UUID,
+        nonce: UUID = UUID()
+    ) -> CKRecord.ID {
+        CKRecord.ID(recordName: "collection_\(collectionId.uuidString)_\(nonce.uuidString)")
+    }
 
     nonisolated static func deletedCollectionRecordID(collectionId: UUID) -> CKRecord.ID {
         CKRecord.ID(recordName: "deletedCollection_\(collectionId.uuidString)")
     }
 
-    func saveDeletedCollectionTombstone(_ tombstone: DeletedCollectionTombstone) async throws {
+    /// New public state records use an unguessable suffix. The deterministic
+    /// identifier above remains a read/delete compatibility alias for records
+    /// written by older app versions, but is no longer a global creation lock
+    /// another authenticated user can preclaim.
+    nonisolated static func newDeletedCollectionRecordID(
+        collectionId: UUID,
+        nonce: UUID = UUID()
+    ) -> CKRecord.ID {
+        CKRecord.ID(recordName: "deletedCollection_\(collectionId.uuidString)_\(nonce.uuidString)")
+    }
+
+    func saveDeletedCollectionTombstone(
+        _ tombstone: DeletedCollectionTombstone,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: tombstone.ownerId,
+            provided: authorizationContext
+        )
         let db = try await core.getPublicDatabase()
-        let recordID = Self.deletedCollectionRecordID(collectionId: tombstone.collectionId)
+        let currentIdentity = try await validatedCurrentOwnerIdentity(for: tombstone.ownerId, in: db)
+        let existingRecords = try await fetchDeletedCollectionRecords(
+            collectionId: tombstone.collectionId,
+            ownerId: tombstone.ownerId,
+            in: db
+        )
+        let recordID = Self.preferredCreatorBoundRecordName(
+            existingRecords.map {
+                CreatorBoundRecordCandidate(
+                    recordName: $0.recordID.recordName,
+                    creatorRecordName: $0.creatorUserRecordID?.recordName == CKCurrentUserDefaultName
+                        ? currentIdentity.recordName
+                        : $0.creatorUserRecordID?.recordName,
+                    updatedAt: ($0["deletedAt"] as? Date) ?? .distantPast
+                )
+            },
+            authorityRecordName: currentIdentity.recordName
+        ).map(CKRecord.ID.init(recordName:))
+            ?? Self.newDeletedCollectionRecordID(collectionId: tombstone.collectionId)
         var tombstoneToSave = tombstone
         var conflictCandidate: CKRecord?
 
@@ -329,10 +524,24 @@ actor CollectionCloudService {
             } else {
                 record = try await fetchOrCreateDeletedCollectionRecord(recordID: recordID, in: db)
             }
+            guard Self.recordCreatorMatchesAuthority(
+                record.creatorUserRecordID?.recordName,
+                authorityRecordName: currentIdentity.recordName,
+                currentIdentityRecordName: currentIdentity.recordName,
+                permitsUnclaimedRecord: true
+            ) else {
+                logger.error("Refusing to overwrite a DeletedCollection record claimed by another CloudKit creator")
+                throw CloudKitError.invalidRecord
+            }
 
             populateDeletedCollectionRecord(record, from: tombstoneToSave)
 
             do {
+                guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: tombstone.ownerId) else {
+                    throw CloudKitError.invalidRecord
+                }
+                defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+                try await authorizeMutation(ownerID: tombstone.ownerId, context: authorizationContext)
                 _ = try await db.save(record)
                 return
             } catch let error as CKError where error.code == .serverRecordChanged {
@@ -377,14 +586,28 @@ actor CollectionCloudService {
                     results = try await db.records(matching: query, resultsLimit: 500)
                 }
 
-                tombstones += results.matchResults.compactMap { _, result in
-                    guard let record = try? result.get() else { return nil }
-                    return try? deletedCollectionTombstone(from: record)
+                for (_, result) in results.matchResults {
+                    guard let record = try? result.get(),
+                          let tombstone = try? deletedCollectionTombstone(from: record),
+                          tombstone.ownerId == ownerId,
+                          try await isCollectionStateRecordAuthorized(
+                              record,
+                              collectionId: tombstone.collectionId,
+                              ownerId: ownerId,
+                              in: db
+                          ) else {
+                        continue
+                    }
+                    tombstones.append(tombstone)
                 }
                 cursor = results.queryCursor
             } while cursor != nil
 
-            return tombstones
+            return Dictionary(grouping: tombstones) {
+                CollectionCloudIdentity(ownerId: $0.ownerId, collectionId: $0.collectionId)
+            }
+                .compactMap { _, duplicates in duplicates.max(by: { $0.deletedAt < $1.deletedAt }) }
+                .sorted { $0.deletedAt > $1.deletedAt }
         } catch let error as CKError {
             if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("DeletedCollection record type not yet in CloudKit schema - returning empty list")
@@ -398,18 +621,75 @@ actor CollectionCloudService {
         CKRecord.ID(recordName: "membership_\(collectionId.uuidString)_\(recipeId.uuidString)")
     }
 
-    func saveMembershipEdge(_ edge: CollectionMembershipEdge) async throws {
+    nonisolated static func newMembershipRecordID(
+        collectionId: UUID,
+        recipeId: UUID,
+        nonce: UUID = UUID()
+    ) -> CKRecord.ID {
+        CKRecord.ID(recordName: "membership_\(collectionId.uuidString)_\(recipeId.uuidString)_\(nonce.uuidString)")
+    }
+
+    func saveMembershipEdge(
+        _ edge: CollectionMembershipEdge,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: edge.ownerId,
+            provided: authorizationContext
+        )
+        try await withPublicationLease(ownerID: edge.ownerId) {
+            try await saveMembershipEdge(
+                edge,
+                authorizationContext: authorizationContext,
+                publicationLeaseHeld: true
+            )
+        }
+    }
+
+    private func saveMembershipEdge(
+        _ edge: CollectionMembershipEdge,
+        authorizationContext: VerifiedAccountMutationContext,
+        publicationLeaseHeld: Bool
+    ) async throws {
+        precondition(publicationLeaseHeld)
         let db = try await core.getPublicDatabase()
-        let recordID = Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+        let currentIdentity = try await validatedCurrentOwnerIdentity(for: edge.ownerId, in: db)
+        let existingRecords = try await fetchMembershipRecords(
+            matching: NSCompoundPredicate(andPredicateWithSubpredicates: [
+                NSPredicate(format: "ownerId == %@", edge.ownerId.uuidString),
+                NSPredicate(format: "collectionId == %@", edge.collectionId.uuidString),
+                NSPredicate(format: "recipeId == %@", edge.recipeId.uuidString),
+            ]),
+            expectedOwnerId: edge.ownerId
+        )
+        let recordID = Self.preferredCreatorBoundRecordName(
+            existingRecords.map {
+                CreatorBoundRecordCandidate(
+                    recordName: $0.recordID.recordName,
+                    creatorRecordName: $0.creatorUserRecordID?.recordName == CKCurrentUserDefaultName
+                        ? currentIdentity.recordName
+                        : $0.creatorUserRecordID?.recordName,
+                    updatedAt: ($0["updatedAt"] as? Date) ?? .distantPast
+                )
+            },
+            authorityRecordName: currentIdentity.recordName
+        ).map(CKRecord.ID.init(recordName:))
+            ?? Self.newMembershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
         var record = try await fetchOrCreateMembershipRecord(recordID: recordID, in: db)
 
         for attempt in 1...maxSaveAttempts {
+            guard Self.recordCreatorMatchesAuthority(
+                record.creatorUserRecordID?.recordName,
+                authorityRecordName: currentIdentity.recordName,
+                currentIdentityRecordName: currentIdentity.recordName,
+                permitsUnclaimedRecord: true
+            ) else {
+                logger.error("Refusing to overwrite a CollectionMembership record claimed by another CloudKit creator")
+                throw CloudKitError.invalidRecord
+            }
             populateMembershipRecord(record, from: edge)
             do {
-                guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: edge.ownerId) else {
-                    throw CloudKitError.invalidRecord
-                }
-                defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+                try await authorizeMutation(ownerID: edge.ownerId, context: authorizationContext)
                 _ = try await db.save(record)
                 return
             } catch let error as CKError where error.code == .serverRecordChanged {
@@ -432,34 +712,75 @@ actor CollectionCloudService {
         throw CloudKitError.syncConflict
     }
 
-    func saveMembershipEdges(_ edges: [CollectionMembershipEdge]) async throws {
+    func saveMembershipEdges(
+        _ edges: [CollectionMembershipEdge],
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
         guard !edges.isEmpty else { return }
 
         let db = try await core.getPublicDatabase()
         for (ownerId, ownerEdges) in Dictionary(grouping: edges, by: \.ownerId) {
-            let existingRecords = try await fetchMembershipRecords(forUserId: ownerId, in: db)
-            let existingByID = Dictionary(uniqueKeysWithValues: existingRecords.map { ($0.recordID, $0) })
-            let records = ownerEdges.compactMap { edge -> CKRecord? in
-                let recordID = Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
-                let record = existingByID[recordID]
-                    ?? CKRecord(recordType: CloudKitCore.RecordType.collectionMembership, recordID: recordID)
-                if let serverEdge = try? membershipEdge(from: record), serverEdge.updatedAt > edge.updatedAt {
-                    return nil
+            let ownerAuthorizationContext = try await resolvedAuthorizationContext(
+                ownerID: ownerId,
+                provided: authorizationContext
+            )
+            try await withPublicationLease(ownerID: ownerId) {
+                let currentIdentity = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
+                let existingRecords = try await fetchMembershipRecords(forUserId: ownerId, in: db)
+                let existingByLogicalKey = Dictionary(grouping: existingRecords) { record in
+                    let collectionID = record["collectionId"] as? String ?? ""
+                    let recipeID = record["recipeId"] as? String ?? ""
+                    return "\(collectionID)|\(recipeID)"
                 }
-                populateMembershipRecord(record, from: edge)
-                return record
-            }
+                let records = ownerEdges.compactMap { edge -> CKRecord? in
+                    let logicalKey = "\(edge.collectionId.uuidString)|\(edge.recipeId.uuidString)"
+                    let candidates = existingByLogicalKey[logicalKey] ?? []
+                    let preferredName = Self.preferredCreatorBoundRecordName(
+                        candidates.map {
+                            CreatorBoundRecordCandidate(
+                                recordName: $0.recordID.recordName,
+                                creatorRecordName: $0.creatorUserRecordID?.recordName == CKCurrentUserDefaultName
+                                    ? currentIdentity.recordName
+                                    : $0.creatorUserRecordID?.recordName,
+                                updatedAt: ($0["updatedAt"] as? Date) ?? .distantPast
+                            )
+                        },
+                        authorityRecordName: currentIdentity.recordName
+                    )
+                    let record = preferredName.flatMap { name in
+                        candidates.first { $0.recordID.recordName == name }
+                    } ?? CKRecord(
+                        recordType: CloudKitCore.RecordType.collectionMembership,
+                        recordID: Self.newMembershipRecordID(
+                            collectionId: edge.collectionId,
+                            recipeId: edge.recipeId
+                        )
+                    )
+                    if let serverEdge = try? membershipEdge(from: record), serverEdge.updatedAt > edge.updatedAt {
+                        return nil
+                    }
+                    populateMembershipRecord(record, from: edge)
+                    return record
+                }
 
-            for chunk in Self.chunked(records, size: 200) {
-                do {
-                    try await saveMembershipRecords(chunk, in: db)
-                } catch {
-                    // Preserve conflict semantics when another device changes an edge
-                    // between the owner query and the batch modify operation.
-                    for edge in ownerEdges where chunk.contains(where: {
-                        $0.recordID == Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
-                    }) {
-                        try await saveMembershipEdge(edge)
+                for chunk in Self.chunked(records, size: 200) {
+                    do {
+                        try await authorizeMutation(ownerID: ownerId, context: ownerAuthorizationContext)
+                        try await saveMembershipRecords(chunk, in: db)
+                    } catch {
+                        // Keep the owner's outer publication lease while resolving
+                        // every conflicted edge; account deletion cannot inventory a
+                        // partially published batch.
+                        for edge in ownerEdges where chunk.contains(where: {
+                            ($0["collectionId"] as? String) == edge.collectionId.uuidString &&
+                                ($0["recipeId"] as? String) == edge.recipeId.uuidString
+                        }) {
+                            try await saveMembershipEdge(
+                                edge,
+                                authorizationContext: ownerAuthorizationContext,
+                                publicationLeaseHeld: true
+                            )
+                        }
                     }
                 }
             }
@@ -470,7 +791,10 @@ actor CollectionCloudService {
         edges.map { edge in
             let record = CKRecord(
                 recordType: CloudKitCore.RecordType.collectionMembership,
-                recordID: Self.membershipRecordID(collectionId: edge.collectionId, recipeId: edge.recipeId)
+                recordID: Self.newMembershipRecordID(
+                    collectionId: edge.collectionId,
+                    recipeId: edge.recipeId
+                )
             )
             populateMembershipRecord(record, from: edge)
             return record
@@ -479,43 +803,74 @@ actor CollectionCloudService {
 
     func fetchMembershipEdges(forUserId userId: UUID) async throws -> [CollectionMembershipEdge] {
         let predicate = NSPredicate(format: "ownerId == %@", userId.uuidString)
-        return try await fetchMembershipRecords(matching: predicate).map(membershipEdge(from:))
+        return try await fetchMembershipRecords(matching: predicate, expectedOwnerId: userId).map(membershipEdge(from:))
     }
 
-    func deleteMembershipEdges(forCollectionId collectionId: UUID, ownerId: UUID) async throws {
+    func deleteMembershipEdges(
+        forCollectionId collectionId: UUID,
+        ownerId: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
+        let db = try await core.getPublicDatabase()
+        _ = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             NSPredicate(format: "ownerId == %@", ownerId.uuidString),
             NSPredicate(format: "collectionId == %@", collectionId.uuidString),
         ])
-        let records = try await fetchMembershipRecords(matching: predicate)
+        let records = try await fetchMembershipRecords(
+            matching: predicate,
+            expectedOwnerId: ownerId,
+            deduplicating: false
+        )
 
         guard !records.isEmpty else {
             logger.info("No collection membership edges found to delete for collection: \(collectionId)")
             return
         }
 
-        let db = try await core.getPublicDatabase()
         let recordIDs = records.map(\.recordID)
 
         for chunk in Self.chunked(recordIDs, size: 200) {
+            try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
             try await deleteRecordIDs(chunk, in: db)
         }
 
         logger.info("✅ Deleted \(records.count) collection membership edges for collection: \(collectionId)")
     }
 
-    func deleteAllMembershipEdges(forOwnerId ownerId: UUID) async throws {
-        let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
-        let records = try await fetchMembershipRecords(matching: predicate)
-        guard !records.isEmpty else { return }
+    func deleteAllMembershipEdges(
+        forOwnerId ownerId: UUID,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
         let db = try await core.getPublicDatabase()
+        _ = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
+        let predicate = NSPredicate(format: "ownerId == %@", ownerId.uuidString)
+        let records = try await fetchMembershipRecords(
+            matching: predicate,
+            expectedOwnerId: ownerId,
+            deduplicating: false
+        )
+        guard !records.isEmpty else { return }
         for chunk in Self.chunked(records.map(\.recordID), size: 200) {
+            try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
             try await deleteRecordIDs(chunk, in: db)
         }
         logger.info("✅ Deleted \(records.count) collection membership edges for owner: \(ownerId)")
     }
 
-    private func fetchMembershipRecords(matching predicate: NSPredicate) async throws -> [CKRecord] {
+    private func fetchMembershipRecords(
+        matching predicate: NSPredicate,
+        expectedOwnerId: UUID,
+        deduplicating: Bool = true
+    ) async throws -> [CKRecord] {
         let db = try await core.getPublicDatabase()
         let query = CKQuery(recordType: CloudKitCore.RecordType.collectionMembership, predicate: predicate)
         var records: [CKRecord] = []
@@ -530,11 +885,22 @@ actor CollectionCloudService {
                     results = try await db.records(matching: query, resultsLimit: 500)
                 }
                 for (_, result) in results.matchResults {
-                    records.append(try result.get())
+                    let record = try result.get()
+                    guard let edge = try? membershipEdge(from: record),
+                          edge.ownerId == expectedOwnerId,
+                          try await isCollectionStateRecordAuthorized(
+                              record,
+                              collectionId: edge.collectionId,
+                              ownerId: expectedOwnerId,
+                              in: db
+                          ) else {
+                        continue
+                    }
+                    records.append(record)
                 }
                 cursor = results.queryCursor
             } while cursor != nil
-            return records
+            return deduplicating ? Self.deduplicatedMembershipRecords(records) : records
         } catch let error as CKError {
             if error.code == .unknownItem || error.errorCode == 11 {
                 logger.info("CollectionMembership record type not yet in CloudKit schema - returning empty list")
@@ -547,13 +913,23 @@ actor CollectionCloudService {
     // MARK: - Cover Image
 
     /// Upload collection cover image to CloudKit
-    func uploadCollectionCoverImage(collectionId: UUID, imageData: Data) async throws -> String {
+    func uploadCollectionCoverImage(
+        collectionId: UUID,
+        ownerId: UUID,
+        expectedRecordName: String?,
+        imageData: Data,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws -> String {
         logger.info("📤 Uploading collection cover image for collection: \(collectionId)")
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
 
         let optimizedData = try await core.optimizeImageForCloudKit(imageData, maxDimension: 1200, targetSize: 2_000_000)
 
         let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("collection_\(collectionId.uuidString)")
+            .appendingPathComponent("collection_\(collectionId.uuidString)_\(UUID().uuidString)")
             .appendingPathExtension("jpg")
 
         try optimizedData.write(to: tempURL)
@@ -565,23 +941,24 @@ actor CollectionCloudService {
         let asset = CKAsset(fileURL: tempURL)
 
         let db = try await core.getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
         do {
-            let record = try await db.record(for: recordID)
+            let currentIdentity = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
+            guard let record = try await preferredCollectionRecord(
+                collectionId: collectionId,
+                ownerId: ownerId,
+                expectedRecordName: expectedRecordName,
+                authorityRecordName: currentIdentity.recordName,
+                in: db
+            ) else { throw CloudKitError.invalidRecord }
 
             record["coverImageAsset"] = asset
             record["coverImageModifiedAt"] = Date() as CKRecordValue
 
-            guard let ownerIDString = record["userId"] as? String,
-                  let ownerID = UUID(uuidString: ownerIDString) else {
-                throw CloudKitError.invalidRecord
+            let savedRecord = try await withPublicationLease(ownerID: ownerId) {
+                try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
+                return try await db.save(record)
             }
-            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerID) else {
-                throw CancellationError()
-            }
-            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
-            let savedRecord = try await db.save(record)
             logger.info("✅ Uploaded collection cover image asset")
             return savedRecord.recordID.recordName
 
@@ -598,14 +975,33 @@ actor CollectionCloudService {
     }
 
     /// Download collection cover image from CloudKit
-    func downloadCollectionCoverImage(collectionId: UUID) async throws -> Data? {
+    func downloadCollectionCoverImage(
+        collectionId: UUID,
+        ownerId: UUID,
+        recordName: String
+    ) async throws -> Data? {
         logger.info("📥 Downloading collection cover image for collection: \(collectionId)")
 
         let db = try await core.getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
         do {
-            let record = try await db.record(for: recordID)
+            let record: CKRecord
+            do {
+                record = try await db.record(for: CKRecord.ID(recordName: recordName))
+            } catch let error as CKError where error.code == .unknownItem {
+                logger.info("Collection record not found: \(collectionId)")
+                return nil
+            }
+
+            guard Self.collectionRecordMatchesIdentity(
+                    record,
+                    identity: CollectionCloudIdentity(ownerId: ownerId, collectionId: collectionId),
+                    expectedRecordName: recordName
+                  ),
+                  try await collectionRecordIsOwnerAuthenticated(record, in: db) else {
+                logger.info("Collection record not found: \(collectionId)")
+                return nil
+            }
 
             guard let asset = record["coverImageAsset"] as? CKAsset,
                   let fileURL = asset.fileURL else {
@@ -627,19 +1023,40 @@ actor CollectionCloudService {
     }
 
     /// Delete collection cover image from CloudKit
-    func deleteCollectionCoverImage(collectionId: UUID) async throws {
+    func deleteCollectionCoverImage(
+        collectionId: UUID,
+        ownerId: UUID,
+        expectedRecordName: String,
+        authorizationContext: VerifiedAccountMutationContext? = nil
+    ) async throws {
         logger.info("🗑️ Deleting collection cover image for collection: \(collectionId)")
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: ownerId,
+            provided: authorizationContext
+        )
 
         let db = try await core.getPublicDatabase()
-        let recordID = CKRecord.ID(recordName: collectionId.uuidString)
 
         do {
-            let record = try await db.record(for: recordID)
+            let currentIdentity = try await validatedCurrentOwnerIdentity(for: ownerId, in: db)
+            guard let record = try await preferredCollectionRecord(
+                collectionId: collectionId,
+                ownerId: ownerId,
+                expectedRecordName: expectedRecordName,
+                authorityRecordName: currentIdentity.recordName,
+                in: db
+            ) else {
+                logger.info("Collection record not found: \(collectionId)")
+                return
+            }
 
             record["coverImageAsset"] = nil
             record["coverImageModifiedAt"] = nil
 
-            _ = try await db.save(record)
+            _ = try await withPublicationLease(ownerID: ownerId) {
+                try await authorizeMutation(ownerID: ownerId, context: authorizationContext)
+                try await db.save(record)
+            }
             logger.info("✅ Deleted collection cover image asset")
 
         } catch let error as CKError {
@@ -652,6 +1069,216 @@ actor CollectionCloudService {
     }
 
     // MARK: - Private Helpers
+
+    private func resolvedAuthorizationContext(
+        ownerID: UUID,
+        provided: VerifiedAccountMutationContext?
+    ) async throws -> VerifiedAccountMutationContext {
+        if let provided {
+            try await authorizeMutation(ownerID: ownerID, context: provided)
+            return provided
+        }
+        guard let context = await MainActor.run(body: {
+            CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerID)
+        }) else {
+            throw UserSessionError.accountChanged
+        }
+        return context
+    }
+
+    private func authorizeMutation(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await RecipePublicationAuthorizationPolicy.authorize(
+            ownerID: ownerID,
+            context: context,
+            validator: publicationAuthorizer
+        )
+    }
+
+#if DEBUG
+    func validateMutationAuthorization(
+        ownerID: UUID,
+        context: VerifiedAccountMutationContext
+    ) async throws {
+        try await authorizeMutation(ownerID: ownerID, context: context)
+    }
+#endif
+
+    /// The operation is the publication boundary used by bulk membership
+    /// writes and their conflict fallback. Keeping release explicit ensures a
+    /// waiting account deletion cannot resume before the final write returns.
+    func withPublicationLease<T>(
+        ownerID: UUID,
+        operation: () async throws -> T
+    ) async throws -> T {
+        guard let lease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerID) else {
+            throw CloudKitError.invalidRecord
+        }
+        do {
+            let value = try await operation()
+            await AccountDeletionGate.shared.releasePublicationLease(lease)
+            return value
+        } catch {
+            await AccountDeletionGate.shared.releasePublicationLease(lease)
+            throw error
+        }
+    }
+
+    private func fetchCollectionRecords(
+        collectionId: UUID,
+        ownerId: UUID? = nil,
+        expectedRecordName: String? = nil,
+        in db: CKDatabase
+    ) async throws -> [CKRecord] {
+        var records: [CKRecord] = []
+
+        // Physical record names are the only index-independent lookup. Prefer
+        // the locally persisted name before falling back to a public query,
+        // whose index can lag a successful save.
+        if let expectedRecordName, !expectedRecordName.isEmpty {
+            guard let ownerId else { throw CloudKitError.invalidRecord }
+            do {
+                let directRecord = try await db.record(
+                    for: CKRecord.ID(recordName: expectedRecordName)
+                )
+                records.append(try Self.validatedKnownCollectionRecord(
+                    directRecord,
+                    identity: CollectionCloudIdentity(
+                        ownerId: ownerId,
+                        collectionId: collectionId
+                    ),
+                    expectedRecordName: expectedRecordName
+                ))
+            } catch let error as CKError where error.code == .unknownItem {
+                // The physical record may have been removed remotely. Query the
+                // logical identity for a replacement or compatibility record.
+            }
+        }
+
+        var predicates = [NSPredicate(format: "collectionId == %@", collectionId.uuidString)]
+        if let ownerId {
+            predicates.append(NSPredicate(format: "userId == %@", ownerId.uuidString))
+        }
+        let query = CKQuery(
+            recordType: CloudKitCore.RecordType.collection,
+            predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        )
+        do {
+            records.append(contentsOf: try await fetchAllRecords(matching: query, in: db))
+        } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+            // Keep any directly fetched physical record.
+        }
+
+        // Directly read the old UUID-only alias as well. This both preserves
+        // older records and avoids a duplicate when the public query index is
+        // briefly behind a legacy save.
+        let legacyID = Self.collectionRecordID(collectionId: collectionId)
+        if !records.contains(where: { $0.recordID == legacyID }),
+           let legacy = try? await db.record(for: legacyID) {
+            records.append(legacy)
+        }
+
+        var unique: [CKRecord.ID: CKRecord] = [:]
+        for record in records {
+            guard record.recordType == CloudKitCore.RecordType.collection,
+                  record["collectionId"] as? String == collectionId.uuidString,
+                  ownerId == nil || record["userId"] as? String == ownerId?.uuidString else {
+                continue
+            }
+            unique[record.recordID] = record
+        }
+        return Array(unique.values)
+    }
+
+    nonisolated static func collectionRecordMatchesIdentity(
+        _ record: CKRecord,
+        identity: CollectionCloudIdentity,
+        expectedRecordName: String? = nil
+    ) -> Bool {
+        record.recordType == CloudKitCore.RecordType.collection &&
+            (expectedRecordName == nil || record.recordID.recordName == expectedRecordName) &&
+            record["collectionId"] as? String == identity.collectionId.uuidString &&
+            record["userId"] as? String == identity.ownerId.uuidString
+    }
+
+    nonisolated static func validatedKnownCollectionRecord(
+        _ record: CKRecord,
+        identity: CollectionCloudIdentity,
+        expectedRecordName: String
+    ) throws -> CKRecord {
+        guard collectionRecordMatchesIdentity(
+            record,
+            identity: identity,
+            expectedRecordName: expectedRecordName
+        ) else {
+            throw CloudKitError.invalidRecord
+        }
+        return record
+    }
+
+    private func preferredCollectionRecord(
+        collectionId: UUID,
+        ownerId: UUID,
+        expectedRecordName: String?,
+        authorityRecordName: String,
+        in db: CKDatabase
+    ) async throws -> CKRecord? {
+        var records: [CKRecord] = []
+        for record in try await fetchCollectionRecords(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            expectedRecordName: expectedRecordName,
+            in: db
+        ) {
+            if try await collectionRecordIsOwnerAuthenticated(record, in: db) {
+                records.append(record)
+            }
+        }
+        if let expectedRecordName,
+           let knownRecord = records.first(where: { $0.recordID.recordName == expectedRecordName }) {
+            return knownRecord
+        }
+        let preferredName = Self.preferredCreatorBoundRecordName(
+            records.map {
+                CreatorBoundRecordCandidate(
+                    recordName: $0.recordID.recordName,
+                    creatorRecordName: $0.creatorUserRecordID?.recordName == CKCurrentUserDefaultName
+                        ? authorityRecordName
+                        : $0.creatorUserRecordID?.recordName,
+                    updatedAt: ($0["updatedAt"] as? Date) ?? .distantPast
+                )
+            },
+            authorityRecordName: authorityRecordName
+        )
+        return preferredName.flatMap { name in records.first { $0.recordID.recordName == name } }
+    }
+
+    private func newestCollectionRecord(collectionId: UUID, in db: CKDatabase) async throws -> CKRecord? {
+        var authenticatedRecords: [CKRecord] = []
+        for record in try await fetchCollectionRecords(collectionId: collectionId, in: db) {
+            if try await collectionRecordIsOwnerAuthenticated(record, in: db) {
+                authenticatedRecords.append(record)
+            }
+        }
+        return authenticatedRecords.max { lhs, rhs in
+            let lhsDate = (lhs["updatedAt"] as? Date) ?? .distantPast
+            let rhsDate = (rhs["updatedAt"] as? Date) ?? .distantPast
+            if lhsDate != rhsDate { return lhsDate < rhsDate }
+            return lhs.recordID.recordName > rhs.recordID.recordName
+        }
+    }
+
+    private func collectionRecordIsOwnerAuthenticated(_ record: CKRecord, in db: CKDatabase) async throws -> Bool {
+        guard let ownerIDString = record["userId"] as? String,
+              let ownerID = UUID(uuidString: ownerIDString),
+              let rawCreatorName = record.creatorUserRecordID?.recordName,
+              let creatorName = try await concreteCreatorName(rawCreatorName) else {
+            return false
+        }
+        return try await ownerIdentityIsAuthenticated(creatorName, ownerId: ownerID, in: db)
+    }
 
     private func fetchOrCreateCollectionRecord(recordID: CKRecord.ID, in db: CKDatabase) async throws -> CKRecord {
         do {
@@ -712,10 +1339,30 @@ actor CollectionCloudService {
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
+            let resultLock = NSLock()
+            var firstRecordError: Error?
             operation.savePolicy = .ifServerRecordUnchanged
             operation.isAtomic = false
+            operation.perRecordSaveBlock = { _, result in
+                guard case .failure(let error) = result else { return }
+                resultLock.withLock {
+                    if firstRecordError == nil {
+                        firstRecordError = error
+                    }
+                }
+            }
             operation.modifyRecordsResultBlock = { result in
-                continuation.resume(with: result)
+                switch result {
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                case .success:
+                    let recordError = resultLock.withLock { firstRecordError }
+                    if let recordError {
+                        continuation.resume(throwing: recordError)
+                    } else {
+                        continuation.resume()
+                    }
+                }
             }
             operation.database = db
             operation.start()
@@ -724,23 +1371,340 @@ actor CollectionCloudService {
 
     private func fetchMembershipRecords(forUserId userId: UUID, in db: CKDatabase) async throws -> [CKRecord] {
         let predicate = NSPredicate(format: "ownerId == %@", userId.uuidString)
-        let query = CKQuery(recordType: CloudKitCore.RecordType.collectionMembership, predicate: predicate)
-        return try await fetchAllRecords(matching: query, in: db)
+        return try await fetchMembershipRecords(matching: predicate, expectedOwnerId: userId)
+    }
+
+    private func currentUserAuthorityMatches(
+        ownerId: UUID,
+        identityRecordName: String,
+        in db: CKDatabase
+    ) async throws -> Bool {
+        let candidateIDs = [
+            CKRecord.ID(recordName: "user_\(identityRecordName)"),
+            CKRecord.ID(recordName: identityRecordName),
+        ]
+        for recordID in candidateIDs {
+            do {
+                let record = try await db.record(for: recordID)
+                if Self.canonicalUserAuthorityRecordName(
+                    recordType: record.recordType,
+                    recordName: record.recordID.recordName,
+                    storedUserID: record["userId"] as? String,
+                    creatorRecordName: record.creatorUserRecordID?.recordName,
+                    expectedUserID: ownerId.uuidString,
+                    currentIdentityRecordName: identityRecordName
+                ) == identityRecordName {
+                    return true
+                }
+            } catch let error as CKError where error.code == .unknownItem {
+                continue
+            }
+        }
+        return false
+    }
+
+    private func validatedCurrentOwnerIdentity(for ownerId: UUID, in db: CKDatabase) async throws -> CKRecord.ID {
+        let currentIdentity = try await core.getCurrentUserRecordID()
+        guard try await currentUserAuthorityMatches(
+            ownerId: ownerId,
+            identityRecordName: currentIdentity.recordName,
+            in: db
+        ) else {
+            logger.error("Refusing collection state write for an owner not bound to the current CloudKit identity")
+            throw CloudKitError.invalidRecord
+        }
+        return currentIdentity
+    }
+
+    nonisolated static func preferredCreatorBoundRecordName(
+        _ candidates: [CreatorBoundRecordCandidate],
+        authorityRecordName: String
+    ) -> String? {
+        candidates
+            .filter { $0.creatorRecordName == authorityRecordName }
+            .max { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt < rhs.updatedAt }
+                return lhs.recordName > rhs.recordName
+            }?
+            .recordName
+    }
+
+    /// Collection state follows the creator of the canonical Collection record.
+    /// Only when that record has already been deleted may a separately
+    /// authenticated owner identity authorize the state record.
+    nonisolated static func collectionStateCreatorIsAuthorized(
+        recordCreatorName: String?,
+        collectionCreatorName: String?,
+        fallbackAuthenticatedCreatorName: String?
+    ) -> Bool {
+        guard let recordCreatorName else { return false }
+        if let collectionCreatorName {
+            return recordCreatorName == collectionCreatorName
+        }
+        return recordCreatorName == fallbackAuthenticatedCreatorName
+    }
+
+    nonisolated static func deterministicUserID(for identityRecordName: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("cauldron-user:\(identityRecordName)".utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return bytes.withUnsafeBufferPointer { buffer in
+            NSUUID(uuidBytes: buffer.baseAddress!) as UUID
+        }
+    }
+
+    private func isCollectionStateRecordAuthorized(
+        _ record: CKRecord,
+        collectionId: UUID,
+        ownerId: UUID,
+        in db: CKDatabase
+    ) async throws -> Bool {
+        guard let rawCreatorName = record.creatorUserRecordID?.recordName,
+              let recordCreatorName = try await concreteCreatorName(rawCreatorName) else {
+            return false
+        }
+
+        switch try await collectionCreatorLookup(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            in: db
+        ) {
+        case .authorized(let collectionCreatorName):
+            return Self.collectionStateCreatorIsAuthorized(
+                recordCreatorName: recordCreatorName,
+                collectionCreatorName: collectionCreatorName,
+                fallbackAuthenticatedCreatorName: nil
+            )
+        case .invalid:
+            return false
+        case .absent:
+            let fallback = try await ownerIdentityIsAuthenticated(
+                recordCreatorName,
+                ownerId: ownerId,
+                in: db
+            ) ? recordCreatorName : nil
+            return Self.collectionStateCreatorIsAuthorized(
+                recordCreatorName: recordCreatorName,
+                collectionCreatorName: nil,
+                fallbackAuthenticatedCreatorName: fallback
+            )
+        }
+    }
+
+    private func collectionCreatorLookup(
+        collectionId: UUID,
+        ownerId: UUID,
+        in db: CKDatabase
+    ) async throws -> CollectionCreatorLookup {
+        let records = try await fetchCollectionRecords(
+            collectionId: collectionId,
+            ownerId: ownerId,
+            in: db
+        )
+        guard !records.isEmpty else { return .absent }
+
+        var authenticatedCreators = Set<String>()
+        for record in records {
+            guard let rawCreatorName = record.creatorUserRecordID?.recordName,
+                  let creatorName = try await concreteCreatorName(rawCreatorName),
+                  try await ownerIdentityIsAuthenticated(creatorName, ownerId: ownerId, in: db) else {
+                continue
+            }
+            authenticatedCreators.insert(creatorName)
+        }
+        guard authenticatedCreators.count == 1, let creatorName = authenticatedCreators.first else {
+            return .invalid
+        }
+        return .authorized(creatorName)
+    }
+
+    private func concreteCreatorName(_ recordName: String) async throws -> String? {
+        if recordName != CKCurrentUserDefaultName { return recordName }
+        return try await core.getCurrentUserRecordID().recordName
+    }
+
+    /// Modern Cauldron user IDs are derived from the CloudKit identity. Legacy
+    /// IDs are accepted only through a complete creator-protected
+    /// UsernameClaim -> canonical User chain.
+    private func ownerIdentityIsAuthenticated(
+        _ identityRecordName: String,
+        ownerId: UUID,
+        in db: CKDatabase
+    ) async throws -> Bool {
+        if Self.deterministicUserID(for: identityRecordName) == ownerId {
+            return true
+        }
+
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "userId == %@", ownerId.uuidString),
+            NSPredicate(format: "identityRecordName == %@", identityRecordName),
+        ])
+        let query = CKQuery(recordType: CloudKitCore.RecordType.usernameClaim, predicate: predicate)
+        let claims: [CKRecord]
+        do {
+            claims = try await fetchAllRecords(matching: query, in: db)
+        } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+            return false
+        }
+
+        for claim in claims {
+            guard let username = claim["username"] as? String,
+                  UserCloudService.usernameClaimBelongsToUser(
+                      recordType: claim.recordType,
+                      claimedUserID: claim["userId"] as? String,
+                      claimedUsername: username,
+                      claimedIdentityRecordName: claim["identityRecordName"] as? String,
+                      creatorRecordName: claim.creatorUserRecordID?.recordName,
+                      expectedUserID: ownerId.uuidString,
+                      expectedUsername: username,
+                      expectedIdentityRecordName: identityRecordName
+                  ) else {
+                continue
+            }
+
+            for recordID in [
+                CKRecord.ID(recordName: "user_\(identityRecordName)"),
+                CKRecord.ID(recordName: identityRecordName),
+            ] {
+                guard let userRecord = try? await db.record(for: recordID),
+                      userRecord["username"] as? String == username,
+                      Self.canonicalUserAuthorityRecordName(
+                          recordType: userRecord.recordType,
+                          recordName: userRecord.recordID.recordName,
+                          storedUserID: userRecord["userId"] as? String,
+                          creatorRecordName: userRecord.creatorUserRecordID?.recordName,
+                          expectedUserID: ownerId.uuidString,
+                          currentIdentityRecordName: identityRecordName
+                      ) == identityRecordName else {
+                    continue
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private func fetchDeletedCollectionRecords(
+        collectionId: UUID,
+        ownerId: UUID,
+        in db: CKDatabase
+    ) async throws -> [CKRecord] {
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            NSPredicate(format: "ownerId == %@", ownerId.uuidString),
+            NSPredicate(format: "collectionId == %@", collectionId.uuidString),
+        ])
+        let query = CKQuery(recordType: CloudKitCore.RecordType.deletedCollection, predicate: predicate)
+        var records: [CKRecord]
+        do {
+            records = try await fetchAllRecords(matching: query, in: db)
+        } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+            records = []
+        }
+
+        // Query results can lag a just-committed legacy deterministic record.
+        let legacyID = Self.deletedCollectionRecordID(collectionId: collectionId)
+        if !records.contains(where: { $0.recordID == legacyID }),
+           let legacy = try? await db.record(for: legacyID) {
+            records.append(legacy)
+        }
+
+        var unique: [CKRecord.ID: CKRecord] = [:]
+        for record in records {
+            guard let tombstone = try? deletedCollectionTombstone(from: record),
+                  tombstone.collectionId == collectionId,
+                  tombstone.ownerId == ownerId,
+                  try await isCollectionStateRecordAuthorized(
+                      record,
+                      collectionId: collectionId,
+                      ownerId: ownerId,
+                      in: db
+                  ) else {
+                continue
+            }
+            unique[record.recordID] = record
+        }
+        return Array(unique.values)
+    }
+
+    nonisolated static func deduplicatedMembershipRecords(_ records: [CKRecord]) -> [CKRecord] {
+        Dictionary(grouping: records) { record in
+            let ownerID = record["ownerId"] as? String ?? ""
+            let collectionID = record["collectionId"] as? String ?? ""
+            let recipeID = record["recipeId"] as? String ?? ""
+            return "\(ownerID)|\(collectionID)|\(recipeID)"
+        }.compactMap { _, duplicates in
+            duplicates.max { lhs, rhs in
+                let lhsDate = (lhs["updatedAt"] as? Date) ?? .distantPast
+                let rhsDate = (rhs["updatedAt"] as? Date) ?? .distantPast
+                if lhsDate != rhsDate { return lhsDate < rhsDate }
+                return lhs.recordID.recordName > rhs.recordID.recordName
+            }
+        }
+    }
+
+    /// Validates the protected User record that anchors all public collection
+    /// state for an application owner. Both the current canonical
+    /// `user_<identity>` name and the legacy system identity name are accepted.
+    nonisolated static func canonicalUserAuthorityRecordName(
+        recordType: String,
+        recordName: String,
+        storedUserID: String?,
+        creatorRecordName: String?,
+        expectedUserID: String,
+        currentIdentityRecordName: String?
+    ) -> String? {
+        guard recordType == CloudKitCore.RecordType.user,
+              storedUserID == expectedUserID,
+              let creatorRecordName else {
+            return nil
+        }
+
+        let authorityRecordName: String
+        if creatorRecordName == CKCurrentUserDefaultName {
+            guard let currentIdentityRecordName else { return nil }
+            authorityRecordName = currentIdentityRecordName
+        } else {
+            authorityRecordName = creatorRecordName
+        }
+
+        guard recordName == authorityRecordName || recordName == "user_\(authorityRecordName)" else {
+            return nil
+        }
+        return authorityRecordName
+    }
+
+    /// New records have no creator until CloudKit saves them. Existing records
+    /// must already belong to the canonical authority; this closes deterministic
+    /// record-name preclaims without preventing the legitimate first save.
+    nonisolated static func recordCreatorMatchesAuthority(
+        _ creatorRecordName: String?,
+        authorityRecordName: String,
+        currentIdentityRecordName: String?,
+        permitsUnclaimedRecord: Bool = false
+    ) -> Bool {
+        guard let creatorRecordName else { return permitsUnclaimedRecord }
+        if creatorRecordName == authorityRecordName { return true }
+        return creatorRecordName == CKCurrentUserDefaultName &&
+            authorityRecordName == currentIdentityRecordName
     }
 
     private func deduplicatedAndSortedCollections(_ collections: [Collection]) -> [Collection] {
-        var byId: [UUID: Collection] = [:]
+        var byIdentity: [CollectionCloudIdentity: Collection] = [:]
         for collection in collections {
-            if let existing = byId[collection.id] {
+            let identity = CollectionCloudIdentity(
+                ownerId: collection.userId,
+                collectionId: collection.id
+            )
+            if let existing = byIdentity[identity] {
                 if collection.updatedAt > existing.updatedAt {
-                    byId[collection.id] = collection
+                    byIdentity[identity] = collection
                 }
             } else {
-                byId[collection.id] = collection
+                byIdentity[identity] = collection
             }
         }
 
-        return byId.values.sorted { $0.updatedAt > $1.updatedAt }
+        return byIdentity.values.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func applyMembershipOverlay(to collections: [Collection]) async -> [Collection] {
@@ -766,9 +1730,15 @@ actor CollectionCloudService {
 
         guard !edges.isEmpty else { return collections }
 
-        let edgesByCollection = Dictionary(grouping: edges, by: \.collectionId)
+        let edgesByCollection = Dictionary(grouping: edges) {
+            CollectionCloudIdentity(ownerId: $0.ownerId, collectionId: $0.collectionId)
+        }
         return collections.map { collection in
-            guard let collectionEdges = edgesByCollection[collection.id], !collectionEdges.isEmpty else {
+            let identity = CollectionCloudIdentity(
+                ownerId: collection.userId,
+                collectionId: collection.id
+            )
+            guard let collectionEdges = edgesByCollection[identity], !collectionEdges.isEmpty else {
                 return collection
             }
             return CollectionMembershipProjection.collectionWithRecipeIds(
@@ -939,11 +1909,17 @@ actor CollectionCloudService {
             allEdges.append(contentsOf: try await fetchMembershipEdges(forUserId: ownerId))
         }
 
-        let edgesByCollectionId = Dictionary(grouping: allEdges, by: \.collectionId)
+        let edgesByCollectionId = Dictionary(grouping: allEdges) {
+            CollectionCloudIdentity(ownerId: $0.ownerId, collectionId: $0.collectionId)
+        }
         guard !edgesByCollectionId.isEmpty else { return collections }
 
         return collections.map { collection in
-            guard let edges = edgesByCollectionId[collection.id] else {
+            let identity = CollectionCloudIdentity(
+                ownerId: collection.userId,
+                collectionId: collection.id
+            )
+            guard let edges = edgesByCollectionId[identity] else {
                 return collection
             }
             return collectionWithRecipeIds(collection, activeRecipeIds(from: edges))
@@ -953,30 +1929,39 @@ actor CollectionCloudService {
     private func filterDeletedCollections(_ collections: [Collection]) async throws -> [Collection] {
         guard !collections.isEmpty else { return [] }
 
-        var deletedCollectionIds = Set<UUID>()
+        var deletedCollections = Set<CollectionCloudIdentity>()
         for ownerId in Set(collections.map(\.userId)) {
             let tombstones = try await fetchDeletedCollectionTombstones(ownerId: ownerId)
-            deletedCollectionIds.formUnion(tombstones.map(\.collectionId))
+            deletedCollections.formUnion(tombstones.map {
+                CollectionCloudIdentity(ownerId: $0.ownerId, collectionId: $0.collectionId)
+            })
         }
 
-        guard !deletedCollectionIds.isEmpty else { return collections }
+        guard !deletedCollections.isEmpty else { return collections }
 
-        for collectionId in deletedCollectionIds where collections.contains(where: { $0.id == collectionId }) {
-            try? await deleteCollection(collectionId)
+        for identity in deletedCollections where collections.contains(where: {
+            $0.id == identity.collectionId && $0.userId == identity.ownerId
+        }) {
+            try? await deleteCollection(identity.collectionId, ownerId: identity.ownerId)
         }
 
-        return collections.filter { !deletedCollectionIds.contains($0.id) }
+        return collections.filter {
+            !deletedCollections.contains(
+                CollectionCloudIdentity(ownerId: $0.userId, collectionId: $0.id)
+            )
+        }
     }
 
     private func isSuppressedByDeletedCollectionTombstone(_ collection: Collection, in db: CKDatabase) async throws -> Bool {
-        let tombstoneRecordID = Self.deletedCollectionRecordID(collectionId: collection.id)
         do {
-            let record = try await db.record(for: tombstoneRecordID)
-            let tombstone = try deletedCollectionTombstone(from: record)
-            return tombstone.ownerId == collection.userId
-        } catch let error as CKError where error.code == .unknownItem {
-            return false
-        } catch let error as CKError where error.errorCode == 11 || error.code == .invalidArguments {
+            let tombstones = try await fetchDeletedCollectionRecords(
+                collectionId: collection.id,
+                ownerId: collection.userId,
+                in: db
+            )
+            return !tombstones.isEmpty
+        } catch let error as CKError where error.code == .unknownItem ||
+                error.errorCode == 11 || error.code == .invalidArguments {
             return false
         }
     }

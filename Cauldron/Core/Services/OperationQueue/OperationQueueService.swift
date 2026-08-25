@@ -27,6 +27,9 @@ nonisolated struct DeadLetteredSyncOperation: Codable, Equatable, Sendable {
 
 /// Actor responsible for managing pending operations and retry logic
 actor OperationQueueService {
+    private nonisolated static let maximumDetailedDeadLetters = 99
+    private nonisolated static let maximumDeadLetterRawBytes = 64 * 1024
+    private nonisolated static let compactedDeadLetterID = "compacted"
     // MARK: - Properties
 
     private var operations: [UUID: SyncOperation] = [:]
@@ -83,11 +86,15 @@ actor OperationQueueService {
         type: SyncOperationType,
         entityType: EntityType,
         entityId: UUID,
-        payload: Data? = nil
+        payload: Data? = nil,
+        ownerId: UUID? = nil,
+        accountRevision: UUID? = nil,
+        accountIdentity: String? = nil
     ) -> UUID {
         // Check if there's already a pending operation for this entity
         let matchingOperations = operations.values.filter {
-            $0.entityId == entityId && $0.entityType == entityType && $0.status != .completed
+            $0.entityId == entityId && $0.entityType == entityType && $0.status != .completed &&
+                (ownerId == nil || ($0.ownerId == ownerId && $0.accountRevision == accountRevision && $0.accountIdentity == accountIdentity))
         }
         // Coalesce into an existing successor when one is waiting. An in-flight
         // operation remains immutable and will be followed by the latest intent.
@@ -99,6 +106,9 @@ actor OperationQueueService {
                 entityType: entityType,
                 entityId: entityId,
                 payload: payload ?? existingOp.payload,
+                ownerId: ownerId ?? existingOp.ownerId,
+                accountRevision: accountRevision ?? existingOp.accountRevision,
+                accountIdentity: accountIdentity ?? existingOp.accountIdentity,
                 status: .pending,
                 attempts: 0,
                 createdAt: existingOp.createdAt
@@ -118,7 +128,10 @@ actor OperationQueueService {
                 type: type,
                 entityType: entityType,
                 entityId: entityId,
-                payload: payload
+                payload: payload,
+                ownerId: ownerId,
+                accountRevision: accountRevision,
+                accountIdentity: accountIdentity
             )
             operations[successor.id] = successor
             persistOperations()
@@ -132,7 +145,10 @@ actor OperationQueueService {
             type: type,
             entityType: entityType,
             entityId: entityId,
-            payload: payload
+            payload: payload,
+            ownerId: ownerId,
+            accountRevision: accountRevision,
+            accountIdentity: accountIdentity
         )
 
         operations[operation.id] = operation
@@ -211,9 +227,86 @@ actor OperationQueueService {
         Array(operations.values).sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// Returns durable operations that Cauldron intentionally refused to replay.
+    /// These are diagnostics, not retryable queue entries: replaying them could
+    /// write malformed data or mutate content from a different iCloud account.
+    func getDeadLetteredOperations() -> [DeadLetteredSyncOperation] {
+        guard let data = UserDefaults.standard.data(forKey: deadLetterPersistenceKey) else {
+            return []
+        }
+        return Self.decodePersistedDeadLetters(data)
+            .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    nonisolated static func decodePersistedDeadLetters(
+        _ data: Data,
+        capturedAt: Date = Date()
+    ) -> [DeadLetteredSyncOperation] {
+        if let deadLetters = try? JSONDecoder().decode([DeadLetteredSyncOperation].self, from: data) {
+            return boundedDeadLetters(deadLetters, capturedAt: capturedAt)
+        }
+        return [
+            DeadLetteredSyncOperation(
+                operationId: "diagnostics",
+                errorDescription: "Cauldron couldn't read its protected-change diagnostics",
+                capturedAt: capturedAt,
+                rawJSON: Data(data.prefix(maximumDeadLetterRawBytes))
+            )
+        ]
+    }
+
+    nonisolated static func boundedDeadLetters(
+        _ entries: [DeadLetteredSyncOperation],
+        capturedAt: Date = Date()
+    ) -> [DeadLetteredSyncOperation] {
+        let existingCompaction = entries
+            .filter { $0.operationId == compactedDeadLetterID }
+            .max { $0.capturedAt < $1.capturedAt }
+        let sanitized = entries
+            .filter { $0.operationId != compactedDeadLetterID }
+            .map { entry in
+                DeadLetteredSyncOperation(
+                    operationId: entry.operationId,
+                    errorDescription: entry.errorDescription,
+                    capturedAt: entry.capturedAt,
+                    rawJSON: entry.rawJSON.map { Data($0.prefix(maximumDeadLetterRawBytes)) }
+                )
+            }
+            .sorted { $0.capturedAt > $1.capturedAt }
+
+        let requiresCompactionSummary = existingCompaction != nil || sanitized.count > maximumDetailedDeadLetters
+        guard requiresCompactionSummary else { return sanitized }
+        return Array(sanitized.prefix(maximumDetailedDeadLetters)) + [
+            DeadLetteredSyncOperation(
+                operationId: compactedDeadLetterID,
+                errorDescription: "Older protected-change diagnostics were compacted to keep local storage bounded.",
+                capturedAt: existingCompaction?.capturedAt ?? capturedAt,
+                rawJSON: nil
+            )
+        ]
+    }
+
+    /// Acknowledges quarantined-operation diagnostics after the user has checked
+    /// that their local library is intact. This never deletes local content.
+    func clearDeadLetteredOperations() {
+        UserDefaults.standard.removeObject(forKey: deadLetterPersistenceKey)
+    }
+
+#if DEBUG
+    /// Seeds the service's isolated diagnostics store for purge regression tests.
+    func replaceDeadLetteredOperationsForTesting(_ entries: [DeadLetteredSyncOperation]) throws {
+        let data = try JSONEncoder().encode(Self.boundedDeadLetters(entries))
+        UserDefaults.standard.set(data, forKey: deadLetterPersistenceKey)
+    }
+#endif
+
     /// Get operations for a specific entity
     func getOperations(for entityId: UUID) -> [SyncOperation] {
         operations.values.filter { $0.entityId == entityId }
+    }
+
+    func getOperation(operationId: UUID) -> SyncOperation? {
+        operations[operationId]
     }
 
     /// Get the first operation for a specific entity/type pair
@@ -253,6 +346,9 @@ actor OperationQueueService {
                 entityType: operation.entityType,
                 entityId: operation.entityId,
                 payload: operation.payload,
+                ownerId: operation.ownerId,
+                accountRevision: operation.accountRevision,
+                accountIdentity: operation.accountIdentity,
                 status: .pending,
                 attempts: operation.attempts,
                 createdAt: operation.createdAt
@@ -273,12 +369,24 @@ actor OperationQueueService {
             return nil
         }
 
+        return retryOperation(operationId: operation.id)
+    }
+
+    /// Retries one exact durable intent. Account-scoped consumers must use this
+    /// overload so an entity collision cannot revive another account's work.
+    @discardableResult
+    func retryOperation(operationId: UUID) -> SyncOperation? {
+        guard let operation = operations[operationId] else { return nil }
+
         let updated = SyncOperation(
             id: operation.id,
             type: operation.type,
             entityType: operation.entityType,
             entityId: operation.entityId,
             payload: operation.payload,
+            ownerId: operation.ownerId,
+            accountRevision: operation.accountRevision,
+            accountIdentity: operation.accountIdentity,
             status: .pending,
             attempts: operation.attempts,
             createdAt: operation.createdAt
@@ -312,6 +420,87 @@ actor OperationQueueService {
         operations.removeValue(forKey: operationId)
         persistOperations()
         AppLogger.general.info("🗑️ Removed operation: \(operationId)")
+    }
+
+    /// Adopts an operation written before queue account scopes existed, only
+    /// after the repository has validated its payload/local entity owner.
+    func bindLegacyOperation(
+        operationId: UUID,
+        scope: SyncOperationAccountScope
+    ) -> SyncOperation? {
+        guard let operation = operations[operationId] else { return nil }
+        let isUnscopedLegacy = operation.ownerId == nil &&
+            operation.accountRevision == nil && operation.accountIdentity == nil
+        let isReturningIdentity = operation.ownerId == scope.ownerId &&
+            operation.accountIdentity != nil &&
+            operation.accountIdentity == scope.cloudKitIdentity
+        guard isUnscopedLegacy || isReturningIdentity else { return operation }
+        let migrated = SyncOperation(
+            id: operation.id,
+            type: operation.type,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            payload: operation.payload,
+            ownerId: scope.ownerId,
+            accountRevision: scope.revision,
+            accountIdentity: scope.cloudKitIdentity,
+            status: isReturningIdentity ? .pending : operation.status,
+            attempts: operation.attempts,
+            lastAttemptDate: operation.lastAttemptDate,
+            nextRetryDate: operation.nextRetryDate,
+            errorMessage: operation.errorMessage,
+            createdAt: operation.createdAt
+        )
+        operations[operationId] = migrated
+        persistOperations()
+        return migrated
+    }
+
+    /// Rebinds a preserved outbox item after the same owner and CloudKit
+    /// identity return under a new local account-boundary generation.
+    func resumeOperation(operationId: UUID, scope: SyncOperationAccountScope) -> SyncOperation? {
+        guard let operation = operations[operationId],
+              operation.ownerId == scope.ownerId,
+              operation.accountIdentity == scope.cloudKitIdentity else { return nil }
+        let resumed = SyncOperation(
+            id: operation.id,
+            type: operation.type,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            payload: operation.payload,
+            ownerId: scope.ownerId,
+            accountRevision: scope.revision,
+            accountIdentity: scope.cloudKitIdentity,
+            status: .pending,
+            attempts: operation.attempts,
+            lastAttemptDate: operation.lastAttemptDate,
+            nextRetryDate: nil,
+            errorMessage: operation.errorMessage,
+            createdAt: operation.createdAt
+        )
+        operations[operationId] = resumed
+        persistOperations()
+        return resumed
+    }
+
+    /// Permanently retires work from another account generation. Retrying it
+    /// could mutate whichever CloudKit account happens to be active later.
+    func quarantineOperation(operationId: UUID, error: String) {
+        guard let operation = operations.removeValue(forKey: operationId) else { return }
+        persistDeadLetteredOperations([
+            DeadLetteredSyncOperation(
+                operationId: operation.id.uuidString,
+                errorDescription: error,
+                capturedAt: Date(),
+                rawJSON: try? JSONEncoder().encode(operation)
+            )
+        ])
+        persistOperations()
+        eventContinuation.yield(.operationCompleted(operationId))
+        if operations.isEmpty {
+            eventContinuation.yield(.queueEmpty)
+        }
+        AppLogger.general.error("Quarantined account-mismatched operation \(operation.id): \(error)")
     }
 
     // MARK: - Private Methods
@@ -393,6 +582,9 @@ actor OperationQueueService {
                     entityType: operation.entityType,
                     entityId: operation.entityId,
                     payload: operation.payload,
+                    ownerId: operation.ownerId,
+                    accountRevision: operation.accountRevision,
+                    accountIdentity: operation.accountIdentity,
                     status: .pending,
                     attempts: operation.attempts,
                     lastAttemptDate: operation.lastAttemptDate,
@@ -435,6 +627,7 @@ actor OperationQueueService {
         }
 
         deadLetters.append(contentsOf: newDeadLetters)
+        deadLetters = Self.boundedDeadLetters(deadLetters)
 
         guard let data = try? JSONEncoder().encode(deadLetters) else {
             AppLogger.general.error("Failed to encode dead-lettered sync operations")
@@ -481,6 +674,9 @@ actor OperationQueueService {
                     entityType: operation.entityType,
                     entityId: operation.entityId,
                     payload: operation.payload,
+                    ownerId: operation.ownerId,
+                    accountRevision: operation.accountRevision,
+                    accountIdentity: operation.accountIdentity,
                     status: .pending,
                     attempts: operation.attempts,
                     createdAt: operation.createdAt

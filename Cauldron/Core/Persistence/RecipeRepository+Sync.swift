@@ -101,7 +101,7 @@ extension RecipeRepository {
         guard await AccountDeletionGate.shared.permitsWrite(ownerID: recipe.ownerId) else {
             return false
         }
-        if await isMarkedDeleted(recipeId: recipe.id) {
+        if await isMarkedDeleted(recipeId: recipe.id, ownerId: recipe.ownerId) {
             logger.info("Skipping private recipe sync because recipe is tombstoned: \(recipe.title)")
             pendingSyncRecipes.remove(recipe.id)
             return await deleteRecipeFromCloudKit(recipe, cloudKitCore: cloudKitCore, recipeCloudService: recipeCloudService)
@@ -136,8 +136,18 @@ extension RecipeRepository {
         // Sync ALL recipes to iCloud, regardless of visibility
         // Visibility only controls social sharing, not cloud backup
         do {
+            guard let authorizationContext = await MainActor.run(body: {
+                CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerId)
+            }) else {
+                pendingSyncRecipes.insert(recipe.id)
+                return false
+            }
             logger.info("Syncing recipe to CloudKit: \(recipe.title) (visibility: \(recipe.visibility.rawValue))")
-            try await recipeCloudService.saveRecipe(recipe, ownerId: ownerId)
+            try await recipeCloudService.saveRecipe(
+                recipe,
+                ownerId: ownerId,
+                authorizationContext: authorizationContext
+            )
             logger.info("✅ Successfully synced recipe to CloudKit: \(recipe.title)")
 
             // Remove from pending if it was there
@@ -205,7 +215,7 @@ extension RecipeRepository {
         guard await AccountDeletionGate.shared.permitsWrite(ownerID: recipe.ownerId) else {
             return .retryNeeded
         }
-        if await isMarkedDeleted(recipeId: recipe.id) {
+        if await isMarkedDeleted(recipeId: recipe.id, ownerId: recipe.ownerId) {
             logger.info("Skipping PUBLIC recipe sync because recipe is tombstoned: \(recipe.title)")
             let didDeletePublicRecipe = await deleteRecipeFromPublicDatabase(
                 recipe,
@@ -291,7 +301,7 @@ extension RecipeRepository {
             return true
         }
 
-        guard recipe.ownerId != nil else {
+        guard let ownerID = recipe.ownerId else {
             logger.warning("Cannot delete from PUBLIC database - missing ownerId: \(recipe.title)")
             return true
         }
@@ -314,7 +324,10 @@ extension RecipeRepository {
 
         do {
             logger.info("Deleting recipe from PUBLIC database: \(recipe.title)")
-            try await recipeCloudService.deletePublicRecipe(recipeId: recipe.id)
+            try await recipeCloudService.deletePublicRecipe(
+                recipeId: recipe.id,
+                ownerID: ownerID
+            )
             logger.info("✅ Successfully deleted recipe from PUBLIC database")
             return true
         } catch {
@@ -323,8 +336,12 @@ extension RecipeRepository {
         }
     }
 
-    private func isMarkedDeleted(recipeId: UUID) async -> Bool {
-        (try? await deletedRecipeRepository.isDeleted(recipeId: recipeId)) ?? false
+    private func isMarkedDeleted(recipeId: UUID, ownerId: UUID?) async -> Bool {
+        guard let ownerId else { return false }
+        return (try? await deletedRecipeRepository.isDeleted(
+            recipeId: recipeId,
+            ownerId: ownerId
+        )) ?? false
     }
     
     /// Migrate all public recipes to the public database
@@ -425,6 +442,17 @@ extension RecipeRepository {
             return
         }
 
+        guard let (ownerID, authorizationContext) = await MainActor.run(body: {
+            guard let ownerID = CurrentUserSession.shared.userId,
+                  let context = CurrentUserSession.shared.verifiedMutationContext(ownerID: ownerID) else {
+                return nil as (UUID, VerifiedAccountMutationContext)?
+            }
+            return (ownerID, context)
+        }) else {
+            logger.info("Account identity is not verified - public recipe search metadata migration will retry later")
+            return
+        }
+
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
             logger.info("CloudKit not available - public recipe search metadata migration will retry later")
@@ -432,7 +460,10 @@ extension RecipeRepository {
         }
 
         do {
-            let summary = try await recipeCloudService.backfillPublicRecipeSearchMetadata()
+            let summary = try await recipeCloudService.backfillPublicRecipeSearchMetadata(
+                ownerID: ownerID,
+                authorizationContext: authorizationContext
+            )
             if Self.shouldMarkPublicRecipeSearchMetadataMigrationAttempted(summary) {
                 defaults.set(true, forKey: publicRecipeSearchMetadataMigrationAttemptedKey)
             }
@@ -494,9 +525,7 @@ extension RecipeRepository {
         }
     }
 
-    private func replayRecipeOperation(_ operation: SyncOperation) async {
-        await operationQueueService.markInProgress(operationId: operation.id)
-
+    func replayRecipeOperation(_ operation: SyncOperation) async {
         switch operation.type {
         case .create, .update:
             await replayRecipeUpsertOperation(operation)
@@ -512,8 +541,15 @@ extension RecipeRepository {
 
     private func replayRecipeUpsertOperation(_ operation: SyncOperation) async {
         do {
-            guard let recipe = try await fetch(id: operation.entityId) else {
-                if try await deletedRecipeRepository.isDeleted(recipeId: operation.entityId) {
+            guard let recipe = try await fetch(
+                id: operation.entityId,
+                preferredOwnerId: operation.ownerId
+            ) else {
+                if let ownerId = operation.ownerId,
+                   try await deletedRecipeRepository.isDeleted(
+                       recipeId: operation.entityId,
+                       ownerId: ownerId
+                   ) {
                     logger.info("Completing stale recipe upsert suppressed by deletion tombstone: \(operation.entityId)")
                     await operationQueueService.markCompleted(operationId: operation.id)
                 } else {
@@ -522,19 +558,16 @@ extension RecipeRepository {
                 return
             }
 
-            guard let currentUserId = await currentUserIdForOwnership() else {
-                await operationQueueService.markFailed(
+            guard let ownerId = recipe.ownerId else {
+                await operationQueueService.quarantineOperation(
                     operationId: operation.id,
-                    error: "Recipe replay deferred: no current user"
+                    error: "Recipe operation has no locally validated owner"
                 )
                 return
             }
 
-            guard recipe.canMutateCloudState(for: currentUserId) else {
-                logger.warning("Dropping queued recipe upsert for recipe not owned by the current user: \(operation.entityId)")
-                await operationQueueService.markCompleted(operationId: operation.id)
-                return
-            }
+            guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
+            await operationQueueService.markInProgress(operationId: operation.id)
 
             let didSyncPrivate = await syncRecipeToCloudKit(
                 recipe,
@@ -574,7 +607,10 @@ extension RecipeRepository {
                 return
             }
 
-            if let recipe = try await fetch(id: operation.entityId) {
+            if let recipe = try await fetch(
+                id: operation.entityId,
+                preferredOwnerId: operation.ownerId
+            ) {
                 let payload = RecipeDeleteOperationPayload(
                     recipeId: recipe.id,
                     ownerId: recipe.ownerId,
@@ -603,14 +639,6 @@ extension RecipeRepository {
         _ operation: SyncOperation,
         payload: RecipeDeleteOperationPayload
     ) async throws {
-        guard let currentUserId = await currentUserIdForOwnership() else {
-            await operationQueueService.markFailed(
-                operationId: operation.id,
-                error: "Recipe delete replay deferred: no current user"
-            )
-            return
-        }
-
         guard !payload.wasPreview else {
             logger.info("Completing queued delete for local-only preview recipe: \(payload.recipeId)")
             await operationQueueService.markCompleted(operationId: operation.id)
@@ -618,20 +646,15 @@ extension RecipeRepository {
         }
 
         guard let ownerId = payload.ownerId else {
-            await operationQueueService.markFailed(
+            await operationQueueService.quarantineOperation(
                 operationId: operation.id,
                 error: "Recipe delete replay missing owner identity"
             )
             return
         }
 
-        guard ownerId == currentUserId else {
-            await operationQueueService.markFailed(
-                operationId: operation.id,
-                error: "Recipe delete replay belongs to a different user"
-            )
-            return
-        }
+        guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
+        await operationQueueService.markInProgress(operationId: operation.id)
 
         var privateDeleteSucceeded = true
         var publicDeleteSucceeded = true
@@ -642,14 +665,17 @@ extension RecipeRepository {
             title: "Deleted Recipe",
             ingredients: [],
             steps: [],
-            visibility: .publicRecipe,
-            ownerId: ownerId
+            visibility: payload.visibility,
+            ownerId: ownerId,
+            cloudRecordName: payload.cloudRecordName
         )
         do {
             try await externalShareService.removeShareMetadata(for: deletionRecipe)
         } catch {
             publicDeleteSucceeded = false
         }
+
+        guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
 
         do {
             try await recipeCloudService.saveDeletedRecipeTombstone(
@@ -664,8 +690,19 @@ extension RecipeRepository {
             tombstoneSaveError = error
         }
 
+        guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
+
         guard RecipeDeletionSyncPolicy.canDeleteActiveRecords(tombstoneSaveError: tombstoneSaveError) else {
             throw tombstoneSaveError ?? RepositoryError.saveFailed
+        }
+
+        if payload.hadImage {
+            await deleteRecipeImageFromPrivate(deletionRecipe)
+            guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
+            if payload.visibility == .publicRecipe {
+                await deleteRecipeImageFromPublic(deletionRecipe)
+                guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
+            }
         }
 
         if let cloudRecordName = payload.cloudRecordName {
@@ -682,10 +719,14 @@ extension RecipeRepository {
             } catch {
                 privateDeleteSucceeded = false
             }
+            guard await authorizeRecipeReplay(operation, entityOwnerId: ownerId) else { return }
         }
 
         do {
-            try await recipeCloudService.deletePublicRecipe(recipeId: payload.recipeId)
+            try await recipeCloudService.deletePublicRecipe(
+                recipeId: payload.recipeId,
+                ownerID: ownerId
+            )
         } catch {
             publicDeleteSucceeded = false
         }
@@ -698,6 +739,51 @@ extension RecipeRepository {
                 error: "Recipe delete replay incomplete"
             )
         }
+    }
+
+    func authorizeRecipeReplay(
+        _ operation: SyncOperation,
+        entityOwnerId: UUID
+    ) async -> Bool {
+        let currentScope = await MainActor.run {
+            CurrentUserSession.shared.syncOperationAccountScope(ownerID: entityOwnerId)
+        }
+        switch SyncOperationAccountPolicy.decision(
+            operation: operation,
+            entityOwnerId: entityOwnerId,
+            currentScope: currentScope
+        ) {
+        case .allowed:
+            return true
+        case .migrateLegacy:
+            guard let currentScope else { return false }
+            guard let migrated = await operationQueueService.bindLegacyOperation(
+                operationId: operation.id,
+                scope: currentScope
+            ), migrated.ownerId == currentScope.ownerId,
+               migrated.accountRevision == currentScope.revision else {
+                return false
+            }
+            return true
+        case .deferred:
+            return false
+        case .reject:
+            await operationQueueService.quarantineOperation(
+                operationId: operation.id,
+                error: "Recipe operation belongs to another account generation"
+            )
+            return false
+        }
+    }
+
+    func authorizeRecipeReplay(
+        operationID: UUID,
+        entityOwnerId: UUID
+    ) async -> Bool {
+        guard let operation = await operationQueueService.getOperation(operationId: operationID) else {
+            return false
+        }
+        return await authorizeRecipeReplay(operation, entityOwnerId: entityOwnerId)
     }
 
     /// Retry syncing recipes that failed previously

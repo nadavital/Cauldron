@@ -188,6 +188,24 @@ final class RecipeRepositoryVisibilityTests: XCTestCase {
         XCTAssertNotNil(fetchedRecipe)
     }
 
+    func testOwnedRecipeDeleteCommitsTombstoneWithActiveRowRemoval() async throws {
+        let recipe = makeRecipe(visibility: .privateRecipe)
+        try await recipeRepository.create(recipe, skipCloudSync: true)
+
+        try await recipeRepository.delete(id: recipe.id)
+
+        let context = ModelContext(modelContainer)
+        let activeRows = try context.fetch(FetchDescriptor<RecipeModel>())
+        let tombstones = try context.fetch(FetchDescriptor<DeletedRecipeModel>())
+        XCTAssertFalse(activeRows.contains { $0.id == recipe.id })
+        let tombstone = try XCTUnwrap(tombstones.first {
+            $0.recipeId == recipe.id && $0.ownerId == self.userId
+        })
+        XCTAssertEqual(tombstone.cloudRecordName, recipe.id.uuidString)
+        XCTAssertNotNil(tombstone.deletedAt)
+        XCTAssertNotNil(tombstone.sourceDeviceId)
+    }
+
     private func makeRecipe(visibility: RecipeVisibility) -> Recipe {
         Recipe(
             id: UUID(),

@@ -392,6 +392,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
 
     func testReplayStaleRecipeUpdateCompletesWhenRemoteTombstoneAlreadyWon() async throws {
         let recipeId = UUID()
+        let ownerId = UUID()
         await repository.operationQueueService.addOperation(
             type: .update,
             entityType: .recipe,
@@ -402,6 +403,7 @@ final class RecipeRepositorySearchTests: XCTestCase {
         }
         try await repository.deletedRecipeRepository.markAsDeleted(
             recipeId: recipeId,
+            ownerId: ownerId,
             cloudRecordName: nil,
             deletedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
@@ -410,6 +412,28 @@ final class RecipeRepositorySearchTests: XCTestCase {
 
         let queued = await repository.operationQueueService.getOperation(for: recipeId, entityType: .recipe)
         XCTAssertNil(queued)
+    }
+
+    func testRecipeReplayDefersOtherAccountOperationWithoutClaimingIt() async throws {
+        let ownerId = UUID()
+        let operationId = await repository.operationQueueService.addOperation(
+            type: .update,
+            entityType: .recipe,
+            entityId: UUID(),
+            ownerId: ownerId,
+            accountRevision: UUID()
+        )
+        let queuedOperation = await repository.operationQueueService.getOperation(operationId: operationId)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let authorized = await repository.authorizeRecipeReplay(
+            operation,
+            entityOwnerId: ownerId
+        )
+
+        XCTAssertFalse(authorized)
+        let remaining = await repository.operationQueueService.getOperation(operationId: operationId)
+        XCTAssertEqual(remaining?.status, .pending)
     }
 
     func testResolveLocalRelatedRecipesPrefersOwnedCopyOverPreview() async throws {
@@ -623,11 +647,15 @@ final class RecipeRepositorySearchTests: XCTestCase {
 
         try await repository.deletedRecipeRepository.markAsDeleted(
             recipeId: recipeId,
+            ownerId: ownerId,
             cloudRecordName: recipeId.uuidString
         )
         try await repository.create(preview, skipCloudSync: true)
 
-        let isDeleted = try await repository.deletedRecipeRepository.isDeleted(recipeId: recipeId)
+        let isDeleted = try await repository.deletedRecipeRepository.isDeleted(
+            recipeId: recipeId,
+            ownerId: ownerId
+        )
         XCTAssertTrue(isDeleted)
     }
 

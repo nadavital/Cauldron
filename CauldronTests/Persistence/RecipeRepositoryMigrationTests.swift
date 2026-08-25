@@ -11,17 +11,25 @@ import XCTest
 final class RecipeRepositoryMigrationTests: XCTestCase {
     private var modelContainer: ModelContainer!
     private var repository: RecipeRepository!
+    private var migrationDefaults: UserDefaults!
+    private var migrationDefaultsSuiteName: String!
 
     override func setUp() async throws {
         try await super.setUp()
 
         UserDefaults.standard.removeObject(forKey: "hasFixedCorruptedImageFilenames_v2")
+        migrationDefaultsSuiteName = "RecipeRepositoryMigrationTests.\(UUID().uuidString)"
+        migrationDefaults = try XCTUnwrap(UserDefaults(suiteName: migrationDefaultsSuiteName))
+        migrationDefaults.removePersistentDomain(forName: migrationDefaultsSuiteName)
         modelContainer = try TestModelContainer.create()
         repository = makeRepository(modelContainer: modelContainer)
     }
 
     override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: "hasFixedCorruptedImageFilenames_v2")
+        migrationDefaults.removePersistentDomain(forName: migrationDefaultsSuiteName)
+        migrationDefaults = nil
+        migrationDefaultsSuiteName = nil
         repository = nil
         modelContainer = nil
         try await super.tearDown()
@@ -39,7 +47,10 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, currentUserId)
@@ -63,7 +74,10 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, previousOwnerId)
@@ -84,7 +98,10 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, previousOwnerId)
@@ -109,7 +126,10 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, currentUserId)
@@ -133,7 +153,10 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, previewOwnerId)
@@ -156,11 +179,58 @@ final class RecipeRepositoryMigrationTests: XCTestCase {
         context.insert(model)
         try context.save()
 
-        try await repository.migrateRecipeOwnership(currentUserId: currentUserId)
+        try await repository.migrateRecipeOwnership(
+            currentUserId: currentUserId,
+            defaults: migrationDefaults
+        )
 
         let migrated = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
         XCTAssertEqual(migrated.ownerId, previewOwnerId)
         XCTAssertEqual(migrated.originalCreatorId, previewOwnerId)
+    }
+
+    func testVersionedOwnershipMigrationCannotReassignPriorOwnersDataAfterAccountSwitch() async throws {
+        let firstOwnerId = UUID()
+        let secondOwnerId = UUID()
+        let sourceOwnerId = UUID()
+        let recipeId = UUID()
+        let context = ModelContext(modelContainer)
+        context.insert(RecipeModel(
+            id: recipeId,
+            title: "Already Claimed Saved Copy",
+            ingredientsBlob: Data(),
+            stepsBlob: Data(),
+            tagsBlob: Data(),
+            ownerId: firstOwnerId,
+            originalRecipeId: UUID(),
+            originalCreatorId: sourceOwnerId,
+            savedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        context.insert(DeletedRecipeModel(
+            recipeId: recipeId,
+            deletedAt: Date(),
+            cloudRecordName: "legacy-tombstone"
+        ))
+        try context.save()
+
+        try await repository.migrateRecipeOwnership(
+            currentUserId: firstOwnerId,
+            defaults: migrationDefaults
+        )
+        try await repository.migrateRecipeOwnership(
+            currentUserId: secondOwnerId,
+            defaults: migrationDefaults
+        )
+
+        let migratedRecipe = try XCTUnwrap(context.fetch(FetchDescriptor<RecipeModel>()).first)
+        let migratedTombstone = try XCTUnwrap(context.fetch(FetchDescriptor<DeletedRecipeModel>()).first)
+        XCTAssertEqual(migratedRecipe.ownerId, firstOwnerId)
+        XCTAssertEqual(migratedRecipe.originalCreatorId, sourceOwnerId)
+        XCTAssertEqual(migratedTombstone.ownerId, firstOwnerId)
+        XCTAssertEqual(
+            migrationDefaults.string(forKey: RecipeRepository.legacyRecipeOwnershipMigrationOwnerKey),
+            firstOwnerId.uuidString
+        )
     }
 
     func testPublicRecipeSearchMetadataMigrationAttemptedAfterFullBestEffortScan() {

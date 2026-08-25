@@ -54,13 +54,25 @@ struct WhatsNewView: View {
                         FeatureRow(
                             symbol: "tray.full.fill",
                             title: "Imports you can trust",
-                            detail: "Shared recipes survive interruptions and remain ready to review."
+                            detail: "Share a link, photo, or text. Interrupted imports wait safely in your Inbox."
                         )
                         Divider().padding(.leading, 44)
                         FeatureRow(
                             symbol: "waveform",
-                            title: "Your recipes, everywhere",
-                            detail: "Use Siri, visual search, Cook Mode, and complete public recipe links."
+                            title: "Cook with Siri",
+                            detail: "Ask Siri to find a recipe or start Cook Mode without hunting through the app."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
+                            symbol: "camera.viewfinder",
+                            title: "Find what you can make",
+                            detail: "Use Visual Intelligence on food or ingredients, then choose Cauldron to find matching recipes."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
+                            symbol: "link",
+                            title: "Share beyond Cauldron",
+                            detail: "Recipes, collections, and profiles now open as complete web pages."
                         )
                     }
                 }

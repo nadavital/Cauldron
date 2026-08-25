@@ -7,6 +7,70 @@
 
 import Foundation
 
+nonisolated struct SyncOperationAccountScope: Equatable, Sendable {
+    let ownerId: UUID
+    let revision: UUID
+    let cloudKitIdentity: String?
+
+    init(ownerId: UUID, revision: UUID, cloudKitIdentity: String? = nil) {
+        self.ownerId = ownerId
+        self.revision = revision
+        self.cloudKitIdentity = cloudKitIdentity
+    }
+}
+
+nonisolated enum SyncOperationAccountDecision: Equatable, Sendable {
+    case allowed
+    case migrateLegacy
+    case deferred
+    case reject
+}
+
+/// Shared by live and replay paths so account-boundary policy is deterministic
+/// and directly testable without invoking CloudKit.
+nonisolated enum SyncOperationAccountPolicy {
+    static func decision(
+        operation: SyncOperation,
+        entityOwnerId: UUID,
+        currentScope: SyncOperationAccountScope?
+    ) -> SyncOperationAccountDecision {
+        guard let currentScope else { return .deferred }
+        guard entityOwnerId == currentScope.ownerId else { return .deferred }
+        if operation.ownerId == nil, operation.accountRevision == nil, operation.accountIdentity == nil {
+            return .migrateLegacy
+        }
+        guard let queuedOwnerId = operation.ownerId,
+              let queuedRevision = operation.accountRevision else {
+            // A partially persisted account scope is malformed, not legacy.
+            // Adopting it could authorize an operation across an account boundary.
+            return .reject
+        }
+        guard queuedOwnerId == entityOwnerId else { return .reject }
+        guard queuedOwnerId == currentScope.ownerId else { return .deferred }
+        guard let queuedIdentity = operation.accountIdentity else {
+            // Compatibility for operations produced by the immediately prior
+            // scoped-queue format. They remain generation-bound and cannot be
+            // resumed after switching away until rewritten by a new mutation.
+            return queuedRevision == currentScope.revision ? .allowed : .deferred
+        }
+        guard let currentIdentity = currentScope.cloudKitIdentity else { return .deferred }
+        guard queuedIdentity == currentIdentity else { return .deferred }
+        guard queuedRevision == currentScope.revision else { return .migrateLegacy }
+        return .allowed
+    }
+}
+
+nonisolated enum QueuedMutationFreshnessPolicy {
+    static func matchesPersistedMutation(
+        persistedUpdatedAt: Date,
+        persistedVisibility: RecipeVisibility,
+        expectedUpdatedAt: Date,
+        expectedVisibility: RecipeVisibility
+    ) -> Bool {
+        persistedUpdatedAt == expectedUpdatedAt && persistedVisibility == expectedVisibility
+    }
+}
+
 /// Represents a type of sync operation that can be performed on an entity
 nonisolated enum SyncOperationType: String, Codable, Sendable {
     case create
@@ -42,6 +106,15 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
     let entityType: EntityType
     let entityId: UUID
     let payload: Data?
+    /// Account that authorized this durable mutation. `nil` is reserved for
+    /// operations written by app versions that predate account-scoped queues.
+    let ownerId: UUID?
+    /// Durable identity generation captured when the operation was enqueued.
+    /// It changes on sign-out or a CloudKit account-change notification, so an
+    /// operation cannot become valid again after switching away and back.
+    let accountRevision: UUID?
+    /// Stable CloudKit account identifier captured with the durable owner.
+    let accountIdentity: String?
     var status: OperationStatus
     var attempts: Int
     var lastAttemptDate: Date?
@@ -55,6 +128,9 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
         entityType: EntityType,
         entityId: UUID,
         payload: Data? = nil,
+        ownerId: UUID? = nil,
+        accountRevision: UUID? = nil,
+        accountIdentity: String? = nil,
         status: OperationStatus = .pending,
         attempts: Int = 0,
         lastAttemptDate: Date? = nil,
@@ -67,6 +143,9 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
         self.entityType = entityType
         self.entityId = entityId
         self.payload = payload
+        self.ownerId = ownerId
+        self.accountRevision = accountRevision
+        self.accountIdentity = accountIdentity
         self.status = status
         self.attempts = attempts
         self.lastAttemptDate = lastAttemptDate
@@ -86,6 +165,9 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
             entityType: entityType,
             entityId: entityId,
             payload: payload,
+            ownerId: ownerId,
+            accountRevision: accountRevision,
+            accountIdentity: accountIdentity,
             status: .failed,
             attempts: newAttempts,
             lastAttemptDate: Date(),
@@ -103,6 +185,9 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
             entityType: entityType,
             entityId: entityId,
             payload: payload,
+            ownerId: ownerId,
+            accountRevision: accountRevision,
+            accountIdentity: accountIdentity,
             status: .inProgress,
             attempts: attempts,
             lastAttemptDate: Date(),
@@ -120,6 +205,9 @@ nonisolated struct SyncOperation: Codable, Identifiable, Equatable, Sendable {
             entityType: entityType,
             entityId: entityId,
             payload: payload,
+            ownerId: ownerId,
+            accountRevision: accountRevision,
+            accountIdentity: accountIdentity,
             status: .completed,
             attempts: attempts,
             lastAttemptDate: Date(),

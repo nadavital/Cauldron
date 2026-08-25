@@ -20,6 +20,7 @@ final class OperationQueueViewModel {
     private(set) var pendingCollectionCount: Int = 0
     private(set) var totalPendingCount: Int = 0
     private(set) var hasFailedOperations: Bool = false
+    private(set) var deadLetteredOperations: [DeadLetteredSyncOperation] = []
 
     // MARK: - Private Properties
 
@@ -80,14 +81,24 @@ final class OperationQueueViewModel {
         }
     }
 
+    /// Clears only the diagnostic notices for operations that were already
+    /// quarantined. It does not remove recipes, collections, or queued uploads.
+    func acknowledgeDeadLetteredOperations() {
+        Task {
+            await service.clearDeadLetteredOperations()
+            await loadState()
+        }
+    }
+
     var healthSnapshot: SyncHealthSnapshot {
         SyncHealthSnapshot.make(
-            operations: pendingOperations
+            operations: pendingOperations,
+            deadLetterCount: deadLetteredOperations.count
         )
     }
 
-    func refresh() {
-        Task { await loadState() }
+    func refresh() async {
+        await loadState()
     }
 
     /// Helper to check if entity is currently syncing
@@ -141,6 +152,7 @@ final class OperationQueueViewModel {
         let recipeCount = await service.getPendingCount(for: .recipe)
         let collectionCount = await service.getPendingCount(for: .collection)
         let totalCount = await service.getTotalPendingCount()
+        let deadLetters = await service.getDeadLetteredOperations()
 
         await MainActor.run {
             self.pendingOperations = operations
@@ -148,6 +160,7 @@ final class OperationQueueViewModel {
             self.pendingCollectionCount = collectionCount
             self.totalPendingCount = totalCount
             self.hasFailedOperations = operations.contains { $0.status == .failed }
+            self.deadLetteredOperations = deadLetters
         }
     }
 
