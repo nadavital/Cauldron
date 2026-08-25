@@ -31,6 +31,9 @@ const MAX_WEB_STEPS = 200;
 const MAX_WEB_RECIPE_TEXT_LENGTH = 4_000;
 const MAX_WEB_RECIPE_CARDS = 12;
 const WEB_RECIPE_CARD_QUERY_LIMIT = MAX_WEB_RECIPE_CARDS + 1;
+const CLOUDKIT_WEB_REQUEST_TIMEOUT_MS = 4_000;
+const CLOUDKIT_WEB_MAX_ATTEMPTS = 2;
+const CLOUDKIT_WEB_RETRY_DELAY_MS = 150;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const usernamePattern = /^[A-Za-z0-9_]{3,20}$/;
 const capabilityPattern = /^[A-Za-z0-9_-]{43,128}$/;
@@ -251,6 +254,7 @@ type CloudKitRecordLike = {
     recordName?: unknown;
     recordType?: unknown;
     serverErrorCode?: unknown;
+    retryAfter?: unknown;
     created?: { timestamp?: unknown; userRecordName?: unknown };
     fields?: Record<string, { value?: unknown }>;
 };
@@ -258,7 +262,91 @@ type CloudKitRecordLike = {
 type CloudKitRecordsPayload = {
     records?: CloudKitRecordLike[];
     serverErrorCode?: unknown;
+    retryAfter?: unknown;
 };
+
+const missingCloudKitRecordCodes = new Set(["UNKNOWN_ITEM", "NOT_FOUND"]);
+const transientCloudKitRecordCodes = new Set([
+    "INTERNAL_ERROR",
+    "REQUEST_RATE_LIMITED",
+    "SERVICE_UNAVAILABLE",
+    "THROTTLED",
+    "TRY_AGAIN_LATER",
+    "ZONE_BUSY",
+]);
+
+function cloudKitPayloadErrorCodes(payload: CloudKitRecordsPayload): string[] {
+    const topLevelCode = typeof payload.serverErrorCode === "string"
+        ? [payload.serverErrorCode.toUpperCase()]
+        : [];
+    const recordCodes = (payload.records ?? []).flatMap((record) =>
+        typeof record.serverErrorCode === "string"
+            ? [record.serverErrorCode.toUpperCase()]
+            : []
+    );
+    return [...topLevelCode, ...recordCodes];
+}
+
+export function cloudKitRecordsPayloadIsRetryableError(payload: CloudKitRecordsPayload): boolean {
+    const hasRetryAfter = typeof payload.retryAfter === "number" && payload.retryAfter >= 0 ||
+        (payload.records ?? []).some((record) =>
+            typeof record.retryAfter === "number" && record.retryAfter >= 0
+        );
+    const codes = cloudKitPayloadErrorCodes(payload)
+        .filter((code) => !missingCloudKitRecordCodes.has(code));
+    return hasRetryAfter ||
+        (codes.length > 0 && codes.every((code) => transientCloudKitRecordCodes.has(code)));
+}
+
+class RetryableCloudKitError extends Error {}
+
+function isTransientCloudKitNetworkError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    if (error.name === "TimeoutError" || error.name === "AbortError" ||
+        error.message === "fetch failed" || error.message === "terminated") {
+        return true;
+    }
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (!cause || typeof cause !== "object") {
+        return false;
+    }
+    const code = (cause as { code?: unknown }).code;
+    return code === "ECONNRESET" || code === "ECONNREFUSED" ||
+        code === "EPIPE" || code === "ETIMEDOUT" || code === "ENETUNREACH" ||
+        code === "UND_ERR_SOCKET" || code === "UND_ERR_CONNECT_TIMEOUT" ||
+        code === "UND_ERR_HEADERS_TIMEOUT" || code === "UND_ERR_BODY_TIMEOUT" ||
+        code === "UND_ERR_RES_CONTENT_LENGTH_MISMATCH";
+}
+
+export async function retryTransientCloudKitOperation<T>(
+    operation: (attempt: number) => Promise<T>,
+    maxAttempts = CLOUDKIT_WEB_MAX_ATTEMPTS,
+    retryDelayMs = CLOUDKIT_WEB_RETRY_DELAY_MS
+): Promise<T> {
+    const attempts = Math.max(1, Math.trunc(maxAttempts));
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            return await operation(attempt);
+        } catch (error) {
+            const shouldRetry = error instanceof RetryableCloudKitError ||
+                isTransientCloudKitNetworkError(error);
+            if (!shouldRetry || attempt === attempts) {
+                throw error;
+            }
+            if (retryDelayMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            }
+        }
+    }
+    throw new Error("CloudKit retry loop completed without a result");
+}
+
+export function isTransientCloudKitHTTPStatus(status: number): boolean {
+    return status === 408 || status === 425 || status === 429 ||
+        status === 500 || status === 502 || status === 503 || status === 504;
+}
 
 export function cloudKitRecordsPayloadDisposition(
     payload: CloudKitRecordsPayload
@@ -267,7 +355,7 @@ export function cloudKitRecordsPayloadDisposition(
         ? payload.serverErrorCode.toUpperCase()
         : null;
     if (topLevelCode) {
-        return topLevelCode === "UNKNOWN_ITEM" ? "notFound" : "error";
+        return missingCloudKitRecordCodes.has(topLevelCode) ? "notFound" : "error";
     }
 
     const records = payload.records ?? [];
@@ -280,7 +368,8 @@ export function cloudKitRecordsPayloadDisposition(
             ? [record.serverErrorCode.toUpperCase()]
             : []
     );
-    if (recordErrorCodes.length === 0 || recordErrorCodes.every((code) => code === "UNKNOWN_ITEM")) {
+    if (recordErrorCodes.length === 0 ||
+        recordErrorCodes.every((code) => missingCloudKitRecordCodes.has(code))) {
         return "notFound";
     }
     return "error";
@@ -510,40 +599,65 @@ async function verifyCloudKitAuthority(
 async function verifyCloudKitUsernameClaim(
     username: string,
     ownerId: string,
-    canonicalUserRecord: CloudKitRecordLike
+    canonicalUserRecord: CloudKitRecordLike,
+    maxAttempts = CLOUDKIT_WEB_MAX_ATTEMPTS
 ): Promise<number | null> {
     const keyID = cloudKitServerKeyID.value();
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
-    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
-    const body = JSON.stringify({ records: [{ recordName: `username_${username}` }] });
-    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const signature = createSign("SHA256")
-        .update(cloudKitSignatureInput(body, date, subpath))
-        .end()
-        .sign(privateKey)
-        .toString("base64");
-    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-Apple-CloudKit-Request-KeyID": keyID,
-            "X-Apple-CloudKit-Request-ISO8601Date": date,
-            "X-Apple-CloudKit-Request-SignatureV1": signature,
-        },
-        body,
-    });
-    if (!response.ok) {
-        return null;
-    }
-    const payload = await response.json() as { records?: CloudKitRecordLike[] };
-    const claim = payload.records?.[0];
-    const isValid = claim?.recordName === `username_${username}` &&
-        claim.recordType === "UsernameClaim" &&
-        claim.created?.userRecordName === canonicalUserRecord.created?.userRecordName &&
-        claim.fields?.userId?.value === ownerId &&
-        claim.fields?.username?.value === username;
-    const createdAt = claim?.created?.timestamp;
-    return isValid && typeof createdAt === "number" ? createdAt : null;
+    return retryTransientCloudKitOperation(async (attempt) => {
+        const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+        const body = JSON.stringify({ records: [{ recordName: `username_${username}` }] });
+        const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const signature = createSign("SHA256")
+            .update(cloudKitSignatureInput(body, date, subpath))
+            .end()
+            .sign(privateKey)
+            .toString("base64");
+        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Apple-CloudKit-Request-KeyID": keyID,
+                "X-Apple-CloudKit-Request-ISO8601Date": date,
+                "X-Apple-CloudKit-Request-SignatureV1": signature,
+            },
+            body,
+            signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            logger.warn("CloudKit username claim lookup failed", {
+                ownerId,
+                status: response.status,
+                attempt,
+            });
+            const message = `CloudKit username claim lookup returned ${response.status}`;
+            if (isTransientCloudKitHTTPStatus(response.status)) {
+                throw new RetryableCloudKitError(message);
+            }
+            return null;
+        }
+        const payload = await response.json() as CloudKitRecordsPayload;
+        const disposition = cloudKitRecordsPayloadDisposition(payload);
+        if (disposition === "error") {
+            const message = "CloudKit username claim lookup returned a record error";
+            throw cloudKitRecordsPayloadIsRetryableError(payload)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        if (disposition === "notFound") {
+            return null;
+        }
+        const claim = payload.records?.find((record) =>
+            typeof record.serverErrorCode !== "string"
+        );
+        const isValid = claim?.recordName === `username_${username}` &&
+            claim.recordType === "UsernameClaim" &&
+            claim.created?.userRecordName === canonicalUserRecord.created?.userRecordName &&
+            claim.fields?.userId?.value === ownerId &&
+            claim.fields?.username?.value === username;
+        const createdAt = claim?.created?.timestamp;
+        return isValid && typeof createdAt === "number" ? createdAt : null;
+    }, maxAttempts);
 }
 
 async function verifyCloudKitResourceAuthority(
@@ -734,42 +848,54 @@ async function fetchPublicCloudKitRecipe(
     if (!keyID || !privateKey) {
         throw new Error("CloudKit web recipe credentials are unavailable");
     }
-    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
-    const body = JSON.stringify({ records: [{ recordName: recipeId }] });
-    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const signature = createSign("SHA256")
-        .update(cloudKitSignatureInput(body, date, subpath))
-        .end()
-        .sign(privateKey)
-        .toString("base64");
     try {
-        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Apple-CloudKit-Request-KeyID": keyID,
-                "X-Apple-CloudKit-Request-ISO8601Date": date,
-                "X-Apple-CloudKit-Request-SignatureV1": signature,
-            },
-            body,
-            signal: AbortSignal.timeout(8_000),
+        return await retryTransientCloudKitOperation(async (attempt) => {
+            const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+            const body = JSON.stringify({ records: [{ recordName: recipeId }] });
+            const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+            const signature = createSign("SHA256")
+                .update(cloudKitSignatureInput(body, date, subpath))
+                .end()
+                .sign(privateKey)
+                .toString("base64");
+            const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Apple-CloudKit-Request-KeyID": keyID,
+                    "X-Apple-CloudKit-Request-ISO8601Date": date,
+                    "X-Apple-CloudKit-Request-SignatureV1": signature,
+                },
+                body,
+                signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+            });
+            if (!response.ok) {
+                logger.warn("CloudKit web recipe lookup failed", {
+                    recipeId,
+                    status: response.status,
+                    attempt,
+                });
+                const message = `CloudKit web recipe lookup returned ${response.status}`;
+                throw isTransientCloudKitHTTPStatus(response.status)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            const payload = await response.json() as CloudKitRecordsPayload;
+            const disposition = cloudKitRecordsPayloadDisposition(payload);
+            if (disposition === "error") {
+                const message = "CloudKit web recipe lookup returned a record error";
+                throw cloudKitRecordsPayloadIsRetryableError(payload)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            if (disposition === "notFound") {
+                return null;
+            }
+            const record = payload.records?.find((candidate) =>
+                typeof candidate.serverErrorCode !== "string"
+            );
+            return record ? sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId) : null;
         });
-        if (!response.ok) {
-            logger.warn("CloudKit web recipe lookup failed", { recipeId, status: response.status });
-            throw new Error(`CloudKit web recipe lookup returned ${response.status}`);
-        }
-        const payload = await response.json() as CloudKitRecordsPayload;
-        const disposition = cloudKitRecordsPayloadDisposition(payload);
-        if (disposition === "error") {
-            throw new Error("CloudKit web recipe lookup returned a record error");
-        }
-        if (disposition === "notFound") {
-            return null;
-        }
-        const record = payload.records?.find((candidate) =>
-            typeof candidate.serverErrorCode !== "string"
-        );
-        return record ? sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId) : null;
     } catch (error) {
         logger.warn("CloudKit web recipe lookup failed", { recipeId, error });
         throw error;
@@ -866,48 +992,65 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
     if (!keyID || !privateKey) {
         throw new Error("CloudKit web creator credentials are unavailable");
     }
-    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
-    const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
-    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const signature = createSign("SHA256")
-        .update(cloudKitSignatureInput(body, date, subpath))
-        .end()
-        .sign(privateKey)
-        .toString("base64");
     try {
-        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Apple-CloudKit-Request-KeyID": keyID,
-                "X-Apple-CloudKit-Request-ISO8601Date": date,
-                "X-Apple-CloudKit-Request-SignatureV1": signature,
-            },
-            body,
-            signal: AbortSignal.timeout(8_000),
+        const identity = await retryTransientCloudKitOperation(async (attempt) => {
+            const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
+            const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
+            const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+            const signature = createSign("SHA256")
+                .update(cloudKitSignatureInput(body, date, subpath))
+                .end()
+                .sign(privateKey)
+                .toString("base64");
+            const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Apple-CloudKit-Request-KeyID": keyID,
+                    "X-Apple-CloudKit-Request-ISO8601Date": date,
+                    "X-Apple-CloudKit-Request-SignatureV1": signature,
+                },
+                body,
+                signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+            });
+            if (!response.ok) {
+                logger.warn("CloudKit web recipe creator lookup failed", {
+                    ownerId,
+                    status: response.status,
+                    attempt,
+                });
+                const message = `CloudKit web recipe creator lookup returned ${response.status}`;
+                throw isTransientCloudKitHTTPStatus(response.status)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            const payload = await response.json() as CloudKitRecordsPayload;
+            const disposition = cloudKitRecordsPayloadDisposition(payload);
+            if (disposition === "error") {
+                const message = "CloudKit web creator lookup returned a record error";
+                throw cloudKitRecordsPayloadIsRetryableError(payload)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            if (disposition === "notFound") {
+                return null;
+            }
+            const records = (payload.records ?? []).filter((record) =>
+                typeof record.serverErrorCode !== "string"
+            );
+            const canonicalRecord = canonicalCloudKitOwnerRecord(records, ownerId);
+            const creator = canonicalCloudKitRecipeCreator(records, ownerId);
+            if (!canonicalRecord || !creator || await verifyCloudKitUsernameClaim(
+                creator.username,
+                ownerId,
+                canonicalRecord,
+                1
+            ) === null) {
+                return null;
+            }
+            return creator;
         });
-        if (!response.ok) {
-            logger.warn("CloudKit web recipe creator lookup failed", { ownerId, status: response.status });
-            throw new Error(`CloudKit web recipe creator lookup returned ${response.status}`);
-        }
-        const payload = await response.json() as CloudKitRecordsPayload;
-        const disposition = cloudKitRecordsPayloadDisposition(payload);
-        if (disposition === "error") {
-            throw new Error("CloudKit web creator lookup returned a record error");
-        }
-        if (disposition === "notFound") {
-            return null;
-        }
-        const records = (payload.records ?? []).filter((record) =>
-            typeof record.serverErrorCode !== "string"
-        );
-        const canonicalRecord = canonicalCloudKitOwnerRecord(records, ownerId);
-        const creator = canonicalCloudKitRecipeCreator(records, ownerId);
-        if (!canonicalRecord || !creator ||
-            await verifyCloudKitUsernameClaim(creator.username, ownerId, canonicalRecord) === null) {
-            return null;
-        }
-        return creator;
+        return identity;
     } catch (error) {
         logger.warn("CloudKit web recipe creator lookup failed", { ownerId, error });
         throw error;

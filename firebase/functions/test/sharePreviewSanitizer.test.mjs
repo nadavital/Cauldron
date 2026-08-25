@@ -11,6 +11,7 @@ import {
     cloudKitOwnerQuery,
     cloudKitRecipeShelfLookupBody,
     cloudKitRecordsPayloadDisposition,
+    cloudKitRecordsPayloadIsRetryableError,
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
     generateCompactRecipePageHtml,
@@ -20,12 +21,14 @@ import {
     generatePreviewHtml,
     isValidUUID,
     isCurrentResourceMutationGeneration,
+    isTransientCloudKitHTTPStatus,
     publicSecurityHeaders,
     previewCollection,
     previewProfile,
     publishedShareResponse,
     recipeCategoryPresentation,
     recipeIndexItemsWithCloudKitImages,
+    retryTransientCloudKitOperation,
     renderCanonicalRecipePage,
     resourceMutationCannotSupersede,
     safeImageURL,
@@ -329,6 +332,12 @@ test("CloudKit HTTP-200 record errors distinguish missing data from retryable fa
         records: [{ serverErrorCode: "UNKNOWN_ITEM" }],
     }), "notFound");
     assert.equal(cloudKitRecordsPayloadDisposition({
+        records: [{ serverErrorCode: "NOT_FOUND" }],
+    }), "notFound");
+    assert.equal(cloudKitRecordsPayloadDisposition({
+        serverErrorCode: "NOT_FOUND",
+    }), "notFound");
+    assert.equal(cloudKitRecordsPayloadDisposition({
         records: [{ serverErrorCode: "TRY_AGAIN_LATER" }],
     }), "error");
     assert.equal(cloudKitRecordsPayloadDisposition({
@@ -337,6 +346,77 @@ test("CloudKit HTTP-200 record errors distinguish missing data from retryable fa
     assert.equal(cloudKitRecordsPayloadDisposition({
         records: [{ recordName: "recipe-id", recordType: "SharedRecipe" }],
     }), "records");
+    assert.equal(cloudKitRecordsPayloadIsRetryableError({
+        records: [{ serverErrorCode: "TRY_AGAIN_LATER" }],
+    }), true);
+    assert.equal(cloudKitRecordsPayloadIsRetryableError({
+        serverErrorCode: "SERVICE_UNAVAILABLE",
+    }), true);
+    assert.equal(cloudKitRecordsPayloadIsRetryableError({
+        records: [{ serverErrorCode: "ACCESS_DENIED" }],
+    }), false);
+    assert.equal(cloudKitRecordsPayloadIsRetryableError({
+        serverErrorCode: "BAD_REQUEST",
+    }), false);
+});
+
+test("CloudKit reads retry transient transport failures once", async () => {
+    let attempts = 0;
+    const result = await retryTransientCloudKitOperation(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+            throw new TypeError("fetch failed");
+        }
+        return "ok";
+    }, 2, 0);
+    assert.equal(result, "ok");
+    assert.equal(attempts, 2);
+});
+
+test("CloudKit reads retry interrupted response bodies", async () => {
+    let attempts = 0;
+    const result = await retryTransientCloudKitOperation(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+            throw Object.assign(new TypeError("terminated"), {
+                cause: { code: "UND_ERR_SOCKET" },
+            });
+        }
+        return "ok";
+    }, 2, 0);
+    assert.equal(result, "ok");
+    assert.equal(attempts, 2);
+});
+
+test("CloudKit retries stop at the configured cap and skip permanent failures", async () => {
+    let transientAttempts = 0;
+    await assert.rejects(
+        retryTransientCloudKitOperation(async () => {
+            transientAttempts += 1;
+            throw new TypeError("fetch failed");
+        }, 2, 0),
+        /fetch failed/
+    );
+    assert.equal(transientAttempts, 2);
+
+    let permanentAttempts = 0;
+    await assert.rejects(
+        retryTransientCloudKitOperation(async () => {
+            permanentAttempts += 1;
+            throw new Error("invalid request");
+        }, 2, 0),
+        /invalid request/
+    );
+    assert.equal(permanentAttempts, 1);
+});
+
+test("CloudKit HTTP retries are limited to transient statuses", () => {
+    for (const status of [408, 425, 429, 500, 502, 503, 504]) {
+        assert.equal(isTransientCloudKitHTTPStatus(status), true, `${status} should retry`);
+    }
+    for (const status of [400, 401, 403, 404, 409, 422]) {
+        assert.equal(isTransientCloudKitHTTPStatus(status), false, `${status} should fail immediately`);
+    }
 });
 
 test("CloudKit server request signature input hashes the exact body", async () => {
