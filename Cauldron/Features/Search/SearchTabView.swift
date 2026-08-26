@@ -34,14 +34,10 @@ struct SearchTabView: View {
     }
 
     private var isRegularWidth: Bool {
-        #if targetEnvironment(macCatalyst)
-        // The app already provides a primary Mac sidebar. A second search split
-        // view wastes most of the window and leaves results stranded in a nested
-        // detail column, so Search uses one full-width navigation workspace.
-        return false
-        #else
-        horizontalSizeClass == .regular
-        #endif
+        // Both Catalyst and the iPhone/iPad app running on Apple silicon Macs
+        // already have the app's primary sidebar. A nested Search split view
+        // wastes the remaining window on another sidebar and placeholder pane.
+        !RuntimeEnvironment.prefersDesktopWorkspace && horizontalSizeClass == .regular
     }
 
     var body: some View {
@@ -108,7 +104,9 @@ struct SearchTabView: View {
         NavigationStack(path: $navigationPath) {
             searchContent
                 .navigationTitle("Search")
-                .toolbarTitleDisplayMode(.inlineLarge)
+                .toolbarTitleDisplayMode(
+                    RuntimeEnvironment.prefersDesktopWorkspace ? .inline : .inlineLarge
+                )
                 .toolbar { searchToolbar }
                 .refreshable {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)

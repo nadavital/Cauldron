@@ -78,6 +78,7 @@ struct ConnectionsView: View {
                     .padding(.horizontal, Theme.Spacing.md)
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
         }
         .warmCanvas()

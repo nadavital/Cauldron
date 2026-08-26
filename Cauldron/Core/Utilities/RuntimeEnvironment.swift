@@ -100,6 +100,32 @@ enum RuntimeEnvironment {
         #endif
     }
 
+    /// Uses a single content workspace when the app is hosted by macOS.
+    ///
+    /// The iPhone/iPad App Store build can run directly on Apple silicon Macs.
+    /// In that environment, a regular horizontal size class does not mean that
+    /// nesting another split view inside the app sidebar is useful; it creates
+    /// redundant navigation columns. Catalyst has the same layout constraint.
+    nonisolated static var prefersDesktopWorkspace: Bool {
+        #if DEBUG
+        if arguments.contains("--cauldron-desktop-workspace") {
+            return true
+        }
+        #endif
+
+        return prefersDesktopWorkspace(
+            isMacCatalystApp: ProcessInfo.processInfo.isMacCatalystApp,
+            isiOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac
+        )
+    }
+
+    nonisolated static func prefersDesktopWorkspace(
+        isMacCatalystApp: Bool,
+        isiOSAppOnMac: Bool
+    ) -> Bool {
+        isMacCatalystApp || isiOSAppOnMac
+    }
+
     nonisolated static var canUseCloudKit: Bool {
         !isRunningTests && !isRunningCI && !isCloudKitForcedOff && !isSimulatorQAMode
     }

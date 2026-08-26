@@ -14,9 +14,19 @@ enum FriendsTabDestination: Hashable {
     case profile(User)
 }
 
-private enum FriendsMacSection: Hashable {
+enum FriendsDesktopSection: Hashable {
     case recipes
     case connections
+}
+
+struct FriendsDesktopRouteState {
+    var section: FriendsDesktopSection = .recipes
+    var path = NavigationPath()
+
+    mutating func select(_ newSection: FriendsDesktopSection) {
+        section = newSection
+        path = NavigationPath()
+    }
 }
 
 /// Friends tab - showing shared recipes and connections
@@ -26,7 +36,7 @@ struct FriendsTabView: View {
     @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var sidebarSelection: FriendsTabDestination?
-    @State private var macSection: FriendsMacSection = .recipes
+    @State private var desktopRouteState = FriendsDesktopRouteState()
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
     @State private var showingInviteSheet = false
@@ -67,7 +77,7 @@ struct FriendsTabView: View {
         .onChange(of: userSession.userId) { _, _ in
             navigationPath = NavigationPath()
             sidebarSelection = nil
-            macSection = .recipes
+            desktopRouteState = FriendsDesktopRouteState()
             collectionImageCache = [:]
         }
         .alert("Success", isPresented: $viewModel.showSuccessAlert) {
@@ -95,22 +105,19 @@ struct FriendsTabView: View {
 
     @ViewBuilder
     private var contentView: some View {
-#if targetEnvironment(macCatalyst)
-        macView
-#else
-        if horizontalSizeClass == .regular {
+        if RuntimeEnvironment.prefersDesktopWorkspace {
+            desktopView
+        } else if horizontalSizeClass == .regular {
             regularView
         } else {
             compactView
         }
-#endif
     }
 
-#if targetEnvironment(macCatalyst)
-    private var macView: some View {
-        NavigationStack(path: $navigationPath) {
+    private var desktopView: some View {
+        NavigationStack(path: $desktopRouteState.path) {
             Group {
-                switch macSection {
+                switch desktopRouteState.section {
                 case .recipes:
                     combinedFeedSection
                         .refreshable {
@@ -118,11 +125,15 @@ struct FriendsTabView: View {
                         }
                 case .connections:
                     ConnectionsView(dependencies: dependencies)
+                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: 720)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                        .warmCanvas()
                 }
             }
-            .navigationTitle(macSection == .recipes ? "Friends" : "Connections")
-            .toolbarTitleDisplayMode(.inlineLarge)
-            .toolbar { macFriendsToolbar }
+            .navigationTitle(desktopRouteState.section == .recipes ? "Friends" : "Connections")
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar { desktopFriendsToolbar }
             .navigationDestination(for: FriendsTabDestination.self) { destination in
                 switch destination {
                 case .connections:
@@ -135,13 +146,16 @@ struct FriendsTabView: View {
     }
 
     @ToolbarContentBuilder
-    private var macFriendsToolbar: some ToolbarContent {
+    private var desktopFriendsToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Picker("Friends Section", selection: $macSection) {
+            Picker("Friends Section", selection: Binding(
+                get: { desktopRouteState.section },
+                set: { desktopRouteState.select($0) }
+            )) {
                 Text("Recipes")
-                    .tag(FriendsMacSection.recipes)
+                    .tag(FriendsDesktopSection.recipes)
                 Text("Connections")
-                    .tag(FriendsMacSection.connections)
+                    .tag(FriendsDesktopSection.connections)
             }
             .pickerStyle(.segmented)
             .frame(width: 280)
@@ -171,7 +185,6 @@ struct FriendsTabView: View {
             }
         }
     }
-#endif
 
     private var compactView: some View {
         NavigationStack(path: $navigationPath) {
@@ -304,17 +317,14 @@ struct FriendsTabView: View {
     }
 
     private func handleConnectionsNavigation() {
-#if targetEnvironment(macCatalyst)
-        navigationPath = NavigationPath()
-        macSection = .connections
-#else
-        if horizontalSizeClass == .regular {
+        if RuntimeEnvironment.prefersDesktopWorkspace {
+            desktopRouteState.select(.connections)
+        } else if horizontalSizeClass == .regular {
             sidebarSelection = .connections
         } else {
             navigationPath = NavigationPath()
             navigationPath.append(FriendsTabDestination.connections)
         }
-#endif
     }
 
     private func handleReferralProfileNavigation(userId: UUID) async {
@@ -342,17 +352,15 @@ struct FriendsTabView: View {
     }
 
     private func navigateToProfile(_ user: User) {
-#if targetEnvironment(macCatalyst)
-        navigationPath = NavigationPath()
-        navigationPath.append(FriendsTabDestination.profile(user))
-#else
-        if horizontalSizeClass == .regular {
+        if RuntimeEnvironment.prefersDesktopWorkspace {
+            desktopRouteState.path = NavigationPath()
+            desktopRouteState.path.append(FriendsTabDestination.profile(user))
+        } else if horizontalSizeClass == .regular {
             sidebarSelection = .profile(user)
         } else {
             navigationPath = NavigationPath()
             navigationPath.append(FriendsTabDestination.profile(user))
         }
-#endif
     }
 
     private var combinedFeedSection: some View {
