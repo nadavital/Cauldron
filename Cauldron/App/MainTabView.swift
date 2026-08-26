@@ -167,9 +167,6 @@ struct MainTabView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            #if targetEnvironment(macCatalyst)
-            resetCatalystWindowTitle()
-            #endif
             openPendingImporterIfNeeded()
             scheduleSidebarCollectionsRefresh()
             Task {
@@ -182,9 +179,6 @@ struct MainTabView: View {
             scheduleSidebarCollectionsRefresh()
         }
         .onChange(of: selectedTab) { _, newTab in
-            #if targetEnvironment(macCatalyst)
-            resetCatalystWindowTitle()
-            #endif
             guard isRegularWidthLayout else { return }
 
             switch newTab {
@@ -224,11 +218,6 @@ struct MainTabView: View {
             icon: "checkmark.circle.fill",
             message: "Recipe imported from share sheet"
         )
-        .onAppear {
-            #if targetEnvironment(macCatalyst)
-            resetCatalystWindowTitle()
-            #endif
-        }
     }
 
     private var appIntentAwareScaffold: some View {
@@ -426,6 +415,9 @@ struct MainTabView: View {
             }
             #endif
         }
+        // The adaptive tab container owns Catalyst's native toolbar. Remove
+        // its redundant app-title item here so feature toolbar controls stay.
+        .modifier(DesktopToolbarTitleRemovalModifier())
     }
 
     private func openPendingImporterIfNeeded() {
@@ -522,19 +514,6 @@ struct MainTabView: View {
             AppLogger.general.error("Failed to persist shared import handoff: \(error.localizedDescription)")
         }
     }
-
-    #if targetEnvironment(macCatalyst)
-    private func resetCatalystWindowTitle() {
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }) else {
-            return
-        }
-
-        // nil restores the default app name ("Cauldron") instead of a dynamic tab/view title.
-        windowScene.title = nil
-    }
-    #endif
 
     private func openImporter(with url: URL, acknowledgement: ShareImportAcknowledgement? = nil) {
         selectedTab = .cook
@@ -782,6 +761,47 @@ struct MainTabView: View {
         sidebarCollections.sort { $0.updatedAt > $1.updatedAt }
     }
 }
+
+private struct DesktopToolbarTitleRemovalModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if RuntimeEnvironment.prefersDesktopWorkspace {
+            #if targetEnvironment(macCatalyst)
+            content
+                .toolbar(removing: .title)
+                .background(CatalystWindowTitleHider())
+            #else
+            content.toolbar(removing: .title)
+            #endif
+        } else {
+            content
+        }
+    }
+}
+
+#if targetEnvironment(macCatalyst)
+private struct CatalystWindowTitleHider: UIViewRepresentable {
+    func makeUIView(context: Context) -> TitlebarConfigurationView {
+        TitlebarConfigurationView()
+    }
+
+    func updateUIView(_ uiView: TitlebarConfigurationView, context: Context) {
+        uiView.hideWindowTitle()
+    }
+
+    final class TitlebarConfigurationView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            hideWindowTitle()
+        }
+
+        func hideWindowTitle() {
+            guard let titlebar = window?.windowScene?.titlebar else { return }
+            titlebar.titleVisibility = .hidden
+        }
+    }
+}
+#endif
 
 #Preview {
     MainTabView(dependencies: .preview(), preloadedData: nil, pendingSharedContent: .constant(nil))
