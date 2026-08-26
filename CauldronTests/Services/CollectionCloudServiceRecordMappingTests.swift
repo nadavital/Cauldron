@@ -9,6 +9,45 @@ import XCTest
 
 @MainActor
 final class CollectionCloudServiceRecordMappingTests: XCTestCase {
+    func testDeletedCollectionRetirementIdentityRequiresCompleteLegacyTombstone() {
+        let collectionID = UUID()
+        let ownerID = UUID()
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.deletedCollection,
+            recordID: CKRecord.ID(recordName: "legacy-tombstone")
+        )
+        record["collectionId"] = collectionID.uuidString as CKRecordValue
+        record["ownerId"] = ownerID.uuidString as CKRecordValue
+        record["deletedAt"] = Date() as CKRecordValue
+
+        XCTAssertTrue(CollectionCloudService.deletedCollectionRecordMatchesIdentity(
+            record,
+            collectionId: collectionID,
+            ownerId: ownerID
+        ))
+
+        record["deletedAt"] = nil
+        XCTAssertFalse(CollectionCloudService.deletedCollectionRecordMatchesIdentity(
+            record,
+            collectionId: collectionID,
+            ownerId: ownerID
+        ))
+    }
+
+    func testStrictQueryResultsThrowWhenAnyMatchedRecordFails() throws {
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.collection,
+            recordID: CKRecord.ID(recordName: "visible-record")
+        )
+        let failure = CKError(.networkFailure)
+        let results: [(CKRecord.ID, Result<CKRecord, Error>)] = [
+            (record.recordID, .success(record)),
+            (CKRecord.ID(recordName: "failed-record"), .failure(failure)),
+        ]
+
+        XCTAssertThrowsError(try CollectionCloudService.strictRecords(from: results))
+    }
+
     func testPopulateAndDecodeCollectionPreservesSourceMetadata() async throws {
         let service = CollectionCloudService(core: CloudKitCore())
         let collectionId = UUID()

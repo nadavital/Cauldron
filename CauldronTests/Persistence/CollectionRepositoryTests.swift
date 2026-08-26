@@ -78,13 +78,14 @@ final class CollectionRepositoryTests: XCTestCase {
             operationQueueService: queue,
             accountScopeProvider: { ownerID in ownerID == canonicalOwnerID ? scope : nil },
             currentAccountScopeProvider: { scope },
-            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordName in
+            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordNames in
                 await retirementRecorder.record(
                     collectionID: collectionID,
                     previousOwnerID: previousOwnerID,
                     canonicalOwnerID: canonicalOwnerID,
-                    expectedRecordName: recordName
+                    expectedRecordName: recordNames.sorted().first
                 )
+                return recordNames
             },
             enforcesVerifiedAccountScope: true
         )
@@ -142,6 +143,678 @@ final class CollectionRepositoryTests: XCTestCase {
         XCTAssertEqual(memberships.first?.ownerId, canonicalOwnerID)
     }
 
+    func testQueuedCollectionRebindRepairsCanonicalOnlyLocalState() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collection = Collection.new(name: "Already migrated", userId: canonicalOwnerID)
+        let recipeID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let retirementRecorder = LegacyCollectionGraphRetirementRecorder()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordNames in
+                await retirementRecorder.record(
+                    collectionID: collectionID,
+                    previousOwnerID: previousOwnerID,
+                    canonicalOwnerID: canonicalOwnerID,
+                    expectedRecordName: recordNames.sorted().first
+                )
+                return recordNames
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let collectionModel = try CollectionModel.from(collection)
+        collectionModel.cloudRecordName = "legacy-collection-record"
+        collectionModel.cloudCoverImageRecordName = "legacy-cover-record"
+        collectionModel.coverImageModifiedAt = Date()
+        context.insert(collectionModel)
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collection.id,
+                recipeId: recipeID,
+                ownerId: canonicalOwnerID
+            )
+        )
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collection.id,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let rebound = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        XCTAssertEqual(rebound.ownerId, canonicalOwnerID)
+        XCTAssertEqual(rebound.status, .pending)
+        let repairedCollection = try await scopedRepository.fetch(
+            id: collection.id,
+            preferredOwnerId: canonicalOwnerID
+        )
+        XCTAssertEqual(repairedCollection?.recipeIds, [recipeID])
+        XCTAssertNil(repairedCollection?.cloudRecordName)
+        XCTAssertNil(repairedCollection?.cloudCoverImageRecordName)
+        XCTAssertNil(repairedCollection?.coverImageModifiedAt)
+        let retirement = await retirementRecorder.lastRequest()
+        XCTAssertEqual(retirement?.previousOwnerID, previousOwnerID)
+        XCTAssertEqual(retirement?.canonicalOwnerID, canonicalOwnerID)
+        XCTAssertEqual(retirement?.expectedRecordName, "legacy-collection-record")
+    }
+
+    func testQueuedCollectionRebindPreservesConfirmedCanonicalCloudRecord() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collection = Collection.new(name: "Canonical", userId: canonicalOwnerID)
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let collectionModel = try CollectionModel.from(collection)
+        collectionModel.cloudRecordName = "canonical-record"
+        collectionModel.cloudCoverImageRecordName = "canonical-cover"
+        let coverModifiedAt = Date()
+        collectionModel.coverImageModifiedAt = coverModifiedAt
+        context.insert(collectionModel)
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collection.id,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let repairedCollection = try await scopedRepository.fetch(
+            id: collection.id,
+            preferredOwnerId: canonicalOwnerID
+        )
+        XCTAssertEqual(repairedCollection?.cloudRecordName, "canonical-record")
+        XCTAssertEqual(repairedCollection?.cloudCoverImageRecordName, "canonical-cover")
+        XCTAssertEqual(repairedCollection?.coverImageModifiedAt, coverModifiedAt)
+    }
+
+    func testQueuedCollectionRebindDeduplicatesCoexistingOwnerGraphs() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let recipeID = UUID()
+        let olderDate = Date(timeIntervalSince1970: 1_000)
+        let newerDate = Date(timeIntervalSince1970: 2_000)
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let recordNamesRecorder = LegacyCollectionRecordNamesRecorder()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, recordNames in
+                await recordNamesRecorder.record(recordNames)
+                return recordNames
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let canonicalModel = CollectionModel(
+            id: collectionID,
+            name: "Older canonical",
+            userId: canonicalOwnerID,
+            cloudRecordName: "canonical-record",
+            updatedAt: olderDate
+        )
+        let legacyModel = CollectionModel(
+            id: collectionID,
+            name: "Newer local edit",
+            userId: previousOwnerID,
+            cloudRecordName: "legacy-record",
+            updatedAt: newerDate
+        )
+        let duplicateLegacyModel = CollectionModel(
+            id: collectionID,
+            name: "Old duplicate",
+            userId: previousOwnerID,
+            cloudRecordName: "legacy-record-2",
+            updatedAt: olderDate
+        )
+        context.insert(canonicalModel)
+        context.insert(legacyModel)
+        context.insert(duplicateLegacyModel)
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collectionID,
+                recipeId: recipeID,
+                ownerId: canonicalOwnerID,
+                status: CollectionMembershipStatus.removed.rawValue,
+                updatedAt: olderDate
+            )
+        )
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collectionID,
+                recipeId: recipeID,
+                ownerId: previousOwnerID,
+                status: CollectionMembershipStatus.active.rawValue,
+                updatedAt: newerDate
+            )
+        )
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let verificationContext = ModelContext(modelContainer)
+        let collections = try verificationContext.fetch(
+            FetchDescriptor<CollectionModel>(
+                predicate: #Predicate {
+                    $0.id == collectionID && $0.userId == canonicalOwnerID
+                }
+            )
+        )
+        let memberships = try verificationContext.fetch(
+            FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            )
+        )
+        XCTAssertEqual(collections.count, 1)
+        XCTAssertEqual(collections.first?.name, "Newer local edit")
+        XCTAssertNil(collections.first?.cloudRecordName)
+        XCTAssertEqual(memberships.count, 1)
+        XCTAssertEqual(memberships.first?.status, CollectionMembershipStatus.active.rawValue)
+        let retiredNames = await recordNamesRecorder.lastRecordNames()
+        XCTAssertEqual(retiredNames, ["canonical-record", "legacy-record", "legacy-record-2"])
+    }
+
+    func testQueuedCollectionRebindUsesStableContentTieBreakForCollections() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let tiedDate = Date(timeIntervalSince1970: 3_000)
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let emptyRecipeIDs = try JSONEncoder().encode([UUID]())
+        context.insert(
+            CollectionModel(
+                id: collectionID,
+                name: "Same name",
+                descriptionText: "Alpha",
+                userId: canonicalOwnerID,
+                recipeIdsBlob: emptyRecipeIDs,
+                createdAt: tiedDate,
+                updatedAt: tiedDate
+            )
+        )
+        context.insert(
+            CollectionModel(
+                id: collectionID,
+                name: "Same name",
+                descriptionText: "Zulu",
+                userId: canonicalOwnerID,
+                recipeIdsBlob: emptyRecipeIDs,
+                createdAt: tiedDate,
+                updatedAt: tiedDate
+            )
+        )
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let repairedCollection = try await scopedRepository.fetch(
+            id: collectionID,
+            preferredOwnerId: canonicalOwnerID
+        )
+        XCTAssertEqual(repairedCollection?.description, "Zulu")
+        let verificationContext = ModelContext(modelContainer)
+        let collections = try verificationContext.fetch(
+            FetchDescriptor<CollectionModel>(
+                predicate: #Predicate {
+                    $0.id == collectionID && $0.userId == canonicalOwnerID
+                }
+            )
+        )
+        XCTAssertEqual(collections.count, 1)
+    }
+
+    func testQueuedCollectionRebindIgnoresMalformedTombstone() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collection = Collection.new(name: "Keep me", userId: canonicalOwnerID)
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        context.insert(try CollectionModel.from(collection))
+        let malformedTombstone = DeletedCollectionModel(
+            collectionId: collection.id,
+            ownerId: canonicalOwnerID,
+            deletedAt: Date(),
+            cloudRecordName: nil
+        )
+        malformedTombstone.deletedAt = nil
+        context.insert(malformedTombstone)
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collection.id,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let repairedCollection = try await scopedRepository.fetch(
+            id: collection.id,
+            preferredOwnerId: canonicalOwnerID
+        )
+        XCTAssertEqual(repairedCollection?.name, "Keep me")
+        let verificationContext = ModelContext(modelContainer)
+        let collectionID = collection.id
+        let tombstones = try verificationContext.fetch(
+            FetchDescriptor<DeletedCollectionModel>(
+                predicate: #Predicate { $0.collectionId == collectionID }
+            )
+        )
+        XCTAssertTrue(tombstones.isEmpty)
+    }
+
+    func testQueuedCollectionRebindMalformedTombstoneDoesNotRetireRemoteOnlyCopy() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let retirementRecorder = LegacyCollectionGraphRetirementRecorder()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordNames in
+                await retirementRecorder.record(
+                    collectionID: collectionID,
+                    previousOwnerID: previousOwnerID,
+                    canonicalOwnerID: canonicalOwnerID,
+                    expectedRecordName: recordNames.sorted().first
+                )
+                return recordNames
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let malformedTombstone = DeletedCollectionModel(
+            collectionId: collectionID,
+            ownerId: previousOwnerID,
+            deletedAt: Date(),
+            cloudRecordName: "remote-only-record"
+        )
+        malformedTombstone.deletedAt = nil
+        context.insert(malformedTombstone)
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let completed = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        XCTAssertEqual(completed.status, .completed)
+        let retirement = await retirementRecorder.lastRequest()
+        let remainingOperation = await queue.getOperation(operationId: operationID)
+        XCTAssertNil(retirement)
+        XCTAssertNil(remainingOperation)
+    }
+
+    func testQueuedCollectionRebindMembershipRemovalWinsTimestampTie() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collection = Collection.new(name: "Tie", userId: canonicalOwnerID)
+        let recipeID = UUID()
+        let tiedDate = Date(timeIntervalSince1970: 5_000)
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        context.insert(try CollectionModel.from(collection))
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collection.id,
+                recipeId: recipeID,
+                ownerId: canonicalOwnerID,
+                status: CollectionMembershipStatus.active.rawValue,
+                updatedAt: tiedDate
+            )
+        )
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collection.id,
+                recipeId: recipeID,
+                ownerId: previousOwnerID,
+                status: CollectionMembershipStatus.removed.rawValue,
+                updatedAt: tiedDate
+            )
+        )
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collection.id,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let verificationContext = ModelContext(modelContainer)
+        let collectionID = collection.id
+        let memberships = try verificationContext.fetch(
+            FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            )
+        )
+        XCTAssertEqual(memberships.count, 1)
+        XCTAssertEqual(memberships.first?.status, CollectionMembershipStatus.removed.rawValue)
+    }
+
+    func testQueuedCollectionDeleteRemovesCanonicalActiveGraph() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collection = Collection.new(name: "Delete me", userId: canonicalOwnerID)
+        let recipeID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        context.insert(try CollectionModel.from(collection))
+        context.insert(
+            CollectionMembershipModel(
+                collectionId: collection.id,
+                recipeId: recipeID,
+                ownerId: canonicalOwnerID
+            )
+        )
+        try context.save()
+        let payload = try JSONEncoder().encode(
+            CollectionRepository.CollectionDeletePayload(
+                collectionId: collection.id,
+                ownerId: previousOwnerID
+            )
+        )
+        let operationID = await queue.addOperation(
+            type: .delete,
+            entityType: .collection,
+            entityId: collection.id,
+            payload: payload,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        _ = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        let verificationContext = ModelContext(modelContainer)
+        let collectionID = collection.id
+        let collections = try verificationContext.fetch(
+            FetchDescriptor<CollectionModel>(predicate: #Predicate { $0.id == collectionID })
+        )
+        let tombstones = try verificationContext.fetch(
+            FetchDescriptor<DeletedCollectionModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            )
+        )
+        let memberships = try verificationContext.fetch(
+            FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            )
+        )
+        XCTAssertTrue(collections.isEmpty)
+        XCTAssertEqual(tombstones.count, 1)
+        XCTAssertEqual(memberships.count, 1)
+        XCTAssertEqual(memberships.first?.status, CollectionMembershipStatus.removed.rawValue)
+    }
+
+    func testQueuedCollectionDeleteRebindsFromPayloadWhenLocalStateAlreadyDisappeared() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let retirementRecorder = LegacyCollectionGraphRetirementRecorder()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordNames in
+                await retirementRecorder.record(
+                    collectionID: collectionID,
+                    previousOwnerID: previousOwnerID,
+                    canonicalOwnerID: canonicalOwnerID,
+                    expectedRecordName: recordNames.sorted().first
+                )
+                return []
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let payload = try JSONEncoder().encode(
+            CollectionRepository.CollectionDeletePayload(
+                collectionId: collectionID,
+                ownerId: previousOwnerID
+            )
+        )
+        let operationID = await queue.addOperation(
+            type: .delete,
+            entityType: .collection,
+            entityId: collectionID,
+            payload: payload,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let rebound = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        XCTAssertEqual(rebound.ownerId, canonicalOwnerID)
+        XCTAssertEqual(rebound.status, .pending)
+        let reboundData = try XCTUnwrap(rebound.payload)
+        let reboundPayload = try JSONDecoder().decode(
+            CollectionRepository.CollectionDeletePayload.self,
+            from: reboundData
+        )
+        XCTAssertEqual(reboundPayload.collectionId, collectionID)
+        XCTAssertEqual(reboundPayload.ownerId, canonicalOwnerID)
+        let retirement = await retirementRecorder.lastRequest()
+        XCTAssertEqual(retirement?.collectionID, collectionID)
+        XCTAssertNil(retirement?.expectedRecordName)
+    }
+
+    func testQueuedCollectionRebindCompletesStateLessUpsertWithoutRemoteRetirement() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let retirementRecorder = LegacyCollectionGraphRetirementRecorder()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { collectionID, previousOwnerID, canonicalOwnerID, recordNames in
+                await retirementRecorder.record(
+                    collectionID: collectionID,
+                    previousOwnerID: previousOwnerID,
+                    canonicalOwnerID: canonicalOwnerID,
+                    expectedRecordName: recordNames.sorted().first
+                )
+                return []
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let rebound = try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+
+        XCTAssertEqual(rebound.ownerId, previousOwnerID)
+        XCTAssertEqual(rebound.status, .completed)
+        let remainingOperation = await queue.getOperation(operationId: rebound.id)
+        XCTAssertNil(remainingOperation)
+        let retirement = await retirementRecorder.lastRequest()
+        XCTAssertNil(retirement)
+    }
+
     func testQueuedCollectionRebindDoesNotMigrateDifferentICloudIdentity() async throws {
         let previousOwnerID = UUID()
         let canonicalOwnerID = UUID()
@@ -158,7 +831,7 @@ final class CollectionRepositoryTests: XCTestCase {
             collectionCloudService: collectionCloudService,
             operationQueueService: queue,
             currentAccountScopeProvider: { currentScope },
-            legacyCollectionGraphRetirer: { _, _, _, _ in },
+            legacyCollectionGraphRetirer: { _, _, _, _ in [] },
             enforcesVerifiedAccountScope: true
         )
         let context = ModelContext(modelContainer)
@@ -201,7 +874,9 @@ final class CollectionRepositoryTests: XCTestCase {
             collectionCloudService: collectionCloudService,
             operationQueueService: queue,
             currentAccountScopeProvider: { scope },
-            legacyCollectionGraphRetirer: { _, _, _, _ in },
+            legacyCollectionGraphRetirer: { _, _, _, recordNames in
+                recordNames
+            },
             enforcesVerifiedAccountScope: true
         )
         let context = ModelContext(modelContainer)
@@ -210,7 +885,7 @@ final class CollectionRepositoryTests: XCTestCase {
                 collectionId: collectionID,
                 ownerId: previousOwnerID,
                 deletedAt: Date(),
-                cloudRecordName: nil
+                cloudRecordName: "legacy-deleted-collection-record"
             )
         )
         try context.save()
@@ -248,6 +923,153 @@ final class CollectionRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(tombstones.count, 1)
         XCTAssertEqual(tombstones.first?.ownerId, canonicalOwnerID)
+        XCTAssertNil(tombstones.first?.cloudRecordName)
+    }
+
+    func testQueuedCollectionRebindIncludesEditCommittedDuringCloudRetirement() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let queue = OperationQueueService()
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        let retirementGate = LegacyCollectionRetirementGate()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { scope },
+            legacyCollectionGraphRetirer: { _, _, _, recordNames in
+                await retirementGate.suspend(returning: recordNames)
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let initialDate = Date(timeIntervalSince1970: 1_000)
+        let concurrentEditDate = Date(timeIntervalSince1970: 2_000)
+        let context = ModelContext(modelContainer)
+        let model = CollectionModel(
+            id: collectionID,
+            name: "Before retirement",
+            userId: previousOwnerID,
+            cloudRecordName: "legacy-record",
+            updatedAt: initialDate
+        )
+        model.recipeIdsBlob = try JSONEncoder().encode([UUID]())
+        context.insert(model)
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let reconciliation = Task {
+            try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+        }
+        await retirementGate.waitUntilSuspended()
+
+        let editingContext = ModelContext(modelContainer)
+        let editDescriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate {
+                $0.id == collectionID && $0.userId == previousOwnerID
+            }
+        )
+        let editedModel = try XCTUnwrap(editingContext.fetch(editDescriptor).first)
+        editedModel.name = "Edited while retiring"
+        editedModel.updatedAt = concurrentEditDate
+        try editingContext.save()
+
+        await retirementGate.resume()
+        _ = try await reconciliation.value
+
+        let repaired = try await scopedRepository.fetch(
+            id: collectionID,
+            preferredOwnerId: canonicalOwnerID
+        )
+        XCTAssertEqual(repaired?.name, "Edited while retiring")
+        XCTAssertEqual(repaired?.updatedAt, concurrentEditDate)
+    }
+
+    func testQueuedCollectionRebindStopsWhenAccountScopeChangesDuringCloudRetirement() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let collectionID = UUID()
+        let queue = OperationQueueService()
+        let originalScope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+        var activeScope: SyncOperationAccountScope? = originalScope
+        let retirementGate = LegacyCollectionRetirementGate()
+        let scopedRepository = CollectionRepository(
+            modelContainer: modelContainer,
+            cloudKitCore: cloudKitCore,
+            collectionCloudService: collectionCloudService,
+            operationQueueService: queue,
+            currentAccountScopeProvider: { activeScope },
+            legacyCollectionGraphRetirer: { _, _, _, recordNames in
+                await retirementGate.suspend(returning: recordNames)
+            },
+            enforcesVerifiedAccountScope: true
+        )
+        let context = ModelContext(modelContainer)
+        let model = CollectionModel(
+            id: collectionID,
+            name: "Original account data",
+            userId: previousOwnerID,
+            cloudRecordName: "legacy-record"
+        )
+        model.recipeIdsBlob = try JSONEncoder().encode([UUID]())
+        context.insert(model)
+        try context.save()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: collectionID,
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        let queuedOperation = await queue.getOperation(operationId: operationID)
+        let operation = try XCTUnwrap(queuedOperation)
+
+        let reconciliation = Task {
+            try await scopedRepository.reconcileQueuedCollectionOwnerIfNeeded(operation)
+        }
+        await retirementGate.waitUntilSuspended()
+        activeScope = SyncOperationAccountScope(
+            ownerId: UUID(),
+            revision: UUID(),
+            cloudKitIdentity: "icloud-B"
+        )
+        await retirementGate.resume()
+
+        do {
+            _ = try await reconciliation.value
+            XCTFail("Expected a changed account scope to abort local owner repair")
+        } catch let error as CollectionRepositoryError {
+            XCTAssertEqual(error, .accountIdentityNotVerified)
+        }
+
+        let verificationContext = ModelContext(modelContainer)
+        let collections = try verificationContext.fetch(FetchDescriptor<CollectionModel>(
+            predicate: #Predicate { $0.id == collectionID }
+        ))
+        XCTAssertEqual(collections.count, 1)
+        XCTAssertEqual(collections.first?.userId, previousOwnerID)
+        XCTAssertEqual(collections.first?.cloudRecordName, "legacy-record")
+        let unchangedOperation = await queue.getOperation(operationId: operationID)
+        XCTAssertEqual(unchangedOperation?.ownerId, previousOwnerID)
     }
 
     func testQueuedCollectionRebindReplacesOutboxItemWhenLegacyItemDisappears() async throws {
@@ -266,7 +1088,9 @@ final class CollectionRepositoryTests: XCTestCase {
             collectionCloudService: collectionCloudService,
             operationQueueService: queue,
             currentAccountScopeProvider: { scope },
-            legacyCollectionGraphRetirer: { _, _, _, _ in },
+            legacyCollectionGraphRetirer: { _, _, _, recordNames in
+                recordNames
+            },
             enforcesVerifiedAccountScope: true
         )
         let context = ModelContext(modelContainer)
@@ -1477,5 +2301,42 @@ private actor LegacyCollectionGraphRetirementRecorder {
 
     func lastRequest() -> LegacyCollectionGraphRetirementRequest? {
         request
+    }
+}
+
+private actor LegacyCollectionRecordNamesRecorder {
+    private var recordNames: Set<String> = []
+
+    func record(_ recordNames: Set<String>) {
+        self.recordNames = recordNames
+    }
+
+    func lastRecordNames() -> Set<String> {
+        recordNames
+    }
+}
+
+private actor LegacyCollectionRetirementGate {
+    private var isSuspended = false
+    private var continuation: CheckedContinuation<Set<String>, Never>?
+    private var recordNames: Set<String> = []
+
+    func suspend(returning recordNames: Set<String>) async -> Set<String> {
+        self.recordNames = recordNames
+        isSuspended = true
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilSuspended() async {
+        while !isSuspended {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume(returning: recordNames)
+        continuation = nil
     }
 }

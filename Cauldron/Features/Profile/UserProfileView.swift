@@ -43,7 +43,7 @@ struct UserProfileView: View {
     @StateObject private var referralManager = ReferralManager.shared
     @State private var codeCopied = false
 
-    // Library recovery and durable-sync visibility
+    // Library backup and recovery
     @State private var archiveDocument: LibraryArchiveDocument?
     @State private var showingArchiveExporter = false
     @State private var showingArchiveImporter = false
@@ -81,7 +81,7 @@ struct UserProfileView: View {
                     }
 
                     if viewModel.isCurrentUser {
-                        dataAndSyncSection
+                        libraryBackupSection
                     }
 
                     // Connection Management Section
@@ -313,25 +313,11 @@ struct UserProfileView: View {
         #endif
     }
 
-    // MARK: - Data & Sync
+    // MARK: - Library Backups
 
-    private var dataAndSyncSection: some View {
+    private var libraryBackupSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            SectionHeaderLabel(title: "Data & Sync", systemImage: "externaldrive.badge.icloud")
-
-            NavigationLink {
-                SyncHealthView(viewModel: viewModel.dependencies.operationQueueViewModel)
-            } label: {
-                settingsRow(
-                    title: "Sync Health",
-                    detail: "Queued uploads and protected changes",
-                    systemImage: "icloud.and.arrow.up"
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows queued iCloud uploads and changes that need attention")
-
-            Divider()
+            SectionHeaderLabel(title: "Library Backups", systemImage: "externaldrive")
 
             Button {
                 Task { await prepareArchiveExport() }

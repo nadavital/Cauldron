@@ -81,8 +81,8 @@ actor CollectionRepository {
         _ collectionID: UUID,
         _ previousOwnerID: UUID,
         _ canonicalOwnerID: UUID,
-        _ expectedRecordName: String?
-    ) async throws -> Void
+        _ expectedRecordNames: Set<String>
+    ) async throws -> Set<String>
 
     private let modelContainer: ModelContainer
     private let cloudKitCore: CloudKitCore
@@ -132,7 +132,7 @@ actor CollectionRepository {
                 collectionId: $0,
                 previousOwnerId: $1,
                 canonicalOwnerId: $2,
-                expectedRecordName: $3
+                expectedRecordNames: $3
             )
         }
         self.enforcesVerifiedAccountScope = enforcesVerifiedAccountScope
@@ -1435,57 +1435,252 @@ actor CollectionRepository {
             return operation
         }
 
-        let context = ModelContext(modelContainer)
         let collectionID = operation.entityId
-        let collectionDescriptor = FetchDescriptor<CollectionModel>(
-            predicate: #Predicate {
-                $0.id == collectionID && $0.userId == previousOwnerID
-            }
-        )
-        let collectionModels = try context.fetch(collectionDescriptor)
+        let canonicalOwnerID = currentScope.ownerId
 
-        let membershipDescriptor = FetchDescriptor<CollectionMembershipModel>(
-            predicate: #Predicate {
-                $0.collectionId == collectionID && $0.ownerId == previousOwnerID
-            }
-        )
-        let membershipModels = try context.fetch(membershipDescriptor)
-
-        let tombstoneDescriptor = FetchDescriptor<DeletedCollectionModel>(
-            predicate: #Predicate {
-                $0.collectionId == collectionID && $0.ownerId == previousOwnerID
-            }
-        )
-        let tombstoneModels = try context.fetch(tombstoneDescriptor)
-
-        guard !collectionModels.isEmpty || !membershipModels.isEmpty || !tombstoneModels.isEmpty else {
-            return operation
+        func fetchGraph(in context: ModelContext) throws -> (
+            legacyCollections: [CollectionModel],
+            canonicalCollections: [CollectionModel],
+            legacyMemberships: [CollectionMembershipModel],
+            canonicalMemberships: [CollectionMembershipModel],
+            legacyTombstones: [DeletedCollectionModel],
+            canonicalTombstones: [DeletedCollectionModel]
+        ) {
+            let legacyCollections = try context.fetch(FetchDescriptor<CollectionModel>(
+                predicate: #Predicate {
+                    $0.id == collectionID && $0.userId == previousOwnerID
+                }
+            ))
+            let canonicalCollections = try context.fetch(FetchDescriptor<CollectionModel>(
+                predicate: #Predicate {
+                    $0.id == collectionID && $0.userId == canonicalOwnerID
+                }
+            ))
+            let legacyMemberships = try context.fetch(FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == previousOwnerID
+                }
+            ))
+            let canonicalMemberships = try context.fetch(FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            ))
+            let legacyTombstones = try context.fetch(FetchDescriptor<DeletedCollectionModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == previousOwnerID
+                }
+            ))
+            let canonicalTombstones = try context.fetch(FetchDescriptor<DeletedCollectionModel>(
+                predicate: #Predicate {
+                    $0.collectionId == collectionID && $0.ownerId == canonicalOwnerID
+                }
+            ))
+            return (
+                legacyCollections,
+                canonicalCollections,
+                legacyMemberships,
+                canonicalMemberships,
+                legacyTombstones,
+                canonicalTombstones
+            )
         }
 
-        let expectedRecordName = collectionModels.compactMap(\.cloudRecordName).first
-            ?? tombstoneModels.compactMap(\.cloudRecordName).first
+        let expectedRecordNames: Set<String>
+        do {
+            let initialContext = ModelContext(modelContainer)
+            let initialGraph = try fetchGraph(in: initialContext)
+            let validInitialTombstones = (
+                initialGraph.legacyTombstones + initialGraph.canonicalTombstones
+            ).filter {
+                $0.collectionId == collectionID && $0.ownerId != nil && $0.deletedAt != nil
+            }
+            let hasLocalReplayState =
+                !initialGraph.legacyCollections.isEmpty ||
+                !initialGraph.canonicalCollections.isEmpty ||
+                !validInitialTombstones.isEmpty
+            if operation.type != .delete, !hasLocalReplayState {
+                // With no local mutation left to publish, the remote collection is
+                // the last durable copy. Retire only the stale queue intent; never
+                // retire CloudKit state based on an empty local cache.
+                await operationQueueService.markCompleted(operationId: operation.id)
+                return operation.markCompleted()
+            }
+            expectedRecordNames = Set(
+                initialGraph.legacyCollections.compactMap(\.cloudRecordName) +
+                    initialGraph.canonicalCollections.compactMap(\.cloudRecordName) +
+                    initialGraph.legacyTombstones.compactMap(\.cloudRecordName) +
+                    initialGraph.canonicalTombstones.compactMap(\.cloudRecordName)
+            )
+        }
 
-        try await legacyCollectionGraphRetirer(
+        let retiredRecordNames = try await legacyCollectionGraphRetirer(
             collectionID,
             previousOwnerID,
             currentScope.ownerId,
-            expectedRecordName
+            expectedRecordNames
         )
 
-        for model in collectionModels {
-            model.userId = currentScope.ownerId
-            // The old physical record was retired above. Clearing its names
-            // forces the canonical-owner replay to create and persist a fresh
-            // CloudKit graph, including a custom cover when one exists.
-            model.cloudRecordName = nil
-            model.cloudCoverImageRecordName = nil
-            model.coverImageModifiedAt = nil
+        // Cloud retirement may outlive the signed-in account generation that
+        // authorized it. Never re-owner local data or recreate an outbox item
+        // unless the complete verified scope is still exactly current.
+        guard let refreshedScope = await currentAccountScopeProvider(),
+              refreshedScope == currentScope else {
+            throw CollectionRepositoryError.accountIdentityNotVerified
         }
-        for model in membershipModels {
-            model.ownerId = currentScope.ownerId
+
+        // The CloudKit retirement above suspends this actor. Re-fetch through a
+        // new context after it returns so a local edit or delete committed
+        // during that suspension participates in conflict resolution instead
+        // of being overwritten by stale pre-await model instances.
+        let context = ModelContext(modelContainer)
+        let graph = try fetchGraph(in: context)
+        let collectionModels = graph.legacyCollections
+        let tombstoneModels = graph.legacyTombstones
+        let allCollectionModels = collectionModels + graph.canonicalCollections
+        let allMembershipModels = graph.legacyMemberships + graph.canonicalMemberships
+        let allTombstoneModels = tombstoneModels + graph.canonicalTombstones
+        let validTombstoneModels = allTombstoneModels.filter {
+            $0.collectionId == collectionID && $0.ownerId != nil && $0.deletedAt != nil
         }
-        for model in tombstoneModels {
-            model.ownerId = currentScope.ownerId
+
+        // Collapse partially migrated local graphs before changing ownership.
+        // SwiftData does not enforce the logical (collection, owner) key, so
+        // simply rebinding legacy rows would leave duplicate cards and make
+        // later edits or deletes target an arbitrary copy.
+        let tombstoneModel: DeletedCollectionModel?
+        if operation.type == .delete {
+            tombstoneModel = validTombstoneModels.max { lhs, rhs in
+                (lhs.deletedAt ?? .distantPast) < (rhs.deletedAt ?? .distantPast)
+            } ?? DeletedCollectionModel(
+                collectionId: collectionID,
+                ownerId: canonicalOwnerID,
+                deletedAt: operation.createdAt,
+                cloudRecordName: nil,
+                sourceDeviceId: SyncDeviceIdentifier.current()
+            )
+            if validTombstoneModels.isEmpty, let tombstoneModel {
+                context.insert(tombstoneModel)
+            }
+        } else {
+            tombstoneModel = validTombstoneModels.max { lhs, rhs in
+                (lhs.deletedAt ?? .distantPast) < (rhs.deletedAt ?? .distantPast)
+            }
+        }
+
+        if let tombstoneModel {
+            let cameFromLegacyOwner = tombstoneModels.contains { $0 === tombstoneModel }
+            tombstoneModel.collectionId = collectionID
+            tombstoneModel.ownerId = canonicalOwnerID
+            if operation.type == .delete,
+               (tombstoneModel.deletedAt ?? .distantPast) < operation.createdAt {
+                tombstoneModel.deletedAt = operation.createdAt
+            }
+            if cameFromLegacyOwner ||
+                tombstoneModel.cloudRecordName.map(retiredRecordNames.contains) == true {
+                tombstoneModel.cloudRecordName = nil
+            }
+            for duplicate in allTombstoneModels where duplicate !== tombstoneModel {
+                context.delete(duplicate)
+            }
+        } else {
+            for malformed in allTombstoneModels {
+                context.delete(malformed)
+            }
+        }
+
+        let deletionWins = tombstoneModel != nil
+        if deletionWins {
+            for model in allCollectionModels {
+                context.delete(model)
+            }
+        } else if let collectionModel = allCollectionModels.reduce(nil as CollectionModel?, { current, candidate in
+            guard let current else { return candidate }
+            if candidate.updatedAt != current.updatedAt {
+                return candidate.updatedAt > current.updatedAt ? candidate : current
+            }
+            let candidateIsCanonical = candidate.userId == canonicalOwnerID
+            let currentIsCanonical = current.userId == canonicalOwnerID
+            if candidateIsCanonical != currentIsCanonical {
+                return candidateIsCanonical ? candidate : current
+            }
+            if (candidate.cloudRecordName != nil) != (current.cloudRecordName != nil) {
+                return candidate.cloudRecordName != nil ? candidate : current
+            }
+            // Complete, stable content ordering makes equal-time duplicate
+            // repair independent of SwiftData fetch order. Truly identical
+            // rows may select either copy without changing persisted meaning.
+            func stableContentKey(_ model: CollectionModel) -> String {
+                [
+                    model.userId.uuidString,
+                    String(model.createdAt.timeIntervalSinceReferenceDate),
+                    model.name,
+                    model.descriptionText ?? "",
+                    model.recipeIdsBlob.base64EncodedString(),
+                    model.emoji ?? "",
+                    model.symbolName ?? "",
+                    model.color ?? "",
+                    model.coverImageType,
+                    model.coverImagePath ?? "",
+                    model.cloudCoverImageRecordName ?? "",
+                    model.coverImageModifiedAt.map { String($0.timeIntervalSinceReferenceDate) } ?? "",
+                    model.visibility,
+                    model.cloudRecordName ?? "",
+                    model.originalCollectionId?.uuidString ?? "",
+                    model.originalCollectionOwnerId?.uuidString ?? "",
+                    model.originalCollectionName ?? "",
+                    model.savedAt.map { String($0.timeIntervalSinceReferenceDate) } ?? "",
+                    model.sourceCollectionUpdatedAt.map { String($0.timeIntervalSinceReferenceDate) } ?? "",
+                    model.followsSourceUpdates ? "1" : "0",
+                ].joined(separator: "\u{1F}")
+            }
+            return stableContentKey(candidate) > stableContentKey(current) ? candidate : current
+        }) {
+            let cameFromLegacyOwner = collectionModels.contains { $0 === collectionModel }
+            collectionModel.userId = canonicalOwnerID
+            if cameFromLegacyOwner ||
+                collectionModel.cloudRecordName.map(retiredRecordNames.contains) == true {
+                // Only clear a canonical pointer when CloudKit confirmed that
+                // exact physical record was part of the retired legacy graph.
+                collectionModel.cloudRecordName = nil
+                collectionModel.cloudCoverImageRecordName = nil
+                collectionModel.coverImageModifiedAt = nil
+            }
+            for duplicate in allCollectionModels where duplicate !== collectionModel {
+                context.delete(duplicate)
+            }
+        }
+
+        for models in Dictionary(grouping: allMembershipModels, by: \.recipeId).values {
+            guard let membershipModel = models.reduce(nil as CollectionMembershipModel?, { current, candidate in
+                guard let current else { return candidate }
+                if candidate.updatedAt != current.updatedAt {
+                    return candidate.updatedAt > current.updatedAt ? candidate : current
+                }
+                let candidateIsRemoved = candidate.status == CollectionMembershipStatus.removed.rawValue
+                let currentIsRemoved = current.status == CollectionMembershipStatus.removed.rawValue
+                if candidateIsRemoved != currentIsRemoved {
+                    return candidateIsRemoved ? candidate : current
+                }
+                if candidate.sortOrder != current.sortOrder {
+                    return candidate.sortOrder < current.sortOrder ? candidate : current
+                }
+                return (candidate.sourceDeviceId ?? "") > (current.sourceDeviceId ?? "")
+                    ? candidate
+                    : current
+            }) else {
+                continue
+            }
+            membershipModel.ownerId = canonicalOwnerID
+            if deletionWins {
+                membershipModel.status = CollectionMembershipStatus.removed.rawValue
+                if membershipModel.updatedAt < operation.createdAt {
+                    membershipModel.updatedAt = operation.createdAt
+                }
+            }
+            for duplicate in models where duplicate !== membershipModel {
+                context.delete(duplicate)
+            }
         }
         try context.save()
 

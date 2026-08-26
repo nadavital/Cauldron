@@ -432,28 +432,30 @@ actor CollectionCloudService {
         collectionId: UUID,
         previousOwnerId: UUID,
         canonicalOwnerId: UUID,
-        expectedRecordName: String?
-    ) async throws {
+        expectedRecordNames: Set<String>
+    ) async throws -> Set<String> {
         let authorizationContext = try await resolvedAuthorizationContext(
             ownerID: canonicalOwnerId,
             provided: nil
         )
 
-        try await withPublicationLease(ownerID: canonicalOwnerId) {
+        return try await withPublicationLease(ownerID: canonicalOwnerId) {
             let db = try await core.getPublicDatabase()
             let currentIdentity = try await validatedCurrentOwnerIdentity(
                 for: canonicalOwnerId,
                 in: db
             )
-            var collectionRecords: [CKRecord] = []
+            var directlyFetchedRecords: [CKRecord] = []
+            var confirmedAbsentRecordNames = Set<String>()
 
-            if let expectedRecordName, !expectedRecordName.isEmpty {
+            for expectedRecordName in expectedRecordNames where !expectedRecordName.isEmpty {
                 do {
-                    collectionRecords.append(
+                    directlyFetchedRecords.append(
                         try await db.record(for: CKRecord.ID(recordName: expectedRecordName))
                     )
                 } catch let error as CKError where error.code == .unknownItem {
                     // Already absent is a successful retirement state.
+                    confirmedAbsentRecordNames.insert(expectedRecordName)
                 }
             }
 
@@ -464,11 +466,13 @@ actor CollectionCloudService {
                     NSPredicate(format: "userId == %@", previousOwnerId.uuidString),
                 ])
             )
-            do {
-                collectionRecords += try await fetchAllRecords(matching: collectionQuery, in: db)
-            } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
-                // The record type or compatibility index may not exist yet.
-            }
+            // Query completeness is part of the retirement proof. If the
+            // compatibility index is unavailable, keep the queue item for a
+            // later retry rather than claiming success after deleting only a
+            // subset of a duplicated legacy graph.
+            let collectionRecords = directlyFetchedRecords.filter {
+                $0.recordType == CloudKitCore.RecordType.collection
+            } + (try await fetchAllRecords(matching: collectionQuery, in: db))
 
             let membershipQuery = CKQuery(
                 recordType: CloudKitCore.RecordType.collectionMembership,
@@ -477,12 +481,18 @@ actor CollectionCloudService {
                     NSPredicate(format: "ownerId == %@", previousOwnerId.uuidString),
                 ])
             )
-            let membershipRecords: [CKRecord]
-            do {
-                membershipRecords = try await fetchAllRecords(matching: membershipQuery, in: db)
-            } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
-                membershipRecords = []
-            }
+            let membershipRecords = try await fetchAllRecords(matching: membershipQuery, in: db)
+
+            let tombstoneQuery = CKQuery(
+                recordType: CloudKitCore.RecordType.deletedCollection,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "collectionId == %@", collectionId.uuidString),
+                    NSPredicate(format: "ownerId == %@", previousOwnerId.uuidString),
+                ])
+            )
+            let tombstoneRecords = directlyFetchedRecords.filter {
+                $0.recordType == CloudKitCore.RecordType.deletedCollection
+            } + (try await fetchAllRecords(matching: tombstoneQuery, in: db))
 
             let legacyIdentity = CollectionCloudIdentity(
                 ownerId: previousOwnerId,
@@ -506,9 +516,22 @@ actor CollectionCloudService {
                         currentIdentityRecordName: currentIdentity.recordName
                     )
             }
-            let recordIDs = Set((verifiedCollections + verifiedMemberships).map(\.recordID))
+            let verifiedTombstones = tombstoneRecords.filter { record in
+                Self.deletedCollectionRecordMatchesIdentity(
+                    record,
+                    collectionId: collectionId,
+                    ownerId: previousOwnerId
+                ) &&
+                    Self.recordCreatorMatchesAuthority(
+                        record.creatorUserRecordID?.recordName,
+                        authorityRecordName: currentIdentity.recordName,
+                        currentIdentityRecordName: currentIdentity.recordName
+                    )
+            }
+            let verifiedStateRecords = verifiedCollections + verifiedTombstones
+            let recordIDs = Set((verifiedStateRecords + verifiedMemberships).map(\.recordID))
 
-            guard !recordIDs.isEmpty else { return }
+            guard !recordIDs.isEmpty else { return confirmedAbsentRecordNames }
             try await authorizeMutation(
                 ownerID: canonicalOwnerId,
                 context: authorizationContext
@@ -519,6 +542,8 @@ actor CollectionCloudService {
             logger.notice(
                 "Retired \(recordIDs.count) legacy collection record(s) for canonical owner repair"
             )
+            return Set(verifiedStateRecords.map(\.recordID.recordName))
+                .union(confirmedAbsentRecordNames)
         }
     }
 
@@ -1301,6 +1326,17 @@ actor CollectionCloudService {
             record["userId"] as? String == identity.ownerId.uuidString
     }
 
+    nonisolated static func deletedCollectionRecordMatchesIdentity(
+        _ record: CKRecord,
+        collectionId: UUID,
+        ownerId: UUID
+    ) -> Bool {
+        record.recordType == CloudKitCore.RecordType.deletedCollection &&
+            record["collectionId"] as? String == collectionId.uuidString &&
+            record["ownerId"] as? String == ownerId.uuidString &&
+            record["deletedAt"] as? Date != nil
+    }
+
     nonisolated static func validatedKnownCollectionRecord(
         _ record: CKRecord,
         identity: CollectionCloudIdentity,
@@ -1405,13 +1441,17 @@ actor CollectionCloudService {
                 results = try await db.records(matching: query, resultsLimit: resultsLimit)
             }
 
-            records += results.matchResults.compactMap { _, result in
-                try? result.get()
-            }
+            records += try Self.strictRecords(from: results.matchResults)
             cursor = results.queryCursor
         } while cursor != nil
 
         return records
+    }
+
+    nonisolated static func strictRecords(
+        from matchResults: [(CKRecord.ID, Result<CKRecord, Error>)]
+    ) throws -> [CKRecord] {
+        try matchResults.map { _, result in try result.get() }
     }
 
     private func deleteRecordIDs(_ recordIDs: [CKRecord.ID], in db: CKDatabase) async throws {
