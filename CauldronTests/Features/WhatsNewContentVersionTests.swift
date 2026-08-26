@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class WhatsNewContentVersionTests: XCTestCase {
     func testSiriVisualSearchUpdateUsesANewContentGate() {
-        XCTAssertEqual(ContentView.whatsNewContentVersion, "1.8.4")
-        XCTAssertNotEqual(ContentView.whatsNewContentVersion, "1.8.3")
+        XCTAssertEqual(ContentView.whatsNewContentVersion, "2.0")
+        XCTAssertNotEqual(ContentView.whatsNewContentVersion, "1.8.4")
     }
 }

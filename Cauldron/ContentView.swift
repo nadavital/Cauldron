@@ -32,7 +32,7 @@ struct ContentView: View {
     // When you ship a bug fix, leave this unchanged so no splash appears.
     /// Independent content gate so material release-note changes can be shown
     /// even when they ship within the same marketing version.
-    static let whatsNewContentVersion = "1.8.4"
+    static let whatsNewContentVersion = "2.0"
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
