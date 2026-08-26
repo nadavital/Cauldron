@@ -264,6 +264,67 @@ final class OperationQueueServiceTests: XCTestCase {
         XCTAssertEqual(rebound.status, .pending)
     }
 
+    func testVerifiedCloudIdentityCanRebindOperationToCanonicalOwner() async throws {
+        let previousOwnerID = UUID()
+        let canonicalOwnerID = UUID()
+        let queue = OperationQueueService()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: UUID(),
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+        await queue.markFailed(operationId: operationID, error: "temporary")
+        let scope = SyncOperationAccountScope(
+            ownerId: canonicalOwnerID,
+            revision: UUID(),
+            cloudKitIdentity: "icloud-A"
+        )
+
+        let rebound = await queue.rebindOperationOwner(
+            operationId: operationID,
+            previousOwnerID: previousOwnerID,
+            scope: scope
+        )
+
+        XCTAssertEqual(rebound?.ownerId, canonicalOwnerID)
+        XCTAssertEqual(rebound?.accountRevision, scope.revision)
+        XCTAssertEqual(rebound?.accountIdentity, scope.cloudKitIdentity)
+        XCTAssertEqual(rebound?.status, .pending)
+        XCTAssertEqual(rebound?.attempts, 1)
+        XCTAssertNil(rebound?.nextRetryDate)
+    }
+
+    func testOperationOwnerRebindRefusesDifferentCloudIdentity() async {
+        let previousOwnerID = UUID()
+        let queue = OperationQueueService()
+        let operationID = await queue.addOperation(
+            type: .update,
+            entityType: .collection,
+            entityId: UUID(),
+            ownerId: previousOwnerID,
+            accountRevision: UUID(),
+            accountIdentity: "icloud-A"
+        )
+
+        let rebound = await queue.rebindOperationOwner(
+            operationId: operationID,
+            previousOwnerID: previousOwnerID,
+            scope: SyncOperationAccountScope(
+                ownerId: UUID(),
+                revision: UUID(),
+                cloudKitIdentity: "icloud-B"
+            )
+        )
+
+        XCTAssertNil(rebound)
+        let unchanged = await queue.getOperation(operationId: operationID)
+        XCTAssertEqual(unchanged?.ownerId, previousOwnerID)
+        XCTAssertEqual(unchanged?.accountIdentity, "icloud-A")
+    }
+
     func testPartialAccountScopesAreRejectedRatherThanMigrated() {
         let ownerId = UUID()
         let scope = SyncOperationAccountScope(ownerId: ownerId, revision: UUID())

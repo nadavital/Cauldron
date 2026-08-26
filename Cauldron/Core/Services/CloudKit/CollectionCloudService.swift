@@ -424,6 +424,104 @@ actor CollectionCloudService {
         )
     }
 
+    /// Removes the old physical graph for a collection after the same
+    /// CloudKit creator has been verified against a new canonical app owner.
+    /// This is intentionally narrower than ordinary deletion: every record
+    /// must match the legacy logical identity and the current CloudKit creator.
+    func retireLegacyCollectionGraph(
+        collectionId: UUID,
+        previousOwnerId: UUID,
+        canonicalOwnerId: UUID,
+        expectedRecordName: String?
+    ) async throws {
+        let authorizationContext = try await resolvedAuthorizationContext(
+            ownerID: canonicalOwnerId,
+            provided: nil
+        )
+
+        try await withPublicationLease(ownerID: canonicalOwnerId) {
+            let db = try await core.getPublicDatabase()
+            let currentIdentity = try await validatedCurrentOwnerIdentity(
+                for: canonicalOwnerId,
+                in: db
+            )
+            var collectionRecords: [CKRecord] = []
+
+            if let expectedRecordName, !expectedRecordName.isEmpty {
+                do {
+                    collectionRecords.append(
+                        try await db.record(for: CKRecord.ID(recordName: expectedRecordName))
+                    )
+                } catch let error as CKError where error.code == .unknownItem {
+                    // Already absent is a successful retirement state.
+                }
+            }
+
+            let collectionQuery = CKQuery(
+                recordType: CloudKitCore.RecordType.collection,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "collectionId == %@", collectionId.uuidString),
+                    NSPredicate(format: "userId == %@", previousOwnerId.uuidString),
+                ])
+            )
+            do {
+                collectionRecords += try await fetchAllRecords(matching: collectionQuery, in: db)
+            } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+                // The record type or compatibility index may not exist yet.
+            }
+
+            let membershipQuery = CKQuery(
+                recordType: CloudKitCore.RecordType.collectionMembership,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    NSPredicate(format: "collectionId == %@", collectionId.uuidString),
+                    NSPredicate(format: "ownerId == %@", previousOwnerId.uuidString),
+                ])
+            )
+            let membershipRecords: [CKRecord]
+            do {
+                membershipRecords = try await fetchAllRecords(matching: membershipQuery, in: db)
+            } catch let error as CKError where error.code == .unknownItem || error.errorCode == 11 {
+                membershipRecords = []
+            }
+
+            let legacyIdentity = CollectionCloudIdentity(
+                ownerId: previousOwnerId,
+                collectionId: collectionId
+            )
+            let verifiedCollections = collectionRecords.filter { record in
+                Self.collectionRecordMatchesIdentity(record, identity: legacyIdentity) &&
+                    Self.recordCreatorMatchesAuthority(
+                        record.creatorUserRecordID?.recordName,
+                        authorityRecordName: currentIdentity.recordName,
+                        currentIdentityRecordName: currentIdentity.recordName
+                    )
+            }
+            let verifiedMemberships = membershipRecords.filter { record in
+                record.recordType == CloudKitCore.RecordType.collectionMembership &&
+                    record["collectionId"] as? String == collectionId.uuidString &&
+                    record["ownerId"] as? String == previousOwnerId.uuidString &&
+                    Self.recordCreatorMatchesAuthority(
+                        record.creatorUserRecordID?.recordName,
+                        authorityRecordName: currentIdentity.recordName,
+                        currentIdentityRecordName: currentIdentity.recordName
+                    )
+            }
+            let recordIDs = Set((verifiedCollections + verifiedMemberships).map(\.recordID))
+
+            guard !recordIDs.isEmpty else { return }
+            try await authorizeMutation(
+                ownerID: canonicalOwnerId,
+                context: authorizationContext
+            )
+            for chunk in Self.chunked(Array(recordIDs), size: 200) {
+                try await deleteRecordIDs(chunk, in: db)
+            }
+            logger.notice(
+                "Retired \(recordIDs.count) legacy collection record(s) for canonical owner repair"
+            )
+        }
+    }
+
     private func deleteCollectionRecordIfPresent(
         _ collectionId: UUID,
         ownerId: UUID,

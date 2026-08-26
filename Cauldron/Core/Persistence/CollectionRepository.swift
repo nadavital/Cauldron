@@ -76,6 +76,13 @@ private nonisolated struct CollectionOwnerKey: Hashable, Sendable {
 /// Thread-safe repository for Collection operations
 actor CollectionRepository {
     typealias AccountScopeProvider = @MainActor @Sendable (UUID) -> SyncOperationAccountScope?
+    typealias CurrentAccountScopeProvider = @MainActor @Sendable () -> SyncOperationAccountScope?
+    typealias LegacyCollectionGraphRetirer = @Sendable (
+        _ collectionID: UUID,
+        _ previousOwnerID: UUID,
+        _ canonicalOwnerID: UUID,
+        _ expectedRecordName: String?
+    ) async throws -> Void
 
     private let modelContainer: ModelContainer
     private let cloudKitCore: CloudKitCore
@@ -83,6 +90,8 @@ actor CollectionRepository {
     private let operationQueueService: OperationQueueService
     private let externalShareService: ExternalShareService?
     private let accountScopeProvider: AccountScopeProvider
+    private let currentAccountScopeProvider: CurrentAccountScopeProvider
+    private let legacyCollectionGraphRetirer: LegacyCollectionGraphRetirer
     private let enforcesVerifiedAccountScope: Bool
     private let logger = Logger(subsystem: "com.cauldron", category: "CollectionRepository")
 
@@ -104,6 +113,11 @@ actor CollectionRepository {
         accountScopeProvider: @escaping AccountScopeProvider = { ownerID in
             CurrentUserSession.shared.syncOperationAccountScope(ownerID: ownerID)
         },
+        currentAccountScopeProvider: @escaping CurrentAccountScopeProvider = {
+            guard let ownerID = CurrentUserSession.shared.userId else { return nil }
+            return CurrentUserSession.shared.syncOperationAccountScope(ownerID: ownerID)
+        },
+        legacyCollectionGraphRetirer: LegacyCollectionGraphRetirer? = nil,
         enforcesVerifiedAccountScope: Bool = !RuntimeEnvironment.isRunningTests
     ) {
         self.modelContainer = modelContainer
@@ -112,6 +126,15 @@ actor CollectionRepository {
         self.operationQueueService = operationQueueService
         self.externalShareService = externalShareService
         self.accountScopeProvider = accountScopeProvider
+        self.currentAccountScopeProvider = currentAccountScopeProvider
+        self.legacyCollectionGraphRetirer = legacyCollectionGraphRetirer ?? { [collectionCloudService] in
+            try await collectionCloudService.retireLegacyCollectionGraph(
+                collectionId: $0,
+                previousOwnerId: $1,
+                canonicalOwnerId: $2,
+                expectedRecordName: $3
+            )
+        }
         self.enforcesVerifiedAccountScope = enforcesVerifiedAccountScope
 
         if !RuntimeEnvironment.isRunningTests {
@@ -1366,13 +1389,13 @@ actor CollectionRepository {
     }
 
     private func replayReadyCollectionOperations() async {
-        let operations = await operationQueueService.getAllOperations()
+        let queuedOperations = await operationQueueService.getAllOperations()
             .filter { operation in
                 operation.entityType == .collection &&
                 (operation.status == .pending || operation.isReadyForRetry)
             }
 
-        guard !operations.isEmpty else { return }
+        guard !queuedOperations.isEmpty else { return }
 
         let isAvailable = await cloudKitCore.isAvailable()
         guard isAvailable else {
@@ -1380,10 +1403,146 @@ actor CollectionRepository {
             return
         }
 
-        for operation in operations {
+        for queuedOperation in queuedOperations {
             guard !Task.isCancelled else { break }
+            let operation: SyncOperation
+            do {
+                operation = try await reconcileQueuedCollectionOwnerIfNeeded(queuedOperation)
+            } catch {
+                await operationQueueService.markFailed(
+                    operationId: queuedOperation.id,
+                    error: "Collection owner reconciliation failed: \(error.localizedDescription)"
+                )
+                continue
+            }
             await replayCollectionOperation(operation)
         }
+    }
+
+    /// Repairs a durable collection mutation when CloudKit proves that the
+    /// same iCloud account now maps to a different canonical Cauldron user ID.
+    /// A different or missing CloudKit identity remains deferred by the normal
+    /// account-boundary policy.
+    @discardableResult
+    func reconcileQueuedCollectionOwnerIfNeeded(_ operation: SyncOperation) async throws -> SyncOperation {
+        guard operation.entityType == .collection,
+              let previousOwnerID = operation.ownerId,
+              let currentScope = await currentAccountScopeProvider(),
+              previousOwnerID != currentScope.ownerId,
+              let queuedIdentity = operation.accountIdentity,
+              !queuedIdentity.isEmpty,
+              queuedIdentity == currentScope.cloudKitIdentity else {
+            return operation
+        }
+
+        let context = ModelContext(modelContainer)
+        let collectionID = operation.entityId
+        let collectionDescriptor = FetchDescriptor<CollectionModel>(
+            predicate: #Predicate {
+                $0.id == collectionID && $0.userId == previousOwnerID
+            }
+        )
+        let collectionModels = try context.fetch(collectionDescriptor)
+
+        let membershipDescriptor = FetchDescriptor<CollectionMembershipModel>(
+            predicate: #Predicate {
+                $0.collectionId == collectionID && $0.ownerId == previousOwnerID
+            }
+        )
+        let membershipModels = try context.fetch(membershipDescriptor)
+
+        let tombstoneDescriptor = FetchDescriptor<DeletedCollectionModel>(
+            predicate: #Predicate {
+                $0.collectionId == collectionID && $0.ownerId == previousOwnerID
+            }
+        )
+        let tombstoneModels = try context.fetch(tombstoneDescriptor)
+
+        guard !collectionModels.isEmpty || !membershipModels.isEmpty || !tombstoneModels.isEmpty else {
+            return operation
+        }
+
+        let expectedRecordName = collectionModels.compactMap(\.cloudRecordName).first
+            ?? tombstoneModels.compactMap(\.cloudRecordName).first
+
+        try await legacyCollectionGraphRetirer(
+            collectionID,
+            previousOwnerID,
+            currentScope.ownerId,
+            expectedRecordName
+        )
+
+        for model in collectionModels {
+            model.userId = currentScope.ownerId
+            // The old physical record was retired above. Clearing its names
+            // forces the canonical-owner replay to create and persist a fresh
+            // CloudKit graph, including a custom cover when one exists.
+            model.cloudRecordName = nil
+            model.cloudCoverImageRecordName = nil
+            model.coverImageModifiedAt = nil
+        }
+        for model in membershipModels {
+            model.ownerId = currentScope.ownerId
+        }
+        for model in tombstoneModels {
+            model.ownerId = currentScope.ownerId
+        }
+        try context.save()
+
+        let reboundPayload: Data?
+        if operation.type == .delete {
+            reboundPayload = try JSONEncoder().encode(
+                CollectionDeletePayload(
+                    collectionId: collectionID,
+                    ownerId: currentScope.ownerId
+                )
+            )
+        } else {
+            reboundPayload = operation.payload
+        }
+
+        let rebound: SyncOperation
+        if let existingRebound = await operationQueueService.rebindOperationOwner(
+            operationId: operation.id,
+            previousOwnerID: previousOwnerID,
+            scope: currentScope,
+            payload: reboundPayload
+        ) {
+            rebound = existingRebound
+        } else {
+            // The legacy item may have completed or been compacted while the
+            // cloud graph was retiring. Preserve the canonical mutation by
+            // creating a replacement rather than rolling local ownership back
+            // to a physical graph that no longer exists.
+            let replacementID = await operationQueueService.addOperation(
+                type: operation.type,
+                entityType: operation.entityType,
+                entityId: operation.entityId,
+                payload: reboundPayload,
+                ownerId: currentScope.ownerId,
+                accountRevision: currentScope.revision,
+                accountIdentity: currentScope.cloudKitIdentity
+            )
+            guard let replacement = await operationQueueService.getOperation(
+                operationId: replacementID
+            ) else {
+                throw CollectionRepositoryError.accountIdentityNotVerified
+            }
+            rebound = replacement
+            logger.warning(
+                "Replaced a vanished legacy collection outbox item during canonical owner repair"
+            )
+        }
+
+        logger.notice(
+            "Rebound collection \(collectionID) from a legacy profile ID after verifying the same iCloud identity"
+        )
+        NotificationCenter.default.post(
+            name: .collectionUpdated,
+            object: collectionID,
+            userInfo: ["collectionId": collectionID]
+        )
+        return rebound
     }
 
     private func replayCollectionOperation(_ operation: SyncOperation) async {

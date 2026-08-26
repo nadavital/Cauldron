@@ -60,6 +60,7 @@ Guidance for coding agents working in this repository.
   - Operation queue + CloudKit sync paths should not be bypassed without a clear migration plan.
   - Deleted recipes are represented by durable private CloudKit `DeletedRecipe` tombstones; deletion wins over stale active recipe records.
   - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
+  - A durable collection mutation may rebind to a new canonical Cauldron user ID only when its persisted stable CloudKit identity exactly matches the verified current account; the creator-bound legacy collection graph is retired before canonical replay, and different identities remain deferred.
   - If the local SwiftData store cannot open, preserve it and its sidecars under `Cauldron Store Backups` before creating a clean store. Keep the committed 1.5 store fixture opening in current-schema tests.
 - Cook Mode state shared with Live Activities and App Intents is persisted through `CookSessionSharedStore`; app and widget navigation must use the shared reducer rather than independent defaults mutations.
 - Update-surface behavior matters:

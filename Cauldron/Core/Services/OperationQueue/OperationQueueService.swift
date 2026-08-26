@@ -483,6 +483,46 @@ actor OperationQueueService {
         return resumed
     }
 
+    /// Rebinds an outbox item after the same verified iCloud account adopts a
+    /// new canonical Cauldron user ID. This is intentionally stricter than the
+    /// legacy migration path: both the previous local owner and stable
+    /// CloudKit identity must match the persisted operation.
+    func rebindOperationOwner(
+        operationId: UUID,
+        previousOwnerID: UUID,
+        scope: SyncOperationAccountScope,
+        payload: Data? = nil
+    ) -> SyncOperation? {
+        guard let operation = operations[operationId],
+              operation.ownerId == previousOwnerID,
+              let queuedIdentity = operation.accountIdentity,
+              !queuedIdentity.isEmpty,
+              queuedIdentity == scope.cloudKitIdentity else {
+            return nil
+        }
+
+        let rebound = SyncOperation(
+            id: operation.id,
+            type: operation.type,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            payload: payload ?? operation.payload,
+            ownerId: scope.ownerId,
+            accountRevision: scope.revision,
+            accountIdentity: scope.cloudKitIdentity,
+            status: .pending,
+            attempts: operation.attempts,
+            lastAttemptDate: operation.lastAttemptDate,
+            nextRetryDate: nil,
+            errorMessage: operation.errorMessage,
+            createdAt: operation.createdAt
+        )
+        operations[operationId] = rebound
+        persistOperations()
+        eventContinuation.yield(.operationRetrying(rebound))
+        return rebound
+    }
+
     /// Permanently retires work from another account generation. Retrying it
     /// could mutate whichever CloudKit account happens to be active later.
     func quarantineOperation(operationId: UUID, error: String) {
