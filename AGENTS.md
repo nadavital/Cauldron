@@ -72,6 +72,9 @@ Guidance for coding agents working in this repository.
   `tools/ci/verify_xcode_27.sh` fails if its Xcode or iPhoneOS SDK major drifts.
   PR/push checks warn when the preview build rotates; manually dispatched
   release verification requires the exact Xcode build supplied in its input.
+- Xcode Cloud runs `tools/ci/verify_release_configuration.sh` from
+  `ci_scripts/ci_post_clone.sh`; GitHub's iOS readiness job runs the same check
+  for archive UTIs, signing entitlements, hosted domains, and Catalyst sandbox access.
 - Xcode Cloud's `PR Checks` and manual `App Store Release (Xcode 26.6)`
   workflows are pinned to Xcode 26.6 (`17F113`) on macOS 26.6.2. The release
   workflow creates an App Store-eligible iOS archive from `main`; increment the

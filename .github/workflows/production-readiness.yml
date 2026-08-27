@@ -57,6 +57,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify Xcode 27 toolchain
         run: tools/ci/verify_xcode_27.sh
+      - name: Verify release configuration
+        run: tools/ci/verify_release_configuration.sh
       - name: Run iOS tests
         run: >-
           xcodebuild test
