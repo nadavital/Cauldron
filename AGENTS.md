@@ -72,6 +72,10 @@ Guidance for coding agents working in this repository.
   `tools/ci/verify_xcode_27.sh` fails if its Xcode or iPhoneOS SDK major drifts.
   PR/push checks warn when the preview build rotates; manually dispatched
   release verification requires the exact Xcode build supplied in its input.
+- App Store-eligible SDK 26 fallback builds use the Xcode Cloud `PR Checks`
+  workflow, pinned to Xcode 26.6 (`17F113`) on macOS 26.6.2 with manual `main`
+  runs enabled. Do not switch it to `Latest Beta or Release` while App Store
+  Connect rejects binaries built with the iOS 27 SDK.
 - The scheduled hosted-sharing monitor is public/read-only and fails closed.
   Keep its profile, recipe, and Bakery collection fixtures published; override
   the corresponding repository variable before intentionally retiring one.
