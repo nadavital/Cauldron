@@ -18,9 +18,9 @@ ROOT = Path(
         str(Path(__file__).resolve().parent.parent),
     )
 ).expanduser().resolve()
-OUT_ROOT = ROOT / 'output' / 'continuous_story_v3_appstore_continuous'
+OUT_ROOT = ROOT / 'output' / 'cauldron_2_0_appstore'
 
-IPHONE_SOURCE = ROOT / 'appscreenshots' / 'iPhone' / '1.3'
+IPHONE_SOURCE = ROOT / 'appscreenshots' / 'iPhone' / '2.0'
 IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '1.3'
 MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '1.3'
 
@@ -110,12 +110,12 @@ class PlatformSpec:
 
 IPHONE_SHOTS = (
     Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
-    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('recipe_view', 'Cook with confidence', 'Ingredients and steps stay together.'),
+    Shot('friends_tab', 'Cook with friends', 'Share recipes with people you know.'),
+    Shot('search_tab', 'Find the right recipe', 'Search by tags, time, or ingredients.'),
+    Shot('generate_recipe', 'Make something new', 'Turn what you have into fresh ideas.'),
+    Shot('collection_view', 'Make it yours', 'Keep every kind of recipe organized.'),
+    Shot('profile_view', 'Keep your favorites close', 'Your recipes and collections, beautifully organized.'),
 )
 
 IPAD_SHOTS = (
@@ -157,11 +157,11 @@ IPHONE_FALLBACK_SHOTS = (
 SPECS = (
     PlatformSpec(
         name='iPhone',
-        canvas_size=(1284, 2778),
-        top_area=378,
-        bottom_area=310,
-        side_margin=84,
-        title_size=144,
+        canvas_size=(1320, 2868),
+        top_area=390,
+        bottom_area=320,
+        side_margin=86,
+        title_size=112,
         body_size=56,
         text_left_margin=96,
         icon_size_first=118,
@@ -494,7 +494,7 @@ def draw_copy(panel_rgb: Image.Image, shot: Shot, spec: PlatformSpec, idx: int, 
     max_width = spec.canvas_size[0] - (2 * spec.text_left_margin)
     title_lines = wrap_text(shot.title, title_font, max_width)
 
-    ty = 130 if spec.name == 'iPhone' else (114 if spec.name == 'iPad' else 96)
+    ty = 96 if spec.name == 'iPhone' else (114 if spec.name == 'iPad' else 96)
     if idx == 1:
         brand_text = 'Cauldron'
         brand_bbox = draw.textbbox((spec.text_left_margin, ty), brand_text, font=title_font)
@@ -582,8 +582,12 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
         print(f'wrote {out_path}')
 
 
-def write_sequence_preview(platform: str) -> None:
-    files = sorted((OUT_ROOT / platform).glob('*.png'))
+def write_sequence_preview(spec: PlatformSpec) -> None:
+    platform = spec.name
+    files = [
+        OUT_ROOT / platform / f'{index:02d}_{shot.key}.png'
+        for index, shot in enumerate(spec.shots, start=1)
+    ]
     if not files:
         return
 
@@ -639,7 +643,7 @@ def main() -> None:
             continue
 
         render_platform(spec, icon)
-        write_sequence_preview(spec.name)
+        write_sequence_preview(spec)
 
     print(f'Done. Output root: {OUT_ROOT}')
 
