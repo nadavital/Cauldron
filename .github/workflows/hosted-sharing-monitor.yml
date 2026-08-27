@@ -33,8 +33,8 @@ jobs:
       CAULDRON_MONITOR_COLLECTION_PATH: ${{ vars.CAULDRON_MONITOR_COLLECTION_PATH || '/collection/9B0D2D38-3B17-406A-83EC-3F35B21BDB42' }}
       CAULDRON_MONITOR_COLLECTION_TITLE: ${{ vars.CAULDRON_MONITOR_COLLECTION_TITLE || 'Bakery' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - name: Probe hosted sharing contract
