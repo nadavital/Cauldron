@@ -8,10 +8,7 @@ final class ReleaseConfigurationTests: XCTestCase {
         XCTAssertTrue(UTType.cauldronLibraryArchive.conforms(to: .json))
         XCTAssertTrue(LibraryArchiveDocument.readableContentTypes.contains(.json))
 
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let repositoryRoot = try TestRepositoryLocator.root()
         let infoURL = repositoryRoot.appendingPathComponent("Cauldron/Info.plist")
         let data = try Data(contentsOf: infoURL)
         let info = try XCTUnwrap(
@@ -51,10 +48,7 @@ final class ReleaseConfigurationTests: XCTestCase {
     }
 
     func testWidgetUsesSharedEntitlementsInEveryBuildConfiguration() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let repositoryRoot = try TestRepositoryLocator.root()
         let projectFile = repositoryRoot
             .appendingPathComponent("Cauldron.xcodeproj/project.pbxproj")
         let project = try String(contentsOf: projectFile, encoding: .utf8)
@@ -84,10 +78,7 @@ final class ReleaseConfigurationTests: XCTestCase {
     }
 
     func testAppRetainsBothHostedSharingAssociatedDomains() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let repositoryRoot = try TestRepositoryLocator.root()
         for relativePath in ["Cauldron/Cauldron.entitlements", "Cauldron/CauldronCatalyst.entitlements"] {
             let data = try Data(contentsOf: repositoryRoot.appendingPathComponent(relativePath))
             let entitlements = try XCTUnwrap(
@@ -100,10 +91,7 @@ final class ReleaseConfigurationTests: XCTestCase {
     }
 
     func testMacCatalystSandboxAllowsHostedServiceRequests() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let repositoryRoot = try TestRepositoryLocator.root()
         let projectFile = repositoryRoot
             .appendingPathComponent("Cauldron.xcodeproj/project.pbxproj")
         let project = try String(contentsOf: projectFile, encoding: .utf8)

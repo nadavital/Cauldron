@@ -7,6 +7,7 @@ import SwiftUI
 import XCTest
 @testable import Cauldron
 
+@MainActor
 final class RuntimeEnvironmentLayoutTests: XCTestCase {
     func testDesktopWorkspaceIsUsedForCatalyst() {
         XCTAssertTrue(RuntimeEnvironment.prefersDesktopWorkspace(

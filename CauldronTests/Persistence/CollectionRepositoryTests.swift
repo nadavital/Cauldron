@@ -2079,10 +2079,8 @@ final class CollectionRepositoryTests: XCTestCase {
     }
 
     func testLegacyStoreFixtureOpensWithCurrentLocalSchema() throws {
-        let committedFixture = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/LegacyStoreV1_5/default.store")
+        let committedFixture = try TestRepositoryLocator.root()
+            .appendingPathComponent("CauldronTests/Fixtures/LegacyStoreV1_5/default.store")
         let fixturePath = ProcessInfo.processInfo.environment["CAULDRON_LEGACY_STORE_FIXTURE"]
             ?? committedFixture.path
         let sourceURL = URL(fileURLWithPath: fixturePath)

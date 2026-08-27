@@ -86,6 +86,7 @@ jobs:
           -scheme Cauldron
           -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac'
           -configuration Debug
+          MACOSX_DEPLOYMENT_TARGET=26.0
           CODE_SIGNING_ALLOWED=NO
       - name: Build unsigned Mac Catalyst release
         run: >-
@@ -93,4 +94,5 @@ jobs:
           -scheme Cauldron
           -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac'
           -configuration Release
+          MACOSX_DEPLOYMENT_TARGET=26.0
           CODE_SIGNING_ALLOWED=NO
