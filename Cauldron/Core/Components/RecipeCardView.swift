@@ -107,10 +107,6 @@ struct RecipeCardView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
-        .modifier(RecipeEntityContextModifier(
-            recipeID: recipe.id,
-            isResolvable: !isSharedRecipe && !recipe.isPreview && recipe.isOwnedByCurrentUser()
-        ))
     }
 
     /// Composed VoiceOver description: title, optional creator, time, favorite.

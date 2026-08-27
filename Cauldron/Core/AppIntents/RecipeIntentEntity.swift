@@ -290,8 +290,10 @@ enum RecipeIntentSearch {
     ) -> [RecipeIntentEntity] {
         let filtered = entities.filter { entity in
             guard !comparators.isEmpty else { return true }
-            let matches = comparators.map { matches(entity, comparator: $0) }
-            return requireAll ? matches.allSatisfy { $0 } : matches.contains(true)
+            let comparatorMatches = comparators.map { matches(entity, comparator: $0) }
+            return requireAll
+                ? comparatorMatches.allSatisfy { $0 }
+                : comparatorMatches.contains(true)
         }
 
         let sorted = filtered.sorted { lhs, rhs in

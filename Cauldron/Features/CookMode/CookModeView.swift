@@ -69,10 +69,6 @@ struct CookModeView: View {
             }
         }
         .background(Color.appBackground.ignoresSafeArea())
-        .modifier(RecipeEntityContextModifier(
-            recipeID: recipe.id,
-            isResolvable: recipe.ownerId == CurrentUserSession.shared.userId && !recipe.isPreview
-        ))
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

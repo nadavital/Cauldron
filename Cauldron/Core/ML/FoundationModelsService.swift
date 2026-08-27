@@ -18,14 +18,11 @@ typealias RecipeSnapshot = GeneratedRecipe.PartiallyGenerated
 /// Service for Apple Intelligence on-device recipe generation
 /// Uses Foundation Models framework for structured content generation
 actor FoundationModelsService {
-    private let routingPolicy: RecipeModelRoutingPolicy
     private let diagnostics: any DiagnosticsRecording
 
     init(
-        routingPolicy: RecipeModelRoutingPolicy = RecipeModelRoutingPolicy(),
         diagnostics: any DiagnosticsRecording = PrivacySafeDiagnosticsRecorder()
     ) {
-        self.routingPolicy = routingPolicy
         self.diagnostics = diagnostics
         // No persistent session - we create fresh sessions per request to avoid context accumulation
     }
@@ -40,23 +37,9 @@ actor FoundationModelsService {
     }
 
     private func createSession(
-        for task: RecipeIntelligenceTask
+        for _: RecipeIntelligenceTask
     ) -> (session: LanguageModelSession?, route: RecipeModelRoute, onDeviceAvailable: Bool) {
         let availability = modelAvailabilitySnapshot()
-        let route = routingPolicy.route(task: task, availability: availability)
-
-        if route == .privateCloudCompute {
-            if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
-                let model = PrivateCloudComputeLanguageModel()
-                if model.isAvailable && !model.quotaUsage.isLimitReached {
-                    return (
-                        LanguageModelSession(model: model, instructions: Self.recipeInstructions),
-                        .privateCloudCompute,
-                        availability.onDeviceAvailable
-                    )
-                }
-            }
-        }
 
         guard availability.onDeviceAvailable else {
             return (nil, .deterministic, false)
@@ -67,18 +50,6 @@ actor FoundationModelsService {
     private func modelAvailabilitySnapshot() -> RecipeModelAvailability {
         let systemModel = SystemLanguageModel.default
         let onDeviceAvailable = systemModel.isAvailable
-
-        if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
-            let cloudModel = PrivateCloudComputeLanguageModel()
-            return RecipeModelAvailability(
-                supportsIOS27Models: true,
-                onDeviceAvailable: onDeviceAvailable,
-                onDeviceSupportsVision: systemModel.capabilities.contains(.vision),
-                privateCloudAvailable: cloudModel.isAvailable,
-                privateCloudSupportsVision: cloudModel.capabilities.contains(.vision),
-                privateCloudQuotaReached: cloudModel.quotaUsage.isLimitReached
-            )
-        }
 
         return RecipeModelAvailability(
             supportsIOS27Models: false,
@@ -101,10 +72,6 @@ actor FoundationModelsService {
         get async {
             if SystemLanguageModel.default.isAvailable {
                 return true
-            }
-            if #available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *) {
-                let cloudModel = PrivateCloudComputeLanguageModel()
-                return cloudModel.isAvailable && !cloudModel.quotaUsage.isLimitReached
             }
             return false
         }
@@ -137,7 +104,7 @@ actor FoundationModelsService {
                         let stream = session.streamResponse(
                             generating: GeneratedRecipe.self,
                             includeSchemaInPrompt: false,
-                            options: GenerationOptions(samplingMode: .greedy)
+                            options: GenerationOptions(sampling: .greedy)
                         ) {
                             "Generate a recipe for: \(prompt)"
 

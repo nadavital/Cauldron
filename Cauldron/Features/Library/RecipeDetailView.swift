@@ -407,10 +407,6 @@ struct RecipeDetailView: View {
         .toast(isShowing: $showReferenceRemovedToast, icon: "bookmark.slash", message: "Reference removed")
         .toast(isShowing: $showSaveSuccessToast, icon: "checkmark.circle.fill", message: "Saved to your recipes")
         .toast(isShowing: $showUpdateSuccessToast, icon: "arrow.triangle.2.circlepath", message: "Recipe updated successfully")
-        .modifier(RecipeEntityContextModifier(
-            recipeID: recipe.id,
-            isResolvable: recipeLibraryRelation == .owned
-        ))
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeUpdated"))) { notification in
             if let updatedRecipeId = notification.object as? UUID {
                 if updatedRecipeId == recipe.id {

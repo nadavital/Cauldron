@@ -63,7 +63,6 @@ struct VisualRecipeSearchResultsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        .modifier(RecipeEntityContextModifier(recipeID: recipe.id, isResolvable: true))
                     }
                 }
             }
