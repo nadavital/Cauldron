@@ -21,7 +21,7 @@ ROOT = Path(
 OUT_ROOT = ROOT / 'output' / 'cauldron_2_0_appstore'
 
 IPHONE_SOURCE = ROOT / 'appscreenshots' / 'iPhone' / '2.0'
-IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '1.3'
+IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '2.0'
 MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '1.3'
 
 BG_MOBILE = ROOT / 'background.png'
@@ -71,12 +71,6 @@ MAC_FRAME = first_existing_path(
         '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro*.png',
     ),
 )
-IPHONE_FRAME_TEMPLATE = Path(
-    os.environ.get(
-        'CAULDRON_IPHONE_FRAME_TEMPLATE',
-        '/Users/nadav/Desktop/playCount/AppStoreScreenshots/Framed-6.9/01-your-music-ranked.png',
-    )
-)
 WEBSITE_CAULDRON_SOURCE = Path('/Users/nadav/Desktop/Website/public/assets/cauldron')
 
 FONT_TITLE = '/Library/Fonts/SF-Pro-Display-Semibold.otf'
@@ -119,13 +113,11 @@ IPHONE_SHOTS = (
 )
 
 IPAD_SHOTS = (
-    Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('cook_mode', 'Cook Mode', 'Follow along step by step with large, hands-on controls.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('live_activity', 'Follow Along', 'Live updates keep your active cook session in sync.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
+    Shot('cook_tab', 'All your recipes. Finally together.', ''),
+    Shot('recipe_view', 'Cook without losing your place.', ''),
+    Shot('search_results', 'Find tonight\'s answer in seconds.', ''),
+    Shot('friends_tab', 'Share recipes, not screenshots.', ''),
+    Shot('cook_mode', 'Cook with everything in view.', ''),
 )
 
 MAC_SHOTS = (
@@ -167,17 +159,17 @@ SPECS = (
         icon_size_first=118,
         bg_path=BG_MOBILE,
         frame_path=IPHONE_FRAME,
-        screen_corner_radius=96,
+        screen_corner_radius=132,
         source_ext='.PNG',
         shots=IPHONE_SHOTS,
     ),
     PlatformSpec(
         name='iPad',
         canvas_size=(2048, 2732),
-        top_area=338,
-        bottom_area=248,
-        side_margin=152,
-        title_size=156,
+        top_area=400,
+        bottom_area=80,
+        side_margin=136,
+        title_size=128,
         body_size=58,
         text_left_margin=134,
         icon_size_first=110,
@@ -268,14 +260,53 @@ def rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
-def compose_generated_mobile_frame(screenshot_path: Path, screen_corner_radius: int, pad: int = 54) -> Image.Image:
+def remove_ipad_window_resize_indicator(shot: Image.Image) -> Image.Image:
+    """Remove capture-only iPad window chrome before placing a full-screen app in a device frame."""
+    cleaned = shot.copy()
+    corner_size = 72
+    x0 = shot.width - corner_size
+    y0 = shot.height - corner_size
+    corner = shot.crop((x0, y0, shot.width, shot.height))
+    replacement = shot.crop((x0 - corner_size, y0, x0, shot.height))
+
+    # The system handle is a neutral-gray arc. Restrict the repair to those
+    # pixels so nearby app content remains intact, then softly expand the mask
+    # to include the antialiased edge of the glyph.
+    mask = Image.new('L', (corner_size, corner_size), 0)
+    mask_pixels = mask.load()
+    corner_pixels = corner.load()
+    for y in range(corner_size):
+        for x in range(corner_size):
+            red, green, blue = corner_pixels[x, y]
+            brightness = (red + green + blue) / 3
+            if max(red, green, blue) - min(red, green, blue) <= 8 and 55 <= brightness <= 190:
+                mask_pixels[x, y] = 255
+
+    mask = mask.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(1.2))
+    cleaned.paste(replacement, (x0, y0), mask)
+    return cleaned
+
+
+def compose_generated_mobile_frame(
+    screenshot_path: Path,
+    screen_corner_radius: int,
+    pad: int = 54,
+    remove_window_resize_indicator: bool = False,
+) -> Image.Image:
     shot = Image.open(screenshot_path).convert('RGB')
+    if remove_window_resize_indicator:
+        shot = remove_ipad_window_resize_indicator(shot)
     shell = Image.new('RGBA', (shot.width + pad * 2, shot.height + pad * 2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(shell)
     radius = screen_corner_radius + pad
     draw.rounded_rectangle(
         (0, 0, shell.width - 1, shell.height - 1),
         radius=radius,
+        fill=(154, 155, 157, 255),
+    )
+    draw.rounded_rectangle(
+        (6, 6, shell.width - 7, shell.height - 7),
+        radius=radius - 6,
         fill=(24, 24, 24, 255),
     )
     draw.rounded_rectangle(
@@ -331,31 +362,18 @@ def load_mobile_background(path: Path, size: tuple[int, int]) -> Image.Image:
     return Image.new('RGB', size, (246, 241, 234))
 
 
-def compose_template_iphone(screenshot_path: Path) -> Image.Image:
-    if not IPHONE_FRAME_TEMPLATE.exists():
-        raise RuntimeError(f'Missing iPhone frame template at {IPHONE_FRAME_TEMPLATE}')
-
-    template_canvas = Image.open(IPHONE_FRAME_TEMPLATE).convert('RGBA')
-    device_box = (145, 530, 145 + 1030, 530 + 2190)
-    screen_box = (39, 42, 39 + 952, 42 + 2072)
-    device = template_canvas.crop(device_box)
-
-    shot = Image.open(screenshot_path).convert('RGB')
-    screen = fit_cover(shot, (952, 2072)).convert('RGBA')
-    mask = rounded_mask((952, 2072), 94)
-    device.paste(Image.new('RGBA', (952, 2072), (0, 0, 0, 255)), (39, 42), mask)
-    device.paste(screen, (39, 42), mask)
-    return device
-
-
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
-        if frame_path == IPHONE_FRAME and IPHONE_FRAME_TEMPLATE.exists():
-            return compose_template_iphone(screenshot_path)
-        return compose_generated_mobile_frame(screenshot_path, screen_corner_radius)
+        return compose_generated_mobile_frame(
+            screenshot_path,
+            screen_corner_radius,
+            remove_window_resize_indicator=frame_path == IPAD_FRAME,
+        )
 
     frame = Image.open(frame_path).convert('RGBA')
     shot = Image.open(screenshot_path).convert('RGB')
+    if frame_path == IPAD_FRAME:
+        shot = remove_ipad_window_resize_indicator(shot)
     x0, y0, x1, y1 = find_screen_bbox(frame)
     sw, sh = x1 - x0 + 1, y1 - y0 + 1
 
@@ -478,7 +496,7 @@ def draw_copy(panel_rgb: Image.Image, shot: Shot, spec: PlatformSpec, idx: int, 
     max_width = spec.canvas_size[0] - (2 * spec.text_left_margin)
     title_lines = wrap_text(shot.title, title_font, max_width)
 
-    if spec.name == 'iPhone':
+    if spec.name in ('iPhone', 'iPad'):
         line_boxes = [draw.textbbox((0, 0), line, font=title_font) for line in title_lines]
         line_heights = [box[3] - box[1] for box in line_boxes]
         total_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
@@ -599,12 +617,12 @@ def source_path(spec: PlatformSpec, key: str) -> Path:
 
 
 def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
-    if spec.name == 'iPhone':
+    if spec.name in ('iPhone', 'iPad'):
         for shot in spec.shots:
             if shot.body:
-                raise ValueError(f'iPhone screenshot {shot.key} must not use below-device copy')
+                raise ValueError(f'{spec.name} screenshot {shot.key} must not use below-device copy')
             if len(shot.title.split()) > 8:
-                raise ValueError(f'iPhone screenshot {shot.key} headline exceeds eight words')
+                raise ValueError(f'{spec.name} screenshot {shot.key} headline exceeds eight words')
 
     out_dir = OUT_ROOT / spec.name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -665,6 +683,24 @@ def write_sequence_preview(spec: PlatformSpec) -> None:
     print(f'wrote {preview}')
 
 
+def write_iphone_65_outputs(spec: PlatformSpec) -> None:
+    """Derive the required 6.5-inch set from the approved 6.9-inch composition."""
+    out_dir = OUT_ROOT / 'iPhone-6.5'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for stale_output in out_dir.glob('*.png'):
+        stale_output.unlink()
+
+    for index, shot in enumerate(spec.shots, start=1):
+        source = OUT_ROOT / spec.name / f'{index:02d}_{shot.key}.png'
+        output = out_dir / source.name
+        fit_cover(Image.open(source).convert('RGB'), (1284, 2778)).save(
+            output,
+            format='PNG',
+            optimize=True,
+        )
+        print(f'wrote {output}')
+
+
 def main() -> None:
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     icon_path = ICON_PATH
@@ -698,6 +734,8 @@ def main() -> None:
 
         render_platform(spec, icon)
         write_sequence_preview(spec)
+        if spec.name == 'iPhone':
+            write_iphone_65_outputs(spec)
 
     print(f'Done. Output root: {OUT_ROOT}')
 

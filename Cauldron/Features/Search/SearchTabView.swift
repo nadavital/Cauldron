@@ -20,6 +20,7 @@ struct SearchTabView: View {
     @State private var showingIngredientFilters = false
     @Namespace private var recipeTransition
     let isActive: Bool
+    let screenshotDetailRecipe: Recipe?
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -31,12 +32,14 @@ struct SearchTabView: View {
     init(
         dependencies: DependencyContainer,
         navigationPath: Binding<NavigationPath>,
-        isActive: Bool = true
+        isActive: Bool = true,
+        screenshotDetailRecipe: Recipe? = nil
     ) {
         _viewModel = State(initialValue: SearchTabViewModel(dependencies: dependencies))
         _searchHistory = State(initialValue: SearchHistoryStore(ownerID: CurrentUserSession.shared.userId))
         _navigationPath = navigationPath
         self.isActive = isActive
+        self.screenshotDetailRecipe = screenshotDetailRecipe
     }
 
     private var isRegularWidth: Bool {
@@ -160,7 +163,16 @@ struct SearchTabView: View {
                 }
         } detail: {
             NavigationStack(path: $navigationPath) {
-                splitDetailPlaceholder
+                Group {
+                    if let screenshotDetailRecipe {
+                        RecipeDetailView(
+                            recipe: screenshotDetailRecipe,
+                            dependencies: viewModel.dependencies
+                        )
+                    } else {
+                        splitDetailPlaceholder
+                    }
+                }
                     .navigationDestination(for: Recipe.self) { recipe in
                         RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
                     }

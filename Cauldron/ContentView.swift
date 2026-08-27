@@ -921,6 +921,15 @@ private struct ScreenshotSceneView: View {
                 }
             case "generate_recipe":
                 AIRecipeGeneratorView(dependencies: dependencies, screenshotPreview: true)
+            case "search_results":
+                if let recipe = featuredRecipe {
+                    ScreenshotSearchResultsScene(
+                        recipe: recipe,
+                        dependencies: dependencies
+                    )
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
             case "cook_mode":
                 if let recipe = featuredRecipe {
                     ScreenshotCookModeScene(
@@ -953,6 +962,21 @@ private struct ScreenshotSceneView: View {
                 MainTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
         }
+    }
+}
+
+private struct ScreenshotSearchResultsScene: View {
+    let recipe: Recipe
+    let dependencies: DependencyContainer
+
+    @State private var navigationPath = NavigationPath()
+
+    var body: some View {
+        SearchTabView(
+            dependencies: dependencies,
+            navigationPath: $navigationPath,
+            screenshotDetailRecipe: recipe
+        )
     }
 }
 
