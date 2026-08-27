@@ -700,6 +700,7 @@ final class RecipeIntentEntityTests: XCTestCase {
         var requestedOwners: [UUID?] = []
         let firstDeleteStarted = AsyncGate()
         let allowFirstDeleteToFinish = AsyncGate()
+        let newestRequestObserved = expectation(description: "Newest reconciliation request observed")
         let coordinator = RecipeIntentDonationBoundaryCoordinator(
             defaults: defaults,
             deleteDonations: { intent in
@@ -711,6 +712,9 @@ final class RecipeIntentEntityTests: XCTestCase {
             },
             reconciliationRequested: { ownerID in
                 requestedOwners.append(ownerID)
+                if requestedOwners.count == 2 {
+                    newestRequestObserved.fulfill()
+                }
             }
         )
 
@@ -723,7 +727,7 @@ final class RecipeIntentEntityTests: XCTestCase {
             await newestRequestCompletion.markCompleted()
             return result
         }()
-        await Task.yield()
+        await fulfillment(of: [newestRequestObserved], timeout: 1)
         XCTAssertEqual(requestedOwners, [firstOwnerID, newestOwnerID])
         let completedBeforeCleanup = await newestRequestCompletion.isCompleted
         XCTAssertFalse(completedBeforeCleanup, "Donation callers must wait for boundary cleanup")
