@@ -15,6 +15,7 @@ struct FavoritesListView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var localRecipes: [Recipe]
+    @Namespace private var recipeTransition
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
 
     init(recipes: [Recipe], dependencies: DependencyContainer) {
@@ -72,9 +73,14 @@ struct FavoritesListView: View {
             }
 
             ForEach(localRecipes) { recipe in
-                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                let transitionID = "favorites-list-\(recipe.id.uuidString)"
+                NavigationLink {
+                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                        .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                } label: {
                     RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
+                .matchedTransitionSource(id: transitionID, in: recipeTransition)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     deleteButton(for: recipe)
                     unfavoriteButton(for: recipe)
@@ -92,10 +98,15 @@ struct FavoritesListView: View {
 
                 LazyVGrid(columns: recipeGridColumns, spacing: 16) {
                     ForEach(localRecipes) { recipe in
-                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                        let transitionID = "favorites-grid-\(recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(recipe: recipe, dependencies: dependencies)
                         }
                         .buttonStyle(.plain)
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                         .contextMenu {
                             deleteButton(for: recipe)
                             unfavoriteButton(for: recipe)

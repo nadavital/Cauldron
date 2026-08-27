@@ -326,6 +326,7 @@ struct ProfileEditView: View {
                     selectedEmoji: $profileEmoji,
                     selectedColor: $profileColor
                 )
+                .appSheetSizing(.standard)
             }
             // Use fullScreenCover for camera to prevent white bar at bottom of viewfinder
             .fullScreenCover(isPresented: $showingImagePicker) {

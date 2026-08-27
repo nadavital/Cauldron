@@ -29,6 +29,52 @@ enum AppSurfaceStyle: Sendable {
     }
 }
 
+/// Stable content sizes for modal workspaces when Cauldron is hosted on macOS.
+/// SwiftUI's automatic Catalyst sheet size is frequently too narrow for the
+/// app's iPad-first forms, so callers choose the amount of working room their
+/// content needs while iPhone and iPad keep their native sheet behavior.
+enum AppSheetSize: Sendable {
+    case compact
+    case standard
+    case large
+
+    var width: CGFloat {
+        switch self {
+        case .compact: 520
+        case .standard: 680
+        case .large: 860
+        }
+    }
+
+    var height: CGFloat {
+        switch self {
+        case .compact: 480
+        case .standard: 620
+        case .large: 720
+        }
+    }
+}
+
+private struct AppSheetSizingModifier: ViewModifier {
+    let size: AppSheetSize
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if RuntimeEnvironment.prefersDesktopWorkspace {
+            content
+                .frame(
+                    minWidth: size.width,
+                    idealWidth: size.width,
+                    minHeight: size.height,
+                    idealHeight: size.height
+                )
+                .presentationSizing(.fitted)
+        } else {
+            content
+        }
+    }
+}
+
 /// Applies one of Cauldron's supported surfaces without imposing content
 /// padding. Use `AppCard` for the common padded-card composition.
 struct AppSurface<Content: View>: View {
@@ -113,5 +159,11 @@ extension View {
         cornerRadius: CGFloat? = nil
     ) -> some View {
         AppSurface(style: style, cornerRadius: cornerRadius) { self }
+    }
+
+    /// Gives Catalyst and iOS-on-Mac sheets enough room to remain legible.
+    /// Other platforms continue to use the native presentation dimensions.
+    func appSheetSizing(_ size: AppSheetSize = .standard) -> some View {
+        modifier(AppSheetSizingModifier(size: size))
     }
 }

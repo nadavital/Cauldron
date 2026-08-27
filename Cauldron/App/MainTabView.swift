@@ -119,6 +119,7 @@ struct MainTabView: View {
                 destinationRecipeID: request.destinationRecipeID,
                 onSuccessfulSave: completeActiveDurableImport
             )
+            .appSheetSizing(.large)
         }
         .tint(.cauldronOrange)
         .onReceive(NotificationCenter.default.publisher(for: .navigateToConnections)) { _ in
@@ -368,7 +369,10 @@ struct MainTabView: View {
             }
 
             Tab("Groceries", systemImage: "cart.fill", value: .groceries) {
-                GroceriesView(dependencies: dependencies)
+                GroceriesView(
+                    dependencies: dependencies,
+                    isActive: selectedTab == .groceries
+                )
             }
 
             Tab("Friends", systemImage: "person.2.fill", value: .sharing) {
@@ -407,11 +411,19 @@ struct MainTabView: View {
 
             #if targetEnvironment(macCatalyst)
             Tab("Search", systemImage: "magnifyingglass", value: .search) {
-                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
+                SearchTabView(
+                    dependencies: dependencies,
+                    navigationPath: $searchNavigationPath,
+                    isActive: selectedTab == .search
+                )
             }
             #else
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                SearchTabView(dependencies: dependencies, navigationPath: $searchNavigationPath)
+                SearchTabView(
+                    dependencies: dependencies,
+                    navigationPath: $searchNavigationPath,
+                    isActive: selectedTab == .search
+                )
             }
             #endif
         }
@@ -786,18 +798,19 @@ private struct CatalystWindowTitleHider: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TitlebarConfigurationView, context: Context) {
-        uiView.hideWindowTitle()
+        uiView.configureTitlebar()
     }
 
     final class TitlebarConfigurationView: UIView {
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            hideWindowTitle()
+            configureTitlebar()
         }
 
-        func hideWindowTitle() {
+        func configureTitlebar() {
             guard let titlebar = window?.windowScene?.titlebar else { return }
             titlebar.titleVisibility = .hidden
+            titlebar.toolbarStyle = .unifiedCompact
         }
     }
 }

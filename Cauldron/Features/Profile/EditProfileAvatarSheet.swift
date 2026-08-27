@@ -168,6 +168,7 @@ struct EditProfileAvatarSheet: View {
                     selectedEmoji: $selectedEmoji,
                     selectedColor: $selectedColor
                 )
+                .appSheetSizing(.standard)
             }
             .onChange(of: selectedAvatarType) { oldValue, newValue in
                 // Clear data when switching types

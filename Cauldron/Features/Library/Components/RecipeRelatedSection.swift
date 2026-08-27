@@ -10,6 +10,7 @@ import SwiftUI
 struct RecipeRelatedSection: View {
     let relatedRecipes: [Recipe]
     let dependencies: DependencyContainer
+    @Namespace private var recipeTransition
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -17,11 +18,16 @@ struct RecipeRelatedSection: View {
 
             VStack(spacing: 0) {
                 ForEach(relatedRecipes) { relatedRecipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: relatedRecipe, dependencies: dependencies)) {
+                    let transitionID = "related-recipe-\(relatedRecipe.id.uuidString)"
+                    NavigationLink {
+                        RecipeDetailView(recipe: relatedRecipe, dependencies: dependencies)
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                    } label: {
                         RecipeRowView(recipe: relatedRecipe, dependencies: dependencies)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
 
                     if relatedRecipe.id != relatedRecipes.last?.id {
                         Divider()

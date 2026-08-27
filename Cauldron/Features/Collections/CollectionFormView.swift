@@ -252,6 +252,7 @@ struct CollectionFormView: View {
                     allRecipes: allRecipes,
                     dependencies: dependencies
                 )
+                .appSheetSizing(.large)
             }
             .fullScreenCover(isPresented: $showingImagePicker) {
                 ImagePicker(

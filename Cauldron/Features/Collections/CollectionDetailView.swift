@@ -189,6 +189,7 @@ struct CollectionDetailView: View {
         }
         .sheet(item: $activeSheet) { sheet in
             sheetContent(for: sheet)
+                .appSheetSizing(.large)
         }
         .onChange(of: activeSheet) { oldValue, newValue in
             // Refresh collection when any sheet is dismissed
@@ -401,6 +402,7 @@ struct CollectionDetailView: View {
                     imageURL: recipe?.imageURL,
                     ownerId: recipe?.ownerId,
                     privateRecordName: recipe?.cloudRecordName,
+                    imageModifiedAt: recipe?.imageModifiedAt,
                     hasCloudImage: recipe?.cloudImageRecordName != nil
                 )
             }

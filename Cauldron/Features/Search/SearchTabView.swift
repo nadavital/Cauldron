@@ -19,6 +19,7 @@ struct SearchTabView: View {
     @State private var showingProfileSheet = false
     @State private var showingIngredientFilters = false
     @Namespace private var recipeTransition
+    let isActive: Bool
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -27,10 +28,15 @@ struct SearchTabView: View {
 
     @Binding var navigationPath: NavigationPath
 
-    init(dependencies: DependencyContainer, navigationPath: Binding<NavigationPath>) {
+    init(
+        dependencies: DependencyContainer,
+        navigationPath: Binding<NavigationPath>,
+        isActive: Bool = true
+    ) {
         _viewModel = State(initialValue: SearchTabViewModel(dependencies: dependencies))
         _searchHistory = State(initialValue: SearchHistoryStore(ownerID: CurrentUserSession.shared.userId))
         _navigationPath = navigationPath
+        self.isActive = isActive
     }
 
     private var isRegularWidth: Bool {
@@ -42,10 +48,14 @@ struct SearchTabView: View {
 
     var body: some View {
         Group {
-            if isRegularWidth {
-                splitView
+            if isActive {
+                if isRegularWidth {
+                    splitView
+                } else {
+                    compactView
+                }
             } else {
-                compactView
+                Color.clear
             }
         }
         .sheet(isPresented: $showingProfileSheet) {
@@ -59,9 +69,11 @@ struct SearchTabView: View {
                         }
                 }
             }
+            .appSheetSizing(.large)
         }
         .sheet(isPresented: $showingIngredientFilters) {
             ingredientFiltersSheet
+                .appSheetSizing(.standard)
         }
         .task {
             searchHistory.selectOwner(currentUserSession.userId)
@@ -94,6 +106,11 @@ struct SearchTabView: View {
         .onChange(of: searchMode) { _, _ in
             // Clear search when switching modes
             searchText = ""
+        }
+        .onChange(of: isActive) { _, active in
+            guard !active else { return }
+            showingProfileSheet = false
+            showingIngredientFilters = false
         }
         .onSubmit(of: .search) {
             recordCurrentRecipeSearch()
@@ -128,9 +145,7 @@ struct SearchTabView: View {
                     VisualRecipeSearchResultsView(route: route, dependencies: viewModel.dependencies)
                 }
         }
-        #if !targetEnvironment(macCatalyst)
-        .searchable(text: $searchText, prompt: searchMode == .recipes ? "Search recipes" : "Search people")
-        #endif
+        .searchable(text: $searchText, prompt: searchPrompt)
     }
 
     private var splitView: some View {
@@ -164,34 +179,15 @@ struct SearchTabView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        #if !targetEnvironment(macCatalyst)
         .searchable(
             text: $searchText,
             placement: .sidebar,
             prompt: searchMode == .recipes ? "Search recipes" : "Search people"
         )
-        #endif
     }
 
     private var searchContent: some View {
         VStack(spacing: 0) {
-            #if targetEnvironment(macCatalyst)
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField(
-                    searchMode == .recipes ? "Search recipes" : "Search people",
-                    text: $searchText
-                )
-                .textFieldStyle(.roundedBorder)
-                .onSubmit {
-                    recordCurrentRecipeSearch()
-                }
-            }
-            .padding(.horizontal)
-            .padding(.top, 12)
-            #endif
-
             // Search mode picker
             Picker("Search Mode", selection: $searchMode) {
                 ForEach(SearchMode.allCases, id: \.self) { mode in
@@ -250,6 +246,10 @@ struct SearchTabView: View {
                 .accessibilityHint("Opens your profile and app settings")
             }
         }
+    }
+
+    private var searchPrompt: String {
+        searchMode == .recipes ? "Search recipes" : "Search people"
     }
     
     private var categoriesView: some View {
@@ -656,7 +656,8 @@ private struct RecentRecipeSearchesSection: View {
                                 .font(.subheadline)
                                 .padding(.horizontal, Theme.Spacing.sm)
                                 .frame(minHeight: Theme.HitTarget.minimum)
-                                .glassEffect(.regular.interactive(), in: Capsule())
+                                .background(Color.appSurfaceElevated, in: Capsule())
+                                .overlay(Capsule().stroke(Color.appSeparator, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .contextMenu {

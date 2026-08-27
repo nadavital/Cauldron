@@ -167,7 +167,9 @@ struct ContentView: View {
                     hasSeenWelcomeScreen = true
                     showWelcome = false
                 }
+                .appSheetSizing(.large)
             }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .animation(.easeInOut(duration: 0.25), value: isDataReady)
         .animation(.easeInOut(duration: 0.2), value: isLoadingShare)
         .onReceive(NotificationCenter.default.publisher(for: .openExternalShare)) { notification in

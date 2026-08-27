@@ -186,10 +186,19 @@ extension RecipeDetailView {
     func refreshRecipe() async {
         do {
             if let updatedRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
+                let imageDidChange = RecipeDetailDisplayPolicy.shouldRefreshHeroImage(
+                    from: recipe,
+                    to: updatedRecipe
+                )
+                if imageDidChange {
+                    ImageCache.shared.clearRecipeImages(for: recipe.id)
+                }
                 recipe = updatedRecipe
                 localIsFavorite = updatedRecipe.isFavorite
                 currentVisibility = updatedRecipe.visibility
-                imageRefreshID = UUID()
+                if imageDidChange {
+                    imageRefreshID = UUID()
+                }
                 dependencies.libraryPresentationStore.seedRecipe(
                     updatedRecipe,
                     sharedBy: sharedBy,
@@ -221,9 +230,18 @@ extension RecipeDetailView {
                 return
             }
 
+            let imageDidChange = RecipeDetailDisplayPolicy.shouldRefreshHeroImage(
+                from: recipe,
+                to: refreshedRecipe
+            )
+            if imageDidChange {
+                ImageCache.shared.clearRecipeImages(for: recipe.id)
+            }
             recipe = refreshedRecipe
             currentVisibility = refreshedRecipe.visibility
-            imageRefreshID = UUID()
+            if imageDidChange {
+                imageRefreshID = UUID()
+            }
             dependencies.libraryPresentationStore.seedRecipe(
                 refreshedRecipe,
                 sharedBy: sharedBy,

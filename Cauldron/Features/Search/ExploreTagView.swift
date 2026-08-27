@@ -13,6 +13,7 @@ struct ExploreTagView: View {
 
     @State private var viewModel: ExploreTagViewModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Namespace private var recipeTransition
 
     init(tag: Tag, dependencies: DependencyContainer) {
         self.tag = tag
@@ -109,10 +110,15 @@ struct ExploreTagView: View {
 
             edgeToEdgeRecipeCarousel {
                 ForEach(viewModel.allRecipes.prefix(10)) { recipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                    let transitionID = "explore-tag-\(recipe.id.uuidString)"
+                    NavigationLink {
+                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                    } label: {
                         RecipeCardView(recipe: recipe, dependencies: dependencies)
                     }
                     .buttonStyle(.plain)
+                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
                 }
             }
         }
@@ -603,6 +609,7 @@ struct TagRecipesListView: View {
     let color: Color
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+    @Namespace private var recipeTransition
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
@@ -638,9 +645,14 @@ struct TagRecipesListView: View {
     private var listContent: some View {
         List {
             ForEach(recipes) { recipe in
-                NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                let transitionID = "tag-recipes-list-\(recipe.id.uuidString)"
+                NavigationLink {
+                    RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                        .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                } label: {
                     RecipeRowView(recipe: recipe, dependencies: dependencies)
                 }
+                .matchedTransitionSource(id: transitionID, in: recipeTransition)
             }
         }
     }
@@ -649,10 +661,15 @@ struct TagRecipesListView: View {
         ScrollView {
             LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: 16) {
                 ForEach(recipes) { recipe in
-                    NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                    let transitionID = "tag-recipes-grid-\(recipe.id.uuidString)"
+                    NavigationLink {
+                        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                    } label: {
                         RecipeCardView(recipe: recipe, dependencies: dependencies)
                     }
                     .buttonStyle(.plain)
+                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
                 }
             }
             .padding(.horizontal)

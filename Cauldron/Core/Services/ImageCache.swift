@@ -131,6 +131,17 @@ class ImageCache {
         remove(keys: trackedKeysSnapshot().filter { $0.hasPrefix("recipe_") || $0.hasPrefix("image_") })
     }
 
+    /// Remove every rendered size for one recipe. CloudKit may replace an
+    /// asset in place, so record names alone are not sufficient cache keys.
+    func clearRecipeImages(for recipeID: UUID) {
+        let prefix = "recipe_\(recipeID.uuidString)_"
+        var keys = Set(trackedKeysSnapshot().filter { $0.hasPrefix(prefix) })
+        for variant in ["hero", "card", "thumbnail", "collectionTile", "preview", "full"] {
+            keys.insert(Self.recipeImageKey(recipeId: recipeID, variant: variant))
+        }
+        remove(keys: keys)
+    }
+
     nonisolated static func profileImageKey(userId: UUID) -> String {
         "profile_\(userId.uuidString)"
     }

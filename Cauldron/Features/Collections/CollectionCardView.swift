@@ -12,6 +12,7 @@ struct CollectionRecipeImageSource: Hashable, Sendable {
     let imageURL: URL?
     let ownerId: UUID?
     let privateRecordName: String?
+    let imageModifiedAt: Date?
     let hasCloudImage: Bool
 
     init(
@@ -19,12 +20,14 @@ struct CollectionRecipeImageSource: Hashable, Sendable {
         imageURL: URL?,
         ownerId: UUID? = nil,
         privateRecordName: String? = nil,
+        imageModifiedAt: Date? = nil,
         hasCloudImage: Bool = false
     ) {
         self.recipeId = recipeId
         self.imageURL = imageURL
         self.ownerId = ownerId
         self.privateRecordName = privateRecordName
+        self.imageModifiedAt = imageModifiedAt
         self.hasCloudImage = hasCloudImage
     }
 
@@ -111,9 +114,10 @@ struct CollectionCoverArtwork: View {
             recipeImageService: (dependencies ?? DependencyContainer.shared).recipeImageService,
             recipeId: imageSource.recipeId,
             ownerId: imageSource.ownerId,
-            privateRecordName: imageSource.privateRecordName
+            privateRecordName: imageSource.privateRecordName,
+            imageCacheIdentity: imageSource.imageModifiedAt.map(RecipeImageView.cacheIdentity)
         )
-        .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")")
+        .id("\(imageSource.recipeId?.uuidString ?? "no-recipe")|\(imageSource.imageURL?.absoluteString ?? "no-url")|\(imageSource.imageModifiedAt?.timeIntervalSinceReferenceDate ?? 0)")
         .frame(width: width, height: height)
         .clipped()
         .overlay {

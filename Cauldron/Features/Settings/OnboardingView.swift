@@ -54,6 +54,7 @@ struct OnboardingView: View {
         .background(Color.appBackground.ignoresSafeArea())
         .sheet(isPresented: $showingAvatarCustomization) {
             AvatarCustomizationSheet(selectedEmoji: $profileEmoji, selectedColor: $profileColor)
+                .appSheetSizing(.standard)
         }
         .fullScreenCover(isPresented: $showingImagePicker) {
             ImagePicker(image: $profileImage, sourceType: imagePickerSourceType)

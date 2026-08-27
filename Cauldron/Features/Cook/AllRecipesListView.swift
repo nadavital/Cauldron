@@ -23,6 +23,7 @@ struct AllRecipesListView: View {
     @State private var showingAIGenerator = false
     @State private var showingCollectionForm = false
     @State private var selectedRecipe: Recipe?
+    @Namespace private var recipeTransition
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
     
     init(recipes: [Recipe], dependencies: DependencyContainer) {
@@ -123,12 +124,22 @@ struct AllRecipesListView: View {
                 localRecipes = $1
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { handleRecipeDeleted($0) }
-            .sheet(isPresented: $showingImporter, onDismiss: refreshRecipes) { ImporterView(dependencies: dependencies) }
-            .sheet(isPresented: $showingEditor) { RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe) }
-            .sheet(isPresented: $showingAIGenerator) { AIRecipeGeneratorView(dependencies: dependencies) }
+            .sheet(isPresented: $showingImporter, onDismiss: refreshRecipes) {
+                ImporterView(dependencies: dependencies)
+                    .appSheetSizing(.large)
+            }
+            .sheet(isPresented: $showingEditor) {
+                RecipeEditorView(dependencies: dependencies, recipe: selectedRecipe)
+                    .appSheetSizing(.large)
+            }
+            .sheet(isPresented: $showingAIGenerator) {
+                AIRecipeGeneratorView(dependencies: dependencies)
+                    .appSheetSizing(.large)
+            }
             .sheet(isPresented: $showingCollectionForm, onDismiss: refreshRecipes) {
                 CollectionFormView()
                     .dependencies(dependencies)
+                    .appSheetSizing(.large)
             }
             .toolbar { toolbarContent }
     }
@@ -165,10 +176,15 @@ struct AllRecipesListView: View {
 
                 LazyVGrid(columns: recipeGridColumns, spacing: 16) {
                     ForEach(filteredAndSortedRecipes) { recipe in
-                        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+                        let transitionID = "all-recipes-grid-\(recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(recipe: recipe, dependencies: dependencies)
                         }
                         .buttonStyle(.plain)
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                         .contextMenu {
                             deleteButton(for: recipe)
                             favoriteButton(for: recipe)
@@ -196,9 +212,14 @@ struct AllRecipesListView: View {
     }
 
     private func recipeRow(for recipe: Recipe) -> some View {
-        NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: dependencies)) {
+        let transitionID = "all-recipes-list-\(recipe.id.uuidString)"
+        return NavigationLink {
+            RecipeDetailView(recipe: recipe, dependencies: dependencies)
+                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+        } label: {
             RecipeRowView(recipe: recipe, dependencies: dependencies)
         }
+        .matchedTransitionSource(id: transitionID, in: recipeTransition)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             deleteButton(for: recipe)
             favoriteButton(for: recipe)

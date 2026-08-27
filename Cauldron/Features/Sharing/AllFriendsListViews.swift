@@ -17,6 +17,7 @@ struct AllFriendsRecipesListView: View {
     let dependencies: DependencyContainer
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+    @Namespace private var recipeTransition
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
@@ -57,9 +58,11 @@ struct AllFriendsRecipesListView: View {
                     dependencies: dependencies,
                     sharedBy: sharedRecipe.sharedBy,
                     sharedAt: sharedRecipe.sharedAt
-                )) {
+                )
+                .navigationTransition(.zoom(sourceID: sharedRecipe.recipe.id, in: recipeTransition))) {
                     SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                 }
+                .matchedTransitionSource(id: sharedRecipe.recipe.id, in: recipeTransition)
             }
         }
     }
@@ -73,10 +76,12 @@ struct AllFriendsRecipesListView: View {
                         dependencies: dependencies,
                         sharedBy: sharedRecipe.sharedBy,
                         sharedAt: sharedRecipe.sharedAt
-                    )) {
+                    )
+                    .navigationTransition(.zoom(sourceID: sharedRecipe.recipe.id, in: recipeTransition))) {
                         RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
                     }
                     .buttonStyle(.plain)
+                    .matchedTransitionSource(id: sharedRecipe.recipe.id, in: recipeTransition)
                 }
             }
             .padding(.horizontal)

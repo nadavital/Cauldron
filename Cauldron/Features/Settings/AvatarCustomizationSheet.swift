@@ -53,6 +53,7 @@ struct AvatarCustomizationSheet: View {
             }
             .sheet(isPresented: $showingEmojiPicker) {
                 EmojiPickerView(selectedEmoji: $selectedEmoji)
+                    .appSheetSizing(.compact)
             }
         }
     }

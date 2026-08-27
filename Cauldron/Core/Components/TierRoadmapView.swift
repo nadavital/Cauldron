@@ -48,12 +48,15 @@ struct TierRoadmapView: View {
             }
             .sheet(isPresented: $showingImporter) {
                 ImporterView(dependencies: dependencies)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingEditor) {
                 RecipeEditorView(dependencies: dependencies)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingAIGenerator) {
                 AIRecipeGeneratorView(dependencies: dependencies)
+                    .appSheetSizing(.large)
             }
             .task {
                 isAIAvailable = await dependencies.foundationModelsService.isAvailable

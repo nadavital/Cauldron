@@ -150,6 +150,7 @@ struct CookModeView: View {
         }
         .sheet(isPresented: $showingAllTimers) {
             AllTimersView(timerManager: timerManager)
+                .appSheetSizing(.standard)
         }
         .alert("End Cooking Session?", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) {}
@@ -255,7 +256,8 @@ struct CookModeView: View {
             recipeImageService: dependencies.recipeImageService,
             recipeId: recipe.id,
             ownerId: recipe.ownerId,
-            privateRecordName: recipe.cloudRecordName
+            privateRecordName: recipe.cloudRecordName,
+            imageCacheIdentity: recipe.imageModifiedAt.map(RecipeImageView.cacheIdentity)
         )
         .frame(height: isRegularWidthLayout ? 300 : 230)
         .overlay(alignment: .bottom) {

@@ -97,6 +97,7 @@ struct RecipeImportPreviewView: View {
                     },
                     isImporting: true
                 )
+                .appSheetSizing(.large)
             }
             .alert("Recipe Saved!", isPresented: $showSuccess) {
                 Button("OK") {

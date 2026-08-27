@@ -25,12 +25,20 @@ class RecipeImageService {
     /// Load an image from a URL (local or remote) with caching
     /// - Parameter url: The URL of the image to load
     /// - Returns: Result containing UIImage or error
-    func loadImage(from url: URL?, targetPixelSize: CGFloat? = nil) async -> Result<UIImage, ImageLoadError> {
+    func loadImage(
+        from url: URL?,
+        targetPixelSize: CGFloat? = nil,
+        cacheIdentity: String? = nil
+    ) async -> Result<UIImage, ImageLoadError> {
         guard let url = url else {
             return .failure(.invalidURL)
         }
 
-        let cacheKey = cacheKey(for: url, targetPixelSize: targetPixelSize)
+        let cacheKey = cacheKey(
+            for: url,
+            targetPixelSize: targetPixelSize,
+            cacheIdentity: cacheIdentity
+        )
 
         // Check cache first
         if let cachedImage = await ImageCache.shared.load(cacheKey) {
@@ -132,11 +140,14 @@ class RecipeImageService {
         ownerId: UUID? = nil,
         targetPixelSize: CGFloat? = nil,
         cacheVariant: String? = nil,
-        privateRecordName: String? = nil
+        privateRecordName: String? = nil,
+        cacheIdentity: String? = nil
     ) async -> Result<UIImage, ImageLoadError> {
+        let baseVariant = cacheVariant ?? variantKey(for: targetPixelSize)
+        let versionedVariant = cacheIdentity.map { "\(baseVariant)_v_\($0)" } ?? baseVariant
         let recipeCacheKey = ImageCache.recipeImageKey(
             recipeId: recipeId,
-            variant: cacheVariant ?? variantKey(for: targetPixelSize)
+            variant: versionedVariant
         )
 
         if let cachedImage = await ImageCache.shared.load(recipeCacheKey) {
@@ -156,7 +167,11 @@ class RecipeImageService {
                     // Skip local load, file doesn't exist for friend's recipe
                     // Fall through to CloudKit
                 } else {
-                    let result = await loadImage(from: url, targetPixelSize: targetPixelSize)
+                    let result = await loadImage(
+                        from: url,
+                        targetPixelSize: targetPixelSize,
+                        cacheIdentity: cacheIdentity
+                    )
                     if case .success(let image) = result {
                         ImageCache.shared.set(recipeCacheKey, image: image)
                         return result
@@ -164,7 +179,11 @@ class RecipeImageService {
                 }
             } else {
                 // Own recipe - try loading normally
-                let result = await loadImage(from: url, targetPixelSize: targetPixelSize)
+                let result = await loadImage(
+                    from: url,
+                    targetPixelSize: targetPixelSize,
+                    cacheIdentity: cacheIdentity
+                )
                 if case .success(let image) = result {
                     ImageCache.shared.set(recipeCacheKey, image: image)
                     return result
@@ -194,7 +213,11 @@ class RecipeImageService {
                         .appendingPathComponent("RecipeImages")
                         .appendingPathComponent(filename)
 
-                    let result = await loadImage(from: imageURL, targetPixelSize: targetPixelSize)
+                    let result = await loadImage(
+                        from: imageURL,
+                        targetPixelSize: targetPixelSize,
+                        cacheIdentity: cacheIdentity
+                    )
                     if case .success(let image) = result {
                         ImageCache.shared.set(recipeCacheKey, image: image)
                     }
@@ -235,7 +258,11 @@ class RecipeImageService {
         ImageCache.shared.remove(cacheKey(for: url, targetPixelSize: nil))
     }
 
-    private func cacheKey(for url: URL, targetPixelSize: CGFloat?) -> String {
+    private func cacheKey(
+        for url: URL,
+        targetPixelSize: CGFloat?,
+        cacheIdentity: String? = nil
+    ) -> String {
         let sizeKey: String
         if let targetPixelSize, targetPixelSize > 0 {
             sizeKey = String(Int(targetPixelSize.rounded(.up)))
@@ -243,7 +270,8 @@ class RecipeImageService {
             sizeKey = "full"
         }
 
-        return "image_\(url.absoluteString)_\(sizeKey)"
+        let identityKey = cacheIdentity.map { "_v_\($0)" } ?? ""
+        return "image_\(url.absoluteString)_\(sizeKey)\(identityKey)"
     }
 
     private func variantKey(for targetPixelSize: CGFloat?) -> String {

@@ -94,4 +94,78 @@ final class RecipeDetailDisplayPolicyTests: XCTestCase {
         XCTAssertTrue(RecipeDetailDisplayPolicy.hasHeroImage(localImageRecipe))
         XCTAssertTrue(RecipeDetailDisplayPolicy.hasHeroImage(cloudImageRecipe))
     }
+
+    func testShouldRefreshHeroImage_SkipsMetadataOnlyRecipeRefresh() {
+        let id = UUID()
+        let imageURL = URL(fileURLWithPath: "/tmp/recipe.jpg")
+        let current = Recipe(
+            id: id,
+            title: "Pasta",
+            ingredients: [],
+            steps: [],
+            imageURL: imageURL,
+            cloudRecordName: "recipe-record",
+            cloudImageRecordName: "image-record"
+        )
+        let updated = Recipe(
+            id: id,
+            title: "Better Pasta",
+            ingredients: [],
+            steps: [],
+            imageURL: imageURL,
+            cloudRecordName: "recipe-record",
+            cloudImageRecordName: "image-record"
+        )
+
+        XCTAssertFalse(
+            RecipeDetailDisplayPolicy.shouldRefreshHeroImage(from: current, to: updated)
+        )
+    }
+
+    func testShouldRefreshHeroImage_DetectsChangedImageIdentity() {
+        let current = Recipe(
+            title: "Pasta",
+            ingredients: [],
+            steps: [],
+            imageURL: URL(fileURLWithPath: "/tmp/old.jpg"),
+            cloudImageRecordName: "old-image"
+        )
+        let updated = Recipe(
+            id: current.id,
+            title: current.title,
+            ingredients: [],
+            steps: [],
+            imageURL: URL(fileURLWithPath: "/tmp/new.jpg"),
+            cloudImageRecordName: "new-image"
+        )
+
+        XCTAssertTrue(
+            RecipeDetailDisplayPolicy.shouldRefreshHeroImage(from: current, to: updated)
+        )
+    }
+
+    func testShouldRefreshHeroImage_DetectsInPlaceCloudAssetUpdate() {
+        let originalModifiedAt = Date(timeIntervalSince1970: 1_000)
+        let current = Recipe(
+            title: "Pasta",
+            ingredients: [],
+            steps: [],
+            cloudRecordName: "recipe-record",
+            cloudImageRecordName: "image-record",
+            imageModifiedAt: originalModifiedAt
+        )
+        let updated = Recipe(
+            id: current.id,
+            title: current.title,
+            ingredients: [],
+            steps: [],
+            cloudRecordName: "recipe-record",
+            cloudImageRecordName: "image-record",
+            imageModifiedAt: originalModifiedAt.addingTimeInterval(60)
+        )
+
+        XCTAssertTrue(
+            RecipeDetailDisplayPolicy.shouldRefreshHeroImage(from: current, to: updated)
+        )
+    }
 }

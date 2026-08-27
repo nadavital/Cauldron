@@ -208,6 +208,7 @@ struct QuickTimerButton: View {
                 }
             }
             .presentationDetents([.medium])
+            .appSheetSizing(.compact)
         }
     }
     

@@ -84,11 +84,19 @@ struct WhatsNewView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            PrimaryActionButton("Continue") { onClose() }
+            GlassEffectContainer(spacing: Theme.Spacing.sm) {
+                Button(action: onClose) {
+                    Text("Continue")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .tint(.cauldronOrange)
                 .frame(maxWidth: 520)
                 .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.vertical, Theme.Spacing.md)
-                .background(Color.appBackground)
+            }
         }
     }
 }

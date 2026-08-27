@@ -462,6 +462,7 @@ import os
                 imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
                 ownerId: recipe?.ownerId,
                 privateRecordName: recipe?.cloudRecordName,
+                imageModifiedAt: recipe?.imageModifiedAt,
                 hasCloudImage: recipe?.cloudImageRecordName != nil
             )
         }

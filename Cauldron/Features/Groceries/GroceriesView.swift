@@ -10,6 +10,7 @@ import os
 
 /// View for managing the unified grocery list
 struct GroceriesView: View {
+    let isActive: Bool
     @State private var viewModel: GroceriesViewModel
     @ObservedObject private var currentUserSession = CurrentUserSession.shared
     @State private var showingAddItem = false
@@ -17,9 +18,9 @@ struct GroceriesView: View {
     @State private var experiencePreferences: ExperiencePreferences
     @State private var collapsedGroups: Set<String> = []  // Track which groups are collapsed
     @State private var isAIAvailable = false
-    @FocusState private var isQuickAddFocused: Bool
 
-    init(dependencies: DependencyContainer) {
+    init(dependencies: DependencyContainer, isActive: Bool = true) {
+        self.isActive = isActive
         _viewModel = State(initialValue: GroceriesViewModel(dependencies: dependencies))
         _experiencePreferences = State(initialValue: .shared)
     }
@@ -77,14 +78,6 @@ struct GroceriesView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingAddItem = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-
-                ToolbarItem(placement: .navigationBarTrailing) {
                     if let user = currentUserSession.currentUser {
                         Button {
                             showingProfileSheet = true
@@ -105,13 +98,17 @@ struct GroceriesView: View {
                                     Button("Done") { showingProfileSheet = false }
                                 }
                             }
-                    }
+                        }
                 }
+                .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingAddItem) {
                 AddGroceryItemView(dependencies: viewModel.dependencies, onAdd: {
                     await viewModel.loadItems(viewMode: viewMode)
                 })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .appSheetSizing(.compact)
             }
             .task {
                 await viewModel.loadItems(viewMode: viewMode)
@@ -123,15 +120,33 @@ struct GroceriesView: View {
             .onChange(of: viewMode) { _, newMode in
                 viewModel.updateGroups(for: newMode)
             }
-            .safeAreaInset(edge: .bottom, spacing: Theme.Spacing.xs) {
-                VStack(spacing: Theme.Spacing.xs) {
-                    if let transaction = viewModel.undoCoordinator.visibleTransaction {
-                        undoBar(transaction)
+            .overlay(alignment: .bottom) {
+                if isActive {
+                    VStack(spacing: Theme.Spacing.xs) {
+                        if let transaction = viewModel.undoCoordinator.visibleTransaction {
+                            undoBar(transaction)
+                        }
+
+                        HStack {
+                            Spacer()
+
+                            Button {
+                                showingAddItem = true
+                            } label: {
+                                Label("Add Item", systemImage: "plus")
+                                    .font(.headline)
+                                    .padding(.horizontal, Theme.Spacing.xs)
+                                    .padding(.vertical, Theme.Spacing.xxs)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.extraLarge)
+                            .tint(.cauldronOrange)
+                        }
                     }
-                    quickAddBar
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.bottom, Theme.Spacing.xs)
+                    .allowsHitTesting(true)
                 }
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.bottom, Theme.Spacing.xs)
             }
             .alert("Unable to Update Groceries", isPresented: Binding(
                 get: { viewModel.operationErrorMessage != nil },
@@ -141,30 +156,6 @@ struct GroceriesView: View {
             } message: {
                 Text(viewModel.operationErrorMessage ?? "Please try again.")
             }
-        }
-    }
-
-    private var quickAddBar: some View {
-        AppSurface(style: .elevated) {
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(Color.cauldronOrange)
-                    .accessibilityHidden(true)
-
-                TextField("Quick add grocery item", text: $viewModel.inlineItemName)
-                    .focused($isQuickAddFocused)
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .onSubmit { submitQuickItem() }
-
-                Button("Details", systemImage: "slider.horizontal.3") {
-                    showingAddItem = true
-                }
-                .labelStyle(.iconOnly)
-                .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
-                .accessibilityHint("Opens quantity and unit options")
-            }
-            .padding(.horizontal, Theme.Spacing.sm)
         }
     }
 
@@ -189,22 +180,11 @@ struct GroceriesView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func submitQuickItem() {
-        Task {
-            let added = await viewModel.addQuickItem()
-            if added {
-                isQuickAddFocused = true
-            }
-        }
-    }
-
     private var emptyState: some View {
         EmptyStateView(
             title: "No Grocery Items",
             message: "Add items manually or from recipes.",
-            systemImage: "cart",
-            actionTitle: "Add First Item",
-            action: { showingAddItem = true }
+            systemImage: "cart"
         )
         .padding(Theme.Spacing.xxl)
     }
@@ -272,6 +252,7 @@ struct GroceriesView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .contentMargins(.bottom, 88, for: .scrollContent)
     }
 
     // MARK: - Ungrouped View
@@ -286,6 +267,7 @@ struct GroceriesView: View {
             .onDelete(perform: deleteItems)
         }
         .scrollContentBackground(.hidden)
+        .contentMargins(.bottom, 88, for: .scrollContent)
     }
 
     // MARK: - Item Row
@@ -380,6 +362,8 @@ struct AddGroceryItemView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.appBackground)
             .navigationTitle("Add Item")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

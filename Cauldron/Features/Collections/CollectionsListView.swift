@@ -75,6 +75,7 @@ struct CollectionsListView: View {
         .sheet(isPresented: $showingCreateSheet) {
             CollectionFormView()
                 .environment(\.dependencies, dependencies)
+                .appSheetSizing(.large)
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK", role: .cancel) {}

@@ -113,6 +113,7 @@ struct RecipeEditorView: View {
                     }
                 }
                 .presentationDetents([.medium, .large])
+                .appSheetSizing(.standard)
             }
             .confirmationDialog("Add Recipe Image", isPresented: $showingImageOptions) {
                 Button("Choose from Library") {

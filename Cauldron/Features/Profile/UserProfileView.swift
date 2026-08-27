@@ -8,6 +8,20 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct ProfileRecipeSearchModifier: ViewModifier {
+    let isEnabled: Bool
+    @Binding var text: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.searchable(text: $text, prompt: "Search recipes")
+        } else {
+            content
+        }
+    }
+}
+
 private actor ArchiveRestoreProgressTracker {
     private var latestReport: LibraryArchiveService.RestoreReport?
 
@@ -50,6 +64,7 @@ struct UserProfileView: View {
     @State private var isPreparingArchive = false
     @State private var isRestoringArchive = false
     @State private var archiveStatusMessage: String?
+    @Namespace private var recipeTransition
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -75,15 +90,6 @@ struct UserProfileView: View {
                     // Profile Header
                     profileHeader
 
-                    // Rewards & Progress Section (only for current user)
-                    if viewModel.isCurrentUser && appIconManager.supportsAlternateIcons {
-                        rewardsSection
-                    }
-
-                    if viewModel.isCurrentUser {
-                        libraryBackupSection
-                    }
-
                     // Connection Management Section
                     if !viewModel.isCurrentUser {
                         connectionSection
@@ -104,7 +110,10 @@ struct UserProfileView: View {
         .frame(minWidth: catalystMinimumWidth, minHeight: catalystMinimumHeight)
         .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $viewModel.searchText, prompt: "Search recipes")
+        .modifier(ProfileRecipeSearchModifier(
+            isEnabled: !viewModel.isCurrentUser,
+            text: $viewModel.searchText
+        ))
         .refreshable {
             await viewModel.refreshProfile()
         }
@@ -132,15 +141,18 @@ struct UserProfileView: View {
         }
         .sheet(isPresented: $showingEditProfile) {
             ProfileEditView(dependencies: viewModel.dependencies)
+                .appSheetSizing(.large)
         }
         .sheet(item: $shareLink) { link in
             ShareSheet(items: [link])
         }
         .sheet(isPresented: $showTierRoadmap) {
             TierRoadmapView(currentTier: viewModel.userTier, recipeCount: viewModel.userRecipeCount, dependencies: viewModel.dependencies)
+                .appSheetSizing(.standard)
         }
         .sheet(isPresented: $showAppIconPicker) {
             AppIconPickerView()
+                .appSheetSizing(.large)
         }
         .fileExporter(
             isPresented: $showingArchiveExporter,
@@ -176,6 +188,12 @@ struct UserProfileView: View {
                 if viewModel.isCurrentUser {
                     Menu {
                         Button {
+                            showingEditProfile = true
+                        } label: {
+                            Label("Edit Profile", systemImage: "pencil")
+                        }
+
+                        Button {
                             Task {
                                 await generateShareLink()
                             }
@@ -187,18 +205,41 @@ struct UserProfileView: View {
                         Button {
                             shareWithFriends()
                         } label: {
-                            Label("Invite Friends", systemImage: "gift")
+                            Label("Invite Friends", systemImage: "person.badge.plus")
                         }
+
+                        if appIconManager.supportsAlternateIcons {
+                            Button {
+                                showAppIconPicker = true
+                            } label: {
+                                Label("App Icons", systemImage: "app.dashed")
+                            }
+                        }
+
+                        Divider()
+
+                        Button {
+                            Task { await prepareArchiveExport() }
+                        } label: {
+                            Label("Back Up Library", systemImage: "square.and.arrow.up")
+                        }
+                        .disabled(isPreparingArchive || isRestoringArchive)
+
+                        Button {
+                            showingArchiveImporter = true
+                        } label: {
+                            Label("Restore Library Backup", systemImage: "square.and.arrow.down")
+                        }
+                        .disabled(isPreparingArchive || isRestoringArchive)
                     } label: {
                         if isGeneratingShareLink {
                             ProgressView()
                         } else {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundColor(.cauldronOrange)
+                            Image(systemName: "ellipsis")
                         }
                     }
                     .disabled(isGeneratingShareLink)
-                    .accessibilityLabel("Share")
+                    .accessibilityLabel("Profile actions")
                 }
             }
         }
@@ -226,18 +267,6 @@ struct UserProfileView: View {
                 Text(displayUser.displayName)
                     .font(.system(.title2, design: .serif).weight(.bold))
 
-                Spacer()
-
-                if viewModel.isCurrentUser {
-                    Button {
-                        showingEditProfile = true
-                    } label: {
-                        Image(systemName: "pencil.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(Color.cauldronOrange)
-                    }
-                    .accessibilityLabel("Edit profile")
-                }
             }
 
             Text("@\(displayUser.username)")
@@ -250,10 +279,6 @@ struct UserProfileView: View {
                     profileTierControl
                     profileConnectionControl
                 }
-            }
-
-            if viewModel.isCurrentUser {
-                referralQuickSection
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -389,6 +414,8 @@ struct UserProfileView: View {
 
     @MainActor
     private func prepareArchiveExport() async {
+        guard !isPreparingArchive && !isRestoringArchive else { return }
+
         guard let userID = currentUserSession.userId else {
             archiveStatusMessage = "Sign in to iCloud before backing up your library."
             return
@@ -413,6 +440,8 @@ struct UserProfileView: View {
 
     @MainActor
     private func restoreArchive(_ result: Result<[URL], Error>) async {
+        guard !isPreparingArchive && !isRestoringArchive else { return }
+
         if case .failure(let error) = result {
             guard !Self.archivePickerWasCancelled(error) else { return }
             archiveStatusMessage = "Cauldron couldn't open that backup. Your existing library was not changed."
@@ -1015,15 +1044,20 @@ struct UserProfileView: View {
                 if horizontalSizeClass == .regular {
                     LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: Theme.Spacing.md) {
                         ForEach(displayedRecipes, id: \.id) { sharedRecipe in
-                            NavigationLink(destination: RecipeDetailView(
-                                recipe: sharedRecipe.recipe,
-                                dependencies: viewModel.dependencies,
-                                sharedBy: sharedRecipe.sharedBy,
-                                sharedAt: sharedRecipe.sharedAt
-                            )) {
-                                RecipeCardView(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                            let transitionID = "profile-grid-\(sharedRecipe.recipe.id.uuidString)"
+                            NavigationLink {
+                                RecipeDetailView(
+                                    recipe: sharedRecipe.recipe,
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
+                                    sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
+                                )
+                                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                            } label: {
+                                profileRecipeCard(sharedRecipe)
                             }
                             .buttonStyle(.plain)
+                            .matchedTransitionSource(id: transitionID, in: recipeTransition)
                         }
                     }
                 } else {
@@ -1031,15 +1065,20 @@ struct UserProfileView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: Theme.Spacing.md) {
                                 ForEach(displayedRecipes, id: \.id) { sharedRecipe in
-                                    NavigationLink(destination: RecipeDetailView(
-                                        recipe: sharedRecipe.recipe,
-                                        dependencies: viewModel.dependencies,
-                                        sharedBy: sharedRecipe.sharedBy,
-                                        sharedAt: sharedRecipe.sharedAt
-                                    )) {
-                                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
+                                    let transitionID = "profile-rail-\(sharedRecipe.recipe.id.uuidString)"
+                                    NavigationLink {
+                                        RecipeDetailView(
+                                            recipe: sharedRecipe.recipe,
+                                            dependencies: viewModel.dependencies,
+                                            sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
+                                            sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
+                                        )
+                                        .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                                    } label: {
+                                        profileRecipeCard(sharedRecipe)
                                     }
                                     .buttonStyle(.plain)
+                                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
                                 }
                             }
                         }
@@ -1047,20 +1086,40 @@ struct UserProfileView: View {
                         // List view for search results (matches Search tab style)
                         VStack(spacing: Theme.Spacing.sm) {
                             ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
-                                NavigationLink(destination: RecipeDetailView(
-                                    recipe: sharedRecipe.recipe,
-                                    dependencies: viewModel.dependencies,
-                                    sharedBy: sharedRecipe.sharedBy,
-                                    sharedAt: sharedRecipe.sharedAt
-                                )) {
+                                let transitionID = "profile-search-\(sharedRecipe.recipe.id.uuidString)"
+                                NavigationLink {
+                                    RecipeDetailView(
+                                        recipe: sharedRecipe.recipe,
+                                        dependencies: viewModel.dependencies,
+                                        sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
+                                        sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
+                                    )
+                                    .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                                } label: {
                                     RecipeRowView(recipe: sharedRecipe.recipe, dependencies: viewModel.dependencies)
                                 }
                                 .buttonStyle(.plain)
+                                .matchedTransitionSource(id: transitionID, in: recipeTransition)
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func profileRecipeCard(_ sharedRecipe: SharedRecipe) -> some View {
+        if viewModel.isCurrentUser {
+            RecipeCardView(
+                recipe: sharedRecipe.recipe,
+                dependencies: viewModel.dependencies
+            )
+        } else {
+            RecipeCardView(
+                sharedRecipe: sharedRecipe,
+                dependencies: viewModel.dependencies
+            )
         }
     }
 
@@ -1156,6 +1215,7 @@ struct AllProfileRecipesListView: View {
     let dependencies: DependencyContainer
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(RecipeLayoutMode.appStorageKey) private var storedRecipeLayoutMode = RecipeLayoutMode.auto.rawValue
+    @Namespace private var recipeTransition
 
     private var resolvedRecipeLayoutMode: RecipeLayoutMode {
         let storedMode = RecipeLayoutMode(rawValue: storedRecipeLayoutMode) ?? .auto
@@ -1191,14 +1251,23 @@ struct AllProfileRecipesListView: View {
     private var listContent: some View {
         List {
             ForEach(recipes) { sharedRecipe in
-                NavigationLink(destination: RecipeDetailView(
-                    recipe: sharedRecipe.recipe,
-                    dependencies: dependencies,
-                    sharedBy: sharedRecipe.sharedBy,
-                    sharedAt: sharedRecipe.sharedAt
-                )) {
-                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                let transitionID = "profile-list-\(sharedRecipe.recipe.id.uuidString)"
+                NavigationLink {
+                    RecipeDetailView(
+                        recipe: sharedRecipe.recipe,
+                        dependencies: dependencies,
+                        sharedBy: user.id == CurrentUserSession.shared.userId ? nil : sharedRecipe.sharedBy,
+                        sharedAt: user.id == CurrentUserSession.shared.userId ? nil : sharedRecipe.sharedAt
+                    )
+                    .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                } label: {
+                    if user.id == CurrentUserSession.shared.userId {
+                        RecipeRowView(recipe: sharedRecipe.recipe, dependencies: dependencies)
+                    } else {
+                        SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                    }
                 }
+                .matchedTransitionSource(id: transitionID, in: recipeTransition)
             }
         }
     }
@@ -1207,15 +1276,24 @@ struct AllProfileRecipesListView: View {
         ScrollView {
             LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: Theme.Spacing.md) {
                 ForEach(recipes) { sharedRecipe in
-                    NavigationLink(destination: RecipeDetailView(
-                        recipe: sharedRecipe.recipe,
-                        dependencies: dependencies,
-                        sharedBy: sharedRecipe.sharedBy,
-                        sharedAt: sharedRecipe.sharedAt
-                    )) {
-                        RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                    let transitionID = "profile-all-grid-\(sharedRecipe.recipe.id.uuidString)"
+                    NavigationLink {
+                        RecipeDetailView(
+                            recipe: sharedRecipe.recipe,
+                            dependencies: dependencies,
+                            sharedBy: user.id == CurrentUserSession.shared.userId ? nil : sharedRecipe.sharedBy,
+                            sharedAt: user.id == CurrentUserSession.shared.userId ? nil : sharedRecipe.sharedAt
+                        )
+                        .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                    } label: {
+                        if user.id == CurrentUserSession.shared.userId {
+                            RecipeCardView(recipe: sharedRecipe.recipe, dependencies: dependencies)
+                        } else {
+                            RecipeCardView(sharedRecipe: sharedRecipe, dependencies: dependencies)
+                        }
                     }
                     .buttonStyle(.plain)
+                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
                 }
             }
             .padding(.horizontal)

@@ -33,6 +33,7 @@ struct PeopleSearchSheet: View {
                 }
                 .padding()
             }
+            .warmCanvas()
             .navigationTitle("Find Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -235,7 +236,8 @@ struct PeopleSearchUserRow: View {
 
             connectionButton
         }
-        .padding(.vertical, 8)
+        .padding(Theme.Spacing.sm)
+        .appSurface(.resting)
     }
 
     @ViewBuilder
@@ -255,9 +257,11 @@ struct PeopleSearchUserRow: View {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 32))
                         .foregroundColor(.cauldronOrange)
+                        .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
                 }
             }
             .disabled(isProcessing)
+            .accessibilityLabel("Connect with \(user.displayName)")
 
         case .pendingOutgoing:
             Text("Pending")
@@ -280,8 +284,10 @@ struct PeopleSearchUserRow: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 32))
                         .foregroundColor(.green)
+                        .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
                 }
                 .disabled(isProcessing)
+                .accessibilityLabel("Accept request from \(user.displayName)")
 
                 Button {
                     Task {
@@ -293,18 +299,22 @@ struct PeopleSearchUserRow: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 32))
                         .foregroundColor(.red)
+                        .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
                 }
                 .disabled(isProcessing)
+                .accessibilityLabel("Decline request from \(user.displayName)")
             }
 
         case .connected:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 32))
                 .foregroundColor(.green)
+                .accessibilityLabel("Connected with \(user.displayName)")
 
         case .syncing:
             ProgressView()
                 .scaleEffect(0.85)
+                .accessibilityLabel("Updating connection with \(user.displayName)")
 
         case .failed:
             Button {
@@ -320,8 +330,10 @@ struct PeopleSearchUserRow: View {
                     Text("Retry")
                         .font(.caption)
                 }
+                .frame(minWidth: Theme.HitTarget.minimum, minHeight: Theme.HitTarget.minimum)
             }
             .disabled(isProcessing)
+            .accessibilityLabel("Retry connection with \(user.displayName)")
 
         case .currentUser:
             Text("You")

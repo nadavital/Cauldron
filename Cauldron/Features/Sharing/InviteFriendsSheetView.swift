@@ -22,25 +22,20 @@ struct InviteFriendsSheetView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AnimatedMeshGradient()
-                    .ignoresSafeArea()
-
-                Color.cauldronBackground.opacity(0.35)
-                    .ignoresSafeArea()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+            ScrollView {
+                GlassEffectContainer(spacing: Theme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                         heroSection
                         actionSection
                         invitesAndRewardsSection
                     }
-                    .frame(maxWidth: 720)
+                    .frame(maxWidth: 560)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
+                    .padding(.horizontal, Theme.Spacing.lg)
+                    .padding(.vertical, Theme.Spacing.xl)
                 }
             }
+            .warmCanvas()
             .navigationTitle("Invite Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -64,90 +59,30 @@ struct InviteFriendsSheetView: View {
     }
 
     private var heroSection: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [Color.cauldronOrange.opacity(0.3), Color.cauldronOrange.opacity(0.07)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: "person.badge.plus")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.cauldronOrange)
+                .frame(width: 48, height: 48)
+                .glassEffect(.regular, in: Circle())
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Invite Friends to Cauldron", systemImage: "person.3.fill")
-                    .font(.title3)
-                    .fontWeight(.bold)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text("Bring your recipes together")
+                    .font(Theme.Typography.sectionTitle)
 
-                Text("Send one tap invite links that auto-apply your code and connect you as friends.")
+                Text("Your invite link connects you automatically when a friend joins Cauldron.")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(18)
         }
-        .frame(maxWidth: .infinity, minHeight: 164, alignment: .bottomLeading)
-        .overlay(alignment: .topTrailing) {
-            Image("BrandMarks/CauldronIcon")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 92, height: 92)
-                .opacity(0.22)
-                .padding(14)
-        }
-        .clipShape(.rect(cornerRadius: 22))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var invitesAndRewardsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "person.2.wave.2.fill")
-                    .foregroundColor(.cauldronOrange)
-                Text("Invites & Rewards")
-                    .font(.headline)
-            }
-
-            Text("Rewards Progress")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
-
-            if let nextUnlock = referralManager.nextIconToUnlock {
-                let target = max(1, nextUnlock.requiredReferrals)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Label(
-                            "\(referralManager.referralCount) referral join\(referralManager.referralCount == 1 ? "" : "s")",
-                            systemImage: "person.2.fill"
-                        )
-                        .font(.subheadline.weight(.semibold))
-
-                        Spacer()
-
-                        Text("\(min(referralManager.referralCount, target))/\(target)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(.secondary)
-                    }
-
-                    ProgressView(
-                        value: Double(min(referralManager.referralCount, target)),
-                        total: Double(target)
-                    )
-                    .tint(.cauldronOrange)
-
-                    let remaining = max(0, nextUnlock.requiredReferrals - referralManager.referralCount)
-                    Text("\(remaining) more to unlock '\(nextUnlock.iconId)'")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                Label("All referral icon rewards unlocked.", systemImage: "checkmark.seal.fill")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            Divider()
-                .overlay(Color.secondary.opacity(0.2))
-                .padding(.vertical, 2)
-
             Text("People You Invited")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
+                .font(.headline)
 
             if isLoadingReferredUsers {
                 ProgressView("Loading invites...")
@@ -178,32 +113,22 @@ struct InviteFriendsSheetView: View {
                                 .foregroundColor(.green)
                         }
                         .padding(10)
-                        .background(Color.cauldronBackground.opacity(0.8))
-                        .clipShape(.rect(cornerRadius: 12))
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
                     }
                 }
             }
         }
-        .padding(16)
-        .background(Color.cauldronSecondaryBackground)
-        .clipShape(.rect(cornerRadius: 18))
     }
 
     private var actionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Invite Tools")
-                    .font(.headline)
-                Spacer()
-            }
-
             if let user = currentUserSession.currentUser {
                 let referralCode = referralManager.generateReferralCode(for: user)
                 let inviteURL = referralManager.getShareURL(for: user)
 
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Referral Code")
+                        Text("Invite code")
                             .font(.caption)
                             .foregroundColor(.secondary)
 
@@ -225,11 +150,10 @@ struct InviteFriendsSheetView: View {
                             } label: {
                                 Label(copiedCode ? "Copied" : "Copy", systemImage: copiedCode ? "checkmark" : "doc.on.doc")
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.glass)
                         }
-                        .padding(12)
-                        .background(Color.cauldronBackground)
-                        .clipShape(.rect(cornerRadius: 14))
+                        .padding(Theme.Spacing.sm)
+                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
                     }
 
                     Button {
@@ -239,11 +163,12 @@ struct InviteFriendsSheetView: View {
                             image: nil
                         )
                     } label: {
-                        Label("Invite Friends", systemImage: "square.and.arrow.up.fill")
+                        Label("Share Invite Link", systemImage: "square.and.arrow.up")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.extraLarge)
                     .tint(.cauldronOrange)
                 }
             } else {
@@ -252,9 +177,6 @@ struct InviteFriendsSheetView: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(16)
-        .background(Color.cauldronSecondaryBackground)
-        .clipShape(.rect(cornerRadius: 18))
     }
 
     @MainActor

@@ -165,6 +165,7 @@ struct CookTabView: View {
                 }
             }) {
                 ImporterView(dependencies: viewModel.dependencies)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingImportInbox) {
                 ImportInboxView(store: viewModel.dependencies.recipeImportInboxStore) { job in
@@ -174,11 +175,13 @@ struct CookTabView: View {
                         inboxJobToReview = job
                     }
                 }
+                .appSheetSizing(.standard)
             }
             .sheet(item: $inboxJobToReview, onDismiss: {
                 Task { await refreshCookLibrary() }
             }) { job in
                 inboxImporter(for: job)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingEditor, onDismiss: {
                 Task {
@@ -186,6 +189,7 @@ struct CookTabView: View {
                 }
             }) {
                 RecipeEditorView(dependencies: viewModel.dependencies, recipe: selectedRecipe)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingAIGenerator, onDismiss: {
                 Task {
@@ -193,6 +197,7 @@ struct CookTabView: View {
                 }
             }) {
                 AIRecipeGeneratorView(dependencies: viewModel.dependencies)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingCollectionForm, onDismiss: {
                 Task {
@@ -201,6 +206,7 @@ struct CookTabView: View {
             }) {
                 CollectionFormView()
                     .dependencies(viewModel.dependencies)
+                    .appSheetSizing(.large)
             }
             .sheet(isPresented: $showingProfileSheet) {
                 NavigationStack {
@@ -213,6 +219,7 @@ struct CookTabView: View {
                             }
                     }
                 }
+                .appSheetSizing(.large)
             }
             .alert("Recipe Already Cooking", isPresented: $showSessionConflictAlert) {
                 Button("Cancel", role: .cancel) {}
@@ -773,12 +780,16 @@ struct CookTabView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.friendsRecipes.prefix(10), id: \.id) { sharedRecipe in
-                        NavigationLink(destination: RecipeDetailView(
-                            recipe: sharedRecipe.recipe,
-                            dependencies: viewModel.dependencies,
-                            sharedBy: sharedRecipe.sharedBy,
-                            sharedAt: sharedRecipe.sharedAt
-                        )) {
+                        let transitionID = "from-friends-\(sharedRecipe.recipe.id.uuidString)"
+                        NavigationLink {
+                            RecipeDetailView(
+                                recipe: sharedRecipe.recipe,
+                                dependencies: viewModel.dependencies,
+                                sharedBy: sharedRecipe.sharedBy,
+                                sharedAt: sharedRecipe.sharedAt
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                        } label: {
                             RecipeCardView(
                                 sharedRecipe: sharedRecipe,
                                 creatorTier: viewModel.friendsRecipeTiers[sharedRecipe.sharedBy.id],
@@ -786,6 +797,7 @@ struct CookTabView: View {
                             )
                         }
                         .buttonStyle(PressableScaleStyle())
+                        .matchedTransitionSource(id: transitionID, in: recipeTransition)
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.md)
@@ -811,11 +823,15 @@ struct CookTabView: View {
                         // Get owner info if available
                         if let ownerId = recipe.ownerId,
                            let owner = viewModel.popularRecipeOwners[ownerId] {
-                            NavigationLink(destination: RecipeDetailView(
-                                recipe: recipe,
-                                dependencies: viewModel.dependencies,
-                                sharedBy: owner
-                            )) {
+                            let transitionID = "popular-\(recipe.id.uuidString)"
+                            NavigationLink {
+                                RecipeDetailView(
+                                    recipe: recipe,
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: owner
+                                )
+                                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                            } label: {
                                 RecipeCardView(
                                     recipe: recipe,
                                     dependencies: viewModel.dependencies,
@@ -824,12 +840,18 @@ struct CookTabView: View {
                                 )
                             }
                             .buttonStyle(PressableScaleStyle())
+                            .matchedTransitionSource(id: transitionID, in: recipeTransition)
                         } else {
                             // Fallback for recipes without owner info
-                            NavigationLink(destination: RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)) {
+                            let transitionID = "popular-\(recipe.id.uuidString)"
+                            NavigationLink {
+                                RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                                    .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                            } label: {
                                 RecipeCardView(recipe: recipe, dependencies: viewModel.dependencies)
                             }
                             .buttonStyle(PressableScaleStyle())
+                            .matchedTransitionSource(id: transitionID, in: recipeTransition)
                         }
                     }
                 }

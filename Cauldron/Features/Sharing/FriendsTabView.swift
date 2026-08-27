@@ -62,12 +62,19 @@ struct FriendsTabView: View {
                         }
                 }
             }
+            .appSheetSizing(.large)
         }
         .sheet(isPresented: $showingPeopleSearch) {
             PeopleSearchSheet(dependencies: dependencies)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .appSheetSizing(.standard)
         }
         .sheet(isPresented: $showingInviteSheet) {
             InviteFriendsSheetView(dependencies: dependencies)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .appSheetSizing(.standard)
         }
         .task(id: userSession.userId) {
             // Configure dependencies if not already done
@@ -171,7 +178,7 @@ struct FriendsTabView: View {
             Button {
                 showingInviteSheet = true
             } label: {
-                Label("Invite", systemImage: "gift.fill")
+                Label("Invite", systemImage: "square.and.arrow.up")
             }
 
             if let user = userSession.currentUser {
@@ -223,7 +230,7 @@ struct FriendsTabView: View {
                     Button {
                         showingInviteSheet = true
                     } label: {
-                        Label("Invite Friends", systemImage: "gift.fill")
+                        Label("Invite Friends", systemImage: "square.and.arrow.up")
                     }
 
                     Button {
@@ -291,7 +298,7 @@ struct FriendsTabView: View {
             Button {
                 showingInviteSheet = true
             } label: {
-                Label("Invite", systemImage: "gift.fill")
+                Label("Invite", systemImage: "square.and.arrow.up")
             }
 
             if let user = userSession.currentUser {

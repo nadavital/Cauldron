@@ -27,10 +27,6 @@ import SwiftUI
 /// ```
 struct RecipeCardView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    /// Whether the top of the image is light (→ use dark overlay text). Updated
-    /// from the loaded image's luminance so over-image labels stay legible.
-    @State private var overlayPrefersDarkText = false
-
     let recipe: Recipe
     let dependencies: DependencyContainer
     var sharedBy: User?
@@ -85,9 +81,7 @@ struct RecipeCardView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             // Image with contextual overlays
             ZStack {
-                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService) { luminance in
-                    overlayPrefersDarkText = luminance > 0.6
-                }
+                RecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
                 .frame(width: cardWidth, height: cardHeight)
 
                 if isSharedRecipe {
@@ -152,15 +146,15 @@ struct RecipeCardView: View {
                         HStack(spacing: 6) {
                             ProfileAvatar(user: creator, size: 24, dependencies: dependencies)
 
-                            Text(creator.displayName)
+                            Text("@\(creator.username)")
                                 .font(.caption2)
-                                .fontWeight(.medium)
+                                .fontWeight(.semibold)
                                 .lineLimit(1)
-                                .foregroundStyle(overlayPrefersDarkText ? .black : .white)
+                                .foregroundStyle(.primary)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .glassEffect(.clear, in: Capsule())
+                        .glassEffect(.regular, in: Capsule())
                     }
 
                     Spacer()
@@ -171,7 +165,7 @@ struct RecipeCardView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(tier.color)
                             .padding(6)
-                            .glassEffect(.clear, in: Circle())
+                            .glassEffect(.regular, in: Circle())
                     }
                 }
                 .padding(8)

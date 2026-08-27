@@ -417,6 +417,7 @@ final class CollectionsListViewModel {
                 imageURL: recipe?.imageURL ?? recipeImageURLsById[recipeId] ?? nil,
                 ownerId: recipe?.ownerId ?? (isNonOwnedCollection ? collection.userId : nil),
                 privateRecordName: recipe?.cloudRecordName,
+                imageModifiedAt: recipe?.imageModifiedAt,
                 hasCloudImage: recipe?.cloudImageRecordName != nil || (recipe == nil && isNonOwnedCollection)
             )
         }

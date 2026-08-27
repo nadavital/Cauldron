@@ -378,6 +378,7 @@ struct RecipeDetailView: View {
                     recipeWasDeleted = true
                 }
             )
+            .appSheetSizing(.large)
         }
         .onChange(of: showingEditSheet) { _, isPresented in
             if !isPresented {
@@ -394,6 +395,7 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showingCollectionPicker) {
             AddToCollectionSheet(recipe: recipe, dependencies: dependencies)
                 .presentationDetents([.medium, .large])
+                .appSheetSizing(.standard)
         }
         .sheet(isPresented: $showShareSheet) {
             if let link = shareLink {
