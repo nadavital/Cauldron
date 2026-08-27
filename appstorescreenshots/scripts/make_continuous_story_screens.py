@@ -109,13 +109,13 @@ class PlatformSpec:
 
 
 IPHONE_SHOTS = (
-    Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Cook with confidence', 'Ingredients and steps stay together.'),
-    Shot('friends_tab', 'Cook with friends', 'Share recipes with people you know.'),
-    Shot('search_tab', 'Find the right recipe', 'Search by tags, time, or ingredients.'),
-    Shot('generate_recipe', 'Make something new', 'Turn what you have into fresh ideas.'),
-    Shot('collection_view', 'Make it yours', 'Keep every kind of recipe organized.'),
-    Shot('profile_view', 'Keep your favorites close', 'Your recipes and collections, beautifully organized.'),
+    Shot('cook_tab', 'All your recipes. Finally together.', ''),
+    Shot('recipe_view', 'Cook without losing your place.', ''),
+    Shot('search_tab', 'Find tonight\'s answer in seconds.', ''),
+    Shot('generate_recipe', 'Turn what you have into dinner.', ''),
+    Shot('friends_tab', 'Share recipes, not screenshots.', ''),
+    Shot('collection_view', 'Organize it your way.', ''),
+    Shot('cook_mode', 'Keep cooking, hands-free.', ''),
 )
 
 IPAD_SHOTS = (
@@ -158,10 +158,10 @@ SPECS = (
     PlatformSpec(
         name='iPhone',
         canvas_size=(1320, 2868),
-        top_area=390,
-        bottom_area=320,
-        side_margin=86,
-        title_size=112,
+        top_area=350,
+        bottom_area=40,
+        side_margin=72,
+        title_size=104,
         body_size=56,
         text_left_margin=96,
         icon_size_first=118,
@@ -325,26 +325,9 @@ def crop_black_border(img: Image.Image, threshold: int = 10) -> Image.Image:
 
 
 def load_mobile_background(path: Path, size: tuple[int, int]) -> Image.Image:
-    if path.exists():
-        return Image.open(path).convert('RGB')
-
-    w, h = size
-    bg = Image.new('RGB', size)
-    px = bg.load()
-    top = (255, 248, 226)
-    mid = (255, 211, 139)
-    bottom = (222, 126, 44)
-    for y in range(h):
-        t = y / max(1, h - 1)
-        if t < 0.52:
-            u = t / 0.52
-            color = tuple(round(top[i] * (1 - u) + mid[i] * u) for i in range(3))
-        else:
-            u = (t - 0.52) / 0.48
-            color = tuple(round(mid[i] * (1 - u) + bottom[i] * u) for i in range(3))
-        for x in range(w):
-            px[x, y] = color
-    return bg
+    # Match the shipping light-mode canvas exactly. The app UI and marketing
+    # frame should read as one visual system, not competing layers.
+    return Image.new('RGB', size, (246, 241, 234))
 
 
 def compose_template_iphone(screenshot_path: Path) -> Image.Image:
@@ -494,7 +477,23 @@ def draw_copy(panel_rgb: Image.Image, shot: Shot, spec: PlatformSpec, idx: int, 
     max_width = spec.canvas_size[0] - (2 * spec.text_left_margin)
     title_lines = wrap_text(shot.title, title_font, max_width)
 
-    ty = 96 if spec.name == 'iPhone' else (114 if spec.name == 'iPad' else 96)
+    if spec.name == 'iPhone':
+        line_boxes = [draw.textbbox((0, 0), line, font=title_font) for line in title_lines]
+        line_heights = [box[3] - box[1] for box in line_boxes]
+        total_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
+        cy = max(54, (spec.top_area - total_height) // 2 - 8)
+        for line, box, line_height in zip(title_lines, line_boxes, line_heights):
+            line_width = box[2] - box[0]
+            draw.text(
+                ((spec.canvas_size[0] - line_width) // 2, cy),
+                line,
+                font=title_font,
+                fill=(39, 38, 37),
+            )
+            cy += line_height + 4
+        return
+
+    ty = 114 if spec.name == 'iPad' else 96
     if idx == 1:
         brand_text = 'Cauldron'
         brand_bbox = draw.textbbox((spec.text_left_margin, ty), brand_text, font=title_font)
@@ -556,8 +555,17 @@ def source_path(spec: PlatformSpec, key: str) -> Path:
 
 
 def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
+    if spec.name == 'iPhone':
+        for shot in spec.shots:
+            if shot.body:
+                raise ValueError(f'iPhone screenshot {shot.key} must not use below-device copy')
+            if len(shot.title.split()) > 8:
+                raise ValueError(f'iPhone screenshot {shot.key} headline exceeds eight words')
+
     out_dir = OUT_ROOT / spec.name
     out_dir.mkdir(parents=True, exist_ok=True)
+    for stale_output in out_dir.glob('*.png'):
+        stale_output.unlink()
 
     bg = load_mobile_background(spec.bg_path, spec.canvas_size)
     strip = build_continuous_strip(bg, spec.canvas_size, len(spec.shots))
@@ -602,7 +610,9 @@ def write_sequence_preview(spec: PlatformSpec) -> None:
         x += im.width
 
     full = OUT_ROOT / f'{platform.lower()}_sequence_strip.png'
-    preview = OUT_ROOT / f'{platform.lower()}_sequence_strip_preview.png'
+    qa_dir = OUT_ROOT / 'qa'
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    preview = qa_dir / f'{platform.lower()}_sequence_contact_sheet.png'
     strip.save(full, format='PNG', optimize=True)
     strip.resize((strip.width // 4, strip.height // 4), Image.Resampling.LANCZOS).save(
         preview, format='PNG', optimize=True

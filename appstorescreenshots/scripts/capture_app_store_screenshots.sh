@@ -51,6 +51,6 @@ capture_tab friends friends_tab
 capture_tab search search_tab
 capture_scene generate_recipe generate_recipe
 capture_scene collection_view collection_view
-capture_scene profile_view profile_view
+capture_scene cook_mode cook_mode
 
 echo "Captured current App Store source screenshots in $output_directory"
