@@ -115,7 +115,7 @@ IPHONE_SHOTS = (
     Shot('generate_recipe', 'Turn what you have into dinner.', ''),
     Shot('friends_tab', 'Share recipes, not screenshots.', ''),
     Shot('collection_view', 'Organize it your way.', ''),
-    Shot('cook_mode', 'Keep cooking, hands-free.', ''),
+    Shot('live_activity', 'Keep cooking from the Lock Screen.', ''),
 )
 
 IPAD_SHOTS = (
@@ -325,8 +325,9 @@ def crop_black_border(img: Image.Image, threshold: int = 10) -> Image.Image:
 
 
 def load_mobile_background(path: Path, size: tuple[int, int]) -> Image.Image:
-    # Match the shipping light-mode canvas exactly. The app UI and marketing
-    # frame should read as one visual system, not competing layers.
+    # Start from the shipping light-mode canvas. Brand depth is added across the
+    # full sequence in build_continuous_strip so adjacent screenshots remain a
+    # single restrained artwork rather than seven unrelated gradients.
     return Image.new('RGB', size, (246, 241, 234))
 
 
@@ -534,9 +535,52 @@ def draw_copy(panel_rgb: Image.Image, shot: Shot, spec: PlatformSpec, idx: int, 
 def build_continuous_strip(bg_img: Image.Image, panel_size: tuple[int, int], count: int) -> Image.Image:
     pw, ph = panel_size
     total_w = pw * count
-    # Stretch one background image across the full sequence width so adjacent panels
-    # form a single continuous artwork when placed side-by-side.
-    return bg_img.resize((total_w, ph), Image.Resampling.LANCZOS).convert('RGB')
+    # Warm paper base with a nearly imperceptible vertical lift toward the copy.
+    column = Image.new('RGB', (1, ph))
+    pixels = column.load()
+    top = (251, 248, 243)
+    bottom = (244, 237, 228)
+    for y in range(ph):
+        t = y / max(1, ph - 1)
+        pixels[0, y] = tuple(round(top[i] * (1 - t) + bottom[i] * t) for i in range(3))
+    strip = column.resize((total_w, ph), Image.Resampling.BICUBIC).convert('RGBA')
+
+    # Low-contrast Cauldron-orange light moves through the sequence. The glows
+    # sit behind the device, leaving the headline area quiet and highly legible.
+    glow = Image.new('RGBA', (total_w, ph), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(glow)
+    glow_specs = (
+        (0.55, 0.76, 0.95, (255, 153, 51, 66)),
+        (2.05, 0.62, 0.78, (224, 103, 31, 48)),
+        (3.65, 0.82, 1.05, (255, 190, 92, 64)),
+        (5.20, 0.68, 0.88, (240, 100, 73, 44)),
+        (6.65, 0.80, 0.92, (255, 153, 51, 62)),
+    )
+    for panel_x, y_ratio, diameter_ratio, color in glow_specs:
+        diameter = int(pw * diameter_ratio)
+        cx = int(panel_x * pw)
+        cy = int(ph * y_ratio)
+        draw.ellipse(
+            (cx - diameter // 2, cy - diameter // 2, cx + diameter // 2, cy + diameter // 2),
+            fill=color,
+        )
+
+    # One broad, continuous ribbon suggests heat/steam without turning the
+    # screenshots into patterned posters. It is intentionally strongest below
+    # the copy and drifts across panels when viewed as a set.
+    ribbon_points = [
+        (-pw, int(ph * 0.77)),
+        (int(total_w * 0.18), int(ph * 0.66)),
+        (int(total_w * 0.40), int(ph * 0.80)),
+        (int(total_w * 0.62), int(ph * 0.64)),
+        (int(total_w * 0.82), int(ph * 0.78)),
+        (total_w + pw, int(ph * 0.67)),
+    ]
+    draw.line(ribbon_points, fill=(255, 153, 51, 34), width=360, joint='curve')
+    draw.line(ribbon_points, fill=(224, 103, 31, 28), width=46, joint='curve')
+
+    glow = glow.filter(ImageFilter.GaussianBlur(150))
+    return Image.alpha_composite(strip, glow).convert('RGB')
 
 
 def source_path(spec: PlatformSpec, key: str) -> Path:

@@ -247,6 +247,68 @@ struct AIRecipePreview: View {
     }
 }
 
+// MARK: - Completed Recipe Preview
+
+/// A stable completed-state presentation. Normal generation reaches this same
+/// state after streaming; the screenshot route can seed it without relying on
+/// model availability or network timing.
+struct AICompletedRecipePreview: View {
+    let recipe: Recipe
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text(recipe.title)
+                    .font(.system(.title, design: .serif).weight(.bold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: Theme.Spacing.lg) {
+                    if let minutes = recipe.totalMinutes {
+                        Label("\(minutes) min", systemImage: "clock")
+                    }
+                    if !recipe.yields.isEmpty {
+                        Label(recipe.yields, systemImage: "person.2")
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Label("Ingredients", systemImage: "basket")
+                    .font(.headline)
+
+                ForEach(recipe.ingredients.prefix(5)) { ingredient in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
+                        Circle()
+                            .fill(Color.cauldronOrange)
+                            .frame(width: 6, height: 6)
+                        Text(ingredient.displayString)
+                            .font(.subheadline)
+                    }
+                }
+            }
+
+            if let firstStep = recipe.steps.first {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    Label("First step", systemImage: "1.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(Color.cauldronOrange)
+                    Text(firstStep.text)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(Theme.Spacing.lg)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.xLarge, style: .continuous))
+    }
+}
+
 // MARK: - Error Card
 
 struct AIErrorCard: View {

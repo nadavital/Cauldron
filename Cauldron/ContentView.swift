@@ -920,10 +920,20 @@ private struct ScreenshotSceneView: View {
                     CookTabView(dependencies: dependencies, preloadedData: preloadedData)
                 }
             case "generate_recipe":
-                AIRecipeGeneratorView(dependencies: dependencies)
-            case "cook_mode", "live_activity":
+                AIRecipeGeneratorView(dependencies: dependencies, screenshotPreview: true)
+            case "cook_mode":
                 if let recipe = featuredRecipe {
                     ScreenshotCookModeScene(
+                        recipe: recipe,
+                        coordinator: dependencies.cookModeCoordinator,
+                        dependencies: dependencies
+                    )
+                } else {
+                    CookTabView(dependencies: dependencies, preloadedData: preloadedData)
+                }
+            case "live_activity":
+                if let recipe = featuredRecipe {
+                    ScreenshotLiveActivityLauncher(
                         recipe: recipe,
                         coordinator: dependencies.cookModeCoordinator,
                         dependencies: dependencies
@@ -942,6 +952,24 @@ private struct ScreenshotSceneView: View {
             default:
                 MainTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
+        }
+    }
+}
+
+private struct ScreenshotLiveActivityLauncher: View {
+    let recipe: Recipe
+    let coordinator: CookModeCoordinator
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        CookModeView(
+            recipe: recipe,
+            coordinator: coordinator,
+            dependencies: dependencies
+        )
+        .task {
+            _ = await coordinator.startCooking(recipe)
+            coordinator.minimizeToBackground()
         }
     }
 }

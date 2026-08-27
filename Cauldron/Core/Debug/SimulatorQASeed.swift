@@ -36,6 +36,32 @@ enum SimulatorQASeed {
         profileColor: "#6C63FF"
     )
 
+    private static let friendC = User(
+        id: UUID(uuidString: "44444444-4444-4444-8444-444444444444")!,
+        username: "sasha_slices",
+        displayName: "Sasha Kim",
+        profileEmoji: "🍊",
+        profileColor: "#F06449"
+    )
+
+    private static let friendD = User(
+        id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+        username: "amir_at_home",
+        displayName: "Amir Cohen",
+        profileEmoji: "🍩",
+        profileColor: "#2E8B57"
+    )
+
+    private static let friendE = User(
+        id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+        username: "clara_cooks",
+        displayName: "Clara Torres",
+        profileEmoji: "🌶️",
+        profileColor: "#D94F70"
+    )
+
+    private static let friends = [friendA, friendB, friendC, friendD, friendE]
+
     private static var didSeed = false
 
     static func configureUserSession(_ session: CurrentUserSession) {
@@ -78,7 +104,7 @@ enum SimulatorQASeed {
     }
 
     private static func clearSeededState(in context: ModelContext) throws {
-        let userIds = [currentUser.id, friendA.id, friendB.id]
+        let userIds = [currentUser.id] + friends.map(\.id)
         let recipeIds = [
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1")!,
             UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2")!,
@@ -104,7 +130,10 @@ enum SimulatorQASeed {
         ]
         let connectionIds = [
             UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc1")!,
-            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")!
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")!,
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc3")!,
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc4")!,
+            UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc5")!
         ]
 
         for model in try context.fetch(FetchDescriptor<UserModel>())
@@ -140,7 +169,7 @@ enum SimulatorQASeed {
     }
 
     private static func seedUsers(in context: ModelContext) throws {
-        for user in [currentUser, friendA, friendB] {
+        for user in [currentUser] + friends {
             context.insert(UserModel.from(user))
         }
     }
@@ -268,7 +297,7 @@ enum SimulatorQASeed {
                 ingredients: ["Blood oranges", "Flour", "Sugar", "Eggs", "Olive oil", "Vanilla"],
                 steps: ["Layer sliced oranges in the pan.", "Pour olive oil cake batter over the fruit.", "Bake and invert while warm."],
                 tags: ["Dessert", "Cake", "Citrus"],
-                ownerId: friendA.id,
+                ownerId: friendC.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-16_200),
                 imageURL: imageURLs.bloodOrangeCake,
@@ -293,7 +322,7 @@ enum SimulatorQASeed {
                 ingredients: ["Flour", "Yeast", "Sugar", "Warm water", "Cinnamon sugar"],
                 steps: ["Mix a sticky dough and let it rise.", "Shape into rings with wet hands.", "Fry and toss in cinnamon sugar."],
                 tags: ["Dessert", "Fried", "Holiday"],
-                ownerId: friendB.id,
+                ownerId: friendD.id,
                 visibility: .publicRecipe,
                 updatedAt: now.addingTimeInterval(-19_800),
                 imageURL: imageURLs.moroccanDonuts,
@@ -441,13 +470,49 @@ enum SimulatorQASeed {
             ),
             Connection(
                 id: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")!,
-                fromUserId: friendB.id,
+                fromUserId: currentUser.id,
+                toUserId: friendB.id,
+                status: .accepted,
+                createdAt: now.addingTimeInterval(-86_400 * 6),
+                updatedAt: now.addingTimeInterval(-86_400 * 6),
+                fromUsername: currentUser.username,
+                fromDisplayName: currentUser.displayName,
+                toUsername: friendB.username,
+                toDisplayName: friendB.displayName
+            ),
+            Connection(
+                id: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc3")!,
+                fromUserId: friendC.id,
+                toUserId: currentUser.id,
+                status: .accepted,
+                createdAt: now.addingTimeInterval(-86_400 * 4),
+                updatedAt: now.addingTimeInterval(-86_400 * 4),
+                fromUsername: friendC.username,
+                fromDisplayName: friendC.displayName,
+                toUsername: currentUser.username,
+                toDisplayName: currentUser.displayName
+            ),
+            Connection(
+                id: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc4")!,
+                fromUserId: currentUser.id,
+                toUserId: friendD.id,
+                status: .accepted,
+                createdAt: now.addingTimeInterval(-86_400 * 2),
+                updatedAt: now.addingTimeInterval(-86_400 * 2),
+                fromUsername: currentUser.username,
+                fromDisplayName: currentUser.displayName,
+                toUsername: friendD.username,
+                toDisplayName: friendD.displayName
+            ),
+            Connection(
+                id: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-ccccccccccc5")!,
+                fromUserId: friendE.id,
                 toUserId: currentUser.id,
                 status: .pending,
                 createdAt: now.addingTimeInterval(-86_400),
                 updatedAt: now.addingTimeInterval(-86_400),
-                fromUsername: friendB.username,
-                fromDisplayName: friendB.displayName,
+                fromUsername: friendE.username,
+                fromDisplayName: friendE.displayName,
                 toUsername: currentUser.username,
                 toDisplayName: currentUser.displayName
             )
@@ -459,13 +524,17 @@ enum SimulatorQASeed {
     }
 
     private static func seedSharedRecipes(recipes: [Recipe], in context: ModelContext) throws {
+        let usersByID = Dictionary(uniqueKeysWithValues: friends.map { ($0.id, $0) })
         let sharedRecipes = recipes
-            .filter { $0.ownerId != currentUser.id }
-            .map { recipe in
-                SharedRecipe(
+            .compactMap { recipe -> SharedRecipe? in
+                guard let ownerID = recipe.ownerId,
+                      let owner = usersByID[ownerID] else {
+                    return nil
+                }
+                return SharedRecipe(
                     id: UUID(),
                     recipe: recipe,
-                    sharedBy: recipe.ownerId == friendA.id ? friendA : friendB,
+                    sharedBy: owner,
                     sharedAt: recipe.updatedAt
                 )
             }

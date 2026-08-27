@@ -44,8 +44,14 @@ struct AIRecipeGeneratorView: View {
         viewModel.isGenerating || viewModel.generatedRecipe != nil
     }
 
-    init(dependencies: DependencyContainer) {
-        _viewModel = State(initialValue: AIRecipeGeneratorViewModel(dependencies: dependencies))
+    init(dependencies: DependencyContainer, screenshotPreview: Bool = false) {
+        let model = AIRecipeGeneratorViewModel(dependencies: dependencies)
+        #if DEBUG
+        if screenshotPreview {
+            model.seedScreenshotPreview()
+        }
+        #endif
+        _viewModel = State(initialValue: model)
     }
 
     var body: some View {
@@ -70,6 +76,9 @@ struct AIRecipeGeneratorView: View {
 
                                 if let partial = viewModel.partialRecipe {
                                     AIRecipePreview(partial: partial)
+                                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                                } else if let recipe = viewModel.generatedRecipe {
+                                    AICompletedRecipePreview(recipe: recipe)
                                         .transition(.move(edge: .bottom).combined(with: .opacity))
                                 }
 

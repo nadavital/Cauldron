@@ -53,4 +53,17 @@ capture_scene generate_recipe generate_recipe
 capture_scene collection_view collection_view
 capture_scene cook_mode cook_mode
 
+# A real Live Activity requires the simulator to be locked after this route
+# starts ActivityKit. Set CAPTURE_LIVE_ACTIVITY=1, lock the Simulator with
+# Command-L while the script pauses, then press Return in this terminal.
+if [[ "${CAPTURE_LIVE_ACTIVITY:-0}" == "1" ]]; then
+    "$simctl" launch --terminate-running-process "$device_id" "$bundle_id" \
+        --cauldron-simulator-qa \
+        --cauldron-screenshot-scene=live_activity
+    sleep 4
+    echo "Lock the Simulator with Command-L, then press Return to capture the real Live Activity."
+    read -r
+    "$simctl" io "$device_id" screenshot "$output_directory/live_activity.PNG"
+fi
+
 echo "Captured current App Store source screenshots in $output_directory"

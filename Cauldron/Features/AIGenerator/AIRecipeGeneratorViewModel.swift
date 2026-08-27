@@ -81,6 +81,34 @@ final class AIRecipeGeneratorViewModel {
         self.dependencies = dependencies
     }
 
+    #if DEBUG
+    /// Deterministic, complete output used only by the App Store screenshot route.
+    /// Keeping it in the real view model lets the capture exercise the same
+    /// completed-state UI and Save action as an actual generation.
+    func seedScreenshotPreview() {
+        prompt = "a bright weeknight dinner with pantry ingredients"
+        generatedRecipe = GeneratedRecipe(
+            title: "Crispy Lemon Chickpeas",
+            yields: "4 servings",
+            totalMinutes: 25,
+            ingredients: [
+                GeneratedIngredient(name: "chickpeas", quantityValue: 2, quantityUnit: "can", note: "drained"),
+                GeneratedIngredient(name: "lemon", quantityValue: 1, quantityUnit: "piece", note: "zested and juiced"),
+                GeneratedIngredient(name: "garlic", quantityValue: 2, quantityUnit: "clove", note: "thinly sliced"),
+                GeneratedIngredient(name: "Greek yogurt", quantityValue: 0.5, quantityUnit: "cup", note: nil),
+                GeneratedIngredient(name: "fresh herbs", quantityValue: 1, quantityUnit: "cup", note: "roughly chopped")
+            ],
+            steps: [
+                GeneratedStep(text: "Crisp the chickpeas in olive oil until deeply golden.", timerSeconds: 600),
+                GeneratedStep(text: "Add garlic, lemon zest, and a pinch of chili flakes.", timerSeconds: nil),
+                GeneratedStep(text: "Spoon over yogurt and finish with herbs and lemon juice.", timerSeconds: nil)
+            ],
+            notes: "Flexible, fast, and built from pantry staples."
+        ).toRecipe(withTags: [Tag(name: "Quick"), Tag(name: "Vegetarian")])
+        generationProgress = .complete
+    }
+    #endif
+
     var canGenerate: Bool {
         if isGenerating { return false }
 
