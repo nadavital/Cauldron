@@ -241,6 +241,25 @@ def find_screen_bbox(frame_rgba: Image.Image) -> tuple[int, int, int, int]:
     return (minx, miny, maxx, maxy)
 
 
+def find_screen_region(frame_rgba: Image.Image) -> tuple[tuple[int, int, int, int], Image.Image]:
+    """Return the official bezel's connected transparent screen cutout and exact mask."""
+    alpha = frame_rgba.split()[-1]
+    sx, sy = frame_rgba.width // 2, frame_rgba.height // 2
+    if alpha.getpixel((sx, sy)) != 0:
+        raise RuntimeError(f'Frame center for {frame_rgba.size} is not transparent.')
+
+    # Include the inner rim's antialiased pixels so dark screenshots continue
+    # beneath the partially transparent bezel edge. The opaque bezel keeps this
+    # connected component separate from the transparent canvas outside it.
+    transparent = alpha.point(lambda value: 255 if value < 250 else 0)
+    ImageDraw.floodfill(transparent, (sx, sy), 128, thresh=0)
+    component = transparent.point(lambda value: 255 if value == 128 else 0)
+    bbox = component.getbbox()
+    if bbox is None:
+        raise RuntimeError(f'Could not detect the screen cutout for frame {frame_rgba.size}.')
+    return bbox, component.crop(bbox)
+
+
 def fit_cover(src: Image.Image, target_size: tuple[int, int]) -> Image.Image:
     tw, th = target_size
     sw, sh = src.size
@@ -364,6 +383,11 @@ def load_mobile_background(path: Path, size: tuple[int, int]) -> Image.Image:
 
 def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_radius: int) -> Image.Image:
     if not frame_path.exists():
+        if frame_path == IPHONE_FRAME:
+            raise RuntimeError(
+                'Missing Apple iPhone bezel. Mount Bezel-iPhone-17.dmg or set '
+                'CAULDRON_IPHONE_FRAME to the official portrait PNG.'
+            )
         return compose_generated_mobile_frame(
             screenshot_path,
             screen_corner_radius,
@@ -374,16 +398,12 @@ def compose_mobile_frame(frame_path: Path, screenshot_path: Path, screen_corner_
     shot = Image.open(screenshot_path).convert('RGB')
     if frame_path == IPAD_FRAME:
         shot = remove_ipad_window_resize_indicator(shot)
-    x0, y0, x1, y1 = find_screen_bbox(frame)
-    sw, sh = x1 - x0 + 1, y1 - y0 + 1
+    (x0, y0, x1, y1), screen_mask = find_screen_region(frame)
+    sw, sh = x1 - x0, y1 - y0
 
     screen = fit_cover(shot, (sw, sh)).convert('RGBA')
-    mask = rounded_mask((sw, sh), screen_corner_radius)
-    clipped = Image.new('RGBA', (sw, sh), (0, 0, 0, 0))
-    clipped.paste(screen, (0, 0), mask)
-
     base = Image.new('RGBA', frame.size, (0, 0, 0, 0))
-    base.paste(clipped, (x0, y0), clipped)
+    base.paste(screen, (x0, y0), screen_mask)
     out = Image.alpha_composite(base, frame)
     return crop_to_visible_alpha(out)
 
