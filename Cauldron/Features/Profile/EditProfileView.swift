@@ -297,7 +297,7 @@ struct ProfileEditView: View {
                     .padding(.horizontal)
                 }
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

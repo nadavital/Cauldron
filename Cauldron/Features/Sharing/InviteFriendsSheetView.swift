@@ -35,12 +35,12 @@ struct InviteFriendsSheetView: View {
                     .padding(.vertical, Theme.Spacing.xl)
                 }
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Invite Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         dismiss()
                     }
                 }

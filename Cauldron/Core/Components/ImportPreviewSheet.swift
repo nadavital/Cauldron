@@ -111,7 +111,7 @@ struct ImportPreviewSheet: View {
 
     private var loadingView: some View {
         AppStateView(kind: .loading, message: "Loading shared content…")
-            .warmCanvas()
+            .appPageChrome()
     }
 
     private func errorView(_ message: String) -> some View {
@@ -123,7 +123,7 @@ struct ImportPreviewSheet: View {
         ) {
             Task { await viewModel.loadContent() }
         }
-        .warmCanvas()
+        .appPageChrome()
     }
 
     @ViewBuilder
@@ -192,7 +192,7 @@ struct ImportPreviewSheet: View {
                 .padding(.bottom, Theme.Spacing.xxl)
             }
         }
-        .warmCanvas()
+        .appPageChrome()
     }
 
     // MARK: - Profile Preview
@@ -242,7 +242,7 @@ struct ImportPreviewSheet: View {
             Spacer()
         }
         .padding(Theme.Spacing.md)
-        .warmCanvas()
+        .appPageChrome()
     }
 
     // MARK: - Collection Preview
@@ -295,7 +295,7 @@ struct ImportPreviewSheet: View {
             .padding(Theme.Spacing.md)
             .padding(.vertical, Theme.Spacing.lg)
         }
-        .warmCanvas()
+        .appPageChrome()
     }
 
     // MARK: - Helper Views

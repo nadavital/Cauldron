@@ -60,7 +60,7 @@ struct ImportInboxView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Done", systemImage: "checkmark") { dismiss() }
                 }
             }
             .task { await reload() }

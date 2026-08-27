@@ -44,7 +44,10 @@ struct ExploreTagView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            GlassEffectContainer(spacing: 2) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    TagView(tag)
+
                 if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
                     loadingPlaceholder
                 }
@@ -68,11 +71,13 @@ struct ExploreTagView: View {
                 if !RuntimeEnvironment.forceSkeletonLoading && viewModel.isLoading && viewModel.hasContent {
                     refreshingIndicator
                 }
+                }
             }
             .padding(.horizontal, horizontalContentPadding)
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
+        .appPageChrome()
         .navigationTitle(displayName)
         .toolbarTitleDisplayMode(.inline)
         .task {
@@ -216,9 +221,14 @@ struct ExploreTagView: View {
 
     private var emptyState: some View {
         VStack(spacing: 16) {
-            Image(systemName: "tag")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary.opacity(0.5))
+            if let emoji {
+                Text(emoji)
+                    .font(.system(size: 48))
+            } else {
+                Image(systemName: "tag")
+                    .font(.system(size: 48))
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
 
             Text("No Recipes Found")
                 .font(.headline)
@@ -622,6 +632,7 @@ struct TagRecipesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("All Recipes")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -697,6 +708,7 @@ struct TagFriendRecipesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("From Friends")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -768,6 +780,7 @@ struct TagPublicRecipesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("Community Recipes")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {

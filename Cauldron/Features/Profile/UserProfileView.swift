@@ -90,23 +90,27 @@ struct UserProfileView: View {
                     // Profile Header
                     profileHeader
 
+                    if viewModel.isCurrentUser {
+                        profileQuickActions
+                    }
+
                     // Connection Management Section
                     if !viewModel.isCurrentUser {
                         connectionSection
                     }
 
+                    // Recipes Section
+                    recipesSection
+
                     // Collections Section (only show if user has collections OR still loading the first time)
                     if !viewModel.userCollections.isEmpty || viewModel.isColdLoadingCollections || RuntimeEnvironment.forceSkeletonLoading {
                         collectionsSection
                     }
-
-                    // Recipes Section
-                    recipesSection
                 }
             }
             .padding()
         }
-        .warmCanvas()
+        .appPageChrome()
         .frame(minWidth: catalystMinimumWidth, minHeight: catalystMinimumHeight)
         .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -147,7 +151,12 @@ struct UserProfileView: View {
             ShareSheet(items: [link])
         }
         .sheet(isPresented: $showTierRoadmap) {
-            TierRoadmapView(currentTier: viewModel.userTier, recipeCount: viewModel.userRecipeCount, dependencies: viewModel.dependencies)
+            TierRoadmapView(
+                currentTier: viewModel.userTier,
+                recipeCount: viewModel.userRecipeCount,
+                dependencies: viewModel.dependencies,
+                showsAddRecipeActions: viewModel.isCurrentUser
+            )
                 .appSheetSizing(.standard)
         }
         .sheet(isPresented: $showAppIconPicker) {
@@ -184,65 +193,66 @@ struct UserProfileView: View {
             Text(archiveStatusMessage ?? "")
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if viewModel.isCurrentUser {
-                    Menu {
-                        Button {
-                            showingEditProfile = true
-                        } label: {
-                            Label("Edit Profile", systemImage: "pencil")
-                        }
-
-                        Button {
-                            Task {
-                                await generateShareLink()
-                            }
-                        } label: {
-                            Label("Share Profile", systemImage: "person.crop.circle.badge.plus")
-                        }
-                        .disabled(!viewModel.canShareProfile)
-
-                        Button {
-                            shareWithFriends()
-                        } label: {
-                            Label("Invite Friends", systemImage: "person.badge.plus")
-                        }
-
-                        if appIconManager.supportsAlternateIcons {
-                            Button {
-                                showAppIconPicker = true
-                            } label: {
-                                Label("App Icons", systemImage: "app.dashed")
-                            }
-                        }
-
-                        Divider()
-
-                        Button {
-                            Task { await prepareArchiveExport() }
-                        } label: {
-                            Label("Back Up Library", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(isPreparingArchive || isRestoringArchive)
-
-                        Button {
-                            showingArchiveImporter = true
-                        } label: {
-                            Label("Restore Library Backup", systemImage: "square.and.arrow.down")
-                        }
-                        .disabled(isPreparingArchive || isRestoringArchive)
+            if viewModel.isCurrentUser {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        Task { await generateShareLink() }
                     } label: {
                         if isGeneratingShareLink {
                             ProgressView()
                         } else {
-                            Image(systemName: "ellipsis")
+                            Label("Share Profile", systemImage: "square.and.arrow.up")
                         }
                     }
-                    .disabled(isGeneratingShareLink)
-                    .accessibilityLabel("Profile actions")
+                    .disabled(isGeneratingShareLink || !viewModel.canShareProfile)
+                    .accessibilityLabel("Share profile")
                 }
             }
         }
+    }
+
+    private var profileQuickActions: some View {
+        GlassEffectContainer(spacing: Theme.Spacing.sm) {
+            HStack(spacing: Theme.Spacing.sm) {
+                profileActionButton("Edit", systemImage: "pencil") {
+                    showingEditProfile = true
+                }
+
+                profileActionButton("Invite", systemImage: "person.badge.plus") {
+                    shareWithFriends()
+                }
+
+                if appIconManager.supportsAlternateIcons {
+                    profileActionButton("App Icons", systemImage: "app.dashed") {
+                        showAppIconPicker = true
+                    }
+                } else {
+                    profileActionButton("Progress", systemImage: viewModel.userTier.icon) {
+                        showTierRoadmap = true
+                    }
+                }
+            }
+        }
+    }
+
+    private func profileActionButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: Theme.Spacing.xxs) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 58)
+        }
+        .buttonStyle(.glass)
     }
 
     private var profileHeader: some View {
@@ -293,16 +303,12 @@ struct UserProfileView: View {
 
     @ViewBuilder
     private var profileTierControl: some View {
-        if viewModel.isCurrentUser {
-            Button {
-                showTierRoadmap = true
-            } label: {
-                TierBadgeView(tier: viewModel.userTier, style: .standard)
-            }
-            .accessibilityLabel("View tier progress")
-        } else {
+        Button {
+            showTierRoadmap = true
+        } label: {
             TierBadgeView(tier: viewModel.userTier, style: .standard)
         }
+        .accessibilityLabel("View tier progress")
     }
 
     @ViewBuilder
@@ -1228,6 +1234,7 @@ struct AllProfileRecipesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("\(user.displayName)'s Recipes")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

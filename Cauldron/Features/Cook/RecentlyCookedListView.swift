@@ -35,6 +35,7 @@ struct RecentlyCookedListView: View {
     
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("Recently Cooked")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {

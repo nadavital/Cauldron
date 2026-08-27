@@ -197,7 +197,7 @@ private struct RecipeReviewHeaderSection: View {
                 sourceDescription: "Imported from example.com"
             )
         }
-        .warmCanvas()
+        .appPageChrome()
         .navigationTitle("Preview Recipe")
         .navigationBarTitleDisplayMode(.inline)
     }

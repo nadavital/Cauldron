@@ -117,6 +117,7 @@ struct AllRecipesListView: View {
     
     var body: some View {
         contentView
+            .appPageChrome()
             .navigationTitle("All Recipes")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: "Search recipes")
@@ -436,11 +437,12 @@ struct FilterSheet: View {
                     }
                 }
             }
+            .appPageChrome()
             .navigationTitle("Filter & Sort")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         dismiss()
                     }
                 }

@@ -12,11 +12,17 @@ struct SectionHeaderLabel: View {
     let title: String
     let systemImage: String
     var iconColor: Color = .cauldronOrange
+    var emoji: String? = nil
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: systemImage)
-                .foregroundStyle(iconColor)
+            if let emoji {
+                Text(emoji)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: systemImage)
+                    .foregroundStyle(iconColor)
+            }
             Text(title)
         }
         .font(Theme.Typography.sectionTitle)

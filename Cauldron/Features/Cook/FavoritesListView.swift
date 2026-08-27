@@ -35,6 +35,7 @@ struct FavoritesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle("Favorites")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {

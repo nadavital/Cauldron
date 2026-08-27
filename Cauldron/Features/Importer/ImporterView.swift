@@ -62,26 +62,26 @@ struct ImporterView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    VStack(spacing: Theme.Spacing.xl) {
-                        headerSection
+                    GlassEffectContainer(spacing: 2) {
+                        VStack(spacing: Theme.Spacing.lg) {
+                            importTypePicker
 
-                        importTypePicker
+                            switch viewModel.importType {
+                            case .url:
+                                urlSection
+                            case .text:
+                                textSection
+                            case .image:
+                                imageSection
+                            }
 
-                        switch viewModel.importType {
-                        case .url:
-                            urlSection
-                        case .text:
-                            textSection
-                        case .image:
-                            imageSection
-                        }
+                            if let ocrError = viewModel.ocrErrorMessage {
+                                errorSection(ocrError)
+                            }
 
-                        if let ocrError = viewModel.ocrErrorMessage {
-                            errorSection(ocrError)
-                        }
-
-                        if let error = viewModel.errorMessage {
-                            errorSection(error)
+                            if let error = viewModel.errorMessage {
+                                errorSection(error)
+                            }
                         }
                     }
                     .frame(maxWidth: 720)
@@ -90,7 +90,7 @@ struct ImporterView: View {
                     .padding(.horizontal, Theme.Spacing.md)
                     .padding(.bottom, 110)
                 }
-                .warmCanvas()
+                .appPageChrome()
 
                 if viewModel.canImport || viewModel.isLoading {
                     generateActionButton
@@ -207,34 +207,8 @@ struct ImporterView: View {
         return "Importing..."
     }
 
-    private var headerSection: some View {
-        AppCard(style: .elevated) {
-            HStack(alignment: .center, spacing: Theme.Spacing.md) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                        .fill(Color.cauldronWarmGradient)
-                        .frame(width: 64, height: 64)
-
-                    Image(systemName: "square.and.arrow.down.on.square")
-                        .font(.system(size: Theme.IconSize.large))
-                        .foregroundColor(.white)
-                }
-
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("Import a Recipe")
-                        .font(Theme.Typography.sectionTitle)
-
-                    Text(headerDescription)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
     private var importTypePicker: some View {
-        AppCard {
+        AppCard(style: .glass) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 Label("Import Method", systemImage: "arrow.triangle.branch")
                     .font(.headline)
@@ -250,7 +224,7 @@ struct ImporterView: View {
     }
 
     private var urlSection: some View {
-        AppCard {
+        AppCard(style: .glass) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 Label("Recipe Link", systemImage: "link")
                     .font(Theme.Typography.cardTitle)
@@ -302,7 +276,7 @@ struct ImporterView: View {
     }
 
     private var textSection: some View {
-        AppCard {
+        AppCard(style: .glass) {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 HStack {
                     Label("Recipe Text", systemImage: "text.justifyleft")
@@ -358,7 +332,7 @@ struct ImporterView: View {
     }
 
     private var imageSection: some View {
-        AppCard {
+        AppCard(style: .glass) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 Label("Recipe Image", systemImage: "photo.on.rectangle")
                     .font(Theme.Typography.cardTitle)
@@ -407,18 +381,8 @@ struct ImporterView: View {
         )
     }
 
-    private var headerDescription: String {
-        if hasPreparedRecipe {
-            return "Recipe details were prepared in Share Sheet. Review and save to your library."
-        }
-        if autoImportFromInitialURL {
-            return "Link received from Share Sheet. We'll import it now, then you can review and save."
-        }
-        return "Bring recipes into Cauldron from a URL, raw text, or a recipe image."
-    }
-
     private func errorSection(_ message: String) -> some View {
-        AppCard {
+        AppCard(style: .glass) {
             HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundColor(.red)

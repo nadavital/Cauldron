@@ -24,8 +24,8 @@ struct AllTimersView: View {
             .navigationTitle("Active Timers")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Done") {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", systemImage: "checkmark") {
                         dismiss()
                     }
                 }

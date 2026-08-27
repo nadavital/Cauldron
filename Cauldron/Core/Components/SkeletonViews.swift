@@ -125,8 +125,13 @@ struct RecipeCardSkeleton: View {
             SkeletonBlock(cornerRadius: Theme.Radius.large)
                 .frame(width: cardWidth, height: imageHeight)
 
-            SkeletonBlock(cornerRadius: 4)
-                .frame(width: cardWidth * 0.74, height: 20)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                SkeletonBlock(cornerRadius: 4)
+                    .frame(width: cardWidth * 0.74, height: 16)
+                SkeletonBlock(cornerRadius: 4)
+                    .frame(width: cardWidth * 0.48, height: 16)
+            }
+            .frame(width: cardWidth, height: 40, alignment: .topLeading)
 
             HStack(spacing: Theme.Spacing.xxs) {
                 SkeletonBlock(cornerRadius: 4)

@@ -67,7 +67,7 @@ struct SearchTabView: View {
                     UserProfileView(user: user, dependencies: viewModel.dependencies)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { showingProfileSheet = false }
+                                Button("Done", systemImage: "checkmark") { showingProfileSheet = false }
                             }
                         }
                 }
@@ -229,7 +229,7 @@ struct SearchTabView: View {
             }
             .contentMargins(.bottom, Theme.Spacing.xxl, for: .scrollContent)
         }
-        .warmCanvas()
+        .appPageChrome()
     }
 
     private var splitDetailPlaceholder: some View {
@@ -242,7 +242,7 @@ struct SearchTabView: View {
                 searchMode == .recipes ? "Choose a recipe to view its details." : "Choose a person to view their profile."
             )
         )
-        .warmCanvas()
+        .appPageChrome()
     }
 
     @ToolbarContentBuilder
@@ -501,7 +501,7 @@ struct SearchTabView: View {
                 .frame(maxWidth: .infinity)
                 .padding(Theme.Spacing.xl)
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Ingredients")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -514,7 +514,7 @@ struct SearchTabView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showingIngredientFilters = false }
+                    Button("Done", systemImage: "checkmark") { showingIngredientFilters = false }
                         .fontWeight(.semibold)
                 }
             }

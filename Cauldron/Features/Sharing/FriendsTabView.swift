@@ -57,7 +57,7 @@ struct FriendsTabView: View {
                     UserProfileView(user: user, dependencies: dependencies)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { showingProfileSheet = false }
+                                Button("Done", systemImage: "checkmark") { showingProfileSheet = false }
                             }
                         }
                 }
@@ -135,7 +135,7 @@ struct FriendsTabView: View {
                         .frame(maxWidth: .infinity)
                         .frame(maxWidth: 720)
                         .frame(maxWidth: .infinity, alignment: .top)
-                        .warmCanvas()
+                        .appPageChrome()
                 }
             }
             .navigationTitle(desktopRouteState.section == .recipes ? "Friends" : "Connections")
@@ -421,7 +421,7 @@ struct FriendsTabView: View {
                 }
             }
         }
-        .warmCanvas()
+        .appPageChrome()
     }
 
     private var emptyRecipesState: some View {
@@ -483,7 +483,12 @@ struct FriendsTabView: View {
     private func tagSectionView(tag: String, recipes: [SharedRecipe]) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack {
-                SectionHeaderLabel(title: tag, systemImage: "tag.fill")
+                SectionHeaderLabel(
+                    title: tag,
+                    systemImage: "tag.fill",
+                    iconColor: RecipeCategory.match(string: tag)?.color ?? .cauldronOrange,
+                    emoji: RecipeCategory.match(string: tag)?.emoji
+                )
                 Spacer()
 
                 NavigationLink(destination: AllFriendsRecipesListView(

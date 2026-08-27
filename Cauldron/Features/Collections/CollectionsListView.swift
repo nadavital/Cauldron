@@ -61,7 +61,7 @@ struct CollectionsListView: View {
             }
             .padding(.vertical)
         }
-        .warmCanvas()
+        .appPageChrome()
         .navigationTitle("Collections")
         .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(text: $viewModel.searchText, prompt: "Search collections")

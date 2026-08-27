@@ -18,12 +18,15 @@ enum AppSurfaceStyle: Sendable {
     /// Native Liquid Glass. Group neighboring glass surfaces in a
     /// `GlassEffectContainer` at the composition boundary.
     case glass
+    /// Translucent system material for embedded controls where native glass
+    /// does not compose reliably (notably rows inside Catalyst forms).
+    case material
 
     var cornerRadius: CGFloat {
         switch self {
         case .resting:
             Theme.Radius.card
-        case .elevated, .glass:
+        case .elevated, .glass, .material:
             Theme.Radius.large
         }
     }
@@ -112,6 +115,11 @@ struct AppSurface<Content: View>: View {
         case .glass:
             content
                 .glassEffect(.regular, in: surfaceShape)
+
+        case .material:
+            content
+                .background(.ultraThinMaterial, in: surfaceShape)
+                .overlay(surfaceShape.stroke(Color.appSeparator.opacity(0.7), lineWidth: 1))
         }
     }
 
@@ -165,5 +173,12 @@ extension View {
     /// Other platforms continue to use the native presentation dimensions.
     func appSheetSizing(_ size: AppSheetSize = .standard) -> some View {
         modifier(AppSheetSizingModifier(size: size))
+    }
+
+    /// Applies Cauldron's canvas and the same soft scroll-edge treatment to
+    /// every pushed destination, list, and modal workspace.
+    func appPageChrome() -> some View {
+        warmCanvas()
+            .scrollEdgeEffectStyle(.soft, for: .all)
     }
 }

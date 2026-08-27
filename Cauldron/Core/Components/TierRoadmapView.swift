@@ -12,23 +12,27 @@ struct TierRoadmapView: View {
     let currentTier: UserTier
     let recipeCount: Int
     let dependencies: DependencyContainer
+    var showsAddRecipeActions = true
     @Environment(\.dismiss) private var dismiss
     @State private var showingImporter = false
     @State private var showingEditor = false
     @State private var showingAIGenerator = false
     @State private var isAIAvailable = false
-    @State private var animatedProgress: CGFloat = 0
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 GlassEffectContainer(spacing: 2) {
                     VStack(spacing: 16) {
+                        explanationSection
+
                         // Combined current + next tier section
                         combinedProgressSection
 
                         // Add recipe CTA
-                        addRecipeCTA
+                        if showsAddRecipeActions {
+                            addRecipeCTA
+                        }
 
                         // All tiers overview
                         allTiersSection
@@ -36,8 +40,8 @@ struct TierRoadmapView: View {
                 }
                 .padding()
             }
-            .warmCanvas()
-            .navigationTitle("Tier Progress")
+            .appPageChrome()
+            .navigationTitle("Chef Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -66,6 +70,19 @@ struct TierRoadmapView: View {
 
     // MARK: - Combined Progress Section
 
+    private var explanationSection: some View {
+        AppCard(style: .glass) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Label("How progress works", systemImage: "sparkles")
+                    .font(.headline)
+                Text("Saving recipes unlocks new Cauldron tiers. Higher tiers give your public recipes a modest boost when people search and explore; your recipes and cooking tools never become restricted.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var combinedProgressSection: some View {
         VStack(spacing: 12) {
             HStack(spacing: 16) {
@@ -85,8 +102,6 @@ struct TierRoadmapView: View {
                     Image(systemName: currentTier.icon)
                         .font(.system(size: 28))
                         .foregroundColor(currentTier.color)
-                        .scaleEffect(animatedProgress > 0 || currentTier.nextTier == nil ? 1.0 : 0.7)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1), value: animatedProgress)
                 }
 
                 // Tier info
@@ -117,7 +132,7 @@ struct TierRoadmapView: View {
                 let progress = Double(recipeCount - currentTier.requiredRecipes) / Double(nextTier.requiredRecipes - currentTier.requiredRecipes)
 
                 VStack(spacing: 8) {
-                    // Progress bar (animates from empty → current on appear)
+                    // A stable progress bar avoids a distracting entrance animation.
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 4)
@@ -126,15 +141,13 @@ struct TierRoadmapView: View {
 
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(currentTier.color)
-                                .frame(width: geo.size.width * max(0.02, animatedProgress), height: 8)
+                                .frame(
+                                    width: geo.size.width * CGFloat(max(0.02, min(1, progress))),
+                                    height: 8
+                                )
                         }
                     }
                     .frame(height: 8)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.7, dampingFraction: 0.8).delay(0.15)) {
-                            animatedProgress = max(0.02, CGFloat(progress))
-                        }
-                    }
 
                     // Recipe count and next tier
                     HStack {
@@ -164,7 +177,6 @@ struct TierRoadmapView: View {
                     Image(systemName: "crown.fill")
                         .font(.caption)
                         .foregroundColor(.yellow)
-                        .symbolEffect(.pulse, options: .repeating)
                     Text("Max tier reached! Maximum search visibility boost active.")
                         .font(.caption)
                         .foregroundColor(.secondary)

@@ -94,11 +94,11 @@ struct RecipeCardView: View {
             }
             .frame(width: cardWidth, height: cardHeight)
 
-            // Title - single line for clean look
+            // Keep every card aligned while giving longer recipe names room.
             Text(recipe.title)
                 .font(Theme.Typography.cardTitle)
-                .lineLimit(1)
-                .frame(width: cardWidth, height: 20, alignment: .leading)
+                .lineLimit(2, reservesSpace: true)
+                .frame(width: cardWidth, height: 40, alignment: .topLeading)
 
             // Metadata row - time and tag
             metadataRow

@@ -40,6 +40,7 @@ struct CategoryRecipesListView: View {
     
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle(categoryName)
         .navigationBarTitleDisplayMode(.large)
         .onAppear {

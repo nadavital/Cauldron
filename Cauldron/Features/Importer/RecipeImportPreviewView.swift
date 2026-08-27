@@ -46,7 +46,7 @@ struct RecipeImportPreviewView: View {
                     sourceDescription: sourceInfo
                 )
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

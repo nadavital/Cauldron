@@ -18,7 +18,8 @@ struct ConnectionsView: View {
     
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            GlassEffectContainer(spacing: 2) {
+                LazyVStack(spacing: 0) {
                 if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
                     UserRowSkeletonList()
                         .padding(.horizontal, Theme.Spacing.md)
@@ -77,11 +78,12 @@ struct ConnectionsView: View {
                     .frame(minHeight: 360)
                     .padding(.horizontal, Theme.Spacing.md)
                 }
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
         }
-        .warmCanvas()
+        .appPageChrome()
         .navigationTitle("Friends")
         .task {
             await viewModel.loadConnections()
@@ -190,7 +192,7 @@ struct ConnectionRequestCard: View {
             }
         }
         .padding(Theme.Spacing.sm)
-        .appSurface(.resting)
+        .appSurface(.glass)
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.vertical, Theme.Spacing.xxs)
     }
@@ -242,7 +244,7 @@ private struct ConnectionPersonRow: View {
     var status: String? = nil
 
     var body: some View {
-        AppCard(style: .resting) {
+        AppCard(style: .glass) {
             HStack(spacing: Theme.Spacing.md) {
                 ProfileAvatar(user: user, size: 60, dependencies: dependencies)
 

@@ -30,6 +30,7 @@ struct AllFriendsRecipesListView: View {
 
     var body: some View {
         contentView
+        .appPageChrome()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -127,6 +128,7 @@ struct AllFriendsCollectionsListView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
+        .appPageChrome()
         .navigationTitle("Friends' Collections")
         .navigationBarTitleDisplayMode(.large)
     }

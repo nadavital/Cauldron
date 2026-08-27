@@ -33,7 +33,7 @@ struct PeopleSearchSheet: View {
                 }
                 .padding()
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Find Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

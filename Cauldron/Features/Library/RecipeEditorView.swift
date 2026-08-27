@@ -40,6 +40,8 @@ struct RecipeEditorView: View {
                 deleteSection
                 errorSection
             }
+            .appPageChrome()
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(viewModel.isEditing ? "Edit Recipe" : "New Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -406,12 +408,10 @@ struct RecipeEditorView: View {
                     }
                     .padding(.top, 4)
                 }
-                .padding(12)
-                .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(Theme.Radius.card)
-                .padding(.vertical, 4)
-                .overlay(alignment: .topLeading) {
-                }
+                .padding(Theme.Spacing.md)
+                .appSurface(.material, cornerRadius: Theme.Radius.card)
+                .listRowBackground(Color.clear)
+                .listRowInsets(.init(top: Theme.Spacing.xs, leading: 0, bottom: Theme.Spacing.xs, trailing: 0))
             }
             
         } header: {
@@ -517,10 +517,10 @@ struct RecipeEditorView: View {
                     }
                     .padding(.top, 4)
                 }
-                .padding(12)
-                .background(Color(.secondarySystemGroupedBackground))
-                .cornerRadius(Theme.Radius.card)
-                .padding(.vertical, 4)
+                .padding(Theme.Spacing.md)
+                .appSurface(.material, cornerRadius: Theme.Radius.card)
+                .listRowBackground(Color.clear)
+                .listRowInsets(.init(top: Theme.Spacing.xs, leading: 0, bottom: Theme.Spacing.xs, trailing: 0))
             }
             
         } header: {

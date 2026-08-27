@@ -124,7 +124,7 @@ struct CookTabView: View {
                 }
                 .padding(.vertical)
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Cook")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
@@ -214,7 +214,7 @@ struct CookTabView: View {
                         UserProfileView(user: user, dependencies: viewModel.dependencies)
                             .toolbar {
                                 ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { showingProfileSheet = false }
+                                    Button("Done", systemImage: "checkmark") { showingProfileSheet = false }
                                 }
                             }
                     }
@@ -464,10 +464,16 @@ struct CookTabView: View {
         _ title: String,
         systemImage: String,
         iconColor: Color = .cauldronOrange,
+        emoji: String? = nil,
         seeAll: AnyView? = nil
     ) -> some View {
         HStack {
-            SectionHeaderLabel(title: title, systemImage: systemImage, iconColor: iconColor)
+            SectionHeaderLabel(
+                title: title,
+                systemImage: systemImage,
+                iconColor: iconColor,
+                emoji: emoji
+            )
 
             Spacer()
 
@@ -677,6 +683,7 @@ struct CookTabView: View {
             cookSectionHeader(
                 tag,
                 systemImage: "tag.fill",
+                emoji: RecipeCategory.match(string: tag)?.emoji,
                 seeAll: AnyView(ExploreTagView(tag: Tag(name: tag), dependencies: viewModel.dependencies))
             )
             recipeCarousel(recipes, section: "tag-\(tag)", limit: recipes.count)

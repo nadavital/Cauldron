@@ -95,7 +95,7 @@ struct GroceriesView: View {
                         UserProfileView(user: user, dependencies: viewModel.dependencies)
                             .toolbar {
                                 ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { showingProfileSheet = false }
+                                    Button("Done", systemImage: "checkmark") { showingProfileSheet = false }
                                 }
                             }
                         }

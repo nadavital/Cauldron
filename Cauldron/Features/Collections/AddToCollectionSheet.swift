@@ -101,7 +101,7 @@ struct AddToCollectionSheet: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button("Done", systemImage: "checkmark") {
                         Task {
                             await saveSelections()
                         }

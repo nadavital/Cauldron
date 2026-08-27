@@ -74,7 +74,7 @@ struct DeleteAccountView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
-            .warmCanvas()
+            .appPageChrome()
             .navigationTitle("Delete Account")
             .navigationBarTitleDisplayMode(.inline)
             .alert("Delete Account?", isPresented: $showingDeleteConfirmation) {

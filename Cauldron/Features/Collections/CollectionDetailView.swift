@@ -179,7 +179,7 @@ struct CollectionDetailView: View {
                 .padding(.bottom, 100)
             }
         }
-        .warmCanvas()
+        .appPageChrome()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search recipes")

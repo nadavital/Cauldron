@@ -80,54 +80,55 @@ struct CookModeView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    // Navigate to recipe detail with current step highlighted
-                    NavigationLink {
-                        RecipeDetailView(
-                            recipe: recipe,
-                            dependencies: dependencies,
-                            highlightedStepIndex: coordinator.currentStepIndex
-                        )
-                    } label: {
-                        Label("View Recipe", systemImage: "book.fill")
-                    }
+                    Section("Cooking") {
+                        NavigationLink {
+                            RecipeDetailView(
+                                recipe: recipe,
+                                dependencies: dependencies,
+                                highlightedStepIndex: coordinator.currentStepIndex
+                            )
+                        } label: {
+                            Label("View Full Recipe", systemImage: "book.fill")
+                        }
 
-                    // Scale servings live
-                    Picker("Scale Servings", selection: Binding(
-                        get: { experiencePreferences.recipeScaleFactor },
-                        set: { experiencePreferences.recipeScaleFactor = $0 }
-                    )) {
-                        Text("½×").tag(0.5)
-                        Text("1×").tag(1.0)
-                        Text("2×").tag(2.0)
-                        Text("3×").tag(3.0)
-                    }
-
-                    // Convert units
-                    Picker("Units", selection: Binding(
-                        get: { experiencePreferences.recipeUnitSystem },
-                        set: { experiencePreferences.recipeUnitSystem = $0 }
-                    )) {
-                        ForEach(UnitSystem.allCases) { system in
-                            Text(system.label).tag(system)
+                        Button {
+                            showingAllTimers = true
+                        } label: {
+                            Label("Timers (\(timerManager.activeTimers.count))", systemImage: "timer")
                         }
                     }
 
-                    // View all timers
-                    Button {
-                        showingAllTimers = true
-                    } label: {
-                        Label("All Timers (\(timerManager.activeTimers.count))", systemImage: "timer")
+                    Section("Recipe") {
+                        Picker("Servings", selection: Binding(
+                            get: { experiencePreferences.recipeScaleFactor },
+                            set: { experiencePreferences.recipeScaleFactor = $0 }
+                        )) {
+                            Text("½×").tag(0.5)
+                            Text("1×").tag(1.0)
+                            Text("2×").tag(2.0)
+                            Text("3×").tag(3.0)
+                        }
+
+                        Picker("Units", selection: Binding(
+                            get: { experiencePreferences.recipeUnitSystem },
+                            set: { experiencePreferences.recipeUnitSystem = $0 }
+                        )) {
+                            ForEach(UnitSystem.allCases) { system in
+                                Text(system.label).tag(system)
+                            }
+                        }
                     }
 
-                    cookModeSettingsMenu
+                    Section("Display") {
+                        cookModeSettingsMenu
+                    }
 
-                    Divider()
-
-                    // End session
-                    Button(role: .destructive) {
-                        showingEndSessionAlert = true
-                    } label: {
-                        Label("End Cooking", systemImage: "xmark.circle")
+                    Section {
+                        Button(role: .destructive) {
+                            showingEndSessionAlert = true
+                        } label: {
+                            Label("End Cooking", systemImage: "xmark.circle")
+                        }
                     }
                 } label: {
                     ZStack(alignment: .topTrailing) {

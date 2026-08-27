@@ -95,7 +95,7 @@ struct GroceryListMergeView: View {
                 await loadRecipes()
             }
             .alert("Recipes Added!", isPresented: $showSuccess) {
-                Button("Done") {
+                Button("Done", systemImage: "checkmark") {
                     dismiss()
                 }
             } message: {
