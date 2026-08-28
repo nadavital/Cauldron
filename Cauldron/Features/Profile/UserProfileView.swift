@@ -243,14 +243,14 @@ struct UserProfileView: View {
         Button(action: action) {
             VStack(spacing: Theme.Spacing.xxs) {
                 Image(systemName: systemImage)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                 Text(title)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 58)
+            .frame(minHeight: 44)
         }
         .buttonStyle(.glass)
     }
