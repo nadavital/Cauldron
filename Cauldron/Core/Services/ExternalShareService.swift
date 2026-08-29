@@ -11,6 +11,68 @@ import CloudKit
 import CryptoKit
 import os
 
+enum WebShareCanonicalURL {
+    static let origin = URL(string: "https://cauldron-f900a.web.app")!
+
+    static func recipe(id: UUID) -> URL {
+        origin.appending(path: "recipe").appending(path: id.uuidString)
+    }
+}
+
+/// Remembers the exact public recipe revision that Firebase confirmed. The
+/// canonical URL itself is deterministic; this receipt only decides whether a
+/// share action needs to wait for publication before presenting that URL.
+struct WebSharePublicationReceiptStore {
+    private let defaults: UserDefaults
+    private let storageKey = "webShare.recipePublicationReceipts.v1"
+    private let maximumReceiptCount = 2_000
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func containsCurrentRevision(of recipe: Recipe) -> Bool {
+        guard let ownerID = recipe.ownerId else { return false }
+        return receipts[receiptKey(ownerID: ownerID, recipeID: recipe.id)] == recipe.updatedAt.timeIntervalSince1970
+    }
+
+    func record(_ recipe: Recipe) {
+        guard let ownerID = recipe.ownerId else { return }
+        var updated = receipts
+        updated[receiptKey(ownerID: ownerID, recipeID: recipe.id)] = recipe.updatedAt.timeIntervalSince1970
+        if updated.count > maximumReceiptCount {
+            let overflow = updated.count - maximumReceiptCount
+            for key in updated.sorted(by: { $0.value < $1.value }).prefix(overflow).map(\.key) {
+                updated.removeValue(forKey: key)
+            }
+        }
+        defaults.set(updated, forKey: storageKey)
+    }
+
+    func remove(recipeID: UUID, ownerID: UUID) {
+        var updated = receipts
+        updated.removeValue(forKey: receiptKey(ownerID: ownerID, recipeID: recipeID))
+        defaults.set(updated, forKey: storageKey)
+    }
+
+    func removeAll(ownerID: UUID) {
+        let prefix = "\(ownerID.uuidString.lowercased())|"
+        defaults.set(receipts.filter { !$0.key.hasPrefix(prefix) }, forKey: storageKey)
+    }
+
+    private var receipts: [String: Double] {
+        defaults.dictionary(forKey: storageKey)?.reduce(into: [:]) { result, entry in
+            if let value = entry.value as? NSNumber {
+                result[entry.key] = value.doubleValue
+            }
+        } ?? [:]
+    }
+
+    private func receiptKey(ownerID: UUID, recipeID: UUID) -> String {
+        "\(ownerID.uuidString.lowercased())|\(recipeID.uuidString.lowercased())"
+    }
+}
+
 /// Errors that can occur during external sharing
 enum ExternalShareError: LocalizedError {
     case invalidRecipe
@@ -144,59 +206,28 @@ final class ExternalShareService: Sendable {
     private let session: URLSession
     private let userCloudService: UserCloudService?
     private let mutationCoordinator = WebShareOwnerMutationCoordinator()
+    private let publicationReceipts: WebSharePublicationReceiptStore
 
-    init(imageManager _: RecipeImageManager, userCloudService: UserCloudService? = nil) {
+    init(
+        imageManager _: RecipeImageManager,
+        userCloudService: UserCloudService? = nil,
+        publicationDefaults: UserDefaults = .standard
+    ) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: config)
         self.userCloudService = userCloudService
+        self.publicationReceipts = WebSharePublicationReceiptStore(defaults: publicationDefaults)
     }
 
     // MARK: - Share Link Generation
 
     /// Generate a shareable link for a recipe (Local only - deterministic)
     func generateShareLink(for recipe: Recipe) -> ShareableLink {
-        // Fetch owner username locally or fallback
-        var username = "user"
-        
-        // This is a best-effort local check. The backend sync ensures the link works.
-        // If we don't have the username locally, the link will still work but might redirect
-        // or rely on the ID lookup.
-        if let ownerId = recipe.ownerId {
-             // We can't easily look up other users synchronously here without a cache.
-             // For the current user, we can check session.
-             if let currentUser = CurrentUserSession.shared.currentUser, currentUser.id == ownerId {
-                 username = currentUser.username
-             }
-             // NOTE: If it's another user's recipe, we might not have their username handy
-             // in a synchronous context without fetching.
-             // Ideally, Recipe should store `ownerUsername` or we rely on the repository to provide it.
-             // For now, we'll assume the link format uses the ID if username is generic,
-             // or sticking to the pattern: /u/{username}/{recipeId}
-             // If we don't know the username, "user" is a safe fallback that the web app should handle (redirecting by ID).
-        }
-        
-        // Construct permanent URL
-        // Format: https://cauldron-f900a.web.app/u/{username}/{recipeId}
-        // URL-encode username to handle special characters safely
-        let encodedUsername = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
-        let permanentURLString = "https://cauldron-f900a.web.app/u/\(encodedUsername)/\(recipe.id.uuidString)"
-
-        // Create preview text
         let previewText = "Check out my recipe for \(recipe.title) on Cauldron!"
 
-        // Safely construct URL, falling back to ID-based URL if username encoding fails
-        let url: URL
-        if let constructedURL = URL(string: permanentURLString) {
-            url = constructedURL
-        } else {
-            // Fallback to ID-based URL if username causes invalid URL
-            let fallbackURLString = "https://cauldron-f900a.web.app/recipe/\(recipe.id.uuidString)"
-            url = URL(string: fallbackURLString)!
-        }
-
         return ShareableLink(
-            url: url,
+            url: WebShareCanonicalURL.recipe(id: recipe.id),
             previewText: previewText,
             image: nil // Caller can attach image if they have it, or we can load it if we make this async
         )
@@ -216,6 +247,7 @@ final class ExternalShareService: Sendable {
                 logger.warning("Recipe publication endpoint did not write a snapshot")
                 return false
             }
+            publicationReceipts.record(recipe)
             logger.info("✅ Share metadata updated successfully")
             return true
         } catch {
@@ -247,6 +279,7 @@ final class ExternalShareService: Sendable {
             guard response.success else {
                 throw ExternalShareError.invalidResponse
             }
+            publicationReceipts.remove(recipeID: recipe.id, ownerID: ownerId)
             try await rotateManagementCapability(forOwnerID: ownerId)
         }
     }
@@ -268,17 +301,28 @@ final class ExternalShareService: Sendable {
             )
         }
 
+        if publicationReceipts.containsCurrentRevision(of: recipe) {
+            let link = generateShareLink(for: recipe)
+            return ShareableLink(
+                url: link.url,
+                previewText: link.previewText,
+                image: UIImage(named: "BrandMarks/CauldronIcon")
+            )
+        }
+
         let response = try await publishRecipeShareMetadata(for: recipe, shouldCreate: true)
         guard response.published == true else {
             throw ExternalShareError.invalidResponse
         }
 
-        guard let publishedURL = URL(string: response.shareUrl) else {
+        guard URL(string: response.shareUrl) == WebShareCanonicalURL.recipe(id: recipe.id) else {
             throw ExternalShareError.invalidResponse
         }
+        publicationReceipts.record(recipe)
+        let link = generateShareLink(for: recipe)
         return ShareableLink(
-            url: publishedURL,
-            previewText: "Check out my recipe for \(recipe.title) on Cauldron!",
+            url: link.url,
+            previewText: link.previewText,
             image: UIImage(named: "BrandMarks/CauldronIcon")
         )
     }
@@ -440,6 +484,7 @@ final class ExternalShareService: Sendable {
             guard response.success else {
                 throw ExternalShareError.invalidResponse
             }
+            publicationReceipts.removeAll(ownerID: user.id)
         }
     }
 

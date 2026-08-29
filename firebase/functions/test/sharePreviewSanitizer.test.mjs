@@ -27,6 +27,8 @@ import {
     previewProfile,
     publishedShareResponse,
     recipeCategoryPresentation,
+    detectedImageContentType,
+    recipeSocialImageURL,
     recipeIndexItemsWithCloudKitImages,
     retryTransientCloudKitOperation,
     renderCanonicalRecipePage,
@@ -74,6 +76,42 @@ test("web recipe category colors match the app's adaptive and custom palette", (
     assert.deepEqual(recipeCategoryPresentation["Side Dish"], {
         emoji: "🥗", light: "#34C759", dark: "#30D158",
     });
+});
+
+test("recipe previews use a stable same-origin social image URL", () => {
+    const canonicalURL = "https://cauldron-f900a.web.app/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    assert.equal(
+        recipeSocialImageURL(canonicalURL),
+        `${canonicalURL}/social-card.png`
+    );
+
+    const html = generateRecipePageHtml({
+        recipeId: "018f9344-54ff-42fc-83a8-c2a92e2d1b10",
+        ownerId: "9f082214-0c9e-4e30-94d7-072fc359d2f4",
+        title: "Tomato Soup",
+        yields: "4 servings",
+        totalMinutes: 30,
+        tags: ["Dinner"],
+        ingredients: [],
+        steps: [],
+        imageURL: "https://cvws.icloud-content.com/signed-photo?token=temporary",
+    }, canonicalURL, "cauldron://import/recipe/test", "https://apps.apple.com/app/id6754004943", {
+        username: "chef_nadav",
+        displayName: "Chef Nadav",
+        profileEmoji: "🍲",
+        profileColor: "#FF9933",
+    });
+
+    assert.match(html, new RegExp(`property="og:image" content="${canonicalURL}/social-card\\.png"`));
+    assert.match(html, /property="og:image:alt" content="Tomato Soup on Cauldron"/);
+    assert.doesNotMatch(html, /property="og:image" content="https:\/\/cvws\.icloud-content\.com/);
+});
+
+test("social image proxy validates file signatures when CloudKit omits a MIME type", () => {
+    assert.equal(detectedImageContentType(Buffer.from([0xFF, 0xD8, 0xFF, 0xE0])), "image/jpeg");
+    assert.equal(detectedImageContentType(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])), "image/png");
+    assert.equal(detectedImageContentType(Buffer.from("RIFF1234WEBP", "ascii")), "image/webp");
+    assert.equal(detectedImageContentType(Buffer.from("<script>", "utf8")), null);
 });
 
 test("web recipe tags use the app's trimming, case, and alias normalization", () => {

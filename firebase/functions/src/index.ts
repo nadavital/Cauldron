@@ -34,6 +34,7 @@ const WEB_RECIPE_CARD_QUERY_LIMIT = MAX_WEB_RECIPE_CARDS + 1;
 const CLOUDKIT_WEB_REQUEST_TIMEOUT_MS = 4_000;
 const CLOUDKIT_WEB_MAX_ATTEMPTS = 2;
 const CLOUDKIT_WEB_RETRY_DELAY_MS = 150;
+const SOCIAL_IMAGE_MAX_BYTES = 10_000_000;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const usernamePattern = /^[A-Za-z0-9_]{3,20}$/;
 const capabilityPattern = /^[A-Za-z0-9_-]{43,128}$/;
@@ -2893,11 +2894,36 @@ function formatWebQuantity(quantity: WebRecipeQuantity): string {
     return `${amount} ${unit[shouldPluralize ? 1 : 0]}`.trim();
 }
 
+export function recipeSocialImageURL(canonicalURL: string): string {
+    return `${canonicalURL.replace(/\/$/, "")}/social-card.png`;
+}
+
+export function detectedImageContentType(bytes: Uint8Array): string | null {
+    if (bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+        return "image/jpeg";
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47 &&
+        bytes[4] === 0x0D && bytes[5] === 0x0A && bytes[6] === 0x1A && bytes[7] === 0x0A) {
+        return "image/png";
+    }
+    if (bytes.length >= 12 &&
+        Buffer.from(bytes.subarray(0, 4)).toString("ascii") === "RIFF" &&
+        Buffer.from(bytes.subarray(8, 12)).toString("ascii") === "WEBP") {
+        return "image/webp";
+    }
+    return null;
+}
+
 function recipePageHead(recipe: WebRecipeContent, description: string, canonicalURL: string): string {
     const title = escapeHtml(recipe.title);
     const safeDescription = escapeHtml(description);
     const safeCanonicalURL = escapeHtml(canonicalURL);
-    const previewImage = escapeHtml(recipe.imageURL ?? "https://cauldron-f900a.web.app/social-card.png");
+    // Never expose CloudKit's short-lived signed asset URL to social crawlers.
+    // This stable same-origin endpoint refreshes the current public asset and
+    // falls back to Cauldron's branded card when no compatible photo exists.
+    const previewImage = escapeHtml(recipeSocialImageURL(canonicalURL));
+    const previewImageAlt = escapeHtml(`${recipe.title} on Cauldron`);
     const structuredData = JSON.stringify({
         "@context": "https://schema.org",
         "@type": "Recipe",
@@ -2917,7 +2943,7 @@ function recipePageHead(recipe: WebRecipeContent, description: string, canonical
         }),
         recipeInstructions: recipe.steps.map((step) => ({ "@type": "HowToStep", text: step.text })),
     }).replace(/</g, "\\u003c");
-    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA"><title>${title} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="article"><meta property="og:title" content="${title}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${previewImage}"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${previewImage}"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}"><script type="application/ld+json">${structuredData}</script>`;
+    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA"><title>${title} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="article"><meta property="og:title" content="${title}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${previewImage}"><meta property="og:image:secure_url" content="${previewImage}"><meta property="og:image:alt" content="${previewImageAlt}"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${previewImage}"><meta name="twitter:image:alt" content="${previewImageAlt}"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}"><script type="application/ld+json">${structuredData}</script>`;
 }
 
 export const recipeCategoryPresentation: Readonly<Record<string, Readonly<{
@@ -3501,6 +3527,83 @@ export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (
         logger.error('Error loading recipe preview:', error);
         res.set("Retry-After", "30");
         res.status(503).send(generatePublicStatusPageHtml("Recipe temporarily unavailable", "Please try opening this recipe again in a moment."));
+    }
+});
+
+export const previewRecipeImage = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
+    res.set({
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "X-Content-Type-Options": "nosniff",
+    });
+    if (!await enforcePublicReadRateLimit(req)) {
+        rejectRateLimitedRead(res);
+        return;
+    }
+
+    // Hosting preserves the requested path, while direct function requests may
+    // omit the `/recipe` prefix. Accept the single UUID segment in either form.
+    const recipeId = req.path.split("/").filter(Boolean).find(isValidUUID) ?? null;
+    const sendFallback = () => {
+        res.set("Cache-Control", "public, max-age=300, s-maxage=1800, stale-while-revalidate=86400");
+        res.redirect(302, "/social-card.png");
+    };
+
+    if (!recipeId || !isValidUUID(recipeId)) {
+        sendFallback();
+        return;
+    }
+
+    try {
+        const doc = await db.collection("shared_recipes").doc(recipeId).get();
+        if (!doc.exists) {
+            sendFallback();
+            return;
+        }
+        const sanitized = sanitizeStoredRecipeShareInput(doc.data() ?? {});
+        if (!sanitized.ok ||
+            await isShareRevoked(sanitized.value.ownerId) ||
+            await isResourcePrivacyBlocked("recipe", recipeId)) {
+            sendFallback();
+            return;
+        }
+
+        const recipe = await fetchPublicCloudKitRecipe(recipeId, sanitized.value.ownerId);
+        const assetURL = safeCloudKitAssetURL(recipe?.imageURL);
+        if (!assetURL) {
+            sendFallback();
+            return;
+        }
+
+        const imageResponse = await fetch(assetURL, {
+            signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+        });
+        const declaredLength = Number(imageResponse.headers.get("content-length") ?? "0");
+        if (!imageResponse.ok ||
+            (declaredLength > 0 && declaredLength > SOCIAL_IMAGE_MAX_BYTES)) {
+            sendFallback();
+            return;
+        }
+
+        const bytes = Buffer.from(await imageResponse.arrayBuffer());
+        const contentType = detectedImageContentType(bytes);
+        if (!contentType || bytes.byteLength > SOCIAL_IMAGE_MAX_BYTES) {
+            sendFallback();
+            return;
+        }
+
+        res.set({
+            "Cache-Control": "public, max-age=3600, s-maxage=21600, stale-while-revalidate=86400",
+            "Content-Type": contentType,
+            "Content-Length": String(bytes.byteLength),
+        });
+        if (req.method === "HEAD") {
+            res.status(200).end();
+            return;
+        }
+        res.status(200).send(bytes);
+    } catch (error) {
+        logger.warn("Recipe social image proxy fell back to the brand card", { recipeId, error });
+        sendFallback();
     }
 });
 

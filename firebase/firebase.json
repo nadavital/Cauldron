@@ -27,6 +27,10 @@
         ],
         "rewrites": [
             {
+                "source": "/recipe/*/social-card.png",
+                "function": "previewRecipeImage"
+            },
+            {
                 "source": "/recipe/**",
                 "function": "previewRecipe"
             },
