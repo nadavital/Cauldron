@@ -24,8 +24,9 @@ enum WebShareCanonicalURL {
 /// share action needs to wait for publication before presenting that URL.
 struct WebSharePublicationReceiptStore {
     private let defaults: UserDefaults
-    private let storageKey = "webShare.recipePublicationReceipts.v1"
+    private let storageKey = "webShare.recipePublicationReceipts.v2"
     private let maximumReceiptCount = 2_000
+    private let maximumReceiptAge: TimeInterval = 90 * 24 * 60 * 60
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -33,16 +34,28 @@ struct WebSharePublicationReceiptStore {
 
     func containsCurrentRevision(of recipe: Recipe) -> Bool {
         guard let ownerID = recipe.ownerId else { return false }
-        return receipts[receiptKey(ownerID: ownerID, recipeID: recipe.id)] == recipe.updatedAt.timeIntervalSince1970
+        guard let receipt = parsedReceipt(
+            receipts[receiptKey(ownerID: ownerID, recipeID: recipe.id)]
+        ) else { return false }
+        guard Date().timeIntervalSince1970 - receipt.recordedAt <= maximumReceiptAge else {
+            return false
+        }
+        return receipt.fingerprint == publicationFingerprint(for: recipe)
     }
 
     func record(_ recipe: Recipe) {
         guard let ownerID = recipe.ownerId else { return }
         var updated = receipts
-        updated[receiptKey(ownerID: ownerID, recipeID: recipe.id)] = recipe.updatedAt.timeIntervalSince1970
+        updated[receiptKey(ownerID: ownerID, recipeID: recipe.id)] = [
+            String(Date().timeIntervalSince1970),
+            publicationFingerprint(for: recipe),
+        ].joined(separator: "|")
         if updated.count > maximumReceiptCount {
             let overflow = updated.count - maximumReceiptCount
-            for key in updated.sorted(by: { $0.value < $1.value }).prefix(overflow).map(\.key) {
+            for key in updated
+                .sorted(by: { receiptTimestamp($0.value) < receiptTimestamp($1.value) })
+                .prefix(overflow)
+                .map(\.key) {
                 updated.removeValue(forKey: key)
             }
         }
@@ -60,12 +73,43 @@ struct WebSharePublicationReceiptStore {
         defaults.set(receipts.filter { !$0.key.hasPrefix(prefix) }, forKey: storageKey)
     }
 
-    private var receipts: [String: Double] {
+    private var receipts: [String: String] {
         defaults.dictionary(forKey: storageKey)?.reduce(into: [:]) { result, entry in
-            if let value = entry.value as? NSNumber {
-                result[entry.key] = value.doubleValue
+            if let value = entry.value as? String {
+                result[entry.key] = value
             }
         } ?? [:]
+    }
+
+    private func parsedReceipt(_ value: String?) -> (recordedAt: TimeInterval, fingerprint: String)? {
+        guard let value,
+              let separator = value.firstIndex(of: "|"),
+              let recordedAt = TimeInterval(value[..<separator]) else { return nil }
+        let fingerprint = String(value[value.index(after: separator)...])
+        guard !fingerprint.isEmpty else { return nil }
+        return (recordedAt, fingerprint)
+    }
+
+    private func receiptTimestamp(_ value: String) -> TimeInterval {
+        parsedReceipt(value)?.recordedAt ?? 0
+    }
+
+    /// Firebase stores only this summary pointer. Full recipe content is read
+    /// from CloudKit when the page renders, so favorites, notes, ingredients,
+    /// instructions, and timestamps must not trigger redundant publication.
+    private func publicationFingerprint(for recipe: Recipe) -> String {
+        let normalizedTags = recipe.tags
+            .map(\.name)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        let input = [
+            recipe.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            recipe.totalMinutes.map(String.init) ?? "",
+            normalizedTags.joined(separator: "\u{1F}"),
+        ].joined(separator: "\u{1E}")
+        return SHA256.hash(data: Data(input.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func receiptKey(ownerID: UUID, recipeID: UUID) -> String {
@@ -238,6 +282,10 @@ final class ExternalShareService: Sendable {
     @discardableResult
     func updateShareMetadata(for recipe: Recipe) async -> Bool {
         guard recipe.visibility == .publicRecipe else { return true }
+        guard !publicationReceipts.containsCurrentRevision(of: recipe) else {
+            logger.debug("Skipping unchanged recipe publication: \(recipe.title)")
+            return true
+        }
 
         logger.info("🔄 Updating share metadata for recipe: \(recipe.title)")
 

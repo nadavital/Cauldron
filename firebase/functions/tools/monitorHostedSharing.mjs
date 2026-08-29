@@ -67,6 +67,12 @@ export function validateHTML(kind, html, expected = {}) {
     switch (kind) {
     case "home":
         if (!/<title>[^<]*Cauldron/i.test(html)) throw new Error("home response is missing its Cauldron title");
+        if (canonicalURL(html) !== expected.canonicalURL) {
+            throw new Error(`home canonical URL does not match ${expected.canonicalURL}`);
+        }
+        requireText(html, 'property="og:image" content="https://cauldronrecipes.com/social-card.png"', "home response is missing branded Open Graph artwork");
+        requireText(html, 'href="/icon-small-light.svg"', "home response is missing the Cauldron logo");
+        requireText(html, "id6754004943", "home response is missing its App Store destination");
         break;
     case "profile":
         if (canonicalURL(html) !== expected.canonicalURL) {
@@ -325,7 +331,10 @@ export async function runHostedMonitor() {
         },
     ];
     const checks = [
-        { path: "/", kind: "home", label: "home" },
+        {
+            path: "/", kind: "home", label: "home",
+            expected: { canonicalURL: resolvedMonitoredURL(baseURL, "/").href },
+        },
         { path: "/.well-known/apple-app-site-association", kind: "aasa", label: "aasa" },
         {
             path: profilePath, kind: "profile", label: "canonical profile alias",

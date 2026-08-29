@@ -36,12 +36,21 @@ final class WebSharePublicationReceiptStoreTests: XCTestCase {
         store.record(initial)
         XCTAssertTrue(store.containsCurrentRevision(of: initial))
 
-        let edited = makeRecipe(
+        let timestampOnlyEdit = makeRecipe(
             id: initial.id,
             ownerID: ownerID,
-            updatedAt: initialDate.addingTimeInterval(1)
+            updatedAt: initialDate.addingTimeInterval(1),
+            isFavorite: true
         )
-        XCTAssertFalse(store.containsCurrentRevision(of: edited))
+        XCTAssertTrue(store.containsCurrentRevision(of: timestampOnlyEdit))
+
+        let publicSummaryEdit = makeRecipe(
+            id: initial.id,
+            ownerID: ownerID,
+            updatedAt: initialDate.addingTimeInterval(2),
+            title: "Tomato Soup"
+        )
+        XCTAssertFalse(store.containsCurrentRevision(of: publicSummaryEdit))
     }
 
     func testRemovingReceiptMakesTheLinkRequirePublicationAgain() {
@@ -58,13 +67,16 @@ final class WebSharePublicationReceiptStoreTests: XCTestCase {
     private func makeRecipe(
         id: UUID = UUID(),
         ownerID: UUID,
-        updatedAt: Date
+        updatedAt: Date,
+        isFavorite: Bool = false,
+        title: String = "Soup"
     ) -> Recipe {
         Recipe(
             id: id,
-            title: "Soup",
+            title: title,
             ingredients: [],
             steps: [],
+            isFavorite: isFavorite,
             ownerId: ownerID,
             updatedAt: updatedAt
         )

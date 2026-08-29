@@ -1,22 +1,87 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cauldron App</title>
-    <style>
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      h1 { font-size: 22px; font-weight: 300; color: #8F3210; margin: 0 0 16px;}
-      p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      .button { background: #8F3210; color: white; text-decoration: none; padding: 10px 20px; border-radius: 4px; display: inline-block; }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h1>Cauldron</h1>
-      <p>The best way to manage and share your recipes.</p>
-      <a href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943" class="button">Download App</a>
-    </div>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cauldron — Recipes worth keeping</title>
+  <meta name="description" content="Save recipes from anywhere, keep them beautifully organized, and cook with confidence.">
+  <meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="https://cauldronrecipes.com/">
+  <link rel="icon" href="/icon-small-light.svg" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="/icon-small-dark.svg" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Cauldron">
+  <meta property="og:title" content="Cauldron — Recipes worth keeping">
+  <meta property="og:description" content="Save recipes from anywhere, keep them beautifully organized, and cook with confidence.">
+  <meta property="og:url" content="https://cauldronrecipes.com/">
+  <meta property="og:image" content="https://cauldronrecipes.com/social-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Cauldron — Recipes worth keeping">
+  <meta name="twitter:description" content="Save recipes from anywhere, keep them beautifully organized, and cook with confidence.">
+  <meta name="twitter:image" content="https://cauldronrecipes.com/social-card.png">
+  <meta name="apple-itunes-app" content="app-id=6754004943, app-argument=https://cauldronrecipes.com/">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Cauldron","applicationCategory":"LifestyleApplication","operatingSystem":"iOS, iPadOS, macOS","url":"https://cauldronrecipes.com/","downloadUrl":"https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943"}</script>
+  <style>
+    :root { color-scheme: light dark; --paper:#F6F1EA; --ink:#241A14; --muted:#71645B; --accent:#E6801A; --accent-ink:#321B08; --rule:rgba(67,45,31,.17); --wash:rgba(230,128,26,.08); }
+    * { box-sizing: border-box; }
+    html { background: var(--paper); }
+    body { margin:0; min-height:100svh; background:radial-gradient(circle at 81% 22%,var(--wash),transparent 28rem),var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
+    a { color:inherit; }
+    .page { width:min(1180px,calc(100% - 48px)); min-height:100svh; margin:0 auto; display:grid; grid-template-rows:auto 1fr auto; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:28px 0; }
+    .brand { display:inline-flex; align-items:center; gap:12px; text-decoration:none; font-family:ui-serif,"New York",Georgia,serif; font-size:20px; font-weight:700; letter-spacing:-.02em; }
+    .brand img { width:37px; height:37px; display:block; }
+    .app-link { color:var(--muted); font-size:14px; font-weight:650; text-decoration:none; }
+    .app-link:hover { color:var(--ink); }
+    main { align-self:center; display:grid; grid-template-columns:minmax(0,1.05fr) minmax(320px,.72fr); gap:clamp(64px,10vw,144px); align-items:center; padding:72px 0 96px; }
+    .eyebrow { margin:0 0 20px; color:var(--accent); font-size:13px; font-weight:750; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { max-width:730px; margin:0; font-family:ui-serif,"New York",Georgia,serif; font-size:clamp(54px,7.4vw,104px); font-weight:650; letter-spacing:-.055em; line-height:.94; text-wrap:balance; }
+    .lede { max-width:580px; margin:30px 0 0; color:var(--muted); font-size:clamp(18px,2vw,22px); line-height:1.5; text-wrap:pretty; }
+    .download { display:inline-flex; align-items:center; gap:10px; margin-top:34px; padding:13px 18px; border-radius:999px; background:var(--accent); color:var(--accent-ink); font-size:15px; font-weight:750; text-decoration:none; box-shadow:0 8px 24px rgba(149,73,4,.16); transition:transform .2s ease,box-shadow .2s ease; }
+    .download:hover { transform:translateY(-2px); box-shadow:0 12px 30px rgba(149,73,4,.22); }
+    .download:focus-visible,a:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent); outline-offset:4px; }
+    .arrow { font-size:18px; line-height:1; }
+    .recipe-note { padding:14px 0 14px clamp(26px,4vw,54px); border-left:1px solid var(--rule); }
+    .recipe-note h2 { margin:0 0 8px; font-family:ui-serif,"New York",Georgia,serif; font-size:clamp(29px,3.4vw,42px); letter-spacing:-.035em; line-height:1.08; }
+    .recipe-note>p { margin:0 0 32px; color:var(--muted); font-size:14px; }
+    .recipe-note ol { list-style:none; margin:0; padding:0; counter-reset:benefit; }
+    .recipe-note li { counter-increment:benefit; display:grid; grid-template-columns:28px 1fr; gap:12px; padding:15px 0; border-top:1px solid var(--rule); color:var(--muted); font-size:15px; line-height:1.42; }
+    .recipe-note li::before { content:"0" counter(benefit); color:var(--accent); font-size:12px; font-weight:750; padding-top:3px; }
+    .recipe-note strong { color:var(--ink); font-weight:700; }
+    footer { display:flex; justify-content:space-between; gap:24px; padding:22px 0 30px; border-top:1px solid var(--rule); color:var(--muted); font-size:12px; }
+    footer p { margin:0; }
+    @media (max-width:760px) { .page{width:min(100% - 34px,620px)} header{padding:20px 0} main{grid-template-columns:1fr;gap:58px;padding:68px 0 72px} h1{font-size:clamp(52px,15vw,78px)} .recipe-note{padding-left:24px} footer{align-items:flex-start;flex-direction:column} }
+    @media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
+    @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F8F0E8; --muted:#BBAEA4; --accent:#F09837; --accent-ink:#2C1707; --rule:rgba(248,240,232,.15); --wash:rgba(240,152,55,.09); } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <a class="brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme:dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt=""></picture><span>Cauldron</span></a>
+      <a class="app-link" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">View on the App Store</a>
+    </header>
+    <main>
+      <section aria-labelledby="hero-title">
+        <p class="eyebrow">Your recipes, remembered</p>
+        <h1 id="hero-title">Recipes worth keeping.</h1>
+        <p class="lede">Save recipes from anywhere, make them your own, and keep every favorite ready for the kitchen.</p>
+        <a class="download" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943"><span>Download Cauldron</span><span class="arrow" aria-hidden="true">↗</span></a>
+      </section>
+      <aside class="recipe-note" aria-label="Cauldron highlights">
+        <h2>From found to familiar.</h2>
+        <p>One calm place for the food you actually cook.</p>
+        <ol>
+          <li><span><strong>Bring it in.</strong><br>Import from a link, photo, or a page you already love.</span></li>
+          <li><span><strong>Keep it yours.</strong><br>Organize, annotate, scale, and share without the clutter.</span></li>
+          <li><span><strong>Cook with focus.</strong><br>Follow each step with timers and hands-free help close by.</span></li>
+        </ol>
+      </aside>
+    </main>
+    <footer><p>Cauldron for iPhone, iPad, and Mac.</p><p>Made for recipes that stay in the family.</p></footer>
+  </div>
+</body>
 </html>
