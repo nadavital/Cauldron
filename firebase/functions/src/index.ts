@@ -18,6 +18,12 @@ const db = getFirestore();
 const cloudKitServerKeyID = defineSecret("CLOUDKIT_SERVER_KEY_ID");
 const cloudKitServerPrivateKey = defineSecret("CLOUDKIT_SERVER_PRIVATE_KEY");
 const CLOUDKIT_CONTAINER = "iCloud.Nadav.Cauldron";
+export const PUBLIC_WEB_ORIGIN = "https://cauldronrecipes.com";
+const OWNED_PUBLIC_IMAGE_HOSTS = new Set([
+    "cauldronrecipes.com",
+    "cauldron-f900a.web.app",
+    "cauldron-f900a.firebaseapp.com",
+]);
 
 // --- Utilities ---
 
@@ -195,7 +201,7 @@ export function safeImageURL(rawURL: unknown): string | null {
         }
         // Never republish imported or signed third-party image URLs. Public web
         // snapshots may only reference assets hosted on Cauldron's own origin.
-        if (parsed.hostname !== "cauldron-f900a.web.app") {
+        if (!OWNED_PUBLIC_IMAGE_HOSTS.has(parsed.hostname)) {
             return null;
         }
         parsed.search = "";
@@ -1852,8 +1858,7 @@ export const shareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, r
         // New Format: /u/{username}/{recipeId} is handled by the client/rewrite,
         // but for the direct API response we can return the canonical URL
         // stored in the app or just the basic one.
-        // The iOS app generates https://cauldron-f900a.web.app/u/{username}/{recipeId} locally.
-        const shareUrl = `https://cauldron-f900a.web.app/recipe/${shareId}`;
+        const shareUrl = `${PUBLIC_WEB_ORIGIN}/recipe/${shareId}`;
 
         res.status(200).json(publishedShareResponse(shareId, shareUrl, published));
     } catch (error) {
@@ -2043,7 +2048,7 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
         if (!published) {
             res.status(200).json(publishedShareResponse(
                 shareId,
-                `https://cauldron-f900a.web.app/profile/${shareId}`,
+                `${PUBLIC_WEB_ORIGIN}/profile/${shareId}`,
                 false
             ));
             return;
@@ -2077,7 +2082,7 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
             });
         }
 
-        const shareUrl = `https://cauldron-f900a.web.app/profile/${shareId}`;
+        const shareUrl = `${PUBLIC_WEB_ORIGIN}/profile/${shareId}`;
 
         res.status(200).json(publishedShareResponse(shareId, shareUrl, true));
     } catch (error) {
@@ -2346,7 +2351,7 @@ export const shareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (re
             return true;
         });
 
-        const shareUrl = `https://cauldron-f900a.web.app/collection/${shareId}`;
+        const shareUrl = `${PUBLIC_WEB_ORIGIN}/collection/${shareId}`;
 
         res.status(200).json(publishedShareResponse(shareId, shareUrl, published));
     } catch (error) {
@@ -2579,7 +2584,8 @@ export function generatePreviewHtml(
     const safeAvatarColor = avatarColor && /^#[0-9a-f]{6}$/i.test(avatarColor)
         ? avatarColor
         : "#FF9933";
-    const metaImageURL = safeImageURL(imageURL) || 'https://cauldron-f900a.web.app/social-card.png';
+    const fallbackImageURL = `${PUBLIC_WEB_ORIGIN}/social-card.png`;
+    const metaImageURL = safeImageURL(imageURL) || fallbackImageURL;
     const safeMetaImageURL = escapeHtml(metaImageURL);
 
     return `
@@ -2746,7 +2752,7 @@ export function generatePreviewHtml(
     <div class="container">
         <div class="logo${safeAvatarEmoji ? " avatar" : ""}" aria-hidden="true">${safeAvatarEmoji}</div>
         
-        ${metaImageURL !== 'https://cauldron-f900a.web.app/social-card.png' ? `<img src="${safeMetaImageURL}" alt="${safeTitle}" class="preview-image" onerror="this.style.display='none'">` : ''}
+        ${metaImageURL !== fallbackImageURL ? `<img src="${safeMetaImageURL}" alt="${safeTitle}" class="preview-image" onerror="this.style.display='none'">` : ''}
         
         <h1>${safeTitle}</h1>
         <p class="description">${safeDescription}</p>
@@ -2824,7 +2830,7 @@ function compactPageHead(title: string, description: string, canonicalURL: strin
     const safeTitle = escapeHtml(title);
     const safeDescription = escapeHtml(description);
     const safeCanonicalURL = escapeHtml(canonicalURL);
-    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)"><title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="https://cauldron-f900a.web.app/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="https://cauldron-f900a.web.app/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}`;
+    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)"><title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}`;
 }
 
 function compactBrandHeader(): string {
@@ -2844,7 +2850,7 @@ function appOpenFallbackScript(elementId: string, appURL: string): string {
 export function generatePublicStatusPageHtml(title: string, message: string): string {
     const safeTitle = escapeHtml(title);
     const safeMessage = escapeHtml(message);
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(title, message, "https://cauldron-f900a.web.app/")}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(title, message, `${PUBLIC_WEB_ORIGIN}/`)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main></body></html>`;
 }
 
 export function generateCompactRecipePageHtml(
@@ -3234,8 +3240,8 @@ function extractReferralCodeFromRequest(req: InviteRequestLike): string | null {
 export function generateInvitePreviewHtml(inviteCode: string | null): string {
     const hasValidCode = inviteCode !== null;
     const universalURL = hasValidCode
-        ? `https://cauldron-f900a.web.app/invite/${inviteCode}`
-        : "https://cauldron-f900a.web.app/invite";
+        ? `${PUBLIC_WEB_ORIGIN}/invite/${inviteCode}`
+        : `${PUBLIC_WEB_ORIGIN}/invite`;
     const appURL = hasValidCode
         ? `cauldron://invite?code=${inviteCode}`
         : "cauldron://invite";
@@ -3258,12 +3264,12 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
     <meta property="og:type" content="website">
     <meta property="og:title" content="${title}">
     <meta property="og:description" content="${description}">
-    <meta property="og:image" content="https://cauldron-f900a.web.app/social-card.png">
+    <meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png">
     <meta property="og:url" content="${universalURL}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="${title}">
     <meta name="twitter:description" content="${description}">
-    <meta name="twitter:image" content="https://cauldron-f900a.web.app/social-card.png">
+    <meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png">
     <meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${universalURL}">
     <style>
         :root {
@@ -3393,7 +3399,7 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
 <body>
     <main class="card">
         <div class="logo">
-            <picture><source media="(prefers-color-scheme: dark)" srcset="https://cauldron-f900a.web.app/icon-dark.svg"><img src="https://cauldron-f900a.web.app/icon-light.svg" alt="Cauldron"></picture>
+            <picture><source media="(prefers-color-scheme: dark)" srcset="${PUBLIC_WEB_ORIGIN}/icon-dark.svg"><img src="${PUBLIC_WEB_ORIGIN}/icon-light.svg" alt="Cauldron"></picture>
         </div>
         <h1>${title}</h1>
         <p>${description}</p>
@@ -3504,9 +3510,9 @@ export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (
             return;
         }
 
-        const canonicalURL = `https://cauldron-f900a.web.app/recipe/${encodeURIComponent(recipeId)}`;
-        // Keep the custom scheme until the alternate Hosting-domain entitlement
-        // has shipped broadly; older installed builds cannot claim that host.
+        const canonicalURL = `${PUBLIC_WEB_ORIGIN}/recipe/${encodeURIComponent(recipeId)}`;
+        // Keep the custom scheme until the custom-domain entitlement has shipped
+        // broadly; older installed builds cannot claim the new canonical host.
         const appURL = `cauldron://import/recipe/${encodeURIComponent(recipeId)}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
         const [fullRecipe, creator] = await Promise.all([
@@ -3708,7 +3714,7 @@ export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async 
         recipes.sort((lhs, rhs) => lhs.title.localeCompare(rhs.title));
         const indexItems = await bestEffortRecipeIndexItems(recipes);
         const description = "A recipe shelf shared from Cauldron.";
-        const canonicalURL = `https://cauldron-f900a.web.app/profile/${encodeURIComponent(data.userId)}`;
+        const canonicalURL = `${PUBLIC_WEB_ORIGIN}/profile/${encodeURIComponent(data.userId)}`;
         const appURL = `cauldron://import/profile/${shareId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
@@ -3780,7 +3786,7 @@ export const previewCollection = onRequest(cloudBackedPublicReadHTTPOptions, asy
             (recipeOrder.get(rhs.recipeId) ?? Number.MAX_SAFE_INTEGER));
         const indexItems = await bestEffortRecipeIndexItems(recipes);
         const description = "A recipe collection shared from Cauldron.";
-        const canonicalURL = `https://cauldron-f900a.web.app/collection/${encodeURIComponent(shareId)}`;
+        const canonicalURL = `${PUBLIC_WEB_ORIGIN}/collection/${encodeURIComponent(shareId)}`;
         const appURL = `cauldron://import/collection/${shareId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 

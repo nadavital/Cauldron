@@ -42,7 +42,7 @@ if (!fixture.ok) {
 
 const html = generateRecipePageHtml(
     fixture.value,
-    "https://cauldron-f900a.web.app/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
+    "https://cauldronrecipes.com/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
     "cauldron://import/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
     "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943"
 );

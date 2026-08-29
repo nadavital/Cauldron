@@ -7,6 +7,7 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:icloud.com</string>
+		<string>applinks:cauldronrecipes.com</string>
 		<string>applinks:cauldron-f900a.web.app</string>
 		<string>applinks:cauldron-f900a.firebaseapp.com</string>
 	</array>

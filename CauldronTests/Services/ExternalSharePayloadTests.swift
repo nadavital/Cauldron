@@ -233,7 +233,7 @@ final class ExternalSharePayloadTests: XCTestCase {
     func testPublicationResponseReportsWhetherSnapshotWasActuallyWritten() throws {
         let response = try JSONDecoder().decode(
             ShareResponse.self,
-            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldron-f900a.web.app/recipe/recipe-id","published":true}"#.utf8)
+            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldronrecipes.com/recipe/recipe-id","published":true}"#.utf8)
         )
 
         XCTAssertEqual(response.published, true)
@@ -242,7 +242,7 @@ final class ExternalSharePayloadTests: XCTestCase {
     func testLegacyPublicationResponseStillDecodesForCompatibility() throws {
         let response = try JSONDecoder().decode(
             ShareResponse.self,
-            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldron-f900a.web.app/recipe/recipe-id"}"#.utf8)
+            from: Data(#"{"shareId":"recipe-id","shareUrl":"https://cauldronrecipes.com/recipe/recipe-id"}"#.utf8)
         )
 
         XCTAssertNil(response.published)

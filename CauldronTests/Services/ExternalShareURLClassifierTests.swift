@@ -9,6 +9,11 @@ import XCTest
 final class ExternalShareURLClassifierTests: XCTestCase {
     func testExternalShareURLClassifier_AcceptsLegacyRoutesAndUserRoutes() throws {
         let accepted = [
+            "https://cauldronrecipes.com/recipe/abc123",
+            "https://cauldronrecipes.com/profile/nadav",
+            "https://cauldronrecipes.com/collection/collection-id",
+            "https://cauldronrecipes.com/u/nadav",
+            "https://cauldronrecipes.com/u/nadav/recipe-id",
             "https://cauldron-f900a.web.app/recipe/abc123",
             "https://cauldron-f900a.web.app/profile/nadav",
             "https://cauldron-f900a.web.app/collection/collection-id",
@@ -47,6 +52,7 @@ final class ExternalShareURLClassifierTests: XCTestCase {
 
     func testReferralInviteLinkAcceptsOnlyOwnedHostingDomains() throws {
         let accepted = [
+            "https://cauldronrecipes.com/invite/ABC123",
             "https://cauldron-f900a.web.app/invite/ABC123",
             "https://cauldron-f900a.firebaseapp.com/invite/ABC123",
             "cauldron://invite?code=ABC123",
@@ -76,6 +82,9 @@ final class ExternalShareURLClassifierTests: XCTestCase {
 
     func testShareRouteParserCoversCanonicalLegacyAliasAndCustomSchemeRoutes() throws {
         let cases: [(String, ExternalShareURLClassifier.Route)] = [
+            ("https://cauldronrecipes.com/u/nadav", .profile("nadav")),
+            ("https://cauldronrecipes.com/recipe/recipe-id", .recipe("recipe-id")),
+            ("https://cauldronrecipes.com/collection/collection-id", .collection("collection-id")),
             ("https://cauldron-f900a.web.app/u/nadav", .profile("nadav")),
             ("https://cauldron-f900a.web.app/u/nadav/recipe-id", .recipe("recipe-id")),
             ("https://cauldron-f900a.web.app/profile/user-id", .profile("user-id")),

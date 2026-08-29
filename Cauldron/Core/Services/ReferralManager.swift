@@ -126,7 +126,7 @@ final class ReferralManager: ObservableObject {
     }
 
     /// Universal invite link base (must match AASA allowed paths)
-    private let inviteBaseURL = URL(string: "https://cauldron-f900a.web.app")!
+    private let inviteBaseURL = URL(string: "https://cauldronrecipes.com")!
 
     /// Get the invite URL for sharing.
     /// The referral code is embedded so recipients can join without manual entry.
@@ -333,6 +333,7 @@ final class ReferralManager: ObservableObject {
 /// Helpers for parsing referral invite links.
 enum ReferralInviteLink {
     private static let supportedHosts = Set([
+        "cauldronrecipes.com",
         "cauldron-f900a.web.app",
         "cauldron-f900a.firebaseapp.com",
     ])

@@ -112,12 +112,19 @@ for entitlements in "$app_entitlements" "$catalyst_entitlements"; do
     assert_plist_array_contains \
         "$entitlements" \
         'com\.apple\.developer\.associated-domains' \
+        'applinks:cauldronrecipes.com'
+    assert_plist_array_contains \
+        "$entitlements" \
+        'com\.apple\.developer\.associated-domains' \
         'applinks:cauldron-f900a.web.app'
     assert_plist_array_contains \
         "$entitlements" \
         'com\.apple\.developer\.associated-domains' \
         'applinks:cauldron-f900a.firebaseapp.com'
 done
+
+grep -Fq 'https://cauldronrecipes.com' "$repo_root/Cauldron/Core/Services/ExternalShareService.swift" ||
+    fail "ExternalShareService must generate canonical cauldronrecipes.com links."
 
 assert_plist_raw "$catalyst_entitlements" 'com\.apple\.security\.app-sandbox' 'true'
 assert_plist_raw "$catalyst_entitlements" 'com\.apple\.security\.network\.client' 'true'

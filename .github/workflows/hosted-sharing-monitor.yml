@@ -21,8 +21,9 @@ jobs:
       run:
         working-directory: firebase/functions
     env:
-      CAULDRON_MONITOR_BASE_URL: https://cauldron-f900a.web.app
-      CAULDRON_MONITOR_ALIAS_BASE_URL: https://cauldron-f900a.firebaseapp.com
+      CAULDRON_MONITOR_BASE_URL: https://cauldronrecipes.com
+      CAULDRON_MONITOR_ALIAS_BASE_URL: https://cauldron-f900a.web.app
+      CAULDRON_MONITOR_SECONDARY_ALIAS_BASE_URL: https://cauldron-f900a.firebaseapp.com
       CAULDRON_MONITOR_FUNCTION_BASE_URL: https://us-central1-cauldron-f900a.cloudfunctions.net
       CAULDRON_MONITOR_PROFILE_PATH: ${{ vars.CAULDRON_MONITOR_PROFILE_PATH || '/u/nadav' }}
       CAULDRON_MONITOR_LEGACY_PROFILE_PATH: ${{ vars.CAULDRON_MONITOR_LEGACY_PROFILE_PATH || '/profile/87BB336E-D474-4664-B06E-EC8E516B1748' }}

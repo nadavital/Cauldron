@@ -13,6 +13,7 @@ enum ExternalShareURLClassifier {
     }
 
     private static let allowedHosts = Set([
+        "cauldronrecipes.com",
         "cauldron-f900a.web.app",
         "cauldron-f900a.firebaseapp.com"
     ])

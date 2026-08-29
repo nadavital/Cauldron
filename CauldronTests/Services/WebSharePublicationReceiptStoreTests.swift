@@ -22,7 +22,7 @@ final class WebSharePublicationReceiptStoreTests: XCTestCase {
         let recipeID = UUID(uuidString: "7DBEAFFD-895F-43B1-9985-463F36EA5D8C")!
         XCTAssertEqual(
             WebShareCanonicalURL.recipe(id: recipeID).absoluteString,
-            "https://cauldron-f900a.web.app/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C"
+            "https://cauldronrecipes.com/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C"
         )
     }
 

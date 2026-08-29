@@ -12,7 +12,7 @@ import CryptoKit
 import os
 
 enum WebShareCanonicalURL {
-    static let origin = URL(string: "https://cauldron-f900a.web.app")!
+    static let origin = URL(string: "https://cauldronrecipes.com")!
 
     static func recipe(id: UUID) -> URL {
         origin.appending(path: "recipe").appending(path: id.uuidString)
@@ -331,7 +331,7 @@ final class ExternalShareService: Sendable {
     func generateProfileLink(for user: User, recipeCount: Int) -> ShareableLink {
         // URL-encode username to handle special characters safely
         let encodedUsername = user.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? user.username
-        let permanentURLString = "https://cauldron-f900a.web.app/u/\(encodedUsername)"
+        let permanentURLString = "https://cauldronrecipes.com/u/\(encodedUsername)"
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
 
@@ -340,7 +340,7 @@ final class ExternalShareService: Sendable {
         if let constructedURL = URL(string: permanentURLString) {
             url = constructedURL
         } else {
-            let fallbackURLString = "https://cauldron-f900a.web.app/profile/\(user.id.uuidString)"
+            let fallbackURLString = "https://cauldronrecipes.com/profile/\(user.id.uuidString)"
             url = URL(string: fallbackURLString)!
         }
 
@@ -586,7 +586,7 @@ final class ExternalShareService: Sendable {
         // Assuming /collection/{id} or similar.
         
         // Construct URL - using valid web app structure (collection IDs are UUIDs, safe for URLs)
-        let urlString = "https://cauldron-f900a.web.app/collection/\(collection.id.uuidString)"
+        let urlString = "https://cauldronrecipes.com/collection/\(collection.id.uuidString)"
 
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my \(collection.name) collection on Cauldron! \(recipeText)"
@@ -595,7 +595,7 @@ final class ExternalShareService: Sendable {
         guard let url = URL(string: urlString) else {
             logger.error("Failed to construct collection URL - this should never happen with UUID")
             return ShareableLink(
-                url: URL(string: "https://cauldron-f900a.web.app")!,
+                url: URL(string: "https://cauldronrecipes.com")!,
                 previewText: previewText,
                 image: nil
             )

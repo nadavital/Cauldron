@@ -18,11 +18,11 @@ There is no standalone web-sharing preference or unshare control; lifecycle
 privacy cleanup remains tied to making an item private, deleting it, or deleting
 the account.
 
-The alternate `cauldron-f900a.firebaseapp.com` Hosting domain is reserved in the
-app's Associated Domains entitlement and AASA file for a future cross-domain
-Universal Link handoff. Do not switch public web buttons from the backward-
-compatible custom scheme until an app build containing that entitlement has
-shipped broadly.
+`cauldronrecipes.com` is the canonical public origin. The legacy
+`cauldron-f900a.web.app` and alternate `cauldron-f900a.firebaseapp.com` Hosting
+domains remain in the app's Associated Domains entitlement and AASA file so old
+links keep working. Do not remove the backward-compatible custom-scheme button
+until an app build containing the custom-domain entitlement has shipped broadly.
 
 To audit snapshots created before the Firebase summary-only contract, run
 `npm run scrub:legacy-web-snapshots` from `firebase/functions`. Add
@@ -117,7 +117,7 @@ file contains both `/u/*` and `/u/*/*`; the checked-in file is not proof that
 Firebase Hosting is current:
 
 ```sh
-curl -fsS https://cauldron-f900a.web.app/.well-known/apple-app-site-association
+curl -fsS https://cauldronrecipes.com/.well-known/apple-app-site-association
 ```
 
 ## Production sharing monitor

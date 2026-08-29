@@ -13,7 +13,7 @@ const appPaths = [
     "/recipe/*", "/u/*", "/u/*/*", "/invite", "/invite/*", "/profile/*", "/collection/*",
 ];
 const recipeExpected = {
-    canonicalURL: "https://cauldron-f900a.web.app/recipe/recipe-id",
+    canonicalURL: "https://cauldronrecipes.com/recipe/recipe-id",
     recipeId: "recipe-id",
     creatorPath: "/u/nadav",
     creatorName: "Nadav",
@@ -62,15 +62,15 @@ test("AASA validator rejects a missing canonical profile path", () => {
 
 test("validators enforce exact profile, recipe, collection, and invite identities", () => {
     validateHTML("home", "<title>Cauldron</title>");
-    validateHTML("profile", '<title>Nadav · Cauldron</title><link rel="canonical" href="https://cauldron-f900a.web.app/profile/user-id"><h1>Nadav</h1><p>@nadav</p><a href="cauldron://import/profile/nadav">', {
-        canonicalURL: "https://cauldron-f900a.web.app/profile/user-id",
+    validateHTML("profile", '<title>Nadav · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/profile/user-id"><h1>Nadav</h1><p>@nadav</p><a href="cauldron://import/profile/nadav">', {
+        canonicalURL: "https://cauldronrecipes.com/profile/user-id",
         deepLinkIdentity: "nadav",
         displayName: "Nadav",
         handle: "nadav",
     });
     validateHTML("recipe", recipeHTML(), recipeExpected);
-    validateHTML("collection", '<title>Bakery · Cauldron</title><link rel="canonical" href="https://cauldron-f900a.web.app/collection/id"><h1>Bakery</h1><p>3 recipes</p><a href="/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C">Cake</a><a href="cauldron://import/collection/id">', {
-        canonicalURL: "https://cauldron-f900a.web.app/collection/id",
+    validateHTML("collection", '<title>Bakery · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/collection/id"><h1>Bakery</h1><p>3 recipes</p><a href="/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C">Cake</a><a href="cauldron://import/collection/id">', {
+        canonicalURL: "https://cauldronrecipes.com/collection/id",
         collectionId: "id",
         title: "Bakery",
     });
@@ -79,11 +79,11 @@ test("validators enforce exact profile, recipe, collection, and invite identitie
 
 test("collection validator rejects an empty or mismatched fixture", () => {
     const expected = {
-        canonicalURL: "https://cauldron-f900a.web.app/collection/id",
+        canonicalURL: "https://cauldronrecipes.com/collection/id",
         collectionId: "id",
         title: "Bakery",
     };
-    const base = '<title>Bakery · Cauldron</title><link rel="canonical" href="https://cauldron-f900a.web.app/collection/id"><h1>Bakery</h1><a href="cauldron://import/collection/id">';
+    const base = '<title>Bakery · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/collection/id"><h1>Bakery</h1><a href="cauldron://import/collection/id">';
     assert.throws(() => validateHTML("collection", `${base}<p>0 recipes</p>`, expected), /at least one recipe/);
     assert.throws(() => validateHTML("collection", `${base}<p>1 recipes</p>`, expected), /valid recipe link/);
     assert.throws(
@@ -97,7 +97,7 @@ test("recipe validator rejects empty rich content", () => {
         [{ recipeIngredient: [] }, /nonempty ingredients/],
         [{ recipeInstructions: [] }, /nonempty instructions/],
         [{ image: [] }, /contain a non-placeholder HTTPS image/],
-        [{ image: ["https://cauldron-f900a.web.app/social-card.png"] }, /non-placeholder HTTPS image/],
+        [{ image: ["https://cauldronrecipes.com/social-card.png"] }, /non-placeholder HTTPS image/],
         [{ keywords: "" }, /tags\/keywords/],
     ]) {
         assert.throws(() => validateHTML("recipe", recipeHTML(override), recipeExpected), message);
@@ -106,7 +106,7 @@ test("recipe validator rejects empty rich content", () => {
 
 test("recipe validator rejects mismatched canonical, deep-link, creator, and visible tags", () => {
     assert.throws(
-        () => validateHTML("recipe", recipeHTML().replace(recipeExpected.canonicalURL, "https://cauldron-f900a.web.app/recipe/other"), recipeExpected),
+        () => validateHTML("recipe", recipeHTML().replace(recipeExpected.canonicalURL, "https://cauldronrecipes.com/recipe/other"), recipeExpected),
         /canonical URL/,
     );
     assert.throws(
@@ -128,9 +128,9 @@ test("recipe validator rejects mismatched canonical, deep-link, creator, and vis
 });
 
 test("profile validator rejects a stale identity", () => {
-    const html = '<title>Other · Cauldron</title><link rel="canonical" href="https://cauldron-f900a.web.app/profile/user-id"><h1>Other</h1><p>@other</p><a href="cauldron://import/profile/other">';
+    const html = '<title>Other · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/profile/user-id"><h1>Other</h1><p>@other</p><a href="cauldron://import/profile/other">';
     assert.throws(() => validateHTML("profile", html, {
-        canonicalURL: "https://cauldron-f900a.web.app/profile/user-id",
+        canonicalURL: "https://cauldronrecipes.com/profile/user-id",
         deepLinkIdentity: "nadav",
         displayName: "Nadav",
         handle: "nadav",
@@ -138,7 +138,7 @@ test("profile validator rejects a stale identity", () => {
 });
 
 test("resolved monitor URL rejects slash-backslash cross-origin paths before fetch", () => {
-    const baseURL = new URL("https://cauldron-f900a.web.app");
+    const baseURL = new URL("https://cauldronrecipes.com");
     assert.throws(() => resolvedMonitoredURL(baseURL, "/\\example.com/path"), /resolves off/);
     assert.equal(resolvedMonitoredURL(baseURL, "/recipe/id").origin, baseURL.origin);
 });
@@ -191,7 +191,7 @@ test("data API validators reject stale, empty, and mismatched responses", () => 
 });
 
 test("data API request plan probes every type through Hosting and the direct function origin", () => {
-    const hosting = new URL("https://cauldron-f900a.web.app");
+    const hosting = new URL("https://cauldronrecipes.com");
     const direct = new URL("https://us-central1-cauldron-f900a.cloudfunctions.net");
     const checks = ["profile", "recipe", "collection"].map((dataKind) => ({
         path: `/api/data/${dataKind}/fixture`,

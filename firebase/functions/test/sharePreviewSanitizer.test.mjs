@@ -23,6 +23,7 @@ import {
     isCurrentResourceMutationGeneration,
     isTransientCloudKitHTTPStatus,
     publicSecurityHeaders,
+    PUBLIC_WEB_ORIGIN,
     previewCollection,
     previewProfile,
     publishedShareResponse,
@@ -49,11 +50,12 @@ import {
 } from "../lib/index.js";
 
 test("share publication responses expose the write outcome on every endpoint", () => {
+    assert.equal(PUBLIC_WEB_ORIGIN, "https://cauldronrecipes.com");
     assert.deepEqual(
-        publishedShareResponse("profile-id", "https://cauldron-f900a.web.app/profile/profile-id", true),
+        publishedShareResponse("profile-id", "https://cauldronrecipes.com/profile/profile-id", true),
         {
             shareId: "profile-id",
-            shareUrl: "https://cauldron-f900a.web.app/profile/profile-id",
+            shareUrl: "https://cauldronrecipes.com/profile/profile-id",
             published: true,
         }
     );
@@ -79,7 +81,7 @@ test("web recipe category colors match the app's adaptive and custom palette", (
 });
 
 test("recipe previews use a stable same-origin social image URL", () => {
-    const canonicalURL = "https://cauldron-f900a.web.app/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const canonicalURL = "https://cauldronrecipes.com/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10";
     assert.equal(
         recipeSocialImageURL(canonicalURL),
         `${canonicalURL}/social-card.png`
@@ -152,7 +154,9 @@ test("escapeHtml escapes preview metadata", () => {
 });
 
 test("safeImageURL accepts only controlled public image URLs", () => {
-    assert.equal(safeImageURL("https://cauldron-f900a.web.app/images/recipe.jpg?token=secret#crop"), "https://cauldron-f900a.web.app/images/recipe.jpg");
+    assert.equal(safeImageURL("https://cauldronrecipes.com/images/recipe.jpg?token=secret#crop"), "https://cauldronrecipes.com/images/recipe.jpg");
+    assert.equal(safeImageURL("https://cauldron-f900a.web.app/images/legacy.jpg?token=secret#crop"), "https://cauldron-f900a.web.app/images/legacy.jpg");
+    assert.equal(safeImageURL("https://cauldron-f900a.firebaseapp.com/images/legacy.jpg?token=secret#crop"), "https://cauldron-f900a.firebaseapp.com/images/legacy.jpg");
     assert.equal(safeImageURL("https://example.com/image.jpg"), null);
     assert.equal(safeImageURL("https://127.0.0.1/image.jpg"), null);
     assert.equal(safeImageURL("https://user:password@example.com/image.jpg"), null);
@@ -547,7 +551,7 @@ test("recipe web content is summary-only, normalized, and safe", () => {
 
     const html = generateCompactRecipePageHtml(
         recipe.value,
-        "https://cauldron-f900a.web.app/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
+        "https://cauldronrecipes.com/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
         "cauldron://import/recipe/018f9344-54ff-42fc-83a8-c2a92e2d1b10",
         "https://apps.apple.com/app/id6754004943"
     );
@@ -587,7 +591,7 @@ test("profile and collection pages expose clean recipe shelves without managemen
         handle: "@chef_nadav",
         title: "Nadav <script>alert(1)</script>",
         description: "2 public recipes",
-        canonicalURL: "https://cauldron-f900a.web.app/u/chef_nadav",
+        canonicalURL: "https://cauldronrecipes.com/u/chef_nadav",
         appURL: "cauldron://import/profile/chef_nadav",
         downloadURL: "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943",
         recipes: [recipe.value],
@@ -655,7 +659,7 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
     const html = generateCompactRecipeIndexPageHtml({
         title: "Favorites",
         description: "A collection",
-        canonicalURL: "https://cauldron-f900a.web.app/collection/test",
+        canonicalURL: "https://cauldronrecipes.com/collection/test",
         appURL: "cauldron://import/collection/test",
         downloadURL: "https://apps.apple.com/app/id6754004943",
         recipes: [valid],
@@ -693,7 +697,7 @@ test("public recipe summary text strips embedded URL credentials and signed quer
     });
 
     assert.equal(result.ok, true);
-    const html = generateCompactRecipePageHtml(result.value, "https://cauldron-f900a.web.app/recipe/test", "cauldron://recipe/test", "https://apps.apple.com/app/id6754004943");
+    const html = generateCompactRecipePageHtml(result.value, "https://cauldronrecipes.com/recipe/test", "cauldron://recipe/test", "https://apps.apple.com/app/id6754004943");
     assert.doesNotMatch(html, /password|token=|signature=|key=|credential=/i);
     assert.match(html, /https:\/\/example.com\/title/);
 });
@@ -706,12 +710,12 @@ test("compact recipe preview never emits recipe images or structured instruction
         title: "Tomato Soup ftp://user:password@example.com/file?token=secret",
         notes: "Open " + "https:" + "\\" + "user:password@example.com/path?token=secret",
         capability: "q".repeat(43),
-        imageURL: "https://cauldron-f900a.web.app/recipe-images/tomato-soup.jpg",
+        imageURL: "https://cauldronrecipes.com/recipe-images/tomato-soup.jpg",
         ingredients: [{ text: "2 tomatoes" }],
         steps: [{ text: "Simmer" }],
     });
     assert.equal(result.ok, true);
-    const html = generateCompactRecipePageHtml(result.value, "https://cauldron-f900a.web.app/recipe/test", "cauldron://recipe/test", "https://apps.apple.com/app/id6754004943");
+    const html = generateCompactRecipePageHtml(result.value, "https://cauldronrecipes.com/recipe/test", "cauldron://recipe/test", "https://apps.apple.com/app/id6754004943");
     assert.doesNotMatch(html, /application\/ld\+json/);
     assert.doesNotMatch(html, /recipe-images\/tomato-soup\.jpg/);
     assert.doesNotMatch(html, /2 tomatoes|Simmer/);
@@ -760,7 +764,7 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.equal(recipe.imageURL, "https://cvws.icloud-content.com/image.jpg?token=signed");
     const html = generateRecipePageHtml(
         recipe,
-        `https://cauldron-f900a.web.app/recipe/${recipeId}`,
+        `https://cauldronrecipes.com/recipe/${recipeId}`,
         `cauldron://import/recipe/${recipeId}`,
         "https://apps.apple.com/app/id6754004943",
         { username: "nadav", displayName: "Nadav", profileEmoji: "🧑‍🍳", profileColor: "#E9792F" }
@@ -807,7 +811,7 @@ test("canonical recipe routes never render a Firebase-only compact fallback", ()
     const rendered = renderCanonicalRecipePage(
         null,
         null,
-        "https://cauldron-f900a.web.app/recipe/recipe-id",
+        "https://cauldronrecipes.com/recipe/recipe-id",
         "cauldron://import/recipe/recipe-id",
         "https://apps.apple.com/app/id6754004943"
     );
@@ -833,14 +837,14 @@ test("profile preview uses HTTPS canonical metadata and emoji fallback", () => {
         "Nadav",
         "12 recipes",
         null,
-        "https://cauldron-f900a.web.app/profile/owner-id",
+        "https://cauldronrecipes.com/profile/owner-id",
         "cauldron://import/profile/owner-id",
         "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943",
         "🧑‍🍳",
         "#FF9933"
     );
-    assert.match(html, /property="og:url" content="https:\/\/cauldron-f900a\.web\.app\/profile\/owner-id"/);
-    assert.match(html, /rel="canonical" href="https:\/\/cauldron-f900a\.web\.app\/profile\/owner-id"/);
+    assert.match(html, /property="og:url" content="https:\/\/cauldronrecipes\.com\/profile\/owner-id"/);
+    assert.match(html, /rel="canonical" href="https:\/\/cauldronrecipes\.com\/profile\/owner-id"/);
     assert.match(html, /twitter:app:id:iphone" content="6754004943"/);
     assert.match(html, /🧑‍🍳/);
 });

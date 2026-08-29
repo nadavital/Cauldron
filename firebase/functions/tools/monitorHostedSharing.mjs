@@ -1,8 +1,9 @@
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-const DEFAULT_BASE_URL = "https://cauldron-f900a.web.app";
-const DEFAULT_ALIAS_BASE_URL = "https://cauldron-f900a.firebaseapp.com";
+const DEFAULT_BASE_URL = "https://cauldronrecipes.com";
+const DEFAULT_ALIAS_BASE_URL = "https://cauldron-f900a.web.app";
+const DEFAULT_SECONDARY_ALIAS_BASE_URL = "https://cauldron-f900a.firebaseapp.com";
 const DEFAULT_FUNCTION_BASE_URL = "https://us-central1-cauldron-f900a.cloudfunctions.net";
 const DEFAULT_PROFILE_PATH = "/u/nadav";
 const DEFAULT_LEGACY_PROFILE_PATH = "/profile/87BB336E-D474-4664-B06E-EC8E516B1748";
@@ -268,9 +269,15 @@ async function monitorResponse(baseURL, check) {
 export async function runHostedMonitor() {
     const baseURL = new URL(process.env.CAULDRON_MONITOR_BASE_URL?.trim() || DEFAULT_BASE_URL);
     const aliasBaseURL = new URL(process.env.CAULDRON_MONITOR_ALIAS_BASE_URL?.trim() || DEFAULT_ALIAS_BASE_URL);
+    const secondaryAliasBaseURL = new URL(
+        process.env.CAULDRON_MONITOR_SECONDARY_ALIAS_BASE_URL?.trim() || DEFAULT_SECONDARY_ALIAS_BASE_URL
+    );
     const functionBaseURL = new URL(process.env.CAULDRON_MONITOR_FUNCTION_BASE_URL?.trim() || DEFAULT_FUNCTION_BASE_URL);
     if (baseURL.protocol !== "https:") throw new Error("CAULDRON_MONITOR_BASE_URL must use HTTPS");
     if (aliasBaseURL.protocol !== "https:") throw new Error("CAULDRON_MONITOR_ALIAS_BASE_URL must use HTTPS");
+    if (secondaryAliasBaseURL.protocol !== "https:") {
+        throw new Error("CAULDRON_MONITOR_SECONDARY_ALIAS_BASE_URL must use HTTPS");
+    }
     if (functionBaseURL.protocol !== "https:") throw new Error("CAULDRON_MONITOR_FUNCTION_BASE_URL must use HTTPS");
 
     const profilePath = monitoredPath("CAULDRON_MONITOR_PROFILE_PATH", { defaultValue: DEFAULT_PROFILE_PATH, required: true });
@@ -352,6 +359,11 @@ export async function runHostedMonitor() {
         await monitorResponse(request.baseURL, request.check);
     }
     await monitorResponse(aliasBaseURL, {
+        path: "/.well-known/apple-app-site-association",
+        kind: "aasa",
+        label: "web.app compatibility AASA",
+    });
+    await monitorResponse(secondaryAliasBaseURL, {
         path: "/.well-known/apple-app-site-association",
         kind: "aasa",
         label: "firebaseapp compatibility AASA",
