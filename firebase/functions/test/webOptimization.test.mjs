@@ -1,4 +1,22 @@
 import test from "node:test";
+import { hasSameOriginImages } from "../tools/publicImageAudit.mjs";
+
+test("SEO image audit requires nonempty, well-formed exact-origin URLs", () => {
+    const origin = "https://cauldronrecipes.com";
+    assert.equal(hasSameOriginImages([`${origin}/recipe/id/social-card.png`], origin), true);
+    assert.equal(hasSameOriginImages(["https://CAULDRONRECIPES.com:443/recipe/id/image/640.webp"], origin), true);
+    for (const images of [undefined, null, [], "not an array", [null], [42], [{}],
+        ["/recipe/id/image/640.webp"], ["not a URL"],
+        ["http://cauldronrecipes.com/image.png"],
+        ["https://cauldronrecipes.com.attacker.example/image.png"],
+        ["https://cauldronrecipes.com@attacker.example/image.png"],
+        ["https://attacker.example/?https://cauldronrecipes.com"],
+        ["https://cauldronrecipes.com:444/image.png"],
+        ["https://user:password@cauldronrecipes.com/image.png"],
+        [`${origin}/image.png`, "https://attacker.example/image.png"]]) {
+        assert.equal(hasSameOriginImages(images, origin), false);
+    }
+});
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import { RecipeImageCache, recipeImageWidth, recipeImageRevisionKey, readBoundedImage, resizeRecipeImage } from "../lib/recipeImages.js";

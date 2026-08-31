@@ -1,4 +1,5 @@
 // Small, read-only lab audit. These timings are not field Core Web Vitals.
+import { hasSameOriginImages } from "./publicImageAudit.mjs";
 const origin = "https://cauldronrecipes.com";
 const routes = ["/", "/u/nadav", "/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C",
     "/collection/9B0D2D38-3B17-406A-83EC-3F35B21BDB42", "/invite",
@@ -25,7 +26,7 @@ for (const route of routes) {
         externalScripts: (html.match(/<script[^>]*src=/g) || []).length,
         externalStylesheets: (html.match(/<link[^>]*rel="stylesheet"/g) || []).length,
         schemas: schema.map(s => ({ type: s["@type"], invalid: s.invalidJSON || false,
-            author: Boolean(s.author), stableImage: Array.isArray(s.image) && s.image.every(i => i.startsWith(origin)),
+            author: Boolean(s.author), stableImage: hasSameOriginImages(s.image, origin),
             ingredients: s.recipeIngredient?.length, steps: s.recipeInstructions?.length })),
         sitemapURLs: route === "/sitemap.xml" ? (html.match(/<loc>/g) || []).length : undefined,
     }));
