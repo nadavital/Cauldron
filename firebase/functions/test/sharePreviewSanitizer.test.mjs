@@ -853,7 +853,7 @@ test("homepage presents only supplied validated recipes and complete icon metada
         title: "Tomato & Basil Soup",
         capability: "a".repeat(43),
         totalMinutes: 30,
-        tags: ["Dessert"],
+        tags: ["Dessert", "Baking"],
     });
     assert.equal(recipe.ok, true);
     const html = generateHomePageHtml([{
@@ -868,6 +868,8 @@ test("homepage presents only supplied validated recipes and complete icon metada
     assert.match(html, /Get Cauldron/);
     assert.match(html, /class="creator-name">Nadav<\/span>/);
     assert.match(html, /data-filter="Dessert"/);
+    assert.match(html, /data-filter="Baking"/);
+    assert.match(html, /data-categories="\[&quot;Dessert&quot;,&quot;Baking&quot;\]"/);
     assert.match(html, /class="discovery-grid"/);
     assert.match(html, /class="discovery-card"/);
     assert.match(html, /fetchpriority="high"/);
@@ -943,7 +945,9 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
             recipeId: { value: recipeId },
             ownerId: { value: ownerId },
             visibility: { value: "public" },
-            title: { value: "Tomato Soup" },
+            title: { value: "Updated Tomato Soup" },
+            totalMinutes: { value: 35 },
+            tagsData: { value: Buffer.from(JSON.stringify([{ name: "Lunch" }])).toString("base64") },
             imageAsset: { value: {
                 size: 120_000,
                 downloadURL: "https://cvws.icloud-content.com/image.jpg?token=signed",
@@ -954,6 +958,9 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
     const creatorNames = new Map([[ownerId, creator]]);
     const [valid] = recipeIndexItemsWithCloudKitImages([summary.value], [record], creatorNames);
     assert.equal(valid.imageURL, "https://cvws.icloud-content.com/image.jpg?token=signed");
+    assert.equal(valid.title, "Updated Tomato Soup");
+    assert.equal(valid.totalMinutes, 35);
+    assert.deepEqual(valid.tags, ["Lunch"]);
 
     const wrongOwner = recipeIndexItemsWithCloudKitImages([summary.value], [{
         ...record,
@@ -978,7 +985,7 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
     assert.match(html, /loading="lazy" decoding="async"/);
 });
 
-test("profile and collection shelves bind CloudKit secrets and request image-only fields", () => {
+test("profile and collection shelves fetch current presentation fields without rich content", () => {
     const expectedSecrets = ["CLOUDKIT_SERVER_KEY_ID", "CLOUDKIT_SERVER_PRIVATE_KEY"];
     const endpointSecrets = (endpoint) => endpoint.__endpoint.secretEnvironmentVariables
         .map(({ key }) => key)
@@ -992,6 +999,8 @@ test("profile and collection shelves bind CloudKit secrets and request image-onl
             "ownerId",
             "visibility",
             "title",
+            "totalMinutes",
+            "tagsData",
             "imageAsset",
             "relatedRecipeIdsData",
             "originalRecipeId",

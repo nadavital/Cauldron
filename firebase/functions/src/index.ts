@@ -1,7 +1,7 @@
 import { onRequest, Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
-import { initializeApp } from "firebase-admin/app";
+import { getApps, initializeApp } from "firebase-admin/app";
 import {
     DocumentReference,
     DocumentSnapshot,
@@ -14,7 +14,7 @@ import {
 import * as logger from "firebase-functions/logger";
 import { createHash, createSign, timingSafeEqual } from "node:crypto";
 
-initializeApp();
+if (getApps().length === 0) initializeApp();
 const db = getFirestore();
 const cloudKitServerKeyID = defineSecret("CLOUDKIT_SERVER_KEY_ID");
 const cloudKitServerPrivateKey = defineSecret("CLOUDKIT_SERVER_PRIVATE_KEY");
@@ -1346,6 +1346,9 @@ export function recipeIndexItemsWithCloudKitImages(
             : null;
         return canonical ? [{
             ...recipe,
+            title: canonical.title,
+            totalMinutes: canonical.totalMinutes,
+            tags: canonical.tags,
             imageURL: canonical.imageURL,
             relatedRecipeIds: canonical.relatedRecipeIds,
             relatedGraphReferenceId: canonical.relatedGraphReferenceId,
@@ -1470,6 +1473,8 @@ export function cloudKitRecipeShelfLookupBody(
             "ownerId",
             "visibility",
             "title",
+            "totalMinutes",
+            "tagsData",
             "imageAsset",
             "relatedRecipeIdsData",
             "originalRecipeId",
@@ -4602,16 +4607,17 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
     const visibleRecipes = recipes.flatMap((recipe) => {
         const imageURL = safeCloudKitAssetURL(recipe.imageURL);
         if (!imageURL) return [];
-        const categoryName = recipe.tags
+        const categoryNames = [...new Set(recipe.tags
             .map(canonicalRecipeCategoryName)
-            .find((name): name is string => name !== null) ?? null;
+            .filter((name): name is string => name !== null))];
+        const categoryName = categoryNames[0] ?? null;
         const category = categoryName ? recipeCategoryPresentation[categoryName] : null;
-        return [{ recipe, imageURL, categoryName, category }];
+        return [{ recipe, imageURL, categoryNames, categoryName, category }];
     }).slice(0, 12);
 
     const categoryCounts = new Map<string, number>();
-    visibleRecipes.forEach(({ categoryName }) => {
-        if (categoryName) categoryCounts.set(categoryName, (categoryCounts.get(categoryName) ?? 0) + 1);
+    visibleRecipes.forEach(({ categoryNames }) => {
+        categoryNames.forEach((name) => categoryCounts.set(name, (categoryCounts.get(name) ?? 0) + 1));
     });
     const categories = [...categoryCounts.keys()]
         .sort((lhs, rhs) => (categoryCounts.get(rhs) ?? 0) - (categoryCounts.get(lhs) ?? 0) || lhs.localeCompare(rhs))
@@ -4621,7 +4627,7 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
         return `<button type="button" data-filter="${escapeHtml(name)}" aria-pressed="false"><span aria-hidden="true">${presentation.emoji}</span>${escapeHtml(name)}</button>`;
     }).join("");
 
-    const recipeRows = visibleRecipes.map(({ recipe, imageURL, categoryName, category }, index) => {
+    const recipeRows = visibleRecipes.map(({ recipe, imageURL, categoryNames, categoryName, category }, index) => {
         const tag = category && categoryName
             ? `<span class="recipe-tag" style="--tag-color:${category.light};--tag-color-dark:${category.dark}"><span aria-hidden="true">${category.emoji}</span>${escapeHtml(categoryName)}</span>`
             : "";
@@ -4633,7 +4639,7 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
             ? `<span class="recipe-meta">${creator}${tag}${time}</span>`
             : "";
         const loading = index === 0 ? `fetchpriority="high"` : `loading="lazy" decoding="async"`;
-        return `<li class="discovery-card" data-category="${escapeHtml(categoryName ?? "")}"><a href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-media"><img src="${escapeHtml(imageURL)}" alt="${escapeHtml(recipe.title)}" ${loading} referrerpolicy="no-referrer" onerror="window.cauldronRecipeImageFailed(this)"></span><span class="recipe-copy"><span class="recipe-title">${escapeHtml(recipe.title)}</span>${metadata}</span></a></li>`;
+        return `<li class="discovery-card" data-categories="${escapeHtml(JSON.stringify(categoryNames))}"><a href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-media"><img src="${escapeHtml(imageURL)}" alt="${escapeHtml(recipe.title)}" ${loading} referrerpolicy="no-referrer" onerror="this.closest('.discovery-card').hidden=true;this.closest('.discovery-card').dataset.imageError='true';if(window.cauldronRecipeImageFailed)window.cauldronRecipeImageFailed(this)"></span><span class="recipe-copy"><span class="recipe-title">${escapeHtml(recipe.title)}</span>${metadata}</span></a></li>`;
     }).join("");
 
     const shelf = recipeRows
@@ -4670,7 +4676,7 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
     @media(max-width:340px){.brand span{display:none}}
     @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
     @media(prefers-color-scheme:dark){:root{--paper:#18120d;--ink:#f8f0e8;--muted:#b5aaa2;--accent:#f09837;--surface:#262220;--separator:#39332f;--control:rgba(49,44,40,.7)}body{background:radial-gradient(circle at 12% 0,rgba(240,152,55,.065),transparent 28rem),var(--paper)}.recipe-tag{color:color-mix(in srgb,var(--tag-color-dark) 72%,var(--ink))}}
-    </style></head><body><div class="page"><header><a class="brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme:dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt=""></picture><span>Cauldron</span></a><a class="store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header><main>${shelf}</main><footer><span>© ${year} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer></div><script>(function(){var grid=document.querySelector(".discovery-grid");var buttons=Array.from(document.querySelectorAll("[data-filter]"));var cards=Array.from(document.querySelectorAll(".discovery-card"));var empty=document.querySelector(".no-results");function update(filter){var count=0;cards.forEach(function(card){var failed=card.dataset.imageError==="true";var matches=!filter||card.getAttribute("data-category")===filter;card.hidden=failed||!matches;if(!card.hidden)count+=1;});if(grid)grid.classList.toggle("uniform",Boolean(filter)||Boolean(cards[0]&&cards[0].hidden));if(empty)empty.hidden=count!==0;}window.cauldronRecipeImageFailed=function(image){var card=image.closest(".discovery-card");if(card)card.dataset.imageError="true";var selected=document.querySelector("[data-filter].selected");update(selected?selected.getAttribute("data-filter")||"":"");};buttons.forEach(function(button){button.addEventListener("click",function(){var filter=button.getAttribute("data-filter")||"";buttons.forEach(function(item){var selected=item===button;item.classList.toggle("selected",selected);item.setAttribute("aria-pressed",String(selected));});update(filter);});});update("");})();</script></body></html>`;
+    </style></head><body><div class="page"><header><a class="brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme:dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt=""></picture><span>Cauldron</span></a><a class="store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header><main>${shelf}</main><footer><span>© ${year} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer></div><script>(function(){var grid=document.querySelector(".discovery-grid");var buttons=Array.from(document.querySelectorAll("[data-filter]"));var cards=Array.from(document.querySelectorAll(".discovery-card"));var empty=document.querySelector(".no-results");function update(filter){var count=0;cards.forEach(function(card){var failed=card.dataset.imageError==="true";var matches=!filter||JSON.parse(card.getAttribute("data-categories")||"[]").includes(filter);card.hidden=failed||!matches;if(!card.hidden)count+=1;});if(grid)grid.classList.toggle("uniform",Boolean(filter)||Boolean(cards[0]&&cards[0].hidden));if(empty)empty.hidden=count!==0;}window.cauldronRecipeImageFailed=function(image){var card=image.closest(".discovery-card");if(card)card.dataset.imageError="true";var selected=document.querySelector("[data-filter].selected");update(selected?selected.getAttribute("data-filter")||"":"");};buttons.forEach(function(button){button.addEventListener("click",function(){var filter=button.getAttribute("data-filter")||"";buttons.forEach(function(item){var selected=item===button;item.classList.toggle("selected",selected);item.setAttribute("aria-pressed",String(selected));});update(filter);});});update("");})();</script></body></html>`;
 }
 
 type InviteRequestLike = {
@@ -5348,6 +5354,30 @@ async function cleanupPermanentlyInvalidRecipeSnapshots(
     }));
 }
 
+/** The exact read-only discovery pipeline used by production and local QA. */
+export async function loadHomepageRecipeShelf(now = new Date()): Promise<{
+    validation: RecipeShelfValidation;
+    observed: ObservedRecipeSnapshot[];
+}> {
+    const snapshot = await db.collection("shared_recipes")
+        .orderBy("updatedAt", "desc")
+        .limit(36)
+        .get();
+    const documents = snapshot.docs;
+    const summaries = await browsableRecipes(documents);
+    const rotationKey = now.toISOString().slice(0, 10);
+    const candidates = rotatingHomepageRecipeCandidates(summaries, rotationKey, 18, 2);
+    const validation = await bestEffortRecipeIndexItems(candidates, 6_000);
+    const observed = documents.flatMap((document): ObservedRecipeSnapshot[] => {
+        const ownerId = document.data()?.ownerId;
+        const updateTimeMillis = document.updateTime?.toMillis();
+        return typeof ownerId === "string" && typeof updateTimeMillis === "number"
+            ? [{ recipeId: document.id, ownerId, updateTimeMillis }]
+            : [];
+    });
+    return { validation, observed };
+}
+
 export const previewHome = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     if (!await enforcePublicReadRateLimit(req)) {
@@ -5355,22 +5385,7 @@ export const previewHome = onRequest(cloudBackedPublicReadHTTPOptions, async (re
         return;
     }
     try {
-        const snapshot = await db.collection("shared_recipes")
-            .orderBy("updatedAt", "desc")
-            .limit(36)
-            .get();
-        const documents = snapshot.docs;
-        const summaries = await browsableRecipes(documents);
-        const rotationKey = new Date().toISOString().slice(0, 10);
-        const candidates = rotatingHomepageRecipeCandidates(summaries, rotationKey, 18, 2);
-        const validation = await bestEffortRecipeIndexItems(candidates, 6_000);
-        const observed = documents.flatMap((document): ObservedRecipeSnapshot[] => {
-            const ownerId = document.data()?.ownerId;
-            const updateTimeMillis = document.updateTime?.toMillis();
-            return typeof ownerId === "string" && typeof updateTimeMillis === "number"
-                ? [{ recipeId: document.id, ownerId, updateTimeMillis }]
-                : [];
-        });
+        const { validation, observed } = await loadHomepageRecipeShelf();
         await cleanupPermanentlyInvalidRecipeSnapshots(
             observed,
             validation.permanentlyInvalidRecipeIds

@@ -12,7 +12,9 @@ The browser product is deliberately read-only. `/recipe/<uuid>` validates the
 Firebase publication pointer and then hydrates the current public recipe from
 CloudKit, including its hero image, ingredients, and method. Signed CloudKit
 asset URLs are fetched per request so image links do not go stale. Profile and
-collection URLs remain compact title-only recipe shelves. Rich recipe content
+collection URLs show compact image-led recipe shelves. Shelf titles, times, tags,
+visibility, ownership, and image URLs are validated against current CloudKit
+records. Rich recipe content
 is not duplicated in Firebase; every page has a clear path back to the app.
 There is no standalone web-sharing preference or unshare control; lifecycle
 privacy cleanup remains tied to making an item private, deleting it, or deleting
@@ -23,6 +25,34 @@ the account.
 domains remain in the app's Associated Domains entitlement and AASA file so old
 links keep working. Do not remove the backward-compatible custom-scheme button
 until an app build containing the custom-domain entitlement has shipped broadly.
+
+Human-facing profile URLs are `/u/<username>`. Stable-ID routes remain valid and
+redirect to the current username when one is available. Historical username
+claims remain reserved while the account exists so old links remain resolvable.
+
+## Read-only homepage preview
+
+Run `npm run preview:live` in `firebase/functions` with an authorized `gcloud`
+session. It binds only to `http://127.0.0.1:8766` and uses the same homepage loader
+as production: recent Firebase summaries, daily rotation, creator diversity,
+and authoritative CloudKit validation. It neither publishes nor repairs records,
+and it never substitutes made-up recipes. Credentials are loaded from the
+existing Google Secret Manager secrets into server memory, never browser code.
+Only aggregate recipe/creator counts are logged. `google-auth-library` is an
+explicit development dependency for the local authenticated read client.
+
+This is a **homepage** preview: recipe, profile, collection, and invite links
+redirect to production, so those pages do not preview un-deployed templates.
+Use the deployed hosted monitor and browser QA separately for those routes.
+The handler tests run as part of `npm test` and cover rejected writes, path
+traversal, missing files, bodyless HEAD responses, and sanitized failures.
+
+`tools/withProductionContext.mjs <command> ...` supplies the existing CloudKit
+credentials and public monitor fixtures to the production preflight without
+writing secrets to disk. `tools/configureWWWRedirect.mjs` reads Firebase's
+`www` redirect-domain status; `--apply` configures only that redirect domain.
+Complete the DNS records returned by Firebase separately in Vercel. Never
+replace the apex Firebase ownership, certificate-validation, or address records.
 
 To audit snapshots created before the Firebase summary-only contract, run
 `npm run scrub:legacy-web-snapshots` from `firebase/functions`. Add
@@ -109,7 +139,8 @@ creates a short interval where old clients cannot publish; it never creates an
 interval where V2 is advertised while an unauthenticated Admin SDK writer may
 still be live. Existing public links remain readable. The first authorized update
 upgrades legacy documents in place. Profile username documents become data-free
-aliases to the stable user-ID page. Capability-bound privacy epochs prevent an
+aliases to stable user identities; rendered pages use the current `/u/<username>`
+URL where available. Capability-bound privacy epochs prevent an
 older in-flight publish from racing a newer privacy removal.
 
 Before releasing the matching app build, verify the deployed associated-domain

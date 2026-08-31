@@ -31,6 +31,8 @@ Guidance for coding agents working in this repository.
   - `cd firebase/functions && npm run audit:production`
 - Hosted public sharing contract:
   - `cd firebase/functions && npm run monitor:hosted`
+- Read-only, real-production-data homepage preview (requires authorized `gcloud`; detail links open production):
+  - `cd firebase/functions && npm run preview:live`
 - Simulator QA mode:
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
   - Add `--cauldron-desktop-workspace` to preview the iPhone/iPad-on-Mac single-workspace layout in an iPad simulator.
