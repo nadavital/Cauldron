@@ -7,6 +7,9 @@ test("SEO image audit requires nonempty, well-formed exact-origin URLs", () => {
     assert.equal(hasSameOriginImages(["https://CAULDRONRECIPES.com:443/recipe/id/image/640.webp"], origin), true);
     for (const images of [undefined, null, [], "not an array", [null], [42], [{}],
         ["/recipe/id/image/640.webp"], ["not a URL"],
+        ["blob:https://cauldronrecipes.com/recipe-image"],
+        ["data:image/png;base64,AAAA"],
+        ["javascript:alert(1)"],
         ["http://cauldronrecipes.com/image.png"],
         ["https://cauldronrecipes.com.attacker.example/image.png"],
         ["https://cauldronrecipes.com@attacker.example/image.png"],

@@ -5,7 +5,7 @@ export function hasSameOriginImages(images, expectedOrigin) {
         if (typeof value !== "string") return false;
         try {
             const url = new URL(value);
-            return url.origin === expectedOrigin && !url.username && !url.password;
+            return url.protocol === "https:" && url.origin === expectedOrigin && !url.username && !url.password;
         } catch {
             return false;
         }
