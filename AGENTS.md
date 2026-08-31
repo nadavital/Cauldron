@@ -35,6 +35,8 @@ Guidance for coding agents working in this repository.
   - `cd firebase/functions && npm run preview:live`
 - Read-only public-user/index eligibility audit (aggregate counts only; requires authorized `gcloud`):
   - `cd firebase/functions && npm run build && node tools/auditPublicIndex.mjs`
+- Read-only HTTP timing and SEO smoke audit (not field Core Web Vitals):
+  - `cd firebase/functions && node tools/auditHostedWeb.mjs`
 - Simulator QA mode:
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
   - Add `--cauldron-desktop-workspace` to preview the iPhone/iPad-on-Mac single-workspace layout in an iPad simulator.
@@ -60,6 +62,7 @@ Guidance for coding agents working in this repository.
   - Firebase is a replaceable public index, not the content authority. After authoritative sync, the app submits an exact owner manifest so Firebase can upsert missing summaries and delete stale owner rows with generation, privacy, revocation, and document-revision guards. Web profile, collection, and home shelves batch-validate recipe identity, owner, and visibility in CloudKit before rendering; the homepage mixes up to 24 recent summaries with an age-independent daily document-ID ring sample of up to 36 summaries, validates up to 24 candidates, and displays up to 12 recipes with creator/category diversity. It omits cards without current validated CloudKit images; the hosted monitor fails on an empty shelf and probes up to three displayed images and recipe destinations. Collection pages resolve authoritative `CollectionMembership` edges and use legacy `recipeIds` only when no edges exist. Missing profiles may materialize lazily from canonical `UsernameClaim` and `User` records, while scheduled profile/recipe backfill must never resurrect revoked/private identities or block a public page request.
   - Recipe share links use canonical `/recipe/{id}` URLs. A successful, periodically refreshed publication receipt lets an unchanged Firebase summary share immediately; CloudKit-only recipe edits do not republish that summary, while title/time/tag changes still wait for server confirmation. Open Graph artwork uses the stable same-origin `/recipe/{id}/social-card.png` proxy with the branded static card as its fallback, never a signed CloudKit asset URL.
   - Recipe structured data also uses the stable image proxy. `/sitemap.xml` dynamically lists the current validated discovery recipes, not an exhaustive library export; unavailable validation returns 503 instead of publishing stale links. Legacy users without a creator-owned `UsernameClaim` must open a migration-capable app once before public backfill can include them; the server must not manufacture owner-protected claims.
+  - CloudKit paginated web queries must retain the original query and filters alongside `continuationMarker`; use `cloudKitQueryPageRequest` for profile backfill, owner recipes, and collection membership pages.
   - `cauldronrecipes.com` is DNS-managed at Vercel and attached to the existing Firebase Hosting site. Preserve its Firebase ownership and certificate-validation DNS records when changing domain infrastructure.
 - Large-screen experience is intentional:
   - iPad layouts are first-class, not stretched iPhone views.

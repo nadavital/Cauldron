@@ -29,6 +29,14 @@ test("sitemap monitor rejects static-only, duplicate, or offsite discovery entri
 const appPaths = [
     "/recipe/*", "/u/*", "/u/*/*", "/invite", "/invite/*", "/profile/*", "/collection/*",
 ];
+
+test("invitation utility routes are excluded from search results without blocking app handoff", () => {
+    const config = JSON.parse(readFileSync(new URL("../../firebase.json", import.meta.url), "utf8"));
+    for (const source of ["/invite", "/invite/**"]) {
+        assert.ok(config.hosting.headers.some(rule => rule.source === source &&
+            rule.headers.some(header => header.key === "X-Robots-Tag" && header.value === "noindex, follow")));
+    }
+});
 const recipeExpected = {
     canonicalURL: "https://cauldronrecipes.com/recipe/recipe-id",
     recipeId: "recipe-id",
@@ -170,11 +178,15 @@ test("collection validator rejects an empty or mismatched fixture", () => {
 });
 
 test("recipe validator rejects empty rich content", () => {
+    assert.doesNotThrow(() => validateHTML("recipe", recipeHTML({
+        image: [`${recipeExpected.canonicalURL}/social-card.png`],
+    }), recipeExpected));
     for (const [override, message] of [
         [{ recipeIngredient: [] }, /nonempty ingredients/],
         [{ recipeInstructions: [] }, /nonempty instructions/],
         [{ image: [] }, /contain a non-placeholder HTTPS image/],
         [{ image: ["https://cauldronrecipes.com/social-card.png"] }, /non-placeholder HTTPS image/],
+        [{ image: ["https://cauldronrecipes.com/recipe/other/social-card.png"] }, /non-placeholder HTTPS image/],
         [{ keywords: "" }, /tags\/keywords/],
     ]) {
         assert.throws(() => validateHTML("recipe", recipeHTML(override), recipeExpected), message);

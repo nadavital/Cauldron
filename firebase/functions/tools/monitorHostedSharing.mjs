@@ -189,6 +189,7 @@ export function validateHTML(kind, html, expected = {}) {
         }
         const images = Array.isArray(recipe.image) ? recipe.image : [recipe.image];
         if (!images.some((image) => {
+            if (image === `${expected.canonicalURL}/social-card.png`) return true;
             if (typeof image !== "string" || !image.trim() || /\/social-card\.(?:png|svg)(?:$|\?)/i.test(image)) return false;
             try {
                 return new URL(image).protocol === "https:";

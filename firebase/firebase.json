@@ -73,6 +73,14 @@
         ],
         "headers": [
             {
+                "source": "/invite",
+                "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
+            },
+            {
+                "source": "/invite/**",
+                "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
+            },
+            {
                 "source": "/@(icon-small-light.svg|icon-small-dark.svg|icon-light.svg|icon-dark.svg|favicon.svg|favicon.ico|apple-touch-icon.png|social-card.png)",
                 "headers": [
                     {
