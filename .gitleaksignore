@@ -1,0 +1,5 @@
+# Exact historical false positives reviewed during the public-repository audit.
+# A navigation persistence key, not an authentication credential:
+3bc94aa6a83fabcfdca95912a0a5e820eb29586e:Cauldron/Core/AppIntents/RecipeIntentNavigation.swift:generic-api-key:6
+# A nonfunctional documentation placeholder, not a real private key:
+774414bfbf8df4dce7b88acbef56b1168474fa22:VERCEL_DEPLOYMENT_GUIDE.md:private-key:79

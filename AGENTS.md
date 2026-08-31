@@ -83,6 +83,12 @@ Guidance for coding agents working in this repository.
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.
 
 ## Release/Update Checklist
+- Public-repository CI pins actions to full commit SHAs. Keep the Gitleaks
+  checksum pinned when updating its version, and never broaden its two exact
+  historical false-positive exclusions. CodeQL covers JavaScript/TypeScript,
+  not the native Swift targets. Dependabot changes require review and tests;
+  they must not automatically deploy production. Private operational/QA reports
+  stay untracked under `.agent/`; reusable instructions remain committed.
 - CI uses GitHub's dedicated `xcode-27` preview runner and
   `tools/ci/verify_xcode_27.sh` fails if its Xcode or iPhoneOS SDK major drifts.
   PR/push checks warn when the preview build rotates; manually dispatched
