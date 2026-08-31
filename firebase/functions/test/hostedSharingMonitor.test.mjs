@@ -8,12 +8,23 @@ import {
     dataAPIMonitorRequests,
     resolvedMonitoredURL,
     validateAASA,
+    validateSitemap,
     validateDataAPI,
     validateHTML,
     homepageRecipeCards,
     verifyHomepageImages,
     verifyHomepageRecipes,
 } from "../tools/monitorHostedSharing.mjs";
+
+test("sitemap monitor rejects static-only, duplicate, or offsite discovery entries", () => {
+    const origin = "https://cauldronrecipes.com";
+    const xml = (locations) => `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${locations.map(l=>`<url><loc>${l}</loc></url>`).join("")}</urlset>`;
+    const recipe = `${origin}/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C`;
+    assert.doesNotThrow(() => validateSitemap(xml([`${origin}/`, recipe]), origin));
+    assert.throws(() => validateSitemap(xml([`${origin}/`]), origin));
+    assert.throws(() => validateSitemap(xml([`${origin}/`, recipe, recipe]), origin));
+    assert.throws(() => validateSitemap(xml([`${origin}/`, "https://example.com/"]), origin));
+});
 
 const appPaths = [
     "/recipe/*", "/u/*", "/u/*/*", "/invite", "/invite/*", "/profile/*", "/collection/*",

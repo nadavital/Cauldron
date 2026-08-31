@@ -24,6 +24,7 @@ import {
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
     generateHomePageHtml,
+    generateDiscoverySitemap,
     HOMEPAGE_CACHE_CONTROL,
     homepageArchivePivot,
     loadHomepageRecipeDocuments,
@@ -259,6 +260,11 @@ test("recipe previews use a stable same-origin social image URL", () => {
     assert.match(html, new RegExp(`property="og:image" content="${canonicalURL}/social-card\\.png"`));
     assert.match(html, /property="og:image:alt" content="Tomato Soup on Cauldron"/);
     assert.doesNotMatch(html, /property="og:image" content="https:\/\/cvws\.icloud-content\.com/);
+    const structured = JSON.parse(html.match(/<script type="application\/ld\+json">([^]*?)<\/script>/)[1]);
+    assert.deepEqual(structured.image, [`${canonicalURL}/social-card.png`]);
+    assert.equal(structured.url, canonicalURL);
+    assert.deepEqual(structured.author, { "@type": "Person", name: "Chef Nadav", url: "https://cauldronrecipes.com/u/chef_nadav" });
+    assert.doesNotMatch(JSON.stringify(structured), /token=temporary/);
 });
 
 test("social image proxy validates file signatures when CloudKit omits a MIME type", () => {
@@ -1062,7 +1068,21 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
         totalRecipeCount: 1,
     });
     assert.match(html, /src="https:\/\/cvws\.icloud-content\.com\/image\.jpg\?token=signed"/);
-    assert.match(html, /loading="lazy" decoding="async"/);
+    assert.match(html, /fetchpriority="high" decoding="async"/);
+    assert.match(html, /\.recipe-photo \{ position:absolute; inset:0; z-index:1;/);
+    assert.match(html, /\.recipe-placeholder \{ grid-area:1\/1; z-index:0;/);
+});
+
+test("discovery sitemap lists only canonical valid unique recipe URLs", () => {
+    const id = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const xml = generateDiscoverySitemap([{ recipeId: id }, { recipeId: id }, { recipeId: "<script>" }]);
+    assert.equal((xml.match(/<url>/g) || []).length, 2);
+    assert.match(xml, new RegExp(`https://cauldronrecipes.com/recipe/${id}`));
+    assert.doesNotMatch(xml, /script|changefreq|priority/);
+});
+
+test("unavailable pages are explicitly excluded from search indexing", () => {
+    assert.match(generatePublicStatusPageHtml("Unavailable", "Try again"), /name="robots" content="noindex, follow"/);
 });
 
 test("profile and collection shelves fetch current presentation fields without rich content", () => {

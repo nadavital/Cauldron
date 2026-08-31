@@ -27,6 +27,10 @@
         ],
         "rewrites": [
             {
+                "source": "/sitemap.xml",
+                "function": "previewSitemap"
+            },
+            {
                 "source": "/",
                 "function": "previewHome"
             },
@@ -68,6 +72,15 @@
             }
         ],
         "headers": [
+            {
+                "source": "/@(icon-small-light.svg|icon-small-dark.svg|icon-light.svg|icon-dark.svg|favicon.svg|favicon.ico|apple-touch-icon.png|social-card.png)",
+                "headers": [
+                    {
+                        "key": "Cache-Control",
+                        "value": "public, max-age=86400"
+                    }
+                ]
+            },
             {
                 "source": "/.well-known/apple-app-site-association",
                 "headers": [

@@ -29,6 +29,20 @@ export function validateAASA(payload) {
     }
 }
 
+export function validateSitemap(xml, origin) {
+    const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+    if (!xml.includes('xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"') ||
+        !locations.includes(`${origin}/`) || locations.length < 2 ||
+        new Set(locations).size !== locations.length) throw new Error("sitemap has no valid discovery URLs");
+    for (const location of locations) {
+        const url = new URL(location);
+        if (url.origin !== origin || url.search || url.hash ||
+            (url.pathname !== "/" && !/^\/recipe\/[0-9a-f-]{36}$/i.test(url.pathname))) {
+            throw new Error("sitemap contains a noncanonical URL");
+        }
+    }
+}
+
 function requireText(html, text, message) {
     if (!html.includes(text)) throw new Error(message);
 }
@@ -332,6 +346,9 @@ async function monitorResponse(baseURL, check) {
     if (check.kind === "aasa") {
         if (!contentType.includes("application/json")) throw new Error(`AASA returned unexpected content type: ${contentType || "missing"}`);
         validateAASA(await response.json());
+    } else if (check.kind === "sitemap") {
+        if (!contentType.includes("application/xml")) throw new Error("sitemap returned unexpected content type");
+        validateSitemap(await response.text(), baseURL.origin);
     } else if (check.kind === "data") {
         if (!contentType.includes("application/json")) throw new Error(`${check.label} returned unexpected content type: ${contentType || "missing"}`);
         validateDataAPI(check.dataKind, await response.json(), check.expected);
@@ -439,6 +456,7 @@ export async function runHostedMonitor() {
         },
     ];
     for (const check of checks) await monitorResponse(baseURL, check);
+    await monitorResponse(baseURL, { path: "/sitemap.xml", kind: "sitemap", label: "validated discovery sitemap" });
     for (const request of dataAPIMonitorRequests(baseURL, functionBaseURL, dataChecks)) {
         await monitorResponse(request.baseURL, request.check);
     }

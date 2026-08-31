@@ -1358,7 +1358,8 @@ export function recipeIndexItemsWithCloudKitImages(
 }
 
 async function fetchPublicCloudKitRecipeIndexItems(
-    recipes: SanitizedRecipeShare[]
+    recipes: SanitizedRecipeShare[],
+    knownProfiles: WebProfileContent[] = []
 ): Promise<RecipeShelfValidation> {
     if (recipes.length === 0) {
         return { items: [], permanentlyInvalidRecipeIds: [] };
@@ -1368,8 +1369,11 @@ async function fetchPublicCloudKitRecipeIndexItems(
     if (!keyID || !privateKey) {
         throw new Error("CloudKit web recipe credentials are unavailable");
     }
-    const canonicalOwners: WebProfileContent[] = [];
-    const ownerIds = [...new Set(recipes.map((recipe) => recipe.ownerId))];
+    // Reuse only identities validated in this request, never across requests.
+    const canonicalOwners: WebProfileContent[] = [...knownProfiles];
+    const knownOwnerIDs = new Set(knownProfiles.map((profile) => profile.userId));
+    const ownerIds = [...new Set(recipes.map((recipe) => recipe.ownerId))]
+        .filter((ownerId) => !knownOwnerIDs.has(ownerId));
     for (let index = 0; index < ownerIds.length; index += 4) {
         const ownerChunk = ownerIds.slice(index, index + 4);
         const results = await Promise.all(ownerChunk.map(async (ownerId) => {
@@ -1486,10 +1490,11 @@ export function cloudKitRecipeShelfLookupBody(
 
 async function bestEffortRecipeIndexItems(
     recipes: SanitizedRecipeShare[],
-    deadlineMilliseconds?: number
+    deadlineMilliseconds?: number,
+    knownProfiles: WebProfileContent[] = []
 ): Promise<RecipeShelfValidation> {
     try {
-        const request = fetchPublicCloudKitRecipeIndexItems(recipes);
+        const request = fetchPublicCloudKitRecipeIndexItems(recipes, knownProfiles);
         if (!deadlineMilliseconds) {
             return await request;
         }
@@ -4205,8 +4210,8 @@ function compactPageStyles(): string {
         .recipe-list li { min-width:0; }
         .recipe-row { display:block; color:inherit; text-decoration:none; }
         .recipe-media { position:relative; aspect-ratio:4/3; display:grid; place-items:center; overflow:hidden; border-radius:16px; background:color-mix(in srgb,var(--accent) 8%,var(--surface)); }
-        .recipe-photo { width:100%; height:100%; grid-area:1/1; display:block; object-fit:cover; transition:transform .24s ease; }
-        .recipe-placeholder { grid-area:1/1; }
+        .recipe-photo { position:absolute; inset:0; z-index:1; width:100%; height:100%; display:block; object-fit:cover; transition:transform .24s ease; }
+        .recipe-placeholder { grid-area:1/1; z-index:0; }
         .recipe-placeholder,.recipe-placeholder img { width:38px; height:38px; display:block; opacity:.72; }
         .recipe-copy { display:block; padding:11px 2px 0; }
         .recipe-name { display:-webkit-box; min-height:2.4em; overflow:hidden; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:19px; font-weight:500; line-height:1.2; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
@@ -4274,7 +4279,7 @@ function appOpenFallbackScript(elementId: string, appURL: string): string {
 export function generatePublicStatusPageHtml(title: string, message: string): string {
     const safeTitle = escapeHtml(title);
     const safeMessage = escapeHtml(message);
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(title, message, `${PUBLIC_WEB_ORIGIN}/`)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main>${compactPageFooter()}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta name="robots" content="noindex, follow">${compactPageHead(title, message, `${PUBLIC_WEB_ORIGIN}/`)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main>${compactPageFooter()}</body></html>`;
 }
 
 export function generateCompactRecipePageHtml(
@@ -4345,7 +4350,7 @@ export function detectedImageContentType(bytes: Uint8Array): string | null {
     return null;
 }
 
-function recipePageHead(recipe: WebRecipeContent, description: string, canonicalURL: string): string {
+function recipePageHead(recipe: WebRecipeContent, description: string, canonicalURL: string, creator: WebRecipeCreator | null): string {
     const title = escapeHtml(recipe.title);
     const safeDescription = escapeHtml(description);
     const safeCanonicalURL = escapeHtml(canonicalURL);
@@ -4358,7 +4363,10 @@ function recipePageHead(recipe: WebRecipeContent, description: string, canonical
         "@context": "https://schema.org",
         "@type": "Recipe",
         name: recipe.title,
-        image: recipe.imageURL ? [recipe.imageURL] : undefined,
+        image: recipe.imageURL ? [recipeSocialImageURL(canonicalURL)] : undefined,
+        description,
+        url: canonicalURL,
+        author: creator ? { "@type": "Person", name: creator.displayName, url: canonicalProfileURL(creator.username) } : undefined,
         recipeYield: recipe.yields ?? undefined,
         totalTime: recipe.totalMinutes ? `PT${recipe.totalMinutes}M` : undefined,
         recipeCategory: recipe.tags[0],
@@ -4511,7 +4519,7 @@ export function generateRecipePageHtml(
     const ingredientsClass = recipe.ingredients.length <= 12 ? "ingredients-column sticky-eligible" : "ingredients-column";
     const safeCanonicalJSON = JSON.stringify(canonicalURL).replace(/</g, "\\u003c");
 
-    return `<!DOCTYPE html><html lang="en"><head>${recipePageHead(recipe, description, canonicalURL)}<style>
+    return `<!DOCTYPE html><html lang="en"><head>${recipePageHead(recipe, description, canonicalURL, creator)}<style>
         :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#1C1C1E; --muted:#6E6E73; --accent:#FF9933; --accent-text:#995100; --soft:#FFFFFF; }
         @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } .tags li { color:#FFD3A1; background:color-mix(in srgb,var(--tag-color-dark) 15%,transparent); } }
         * { box-sizing:border-box; }
@@ -4600,7 +4608,7 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
     const safeAppURL = escapeHtml(options.appURL);
     const count = `${options.totalRecipeCount}${options.hasMoreRecipes ? "+" : ""}`;
     const noun = options.totalRecipeCount === 1 ? "recipe" : "recipes";
-    const rows = options.recipes.map((recipe) => {
+    const rows = options.recipes.map((recipe, index) => {
         const categoryName = recipe.tags.flatMap((tag) => {
             const category = canonicalRecipeCategoryName(tag);
             return category ? [category] : [];
@@ -4608,8 +4616,9 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
         const presentation = categoryName ? recipeCategoryPresentation[categoryName] : null;
         const verifiedImageURL = safeCloudKitAssetURL(recipe.imageURL);
         const placeholder = `<picture class="recipe-placeholder"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture>`;
+        const loading = index === 0 ? 'fetchpriority="high"' : index < 3 ? 'loading="eager"' : 'loading="lazy"';
         const media = verifiedImageURL
-            ? `${placeholder}<img class="recipe-photo" src="${escapeHtml(verifiedImageURL)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`
+            ? `${placeholder}<img class="recipe-photo" src="${escapeHtml(verifiedImageURL)}" alt="" ${loading} decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`
             : placeholder;
         const tag = presentation && categoryName
             ? `<span class="recipe-tag" style="--tag-color:${presentation.light};--tag-color-dark:${presentation.dark}"><span aria-hidden="true">${presentation.emoji}</span>${escapeHtml(categoryName)}</span>`
@@ -5440,6 +5449,34 @@ export const previewHome = onRequest(cloudBackedPublicReadHTTPOptions, async (re
     }
 });
 
+/** A conservative discovery sitemap: only currently validated public recipes.
+ * It evolves with daily discovery; it is not an exhaustive library export. */
+export function generateDiscoverySitemap(recipes: Array<Pick<WebRecipeIndexItem, "recipeId">>): string {
+    const urls = [`${PUBLIC_WEB_ORIGIN}/`, ...new Set(recipes
+        .filter((recipe) => isValidUUID(recipe.recipeId))
+        .map((recipe) => `${PUBLIC_WEB_ORIGIN}/recipe/${encodeURIComponent(recipe.recipeId)}`))];
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map((url) => `<url><loc>${escapeHtml(url)}</loc></url>`).join("")}</urlset>`;
+}
+
+export const previewSitemap = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
+    res.set("Cache-Control", "private, no-store, max-age=0");
+    if (!await enforcePublicReadRateLimit(req)) {
+        rejectRateLimitedRead(res);
+        return;
+    }
+    try {
+        const { validation } = await loadHomepageRecipeShelf();
+        if (!validation.items.length) {
+            res.set("Retry-After", "300").status(503).send("Sitemap temporarily unavailable");
+            return;
+        }
+        res.type("application/xml").send(generateDiscoverySitemap(validation.items));
+    } catch {
+        res.set("Retry-After", "300").status(503).send("Sitemap temporarily unavailable");
+    }
+});
+
 export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
@@ -5552,7 +5589,7 @@ export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async 
             profileCursor = recipeSnapshot.docs[recipeSnapshot.docs.length - 1];
         }
         browsable.sort((lhs, rhs) => lhs.title.localeCompare(rhs.title));
-        const validation = await bestEffortRecipeIndexItems(browsable);
+        const validation = await bestEffortRecipeIndexItems(browsable, undefined, [canonicalProfile]);
         const recipes = validation.items.slice(0, MAX_WEB_RECIPE_CARDS);
         const hasMoreRecipes = validation.items.length > MAX_WEB_RECIPE_CARDS || !profileSourceExhausted;
         await cleanupPermanentlyInvalidRecipeSnapshots(
