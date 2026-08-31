@@ -1093,9 +1093,7 @@ async function fetchPublicCloudKitCollectionMembershipRecipeIDs(
         if (pageCount > 3) {
             throw new Error("CloudKit collection membership query exceeded its safety cap");
         }
-        const body = JSON.stringify(continuationMarker
-            ? { continuationMarker }
-            : {
+        const body = JSON.stringify(cloudKitQueryPageRequest({
                 query: {
                     recordType: "CollectionMembership",
                     filterBy: [
@@ -1112,7 +1110,7 @@ async function fetchPublicCloudKitCollectionMembershipRecipeIDs(
                     ],
                 },
                 resultsLimit: 500,
-            });
+            }, continuationMarker));
         const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
         const signature = createSign("SHA256")
             .update(cloudKitSignatureInput(body, date, subpath))
@@ -1217,9 +1215,7 @@ async function fetchCanonicalCloudKitRecipesByOwner(
     let continuationMarker: string | null = null;
     const recipes: WebRecipeContent[] = [];
     for (let page = 0; page < 5; page += 1) {
-        const body = JSON.stringify(continuationMarker
-            ? { continuationMarker }
-            : {
+        const body = JSON.stringify(cloudKitQueryPageRequest({
                 query: {
                     recordType: "SharedRecipe",
                     filterBy: [{
@@ -1229,7 +1225,7 @@ async function fetchCanonicalCloudKitRecipesByOwner(
                     }],
                 },
                 resultsLimit: 100,
-            });
+            }, continuationMarker));
         const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
         const signature = createSign("SHA256")
             .update(cloudKitSignatureInput(body, date, subpath))
@@ -4980,15 +4976,23 @@ export const previewInvite = onRequest(cloudAuthorizedHTTPOptions, async (req, r
     res.send(generateInvitePreviewHtml(activeInviteCode));
 });
 
+// CloudKit requires the original query even when continuing a result page.
+export function cloudKitQueryPageRequest(
+    request: { query: object; resultsLimit: number },
+    continuationMarker: string | null
+): object {
+    return { ...request, ...(continuationMarker ? { continuationMarker } : {}) };
+}
+
 async function fetchCloudKitProfileBackfillPage(
     continuationMarker: string | null
 ): Promise<{ ownerIds: string[]; continuationMarker: string | null }> {
     const keyID = cloudKitServerKeyID.value();
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
-    const body = JSON.stringify(continuationMarker
-        ? { continuationMarker }
-        : { query: { recordType: "User" }, resultsLimit: 25 });
+    const body = JSON.stringify(cloudKitQueryPageRequest(
+        { query: { recordType: "User" }, resultsLimit: 25 }, continuationMarker
+    ));
     const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const signature = createSign("SHA256")
         .update(cloudKitSignatureInput(body, date, subpath))

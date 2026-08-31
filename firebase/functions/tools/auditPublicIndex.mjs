@@ -16,7 +16,7 @@ authClient.refreshHandler = async () => {
 const db = getFirestore();
 db.settings({ projectId, auth: new GoogleAuth({ projectId, authClient }) });
 const { canonicalCloudKitOwnerRecord, canonicalCloudKitRecipeCreator, cloudKitSignatureInput,
-    sanitizeStoredRecipeShareInput } = await import("../lib/index.js");
+    sanitizeStoredRecipeShareInput, cloudKitQueryPageRequest } = await import("../lib/index.js");
 
 async function cloudRead(operation, payload) {
     const subpath = `/database/1/iCloud.Nadav.Cauldron/production/public/records/${operation}`;
@@ -38,9 +38,9 @@ async function cloudRead(operation, payload) {
 const records = [];
 let continuationMarker;
 for (let page = 0; page < 10; page++) {
-    const result = await cloudRead("query", continuationMarker ? { continuationMarker } : {
-        query: { recordType: "User" }, resultsLimit: 100,
-    });
+    const result = await cloudRead("query", cloudKitQueryPageRequest({
+        query: { recordType: "User" }, resultsLimit: 25,
+    }, continuationMarker ?? null));
     records.push(...(result.records || []));
     continuationMarker = result.continuationMarker;
     if (!continuationMarker) break;

@@ -17,6 +17,7 @@ import {
     profileShareRequestMatchesCanonicalUsername,
     profileBackfillFailureState,
     cloudKitOwnerQuery,
+    cloudKitQueryPageRequest,
     cloudKitRecipeShelfLookupBody,
     cloudKitRecordsPayloadDisposition,
     cloudKitQueryPayloadHasErrors,
@@ -75,6 +76,15 @@ test("web avatar resolution matches the native emoji-first recovery rule", () =>
     assert.equal(canonicalProfileImageRecordName("🍳", "stale-profile-photo"), null);
     assert.equal(canonicalProfileImageRecordName("  ", "current-profile-photo"), "current-profile-photo");
     assert.equal(canonicalProfileImageRecordName(null, null), null);
+});
+
+test("CloudKit pagination retains the original record type, owner filters, and limit", () => {
+    for (const recordType of ["User", "SharedRecipe", "CollectionMembership"]) {
+        const request = { query: { recordType, filterBy: [{ fieldName: "ownerId", comparator: "EQUALS", fieldValue: { value: "owner" } }] }, resultsLimit: 25 };
+        assert.deepEqual(cloudKitQueryPageRequest(request, null), request);
+        assert.deepEqual(cloudKitQueryPageRequest(request, "page-2"), { ...request, continuationMarker: "page-2" });
+        assert.equal(Object.hasOwn(request, "continuationMarker"), false);
+    }
 });
 
 test("profile aliases must still match the owner's canonical username", () => {
