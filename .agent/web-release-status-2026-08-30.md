@@ -1,5 +1,20 @@
 # Website follow-up status — 2026-08-30
 
+## Subsequent header/discovery follow-up
+
+- All active public templates now use one header markup/style implementation.
+- Discovery combines 24 recent summaries with an age-independent, wrapping
+  daily document-ID sample of 36 summaries. It validates up to 24 candidates and
+  reselects up to 12 pictured recipes using current tags and creator diversity.
+- Archive selection is deterministic sampling, not guaranteed exhaustive rotation.
+- Hosted checks now fail on empty discovery and probe three displayed image and
+  canonical recipe destinations. These checks are public, bounded, and do not
+  replace rendered browser or device QA.
+- TypeScript build and 82 web unit/contract tests passed. All 20 emulator tests
+  passed, including an actual archive query covering old/timestamp-less records.
+- No new deployment or browser/local-preview approval was obtained in these
+  follow-ups; production and visual verification gates below remain outstanding.
+
 ## Source provenance
 
 - Shared checkout: `/Users/nadav/Desktop/Cauldron`.

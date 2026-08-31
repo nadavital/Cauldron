@@ -34,7 +34,7 @@ claims remain reserved while the account exists so old links remain resolvable.
 
 Run `npm run preview:live` in `firebase/functions` with an authorized `gcloud`
 session. It binds only to `http://127.0.0.1:8766` and uses the same homepage loader
-as production: recent Firebase summaries, daily rotation, creator diversity,
+as production: a recent/archive mix, daily rotation, creator/category diversity,
 and authoritative CloudKit validation. It neither publishes nor repairs records,
 and it never substitutes made-up recipes. Credentials are loaded from the
 existing Google Secret Manager secrets into server memory, never browser code.
@@ -53,6 +53,29 @@ writing secrets to disk. `tools/configureWWWRedirect.mjs` reads Firebase's
 `www` redirect-domain status; `--apply` configures only that redirect domain.
 Complete the DNS records returned by Firebase separately in Vercel. Never
 replace the apex Firebase ownership, certificate-validation, or address records.
+
+## Homepage discovery
+
+Each request reads up to 24 recent summaries and 36 summaries from a daily
+UUID/document-ID pivot, wrapping at the end of the index. This bounded archive
+sample has no age cutoff and includes records without an `updatedAt` field.
+Both historical UUID cases are sampled. It is sampling, not a guarantee that
+every recipe will appear within a fixed number of days.
+
+The daily UTC key gives deterministic ranking for an unchanged candidate pool.
+The selector alternates recent and archive recipes, prefers underrepresented
+creators and categories, deduplicates IDs, and relaxes diversity preferences
+only when needed to fill a small library. Up to 24 candidates receive CloudKit
+validation; selection then runs again on current metadata and usable image URLs
+to display up to 12 cards. Six recent/six archive is a target, not a hard quota.
+New publications, edits, privacy changes, and availability can change a day's
+results; do not cache a daily page past current visibility validation.
+
+The hosted monitor requires a nonempty real-image shelf and checks up to three
+displayed images and canonical recipe destinations. Empty discovery or broken
+sampled cards fail the job. This is a bounded availability check, not a full
+image-decode/browser-layout test. Logs include only counts (candidates, displayed
+recipes, creators, archive picks), never signed asset URLs.
 
 To audit snapshots created before the Firebase summary-only contract, run
 `npm run scrub:legacy-web-snapshots` from `firebase/functions`. Add

@@ -6,6 +6,7 @@ import {
     DocumentReference,
     DocumentSnapshot,
     FieldValue,
+    FieldPath,
     getFirestore,
     Query,
     QueryDocumentSnapshot,
@@ -1516,41 +1517,66 @@ async function bestEffortRecipeIndexItems(
 }
 
 function stableHomepageScore(value: string): number {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index += 1) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
+    return createHash("sha256").update(value).digest().readUInt32BE(0);
+}
+
+/** A daily ring position in the UUID index, independent of recipe age. */
+export function homepageArchivePivot(rotationKey: string): string {
+    const hash = createHash("sha256").update(`archive:${rotationKey}`).digest("hex");
+    const uuid = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+    // Existing snapshots can use either UUID case. Sample both key ranges.
+    return parseInt(hash.slice(32, 34), 16) % 2 === 0 ? uuid.toUpperCase() : uuid;
+}
+
+export async function loadHomepageRecipeDocuments(collection: Query, rotationKey: string): Promise<{
+    recent: QueryDocumentSnapshot[]; archive: QueryDocumentSnapshot[];
+}> {
+    const pivot = homepageArchivePivot(rotationKey);
+    const archiveQuery = collection.orderBy(FieldPath.documentId());
+    const [recent, tail] = await Promise.all([
+        collection.orderBy("updatedAt", "desc").limit(24).get(),
+        archiveQuery.startAt(pivot).limit(36).get(),
+    ]);
+    const head = tail.docs.length < 36
+        ? await archiveQuery.endBefore(pivot).limit(36 - tail.docs.length).get()
+        : null;
+    return { recent: recent.docs, archive: [...tail.docs, ...(head?.docs ?? [])] };
+}
+
+/** Alternate fresh/archive choices, preferring underrepresented owners/categories. */
+export function selectHomepageRecipeMix<T extends SanitizedRecipeShare>(
+    recent: T[], archive: T[], rotationKey: string, maximumRecipes = 12
+): T[] {
+    const unique = new Map([...archive, ...recent].map((recipe) => [recipe.recipeId, recipe]));
+    const recentIDs = new Set(recent.map((recipe) => recipe.recipeId));
+    const owners = new Map<string, number>();
+    const categories = new Map<string, number>();
+    const result: T[] = [];
+    const recipeCategories = (recipe: T) => [...new Set((recipe.tags ?? [])
+        .map(canonicalRecipeCategoryName).filter((name): name is string => name !== null))];
+    const categoryCount = (recipe: T) => Math.min(...(recipeCategories(recipe).length
+        ? recipeCategories(recipe) : ["uncategorized"]).map((name) => categories.get(name) ?? 0));
+    while (unique.size && result.length < maximumRecipes) {
+        const remaining = [...unique.values()];
+        const diverse = remaining.filter((recipe) => (owners.get(recipe.ownerId) ?? 0) < 2);
+        const eligible = diverse.length ? diverse : remaining;
+        const wantRecent = result.length % 2 === 0;
+        const preferred = eligible.filter((recipe) => recentIDs.has(recipe.recipeId) === wantRecent);
+        const pool = preferred.length ? preferred : eligible;
+        pool.sort((lhs, rhs) => (owners.get(lhs.ownerId) ?? 0) - (owners.get(rhs.ownerId) ?? 0) ||
+            categoryCount(lhs) - categoryCount(rhs) ||
+            stableHomepageScore(`${rotationKey}:${lhs.recipeId}`) - stableHomepageScore(`${rotationKey}:${rhs.recipeId}`) ||
+            lhs.recipeId.localeCompare(rhs.recipeId));
+        const selected = pool[0];
+        result.push(selected);
+        unique.delete(selected.recipeId);
+        owners.set(selected.ownerId, (owners.get(selected.ownerId) ?? 0) + 1);
+        const names = recipeCategories(selected);
+        for (const name of names.length ? names : ["uncategorized"]) categories.set(name, (categories.get(name) ?? 0) + 1);
     }
-    return hash >>> 0;
+    return result;
 }
 
-export function rotatingHomepageRecipeCandidates(
-    recipes: SanitizedRecipeShare[],
-    rotationKey: string,
-    maximumRecipes = 18,
-    maximumPerOwner = 2
-): SanitizedRecipeShare[] {
-    const ordered = [...recipes]
-        .sort((lhs, rhs) => stableHomepageScore(`${rotationKey}:${lhs.recipeId}`) -
-            stableHomepageScore(`${rotationKey}:${rhs.recipeId}`));
-    const ownerCounts = new Map<string, number>();
-    const diverse = ordered.filter((recipe) => {
-            const ownerCount = ownerCounts.get(recipe.ownerId) ?? 0;
-            if (ownerCount >= maximumPerOwner) return false;
-            ownerCounts.set(recipe.ownerId, ownerCount + 1);
-            return true;
-        });
-    if (diverse.length >= maximumRecipes) return diverse.slice(0, maximumRecipes);
-
-    // Prefer creator diversity, but do not leave the showcase nearly empty
-    // while the public index is still small. Remaining real, validated recipes
-    // fill the shelf only after every available creator received priority.
-    const selectedIds = new Set(diverse.map((recipe) => recipe.recipeId));
-    return [
-        ...diverse,
-        ...ordered.filter((recipe) => !selectedIds.has(recipe.recipeId)),
-    ].slice(0, maximumRecipes);
-}
 
 async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRecipeCreator | null> {
     const keyID = cloudKitServerKeyID.value();
@@ -4159,12 +4185,8 @@ function compactPageStyles(): string {
         * { box-sizing:border-box; }
         html { background:var(--paper); }
         body { margin:0; min-height:100svh; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
-        .bar,main,.site-footer { width:min(1120px,calc(100% - 48px)); margin-inline:auto; }
-        .bar { min-height:80px; display:flex; align-items:center; justify-content:space-between; }
-        .brand { display:flex; align-items:center; gap:10px; color:inherit; text-decoration:none; }
-        .brand picture,.brand img { width:34px; height:34px; display:block; }
-        .brand span { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:600; letter-spacing:-.015em; }
-        .bar-store,.action { min-height:42px; display:inline-flex; align-items:center; justify-content:center; padding:9px 14px; border:1px solid color-mix(in srgb,var(--separator) 82%,transparent); border-radius:999px; background:var(--control); color:var(--ink); box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); font-size:13px; font-weight:500; text-decoration:none; }
+        main,.site-footer { width:min(1120px,calc(100% - 48px)); margin-inline:auto; }
+        .action { min-height:42px; display:inline-flex; align-items:center; justify-content:center; padding:9px 14px; border:1px solid color-mix(in srgb,var(--separator) 82%,transparent); border-radius:999px; background:var(--control); color:var(--ink); box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); font-size:13px; font-weight:500; text-decoration:none; }
         main { margin-top:46px; margin-bottom:104px; }
         .intro { max-width:720px; }
         .identity { display:flex; align-items:center; gap:18px; }
@@ -4200,7 +4222,7 @@ function compactPageStyles(): string {
         a:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
         @media (hover:hover) { .recipe-row:hover .recipe-name,.site-footer a:hover { color:var(--accent-text); } .recipe-row:hover .recipe-photo { transform:scale(1.018); } .action:hover,.bar-store:hover { filter:brightness(.98); } }
         @media (max-width:760px) { .recipe-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-        @media (max-width:520px) { .bar,main,.site-footer { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } .bar-store { min-height:38px; padding:8px 12px; } main { margin-top:28px; margin-bottom:72px; } .recipe-list { gap:30px 12px; } .shelf { margin-top:52px; } .identity { align-items:flex-start; } .recipe-name { font-size:17px; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
+        @media (max-width:520px) { main,.site-footer { width:min(calc(100% - 32px),560px); } main { margin-top:28px; margin-bottom:72px; } .recipe-list { gap:30px 12px; } .shelf { margin-top:52px; } .identity { align-items:flex-start; } .recipe-name { font-size:17px; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
         @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action,.download-action,.site-footer { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
     </style>`;
 }
@@ -4213,11 +4235,26 @@ function compactPageHead(title: string, description: string, canonicalURL: strin
     const safeTitle = escapeHtml(title);
     const safeDescription = escapeHtml(description);
     const safeCanonicalURL = escapeHtml(canonicalURL);
-    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)">${faviconHeadLinks()}<title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}`;
+    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)">${faviconHeadLinks()}<title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}${publicHeaderStyles()}`;
+}
+
+function publicHeaderStyles(): string {
+    return `<style data-cauldron-header>
+        .site-header { height:82px; min-height:82px; width:100%; margin:0; padding:0; color:#241A14; }
+        .site-header-inner { width:min(1220px,calc(100% - 48px)); height:100%; margin-inline:auto; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+        .site-brand { display:inline-flex; align-items:center; gap:10px; color:inherit; text-decoration:none; }
+        .site-brand picture,.site-brand img { display:block; width:34px; height:34px; object-fit:contain; }
+        .site-brand span { font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif; font-size:20px; font-weight:500; letter-spacing:-.015em; }
+        .site-store { min-height:44px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; padding:9px 14px; border:1px solid rgba(229,221,210,.82); border-radius:999px; background:rgba(255,255,255,.72); color:inherit; box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.05); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; font-size:13px; font-weight:500; text-decoration:none; }
+        .site-header a:focus-visible { outline:3px solid #E6801A; outline-offset:4px; }
+        @media(max-width:700px) { .site-header { height:70px; min-height:70px; } .site-header-inner { width:calc(100% - 32px); } }
+        @media(prefers-color-scheme:dark) { .site-header { color:#F8F0E8; } .site-store { border-color:rgba(57,51,47,.82); background:rgba(49,44,40,.7); } }
+        @media print { .site-header { display:none; } }
+    </style>`;
 }
 
 function compactBrandHeader(): string {
-    return `<header class="bar"><a class="brand" href="/"><picture><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span>Cauldron</span></a><a class="bar-store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header>`;
+    return `<header class="site-header"><div class="site-header-inner"><a class="site-brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span>Cauldron</span></a><a class="site-store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></div></header>`;
 }
 
 function compactPageFooter(): string {
@@ -4481,13 +4518,7 @@ export function generateRecipePageHtml(
         html { background:var(--paper); }
         body { margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
         a { color:inherit; }
-        .topbar { width:min(1180px,calc(100% - 64px)); min-height:82px; margin:auto; display:flex; align-items:center; justify-content:space-between; }
-        .brand { display:flex; align-items:center; gap:10px; text-decoration:none; }
-        .brand-icon { width:32px; height:32px; display:grid; place-items:center; }
-        .brand-icon img { display:block; width:32px; height:32px; object-fit:contain; }
-        .brand-name { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:600; letter-spacing:-.015em; }
-        .store-action,.intro-action { border:1px solid color-mix(in srgb,var(--soft) 70%,transparent); box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); }
-        .store-action { min-height:42px; display:inline-flex; align-items:center; padding:9px 14px; border-radius:999px; background:color-mix(in srgb,var(--soft) 78%,transparent); font-size:13px; font-weight:500; text-decoration:none; }
+        .intro-action { border:1px solid color-mix(in srgb,var(--soft) 70%,transparent); box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); }
         main { width:min(1180px,calc(100% - 64px)); margin:48px auto 120px; }
         .recipe-masthead { display:grid; grid-template-columns:minmax(0,1.42fr) minmax(320px,.78fr); gap:clamp(48px,7vw,96px); align-items:center; }
         .recipe-masthead.no-image { grid-template-columns:minmax(0,760px); min-height:360px; align-content:center; }
@@ -4537,10 +4568,10 @@ export function generateRecipePageHtml(
         .site-footer a { color:inherit; text-decoration:none; }
         a:focus-visible,button:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
         @media (min-width:900px) and (min-height:720px) { .ingredients-column.sticky-eligible { position:sticky; top:32px; } }
-        @media (max-width:820px) { .topbar,main,.site-footer { width:min(calc(100% - 32px),680px); } .topbar { min-height:68px; } .store-action { min-height:38px; padding:8px 12px; } main { margin:24px auto 80px; } .recipe-masthead { grid-template-columns:1fr; gap:30px; } .hero-image { aspect-ratio:4/3; border-radius:12px; } .recipe-intro { padding:0; } h1 { max-width:16ch; font-size:clamp(38px,10.5vw,54px); } .meta { margin-top:22px; } .recipe-actions { margin-top:28px; } .recipe-body { grid-template-columns:1fr; gap:58px; margin-top:72px; } .ingredients-column { position:static; } .method { max-width:none; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
-        @media (max-width:430px) { .brand-name { font-size:19px; } .brand-icon,.brand-icon img { width:30px; height:30px; } .creator-copy { flex-direction:column; gap:1px; align-items:flex-start; } }
+        @media (max-width:820px) { main,.site-footer { width:min(calc(100% - 32px),680px); } main { margin:24px auto 80px; } .recipe-masthead { grid-template-columns:1fr; gap:30px; } .hero-image { aspect-ratio:4/3; border-radius:12px; } .recipe-intro { padding:0; } h1 { max-width:16ch; font-size:clamp(38px,10.5vw,54px); } .meta { margin-top:22px; } .recipe-actions { margin-top:28px; } .recipe-body { grid-template-columns:1fr; gap:58px; margin-top:72px; } .ingredients-column { position:static; } .method { max-width:none; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
+        @media (max-width:430px) { .creator-copy { flex-direction:column; gap:1px; align-items:flex-start; } }
         @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .topbar,.recipe-actions { display:none; } body { background:#fff; } main { width:100%; margin:0; } .recipe-masthead { grid-template-columns:42% 1fr; gap:32px; align-items:start; } .hero-image { max-height:360px; border-radius:0; } h1 { font-size:42px; } .recipe-body { grid-template-columns:34% 1fr; gap:44px; margin-top:48px; } .ingredients-column { position:static !important; } .step { break-inside:avoid; } }
-    </style></head><body><header class="topbar"><a class="brand" href="/"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></a><a class="store-action" href="${escapeHtml(downloadURL)}">Get Cauldron</a></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main>${compactPageFooter()}<script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
+    </style>${publicHeaderStyles()}</head><body>${compactBrandHeader()}<main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main>${compactPageFooter()}<script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
 }
 
 export function renderCanonicalRecipePage(
@@ -4651,11 +4682,8 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
     *{box-sizing:border-box}
     html{background:var(--paper)}
     body{min-height:100svh;margin:0;background:radial-gradient(circle at 12% 0,color-mix(in srgb,var(--accent) 7%,transparent),transparent 28rem),var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    a{color:inherit}.page{width:calc(100% - 48px);max-width:1220px;min-height:100svh;margin:auto;display:grid;grid-template-rows:auto 1fr auto}
-    header{height:82px;display:flex;align-items:center;justify-content:space-between}
-    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif;font-size:20px;font-weight:600;letter-spacing:-.015em}.brand img{width:35px;height:35px;display:block}
-    .store,.filters button{border:1px solid color-mix(in srgb,var(--separator) 82%,transparent);background:var(--control);box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.05);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}
-    .store{min-height:42px;display:inline-flex;align-items:center;padding:9px 14px;border-radius:999px;font-size:13px;font-weight:500;text-decoration:none}
+    a{color:inherit}.page{width:calc(100% - 48px);max-width:1220px;min-height:calc(100svh - 82px);margin:auto;display:grid;grid-template-rows:1fr auto}
+    .filters button{border:1px solid color-mix(in srgb,var(--separator) 82%,transparent);background:var(--control);box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.05);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}
     main{min-width:0;padding:42px 0 92px}.discovery{min-width:0}.discovery-head{display:flex;align-items:end;justify-content:space-between;gap:28px;margin-bottom:30px}
     h1{margin:0;font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif;font-size:clamp(42px,5.2vw,62px);font-weight:500;letter-spacing:-.042em;line-height:.96}
     .filters{display:flex;gap:7px;max-width:min(70%,760px);padding:4px;overflow:auto;scrollbar-width:none}.filters::-webkit-scrollbar{display:none}
@@ -4672,11 +4700,10 @@ export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
     footer{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 0 30px;border-top:1px solid var(--separator);color:var(--muted);font-size:12px}footer nav{display:flex;gap:18px}footer a{text-decoration:none}footer a:hover{color:var(--ink)}
     a:focus-visible,button:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:4px}
     @media(max-width:980px){.discovery-head{align-items:flex-start;flex-direction:column}.filters{max-width:100%;width:100%;margin-left:-4px}.discovery-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.discovery-card:first-child{grid-column:span 6;grid-row:auto}.discovery-card:first-child .recipe-media{min-height:0;aspect-ratio:16/10}.discovery-card:nth-child(2),.discovery-card:nth-child(3){grid-column:span 3}.discovery-card:nth-child(2)>a,.discovery-card:nth-child(3)>a{min-height:0;display:block}.discovery-card:nth-child(2) .recipe-media,.discovery-card:nth-child(3) .recipe-media{height:auto;aspect-ratio:4/3}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title{min-height:2.2em;margin-top:11px}.discovery-card{grid-column:span 2}.discovery-grid.uniform .discovery-card{grid-column:span 2}}
-    @media(max-width:700px){.page{width:calc(100% - 32px);max-width:620px}header{height:70px}.store{min-height:38px;padding:8px 12px}main{padding:30px 0 72px}.discovery-head{gap:20px;margin-bottom:22px}.discovery-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:30px 12px}.discovery-card,.discovery-card:nth-child(2),.discovery-card:nth-child(3),.discovery-grid.uniform .discovery-card{grid-column:span 1}.discovery-card:first-child{grid-column:span 2}.discovery-card:first-child .recipe-media{aspect-ratio:4/3;border-radius:16px}.discovery-card:first-child .recipe-title{font-size:30px}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title,.discovery-grid.uniform .recipe-title,.recipe-title{font-size:17px}.recipe-meta{min-height:0;align-items:flex-start;flex-direction:column;gap:4px;white-space:normal}.creator-name:not(:last-child)::after{display:none}footer{align-items:flex-start;flex-direction:column-reverse}}
-    @media(max-width:340px){.brand span{display:none}}
+    @media(max-width:700px){.page{width:calc(100% - 32px);max-width:620px;min-height:calc(100svh - 70px)}main{padding:30px 0 72px}.discovery-head{gap:20px;margin-bottom:22px}.discovery-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:30px 12px}.discovery-card,.discovery-card:nth-child(2),.discovery-card:nth-child(3),.discovery-grid.uniform .discovery-card{grid-column:span 1}.discovery-card:first-child{grid-column:span 2}.discovery-card:first-child .recipe-media{aspect-ratio:4/3;border-radius:16px}.discovery-card:first-child .recipe-title{font-size:30px}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title,.discovery-grid.uniform .recipe-title,.recipe-title{font-size:17px}.recipe-meta{min-height:0;align-items:flex-start;flex-direction:column;gap:4px;white-space:normal}.creator-name:not(:last-child)::after{display:none}footer{align-items:flex-start;flex-direction:column-reverse}}
     @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
     @media(prefers-color-scheme:dark){:root{--paper:#18120d;--ink:#f8f0e8;--muted:#b5aaa2;--accent:#f09837;--surface:#262220;--separator:#39332f;--control:rgba(49,44,40,.7)}body{background:radial-gradient(circle at 12% 0,rgba(240,152,55,.065),transparent 28rem),var(--paper)}.recipe-tag{color:color-mix(in srgb,var(--tag-color-dark) 72%,var(--ink))}}
-    </style></head><body><div class="page"><header><a class="brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme:dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt=""></picture><span>Cauldron</span></a><a class="store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header><main>${shelf}</main><footer><span>© ${year} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer></div><script>(function(){var grid=document.querySelector(".discovery-grid");var buttons=Array.from(document.querySelectorAll("[data-filter]"));var cards=Array.from(document.querySelectorAll(".discovery-card"));var empty=document.querySelector(".no-results");function update(filter){var count=0;cards.forEach(function(card){var failed=card.dataset.imageError==="true";var matches=!filter||JSON.parse(card.getAttribute("data-categories")||"[]").includes(filter);card.hidden=failed||!matches;if(!card.hidden)count+=1;});if(grid)grid.classList.toggle("uniform",Boolean(filter)||Boolean(cards[0]&&cards[0].hidden));if(empty)empty.hidden=count!==0;}window.cauldronRecipeImageFailed=function(image){var card=image.closest(".discovery-card");if(card)card.dataset.imageError="true";var selected=document.querySelector("[data-filter].selected");update(selected?selected.getAttribute("data-filter")||"":"");};buttons.forEach(function(button){button.addEventListener("click",function(){var filter=button.getAttribute("data-filter")||"";buttons.forEach(function(item){var selected=item===button;item.classList.toggle("selected",selected);item.setAttribute("aria-pressed",String(selected));});update(filter);});});update("");})();</script></body></html>`;
+    </style>${publicHeaderStyles()}</head><body>${compactBrandHeader()}<div class="page"><main>${shelf}</main><footer><span>© ${year} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer></div><script>(function(){var grid=document.querySelector(".discovery-grid");var buttons=Array.from(document.querySelectorAll("[data-filter]"));var cards=Array.from(document.querySelectorAll(".discovery-card"));var empty=document.querySelector(".no-results");function update(filter){var count=0;cards.forEach(function(card){var failed=card.dataset.imageError==="true";var matches=!filter||JSON.parse(card.getAttribute("data-categories")||"[]").includes(filter);card.hidden=failed||!matches;if(!card.hidden)count+=1;});if(grid)grid.classList.toggle("uniform",Boolean(filter)||Boolean(cards[0]&&cards[0].hidden));if(empty)empty.hidden=count!==0;}window.cauldronRecipeImageFailed=function(image){var card=image.closest(".discovery-card");if(card)card.dataset.imageError="true";var selected=document.querySelector("[data-filter].selected");update(selected?selected.getAttribute("data-filter")||"":"");};buttons.forEach(function(button){button.addEventListener("click",function(){var filter=button.getAttribute("data-filter")||"";buttons.forEach(function(item){var selected=item===button;item.classList.toggle("selected",selected);item.setAttribute("aria-pressed",String(selected));});update(filter);});});update("");})();</script></body></html>`;
 }
 
 type InviteRequestLike = {
@@ -4873,13 +4900,15 @@ export function generateInvitePreviewHtml(inviteCode: string | null): string {
         }
 
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+        body { display:block; padding:0; }
+        .card { margin:48px auto 80px; width:min(480px,calc(100% - 32px)); padding:0; }
     </style>
+    ${faviconHeadLinks()}
+    ${publicHeaderStyles()}
 </head>
 <body>
+    ${compactBrandHeader()}
     <main class="card">
-        <div class="logo">
-            <picture><source media="(prefers-color-scheme: dark)" srcset="${PUBLIC_WEB_ORIGIN}/icon-dark.svg"><img src="${PUBLIC_WEB_ORIGIN}/icon-light.svg" alt="Cauldron"></picture>
-        </div>
         <h1>${title}</h1>
         <p>${description}</p>
 
@@ -5359,15 +5388,27 @@ export async function loadHomepageRecipeShelf(now = new Date()): Promise<{
     validation: RecipeShelfValidation;
     observed: ObservedRecipeSnapshot[];
 }> {
-    const snapshot = await db.collection("shared_recipes")
-        .orderBy("updatedAt", "desc")
-        .limit(36)
-        .get();
-    const documents = snapshot.docs;
-    const summaries = await browsableRecipes(documents);
     const rotationKey = now.toISOString().slice(0, 10);
-    const candidates = rotatingHomepageRecipeCandidates(summaries, rotationKey, 18, 2);
+    const pools = await loadHomepageRecipeDocuments(db.collection("shared_recipes"), rotationKey);
+    const recentIDs = new Set(pools.recent.map((document) => document.id));
+    const documents = [...new Map([...pools.archive, ...pools.recent].map((doc) => [doc.id, doc])).values()];
+    const summaries = await browsableRecipes(documents);
+    const candidates = selectHomepageRecipeMix(
+        summaries.filter((recipe) => recentIDs.has(recipe.recipeId)),
+        summaries.filter((recipe) => !recentIDs.has(recipe.recipeId)), rotationKey, 24
+    );
     const validation = await bestEffortRecipeIndexItems(candidates, 6_000);
+    // Repeat selection after authoritative validation: stale images/tags must not
+    // determine the final balance, and missing images must not consume slots.
+    const pictured = validation.items.filter((recipe) => safeCloudKitAssetURL(recipe.imageURL));
+    validation.items = selectHomepageRecipeMix(
+        pictured.filter((recipe) => recentIDs.has(recipe.recipeId)),
+        pictured.filter((recipe) => !recentIDs.has(recipe.recipeId)), rotationKey
+    );
+    logger.info("Homepage discovery health", { candidates: candidates.length,
+        displayed: validation.items.length, creators: new Set(validation.items.map((item) => item.ownerId)).size,
+        archiveDisplayed: validation.items.filter((item) => !recentIDs.has(item.recipeId)).length });
+    if (validation.items.length === 0) logger.warn("Homepage discovery has no validated recipe images");
     const observed = documents.flatMap((document): ObservedRecipeSnapshot[] => {
         const ownerId = document.data()?.ownerId;
         const updateTimeMillis = document.updateTime?.toMillis();

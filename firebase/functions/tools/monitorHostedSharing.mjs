@@ -62,6 +62,55 @@ function nonemptyStrings(value) {
     ));
 }
 
+export function homepageRecipeCards(html) {
+    const cards = [...html.matchAll(/<li\b[^>]*class="discovery-card"[^>]*>([\s\S]*?)<\/li>/g)].map((match) => {
+        const path = match[1].match(/<a\b[^>]*href="([^"]+)"/)?.[1];
+        const rawImage = match[1].match(/<img\b[^>]*src="([^"]+)"/)?.[1];
+        if (!path || !/^\/recipe\/[0-9a-f-]{36}$/i.test(path) || !rawImage) {
+            throw new Error("homepage has an invalid recipe card");
+        }
+        const image = new URL(rawImage.replaceAll("&amp;", "&"));
+        if (image.protocol !== "https:" || image.username || image.password || image.port ||
+            !image.hostname.endsWith(".icloud-content.com")) {
+            throw new Error("homepage recipe image has an unexpected origin");
+        }
+        return { path, imageURL: image.href };
+    });
+    if (!cards.length) throw new Error("homepage has no recipe cards with real images");
+    if (new Set(cards.map((card) => card.path)).size !== cards.length) throw new Error("homepage repeats recipe cards");
+    return cards;
+}
+
+export async function verifyHomepageImages(html, request = fetch) {
+    // Bounded public checks; never log signed image URLs or follow arbitrary redirects.
+    const cards = homepageRecipeCards(html).slice(0, 3);
+    for (const card of cards) {
+        try {
+            let response = await request(card.imageURL, { method: "HEAD", redirect: "error", signal: AbortSignal.timeout(15_000) });
+            if ([405, 501].includes(response.status)) {
+                response = await request(card.imageURL, { method: "GET", headers: { Range: "bytes=0-31" }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+            }
+            await response.body?.cancel();
+            if (!response.ok || !(response.headers.get("content-type") ?? "").startsWith("image/")) throw new Error();
+        } catch {
+            throw new Error(`homepage image unavailable for ${card.path}`);
+        }
+    }
+}
+
+export async function verifyHomepageRecipes(html, baseURL, request = fetch) {
+    for (const card of homepageRecipeCards(html).slice(0, 3)) {
+        const url = new URL(card.path, baseURL);
+        const response = await request(url, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+        if (!response.ok || !(response.headers.get("content-type") ?? "").includes("text/html")) {
+            throw new Error(`homepage recipe unavailable at ${card.path}`);
+        }
+        const page = await response.text();
+        recipeStructuredData(page);
+        if (canonicalURL(page) !== url.href) throw new Error(`homepage recipe identity mismatch at ${card.path}`);
+    }
+}
+
 export function validateHTML(kind, html, expected = {}) {
     requireText(html, "Cauldron", `${kind} response does not contain Cauldron branding`);
     switch (kind) {
@@ -77,6 +126,7 @@ export function validateHTML(kind, html, expected = {}) {
         requireText(html, 'href="/favicon.svg"', "home response is missing its SVG favicon");
         requireText(html, 'href="/apple-touch-icon.png"', "home response is missing its Apple touch icon");
         requireText(html, "id6754004943", "home response is missing its App Store destination");
+        homepageRecipeCards(html);
         break;
     case "profile":
         if (canonicalURL(html) !== expected.canonicalURL) {
@@ -271,7 +321,12 @@ async function monitorResponse(baseURL, check) {
         validateDataAPI(check.dataKind, await response.json(), check.expected);
     } else {
         if (!contentType.includes("text/html")) throw new Error(`${check.label} returned unexpected content type: ${contentType || "missing"}`);
-        validateHTML(check.kind, await response.text(), check.expected);
+        const html = await response.text();
+        validateHTML(check.kind, html, check.expected);
+        if (check.kind === "home") {
+            await verifyHomepageImages(html);
+            await verifyHomepageRecipes(html, baseURL);
+        }
     }
     process.stdout.write(`PASS ${check.label}: ${requestedURL}\n`);
 }

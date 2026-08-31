@@ -75,3 +75,31 @@ test("Admin SDK remains the only persistence boundary", async () => {
     await assertFails(getDoc(clientReference));
     assert.ok(true);
 });
+
+test("homepage archive query reaches older and timestamp-less records with bounded unique results", async () => {
+    assert.ok(process.env.FIRESTORE_EMULATOR_HOST, "Archive query tests must never use production");
+    const { initializeApp, deleteApp } = await import("firebase-admin/app");
+    const { getFirestore, Timestamp } = await import("firebase-admin/firestore");
+    const { loadHomepageRecipeDocuments } = await import("../lib/index.js");
+    const app = initializeApp({ projectId }, "homepage-query-test");
+    const firestore = getFirestore(app);
+    const collection = firestore.collection("homepage_query_fixture");
+    const refs = Array.from({ length: 41 }, (_, i) => collection.doc(`00000000-0000-0000-0000-${String(i).padStart(12, "0")}`));
+    try {
+        const batch = firestore.batch();
+        refs.forEach((ref, i) => batch.set(ref, i === 0 ? { title: "Legacy recipe" } : { updatedAt: Timestamp.fromMillis(i * 1000) }));
+        await batch.commit();
+        const { recent, archive } = await loadHomepageRecipeDocuments(collection, "2026-08-30");
+        assert.equal(recent.length, 24);
+        assert.equal(archive.length, 36);
+        assert.equal(new Set(archive.map((doc) => doc.id)).size, 36);
+        assert.ok(archive.some((doc) => doc.id === refs[0].id));
+        assert.ok(archive.some((doc) => !recent.some((r) => r.id === doc.id)));
+        assert.equal(recent[0].id, refs[40].id);
+    } finally {
+        const batch = firestore.batch();
+        refs.forEach((ref) => batch.delete(ref));
+        await batch.commit();
+        await deleteApp(app);
+    }
+});

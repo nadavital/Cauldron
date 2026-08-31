@@ -25,7 +25,9 @@ import {
     generateCompactRecipeIndexPageHtml,
     generateHomePageHtml,
     HOMEPAGE_CACHE_CONTROL,
-    rotatingHomepageRecipeCandidates,
+    homepageArchivePivot,
+    loadHomepageRecipeDocuments,
+    selectHomepageRecipeMix,
     generateCompactRecipePageHtml,
     generateInvitePreviewHtml,
     generatePublicStatusPageHtml,
@@ -282,7 +284,9 @@ test("invite preview opens the app without an automatic App Store redirect", () 
     assert.match(html, /--bg: #F6F1EA/);
     assert.match(html, /--bg: #18120D/);
     assert.match(html, /--orange: #FF9933/);
-    assert.doesNotMatch(html, /radial-gradient|box-shadow/);
+    // Only the shared header's glass button has a shadow, not the invite card.
+    const inviteContent = html.replace(/<style data-cauldron-header>[\s\S]*?<\/style>/, "");
+    assert.doesNotMatch(inviteContent, /radial-gradient|box-shadow/);
 });
 
 test("public responses use browser defense-in-depth headers", () => {
@@ -885,24 +889,98 @@ test("homepage presents only supplied validated recipes and complete icon metada
     assert.match(generateHomePageHtml([]), /Open Cauldron/);
 });
 
+test("all active public page templates share identical header markup and styles", () => {
+    const recipe = { recipeId: "recipe", ownerId: "owner", title: "Soup", tags: [],
+        ingredients: [], steps: [], imageURL: null, totalMinutes: null, yields: null };
+    const pages = [
+        generateHomePageHtml([]),
+        generateRecipePageHtml(recipe, "https://cauldronrecipes.com/recipe/recipe", "cauldron://import/recipe/recipe", "https://apps.apple.com/app/id6754004943"),
+        generateCompactRecipePageHtml(recipe, "https://cauldronrecipes.com/recipe/recipe", "cauldron://import/recipe/recipe", "https://apps.apple.com/app/id6754004943"),
+        ...["profile", "collection"].map((type) => generateCompactRecipeIndexPageHtml({
+            title: "Recipes", description: "", canonicalURL: `https://cauldronrecipes.com/${type}/one`,
+            appURL: `cauldron://import/${type}/one`, downloadURL: "https://apps.apple.com/app/id6754004943",
+            recipes: [], totalRecipeCount: 0,
+        })),
+        generatePublicStatusPageHtml("Unavailable", "Please try again."),
+        generateInvitePreviewHtml("ABC123"),
+        generateInvitePreviewHtml(null),
+    ];
+    const header = pages[0].match(/<header class="site-header">.*?<\/header>/)?.[0];
+    const styles = pages[0].match(/<style data-cauldron-header>[\s\S]*?<\/style>/)?.[0];
+    assert.ok(header);
+    assert.ok(styles);
+    for (const html of pages) {
+        assert.equal(html.match(/<header class="site-header">.*?<\/header>/)?.[0], header);
+        assert.equal(html.match(/<style data-cauldron-header>[\s\S]*?<\/style>/)?.[0], styles);
+        assert.equal((html.match(/class="site-header"/g) ?? []).length, 1);
+        assert.doesNotMatch(html, /class="topbar"|class="bar"/);
+    }
+});
+
 test("homepage responses remain private while daily rotation prioritizes diverse owners", () => {
     assert.equal(HOMEPAGE_CACHE_CONTROL, "private, no-store, max-age=0");
     const recipes = Array.from({ length: 16 }, (_, index) => ({
         recipeId: `recipe-${index}`,
         ownerId: index < 8 ? "owner-repeat" : `owner-${index}`,
     }));
-    const first = rotatingHomepageRecipeCandidates(recipes, "2026-08-29", 8, 2);
-    const repeated = rotatingHomepageRecipeCandidates(recipes, "2026-08-29", 8, 2);
-    const nextDay = rotatingHomepageRecipeCandidates(recipes, "2026-08-30", 8, 2);
+    const first = selectHomepageRecipeMix(recipes, [], "2026-08-29", 8);
+    const repeated = selectHomepageRecipeMix(recipes, [], "2026-08-29", 8);
+    const nextDay = selectHomepageRecipeMix(recipes, [], "2026-08-30", 8);
     assert.deepEqual(first, repeated);
     assert.notDeepEqual(first.map((recipe) => recipe.recipeId), nextDay.map((recipe) => recipe.recipeId));
     assert.ok(first.filter((recipe) => recipe.ownerId === "owner-repeat").length <= 2);
     assert.ok(new Set(first.map((recipe) => recipe.ownerId)).size > 1);
 
     const oneCreator = recipes.filter((recipe) => recipe.ownerId === "owner-repeat");
-    const filled = rotatingHomepageRecipeCandidates(oneCreator, "2026-08-29", 6, 2);
+    const filled = selectHomepageRecipeMix(oneCreator, [], "2026-08-29", 6);
     assert.equal(filled.length, 6);
     assert.equal(new Set(filled.map((recipe) => recipe.recipeId)).size, 6);
+});
+
+test("homepage mix alternates recent and archive recipes with stable daily variety", () => {
+    const pool = (prefix) => Array.from({ length: 30 }, (_, i) => ({
+        recipeId: `${prefix}-${i}`, ownerId: `owner-${i}`, tags: [i % 2 ? "Dinner" : "Dessert"],
+    }));
+    const recent = pool("new"), archive = pool("old");
+    const first = selectHomepageRecipeMix(recent, archive, "2026-08-30");
+    assert.equal(first.length, 12);
+    assert.equal(first.filter((r) => r.recipeId.startsWith("new")).length, 6);
+    assert.equal(first.filter((r) => r.recipeId.startsWith("old")).length, 6);
+    assert.deepEqual(first, selectHomepageRecipeMix([...recent].reverse(), [...archive].reverse(), "2026-08-30"));
+    assert.notDeepEqual(first, selectHomepageRecipeMix(recent, archive, "2026-08-31"));
+    assert.ok(new Set(first.map((r) => r.ownerId)).size >= 6);
+    assert.ok(new Set(first.flatMap((r) => r.tags)).size === 2);
+});
+
+test("homepage diversity preferences yield to a small pool without duplicates or invented cards", () => {
+    const pool = Array.from({ length: 5 }, (_, i) => ({ recipeId: `${i}`, ownerId: "one", tags: [] }));
+    assert.equal(selectHomepageRecipeMix(pool, pool, "day").length, 5);
+    assert.equal(new Set(selectHomepageRecipeMix(pool, pool, "day").map((r) => r.recipeId)).size, 5);
+    assert.deepEqual(selectHomepageRecipeMix([], [], "day"), []);
+    assert.equal(selectHomepageRecipeMix([], pool, "day").length, 5);
+    const categories = pool.map((r, i) => ({ ...r, ownerId: `owner-${i}`, tags: [i === 4 ? "Lunch" : "Dinner"] }));
+    assert.equal(new Set(selectHomepageRecipeMix(categories, [], "day", 2).flatMap((r) => r.tags)).size, 2);
+});
+
+test("archive daily pivot samples both UUID cases and is independent of update timestamps", async () => {
+    const pivots = Array.from({ length: 30 }, (_, i) => homepageArchivePivot(`2026-08-${i + 1}`));
+    assert.ok(pivots.every((pivot) => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(pivot)));
+    assert.ok(pivots.some((pivot) => /[A-F]/.test(pivot)) && pivots.some((pivot) => /[a-f]/.test(pivot)));
+    assert.equal(homepageArchivePivot("day"), homepageArchivePivot("day"));
+    const reads = [];
+    const query = (state = {}) => ({
+        orderBy(field, direction) { return query({ ...state, field: typeof field === "string" ? field : "documentId", direction }); },
+        startAt(value) { return query({ ...state, start: value }); },
+        endBefore(value) { return query({ ...state, end: value }); },
+        limit(value) { return query({ ...state, limit: value }); },
+        async get() { reads.push(state); return { docs: state.field === "updatedAt" ? [{ id: "recent" }] : state.start ? [{ id: "tail" }] : [{ id: "head" }] }; },
+    });
+    const result = await loadHomepageRecipeDocuments(query(), "day");
+    assert.deepEqual(result.archive.map((doc) => doc.id), ["tail", "head"]);
+    assert.equal(reads.length, 3);
+    assert.deepEqual(reads.map((r) => r.limit), [24, 36, 35]);
+    assert.equal(reads[1].start, reads[2].end);
+    assert.equal(reads[1].field, "documentId");
 });
 
 test("resolved web profile photos render without persisting signed asset URLs", () => {
@@ -1101,7 +1179,7 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.match(html, /class="hero-image"/);
     assert.match(html, />Ingredients</);
     assert.match(html, />Instructions</);
-    assert.match(html, /class="brand-icon"/);
+    assert.match(html, /class="site-brand"/);
     assert.match(html, /src="\/icon-small-light\.svg"/);
     assert.match(html, /srcset="\/icon-small-dark\.svg"/);
     assert.match(html, /class="tags" aria-label="Recipe tags"><li style="--tag-color:#AF52DE;--tag-color-dark:#BF5AF2"><span aria-hidden="true">🍽️<\/span>Dinner<\/li>/);

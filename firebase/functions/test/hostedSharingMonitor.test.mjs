@@ -10,6 +10,9 @@ import {
     validateAASA,
     validateDataAPI,
     validateHTML,
+    homepageRecipeCards,
+    verifyHomepageImages,
+    verifyHomepageRecipes,
 } from "../tools/monitorHostedSharing.mjs";
 
 const appPaths = [
@@ -23,7 +26,10 @@ const recipeExpected = {
     creatorHandle: "nadav",
 };
 
-const productionHomeHTML = generateHomePageHtml([]);
+const productionHomeHTML = generateHomePageHtml([{
+    recipeId: "7DBEAFFD-895F-43B1-9985-463F36EA5D8C", ownerId: "owner", title: "Cake", tags: ["Dessert"],
+    imageURL: "https://cvws.icloud-content.com/cake.jpg?token=public-test&v=1",
+}]);
 
 function recipeHTML(overrides = {}) {
     const structured = {
@@ -66,7 +72,7 @@ test("AASA validator rejects a missing canonical profile path", () => {
 });
 
 test("validators enforce exact profile, recipe, collection, and invite identities", () => {
-    validateHTML("home", '<title>Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/"><meta property="og:image" content="https://cauldronrecipes.com/social-card.png"><link href="/icon-small-light.svg"><link href="/favicon.svg"><link href="/apple-touch-icon.png"><a href="https://apps.apple.com/app/id6754004943">', {
+    validateHTML("home", productionHomeHTML, {
         canonicalURL: "https://cauldronrecipes.com/",
     });
     validateHTML("profile", '<title>Nadav · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/u/nadav"><h1>Nadav</h1><p>@nadav</p><a href="cauldron://import/profile/nadav">', {
@@ -97,6 +103,35 @@ test("generated production homepage satisfies the hosted contract", () => {
     assert.match(productionHomeHTML, /application\/ld\+json/);
     assert.match(productionHomeHTML, /prefers-reduced-motion/);
     assert.match(productionHomeHTML, /prefers-color-scheme:dark/);
+});
+
+test("homepage monitor rejects empty discovery, duplicate cards, and unsafe image hosts", () => {
+    assert.throws(() => homepageRecipeCards(generateHomePageHtml([])), /no recipe cards/);
+    assert.throws(() => homepageRecipeCards(productionHomeHTML + productionHomeHTML), /repeats/);
+    assert.throws(() => homepageRecipeCards(productionHomeHTML.replace("cvws.icloud-content.com", "example.com")), /unexpected origin/);
+    assert.equal(homepageRecipeCards(productionHomeHTML)[0].imageURL, "https://cvws.icloud-content.com/cake.jpg?token=public-test&v=1");
+});
+
+test("homepage monitor verifies bounded public image responses and reports broken images", async () => {
+    let requests = 0;
+    await verifyHomepageImages(productionHomeHTML, async (_url, options) => {
+        requests++;
+        assert.equal(options.method, "HEAD");
+        assert.equal(options.redirect, "error");
+        return new Response(null, { headers: { "content-type": "image/jpeg" } });
+    });
+    assert.equal(requests, 1);
+    await assert.rejects(verifyHomepageImages(productionHomeHTML, async () => new Response(null, { status: 404 })), /image unavailable/);
+    await assert.rejects(verifyHomepageImages(productionHomeHTML, async () => new Response("not an image", { headers: { "content-type": "text/html" } })), /image unavailable/);
+});
+
+test("homepage monitor follows real recipe cards and rejects unavailable or mismatched pages", async () => {
+    const page = '<link rel="canonical" href="https://cauldronrecipes.com/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C"><script type="application/ld+json">{"@type":"Recipe","name":"Cake"}</script>';
+    const response = (html) => new Response(html, { headers: { "content-type": "text/html" } });
+    await verifyHomepageRecipes(productionHomeHTML, "https://cauldronrecipes.com", async () => response(page));
+    await assert.rejects(verifyHomepageRecipes(productionHomeHTML, "https://cauldronrecipes.com", async () => new Response(null, { status: 404 })), /unavailable/);
+    await assert.rejects(verifyHomepageRecipes(productionHomeHTML, "https://cauldronrecipes.com", async () => response(page.replace("7DBEAFFD", "DEADBEEF"))), /identity mismatch/);
+    await assert.rejects(verifyHomepageRecipes(productionHomeHTML, "https://cauldronrecipes.com", async () => response("Recipe unavailable")), /Recipe JSON-LD/);
 });
 
 test("production favicon assets include SVG, ICO, and Apple touch formats", () => {
