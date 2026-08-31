@@ -53,11 +53,7 @@ struct ProfileEditView: View {
         _profileColor = State(initialValue: user?.profileColor)
 
         // Determine avatar type
-        if user?.profileImageURL != nil {
-            _selectedAvatarType = State(initialValue: .photo)
-        } else {
-            _selectedAvatarType = State(initialValue: .emoji)
-        }
+        _selectedAvatarType = State(initialValue: AvatarType.initialSelection(for: user))
     }
 
     /// The current user, preferring the live session value over the initial snapshot
@@ -161,7 +157,7 @@ struct ProfileEditView: View {
                             } label: {
                                 Label("Take Photo", systemImage: "camera")
                             }
-                            if profileImage != nil || (selectedAvatarType == .photo && currentUser.profileImageURL != nil) {
+                            if profileImage != nil || (selectedAvatarType == .photo && currentUser.avatarRepresentation.isPhoto) {
                                 Divider()
                                 Button(role: .destructive) {
                                     profileImage = nil
@@ -178,6 +174,8 @@ struct ProfileEditView: View {
                                 .frame(width: 32, height: 32)
                                 .background(Color.cauldronOrange, in: Circle())
                                 .overlay(Circle().strokeBorder(Color.appBackground, lineWidth: 2))
+                                .frame(width: 44, height: 44)
+                                .contentShape(.rect)
                         }
                         .accessibilityLabel("Edit avatar")
                         }
@@ -346,10 +344,10 @@ struct ProfileEditView: View {
             .onChange(of: profileColor) { _, _ in isAvatarDirty = true }
             .task {
                 // Load existing profile image if available
-                if selectedAvatarType == .photo,
-                   currentUser.profileImageURL != nil,
-                   profileImage == nil {
-                    profileImage = await dependencies.profileImageManager.loadImage(userId: currentUser.id)
+                if selectedAvatarType == .photo, profileImage == nil {
+                    profileImage = await dependencies.entityImageLoader
+                        .loadProfileImage(for: currentUser, dependencies: dependencies)
+                        .image
                 }
             }
             .onChange(of: userSession.currentUser) { _, newUser in

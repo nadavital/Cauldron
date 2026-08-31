@@ -44,7 +44,7 @@ struct CookTabView: View {
     private var cookNavigationContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoading {
                         DashboardSkeletonView()
                     } else {
@@ -147,15 +147,17 @@ struct CookTabView: View {
                         showingCollectionForm: $showingCollectionForm
                     )
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if let user = currentUserSession.currentUser {
-                        Button {
-                            showingProfileSheet = true
-                        } label: {
-                            ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
+                if !RuntimeEnvironment.prefersDesktopWorkspace {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        if let user = currentUserSession.currentUser {
+                            Button {
+                                showingProfileSheet = true
+                            } label: {
+                                ProfileAvatar(user: user, size: 30, dependencies: viewModel.dependencies)
+                            }
+                            .accessibilityLabel("Profile and settings")
+                            .accessibilityHint("Opens your profile and app settings")
                         }
-                        .accessibilityLabel("Profile and settings")
-                        .accessibilityHint("Opens your profile and app settings")
                     }
                 }
             }
@@ -498,7 +500,7 @@ struct CookTabView: View {
     /// more than one section, so the animation always originates from the tapped card.
     private func recipeCarousel(_ recipes: [Recipe], section: String, limit: Int = 10) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.md) {
+            LazyHStack(spacing: Theme.Spacing.md) {
                 ForEach(recipes.prefix(limit)) { recipe in
                     let transitionID = "\(section)-\(recipe.id.uuidString)"
                     NavigationLink {
@@ -610,7 +612,7 @@ struct CookTabView: View {
                     .padding(.horizontal, Theme.Spacing.md)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.Spacing.md) {
+                    LazyHStack(spacing: Theme.Spacing.md) {
                         ForEach(collections.prefix(10)) { collection in
                             let collectionTransitionID = "collection-\(collection.id.uuidString)"
                             NavigationLink {
@@ -785,7 +787,7 @@ struct CookTabView: View {
             cookSectionHeader("From Friends", systemImage: "person.2.fill")
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Spacing.md) {
+                LazyHStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.friendsRecipes.prefix(10), id: \.id) { sharedRecipe in
                         let transitionID = "from-friends-\(sharedRecipe.recipe.id.uuidString)"
                         NavigationLink {
@@ -825,7 +827,7 @@ struct CookTabView: View {
                 .padding(.horizontal, Theme.Spacing.md)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Spacing.md) {
+                LazyHStack(spacing: Theme.Spacing.md) {
                     ForEach(viewModel.popularRecipes.prefix(10)) { recipe in
                         // Get owner info if available
                         if let ownerId = recipe.ownerId,

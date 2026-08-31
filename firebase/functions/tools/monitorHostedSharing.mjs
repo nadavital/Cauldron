@@ -71,7 +71,11 @@ export function validateHTML(kind, html, expected = {}) {
             throw new Error(`home canonical URL does not match ${expected.canonicalURL}`);
         }
         requireText(html, 'property="og:image" content="https://cauldronrecipes.com/social-card.png"', "home response is missing branded Open Graph artwork");
-        requireText(html, 'href="/icon-small-light.svg"', "home response is missing the Cauldron logo");
+        if (!/(?:href|src)="\/icon-small-light\.svg"/.test(html)) {
+            throw new Error("home response is missing the Cauldron logo");
+        }
+        requireText(html, 'href="/favicon.svg"', "home response is missing its SVG favicon");
+        requireText(html, 'href="/apple-touch-icon.png"', "home response is missing its Apple touch icon");
         requireText(html, "id6754004943", "home response is missing its App Store destination");
         break;
     case "profile":
@@ -339,15 +343,15 @@ export async function runHostedMonitor() {
         {
             path: profilePath, kind: "profile", label: "canonical profile alias",
             expected: {
-                canonicalURL: resolvedMonitoredURL(baseURL, legacyProfilePath).href,
+                canonicalURL: resolvedMonitoredURL(baseURL, profilePath).href,
                 deepLinkIdentity: profileHandle, displayName: profileName, handle: profileHandle,
             },
         },
         {
             path: legacyProfilePath, kind: "profile", label: "legacy profile route",
             expected: {
-                canonicalURL: resolvedMonitoredURL(baseURL, legacyProfilePath).href,
-                deepLinkIdentity: legacyProfileId, displayName: profileName, handle: profileHandle,
+                canonicalURL: resolvedMonitoredURL(baseURL, profilePath).href,
+                deepLinkIdentity: profileHandle, displayName: profileName, handle: profileHandle,
             },
         },
         { path: canonicalRecipePath, kind: "recipe", label: "canonical recipe route", expected: recipeExpected },

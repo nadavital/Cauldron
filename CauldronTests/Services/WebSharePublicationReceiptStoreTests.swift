@@ -26,6 +26,14 @@ final class WebSharePublicationReceiptStoreTests: XCTestCase {
         )
     }
 
+    func testCanonicalProfileURLUsesTheNormalizedClaimedUsername() {
+        XCTAssertEqual(
+            WebShareCanonicalURL.profile(username: "  Nadav  ")?.absoluteString,
+            "https://cauldronrecipes.com/u/nadav"
+        )
+        XCTAssertNil(WebShareCanonicalURL.profile(username: "not a valid handle"))
+    }
+
     func testReceiptOnlyMatchesThePublishedRevision() {
         let ownerID = UUID()
         let initialDate = Date(timeIntervalSince1970: 1_788_000_000)

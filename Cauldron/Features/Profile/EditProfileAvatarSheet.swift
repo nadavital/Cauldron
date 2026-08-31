@@ -12,6 +12,10 @@ import SwiftUI
 enum AvatarType: String, CaseIterable {
     case emoji = "Emoji Avatar"
     case photo = "Upload Photo"
+
+    nonisolated static func initialSelection(for user: User?) -> AvatarType {
+        user?.avatarRepresentation.isPhoto == true ? .photo : .emoji
+    }
 }
 
 // MARK: - Edit Profile Avatar Sheet
@@ -45,12 +49,6 @@ struct EditProfileAvatarSheet: View {
         _selectedEmoji = State(initialValue: currentUser.profileEmoji)
         _selectedColor = State(initialValue: currentUser.profileColor)
 
-        // Determine initial avatar type
-        if currentUser.profileImageURL != nil {
-            _selectedAvatarType = Binding.constant(.photo)
-        } else {
-            _selectedAvatarType = Binding.constant(.emoji)
-        }
     }
 
     var body: some View {
@@ -181,10 +179,10 @@ struct EditProfileAvatarSheet: View {
             }
             .task {
                 // Load existing profile image if available
-                if let userId = CurrentUserSession.shared.userId,
-                   currentUser.profileImageURL != nil,
-                   profileImage == nil {
-                    profileImage = await dependencies.profileImageManager.loadImage(userId: userId)
+                if selectedAvatarType == .photo, profileImage == nil {
+                    profileImage = await dependencies.entityImageLoader
+                        .loadProfileImage(for: currentUser, dependencies: dependencies)
+                        .image
                 }
             }
         }

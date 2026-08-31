@@ -752,7 +752,15 @@ actor CollectionRepository {
     ) throws -> [Collection] {
         guard !collections.isEmpty else { return [] }
 
-        let membershipModels = try context.fetch(FetchDescriptor<CollectionMembershipModel>())
+        let collectionIDs = Array(Set(collections.map(\.id)))
+        let ownerIDs = Set(collections.map(\.userId))
+        let membershipModels = try context.fetch(
+            FetchDescriptor<CollectionMembershipModel>(
+                predicate: #Predicate { model in
+                    collectionIDs.contains(model.collectionId)
+                }
+            )
+        ).filter { ownerIDs.contains($0.ownerId) }
         guard !membershipModels.isEmpty else { return collections }
 
         let edgesByCollection = Dictionary(grouping: membershipModels.map { $0.toDomain() }) {

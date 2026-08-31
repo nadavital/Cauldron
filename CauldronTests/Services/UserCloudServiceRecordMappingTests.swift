@@ -122,6 +122,11 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
         ))
     }
 
+    func testHistoricalUsernameClaimsRemainReservedUntilAccountDeletion() {
+        XCTAssertFalse(UserCloudService.shouldReleaseUsernameClaims(keeping: "current_name"))
+        XCTAssertTrue(UserCloudService.shouldReleaseUsernameClaims(keeping: nil))
+    }
+
     func testPopulateUserRecordClearsRemovedOptionalFields() async throws {
         let service = UserCloudService(core: CloudKitCore())
         let userId = UUID()
@@ -162,5 +167,26 @@ final class UserCloudServiceRecordMappingTests: XCTestCase {
         XCTAssertNil(record["profileColor"])
         XCTAssertNil(record["cloudProfileImageRecordName"])
         XCTAssertNil(record["profileImageModifiedAt"])
+    }
+
+    func testUserFromLegacyConflictingRecordPrefersEmojiAndDropsPhotoMetadata() async throws {
+        let service = UserCloudService(core: CloudKitCore())
+        let record = CKRecord(
+            recordType: CloudKitCore.RecordType.user,
+            recordID: CKRecord.ID(recordName: "user_conflicting_avatar")
+        )
+        record["userId"] = UUID().uuidString as CKRecordValue
+        record["username"] = "legacy" as CKRecordValue
+        record["displayName"] = "Legacy" as CKRecordValue
+        record["profileEmoji"] = "🍲" as CKRecordValue
+        record["profileColor"] = "#FF8800" as CKRecordValue
+        record["cloudProfileImageRecordName"] = "stale-photo" as CKRecordValue
+        record["profileImageModifiedAt"] = Date(timeIntervalSince1970: 10) as CKRecordValue
+
+        let user = try await service.userFromRecord(record)
+
+        XCTAssertEqual(user.avatarRepresentation, .emoji(value: "🍲", colorHex: "#FF8800"))
+        XCTAssertNil(user.cloudProfileImageRecordName)
+        XCTAssertNil(user.profileImageModifiedAt)
     }
 }

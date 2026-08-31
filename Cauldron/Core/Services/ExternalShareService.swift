@@ -17,6 +17,14 @@ enum WebShareCanonicalURL {
     static func recipe(id: UUID) -> URL {
         origin.appending(path: "recipe").appending(path: id.uuidString)
     }
+
+    static func profile(username: String) -> URL? {
+        let normalized = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized.range(of: #"^[a-z0-9_]{3,20}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return origin.appending(path: "u").appending(path: normalized)
+    }
 }
 
 /// Remembers the exact public recipe revision that Firebase confirmed. The
@@ -280,9 +288,9 @@ final class ExternalShareService: Sendable {
     /// Update share metadata on the backend (Fire-and-forget style)
     /// This should be called when a recipe is saved/updated and is PUBLIC
     @discardableResult
-    func updateShareMetadata(for recipe: Recipe) async -> Bool {
+    func updateShareMetadata(for recipe: Recipe, force: Bool = false) async -> Bool {
         guard recipe.visibility == .publicRecipe else { return true }
-        guard !publicationReceipts.containsCurrentRevision(of: recipe) else {
+        guard force || !publicationReceipts.containsCurrentRevision(of: recipe) else {
             logger.debug("Skipping unchanged recipe publication: \(recipe.title)")
             return true
         }
@@ -377,20 +385,13 @@ final class ExternalShareService: Sendable {
 
     /// Generate a shareable link for a profile (Local only)
     func generateProfileLink(for user: User, recipeCount: Int) -> ShareableLink {
-        // URL-encode username to handle special characters safely
-        let encodedUsername = user.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? user.username
-        let permanentURLString = "https://cauldronrecipes.com/u/\(encodedUsername)"
         let recipeText = recipeCount == 1 ? "1 recipe" : "\(recipeCount) recipes"
         let previewText = "Check out my Cauldron profile! \(recipeText) and counting 🍲"
 
-        // Safely construct URL, falling back to ID-based URL if username encoding fails
-        let url: URL
-        if let constructedURL = URL(string: permanentURLString) {
-            url = constructedURL
-        } else {
-            let fallbackURLString = "https://cauldronrecipes.com/profile/\(user.id.uuidString)"
-            url = URL(string: fallbackURLString)!
-        }
+        // Public profile identity is the globally claimed username. UUID routes
+        // remain a legacy web resolver and are never presented to users.
+        let url = WebShareCanonicalURL.profile(username: user.username)
+            ?? WebShareCanonicalURL.origin.appending(path: "profile").appending(path: user.id.uuidString)
 
         return ShareableLink(
             url: url,
@@ -565,6 +566,57 @@ final class ExternalShareService: Sendable {
             guard response.success else {
                 throw ExternalShareError.invalidResponse
             }
+        }
+    }
+
+    private struct OwnerPublicManifest: Encodable {
+        let ownerId: String
+        let identityRecordName: String
+        let capability: String
+        let publicRecipeIds: [String]
+        let publicCollectionIds: [String]
+    }
+
+    private struct OwnerPublicManifestResponse: Decodable {
+        let success: Bool
+        let manifestHash: String
+        let missingRecipeIds: [String]
+        let missingCollectionIds: [String]
+    }
+
+    /// Reconciles Firebase's derived index to the exact authoritative library
+    /// set after CloudKit sync. This removes historical snapshots left behind
+    /// by old clients or interrupted delete/privacy operations without making
+    /// link generation itself network-dependent.
+    func reconcileOwnerPublicManifest(
+        ownerId: UUID,
+        publicRecipeIds: [UUID],
+        publicCollectionIds: [UUID]
+    ) async throws -> (missingRecipeIds: Set<UUID>, missingCollectionIds: Set<UUID>) {
+        try await mutationCoordinator.perform(ownerID: ownerId) {
+            let context = try await registeredOwnerContext(ownerId: ownerId)
+            let metadata = OwnerPublicManifest(
+                ownerId: ownerId.uuidString,
+                identityRecordName: context.identityRecordName,
+                capability: context.capability,
+                publicRecipeIds: publicRecipeIds.map(\.uuidString),
+                publicCollectionIds: publicCollectionIds.map(\.uuidString)
+            )
+            guard let publicationLease = await AccountDeletionGate.shared.acquirePublicationLease(ownerID: ownerId) else {
+                throw ExternalShareError.accountDeletionInProgress
+            }
+            defer { Task { await AccountDeletionGate.shared.releasePublicationLease(publicationLease) } }
+            let response: OwnerPublicManifestResponse = try await post(
+                endpoint: "/reconcileOwnerPublicWebV2",
+                metadata: metadata
+            )
+            guard response.success, !response.manifestHash.isEmpty else {
+                throw ExternalShareError.invalidResponse
+            }
+            return (
+                Set(response.missingRecipeIds.compactMap(UUID.init(uuidString:))),
+                Set(response.missingCollectionIds.compactMap(UUID.init(uuidString:)))
+            )
         }
     }
 

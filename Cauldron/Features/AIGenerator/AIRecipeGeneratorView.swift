@@ -56,60 +56,52 @@ struct AIRecipeGeneratorView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
-                // Immersive Background
-                AnimatedMeshGradient()
-                    .ignoresSafeArea()
-                
-                ScrollView {
-                    GlassEffectContainer(spacing: Theme.Spacing.md) {
-                        VStack(spacing: Theme.Spacing.xl) {
-                            if !isAvailable {
-                                AIUnavailableCard()
+            ScrollView {
+                GlassEffectContainer(spacing: Theme.Spacing.md) {
+                    VStack(spacing: Theme.Spacing.xl) {
+                        if !isAvailable {
+                            AIUnavailableCard()
+                        } else {
+                            if isBusyOrDone {
+                                generationStatusStrip
                             } else {
-                                if isBusyOrDone {
-                                    generationStatusStrip
-                                } else {
-                                    promptCard
-                                    categoriesSection
-                                }
+                                promptCard
+                                categoriesSection
+                            }
 
-                                if let partial = viewModel.partialRecipe {
-                                    AIRecipePreview(partial: partial)
-                                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                                } else if let recipe = viewModel.generatedRecipe {
-                                    AICompletedRecipePreview(recipe: recipe)
-                                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                                }
+                            if let partial = viewModel.partialRecipe {
+                                AIRecipePreview(partial: partial)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            } else if let recipe = viewModel.generatedRecipe {
+                                AICompletedRecipePreview(recipe: recipe)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
 
-                                if let error = viewModel.errorMessage {
-                                    AIErrorCard(error: error)
-                                        .transition(.scale.combined(with: .opacity))
-                                }
+                            if let error = viewModel.errorMessage {
+                                AIErrorCard(error: error)
+                                    .transition(.scale.combined(with: .opacity))
                             }
                         }
                     }
-                    .padding(.vertical, Theme.Spacing.xl)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.bottom, 100) // Space for floating button
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8), value: viewModel.partialRecipe == nil)
                 }
-                .onTapGesture {
-                    isPromptFocused = false
-                }
-                
-                // Floating action button (generate/generating/regenerate)
-                if isAvailable && (viewModel.canGenerate || viewModel.isGenerating || viewModel.generatedRecipe != nil) {
-                    floatingActionButton
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                .padding(.vertical, Theme.Spacing.xl)
+                .padding(.horizontal, Theme.Spacing.md)
+                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: viewModel.partialRecipe == nil)
             }
-            .animation(.spring(), value: viewModel.canGenerate)
-            .animation(.spring(), value: viewModel.selectedCuisines.count)
-            .animation(.spring(), value: viewModel.selectedDiets.count)
-            .animation(.spring(), value: viewModel.selectedTimes.count)
-            .animation(.spring(), value: viewModel.selectedTypes.count)
-            .animation(.spring(), value: viewModel.prompt)
+            .onTapGesture {
+                isPromptFocused = false
+            }
+
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                AIRecipePrimaryActionBar(
+                    state: viewModel.primaryActionState(isAvailable: isAvailable),
+                    action: performPrimaryAction
+                )
+            }
+            .background {
+                AnimatedMeshGradient()
+                    .ignoresSafeArea()
+            }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -145,6 +137,7 @@ struct AIRecipeGeneratorView: View {
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $viewModel.prompt)
+                    .accessibilityIdentifier("aiRecipePrompt")
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 96)
                     .padding(Theme.Spacing.sm)
@@ -305,6 +298,7 @@ struct AIRecipeGeneratorView: View {
                         .foregroundStyle(Color.cauldronOrange)
                 }
                 .accessibilityLabel("Regenerate")
+                .disabled(viewModel.isSaving)
             }
         }
         .padding(Theme.Spacing.md)
@@ -331,57 +325,21 @@ struct AIRecipeGeneratorView: View {
         }
     }
 
-    /// Single primary action that morphs Generate → generating → Save.
-    private var floatingActionButton: some View {
-        Button {
-            if viewModel.isGenerating {
-                // No-op while generating.
-            } else if viewModel.generatedRecipe != nil {
-                guard !viewModel.isSaving else { return }
-                viewModel.isSaving = true
-                Task {
-                    if await viewModel.saveRecipe() {
-                        dismiss()
-                    } else {
-                        viewModel.isSaving = false
-                    }
-                }
-            } else {
-                viewModel.generateRecipe()
-                isPromptFocused = false
-            }
-        } label: {
-            HStack(spacing: Theme.Spacing.sm) {
-                if viewModel.isGenerating {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                    Text("Cooking up your recipe…")
-                        .font(.headline)
-                } else if viewModel.generatedRecipe != nil {
-                    if viewModel.isSaving {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "checkmark")
-                            .font(.headline)
-                    }
-                    Text("Save Recipe")
-                        .font(.headline)
+    private func performPrimaryAction() {
+        guard viewModel.primaryActionState(isAvailable: isAvailable).isEnabled else { return }
+        isPromptFocused = false
+        if viewModel.generatedRecipe != nil {
+            viewModel.isSaving = true
+            Task {
+                if await viewModel.saveRecipe() {
+                    dismiss()
                 } else {
-                    Image(systemName: "wand.and.stars")
-                        .font(.headline)
-                    Text("Generate Recipe")
-                        .font(.headline)
+                    viewModel.isSaving = false
                 }
             }
-            .padding(.horizontal, Theme.Spacing.xs)
-            .padding(.vertical, Theme.Spacing.xxs)
+        } else {
+            viewModel.generateRecipe()
         }
-        .buttonStyle(.glassProminent)
-        .controlSize(.extraLarge)
-        .tint(.cauldronOrange)
-        .disabled(viewModel.isGenerating || viewModel.isSaving)
-        .padding(.bottom, Theme.Spacing.xl)
     }
 
 }

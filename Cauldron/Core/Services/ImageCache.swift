@@ -9,6 +9,103 @@ import UIKit
 import os
 import CryptoKit
 
+nonisolated private final class ImageCacheDiskCoordinator: @unchecked Sendable {
+    private let diskQueue = DispatchQueue(
+        label: "com.cauldron.image-cache.disk",
+        qos: .utility
+    )
+    private let generationLock = NSLock()
+    private var generations: [String: UInt] = [:]
+    private var pendingWriteGenerations: [String: UInt] = [:]
+    private var cacheEpoch: UInt = 0
+
+    func generation(for key: String, advancing: Bool = false) -> UInt {
+        generationLock.withLock {
+            if advancing {
+                generations[key, default: 0] &+= 1
+                pendingWriteGenerations[key] = nil
+            }
+            return generations[key, default: 0]
+        }
+    }
+
+    func isCurrent(_ generation: UInt, for key: String) -> Bool {
+        generationLock.withLock { generations[key, default: 0] == generation }
+    }
+
+    func readToken(for key: String) -> (generation: UInt, epoch: UInt) {
+        generationLock.withLock {
+            (generations[key, default: 0], cacheEpoch)
+        }
+    }
+
+    func isCurrent(_ token: (generation: UInt, epoch: UInt), for key: String) -> Bool {
+        generationLock.withLock {
+            generations[key, default: 0] == token.generation && cacheEpoch == token.epoch
+        }
+    }
+
+    func beginWrite(for key: String) -> UInt {
+        generationLock.withLock {
+            generations[key, default: 0] &+= 1
+            let generation = generations[key, default: 0]
+            pendingWriteGenerations[key] = generation
+            return generation
+        }
+    }
+
+    func isWritePending(for key: String) -> Bool {
+        generationLock.withLock { pendingWriteGenerations[key] != nil }
+    }
+
+    func finishWrite(_ generation: UInt, for key: String) {
+        generationLock.withLock {
+            guard pendingWriteGenerations[key] == generation else { return }
+            pendingWriteGenerations[key] = nil
+        }
+    }
+
+    func performDiskOperation<T: Sendable>(
+        _ operation: @escaping @Sendable () -> T
+    ) async -> T {
+        await withCheckedContinuation { continuation in
+            diskQueue.async {
+                continuation.resume(returning: operation())
+            }
+        }
+    }
+
+    func enqueueDiskOperation(_ operation: @escaping @Sendable () -> Void) {
+        diskQueue.async(execute: operation)
+    }
+
+    func enqueueDiskOperationIfCurrent(
+        _ generation: UInt,
+        for key: String,
+        operation: @escaping @Sendable () -> Void
+    ) {
+        diskQueue.async { [self] in
+            guard isCurrent(generation, for: key) else { return }
+            operation()
+        }
+    }
+
+    func invalidate(_ keys: some Sequence<String>) {
+        generationLock.withLock {
+            for key in keys {
+                generations[key, default: 0] &+= 1
+                pendingWriteGenerations[key] = nil
+            }
+        }
+    }
+
+    func invalidateAllReads() {
+        generationLock.withLock {
+            cacheEpoch &+= 1
+        }
+    }
+}
+
 /// Shared two-tier cache for loaded images
 /// L1: In-memory NSCache with size limits
 /// L2: Persistent disk cache in Library/Caches/
@@ -19,6 +116,7 @@ class ImageCache {
     private let diskCacheDirectory: URL
     private var trackedKeys = Set<String>()
     private let trackedKeysLock = NSLock()
+    private let diskCoordinator = ImageCacheDiskCoordinator()
 
     private let logger = Logger(subsystem: "com.cauldron", category: "ImageCache")
 
@@ -49,8 +147,12 @@ class ImageCache {
 
         let diskCacheDirectory = diskCacheDirectory
         let maxDiskCacheAge = maxDiskCacheAge
-        Task.detached(priority: .background) {
-            Self.cleanExpiredDiskCache(in: diskCacheDirectory, maxDiskCacheAge: maxDiskCacheAge)
+        let diskCoordinator = diskCoordinator
+        diskCoordinator.enqueueDiskOperation {
+            Self.cleanExpiredDiskCache(
+                in: diskCacheDirectory,
+                maxDiskCacheAge: maxDiskCacheAge
+            )
         }
     }
 
@@ -76,11 +178,16 @@ class ImageCache {
     /// Load a cached image from disk on a background queue and promote it to memory.
     func getFromDisk(_ key: String) async -> UIImage? {
         let fileURL = diskCacheURL(for: key)
-        let diskImage = await Task.detached(priority: .utility) {
+        let readToken = diskCoordinator.readToken(for: key)
+        guard !diskCoordinator.isWritePending(for: key) else { return nil }
+        let diskCoordinator = diskCoordinator
+        let diskImage = await diskCoordinator.performDiskOperation {
             Self.loadFromDisk(at: fileURL)
-        }.value
+        }
 
-        guard let diskImage else {
+        guard let diskImage,
+              !diskCoordinator.isWritePending(for: key),
+              diskCoordinator.isCurrent(readToken, for: key) else {
             return nil
         }
 
@@ -90,6 +197,7 @@ class ImageCache {
     }
 
     func set(_ key: String, image: UIImage) {
+        let generation = diskCoordinator.beginWrite(for: key)
         let cacheKey = key as NSString
         let cost = estimateImageCost(image)
 
@@ -97,29 +205,48 @@ class ImageCache {
         track(key)
 
         let fileURL = diskCacheURL(for: key)
+        let diskCoordinator = diskCoordinator
         Task.detached(priority: .background) {
-            Self.saveToDisk(image: image, at: fileURL)
+            guard let data = image.jpegData(compressionQuality: 0.8) else {
+                diskCoordinator.finishWrite(generation, for: key)
+                return
+            }
+            diskCoordinator.enqueueDiskOperationIfCurrent(generation, for: key) {
+                defer { diskCoordinator.finishWrite(generation, for: key) }
+                try? FileManager.default.removeItem(at: fileURL)
+                Self.saveToDisk(data: data, at: fileURL)
+            }
         }
     }
 
     func remove(_ key: String) {
+        let generation = diskCoordinator.generation(for: key, advancing: true)
         memoryCache.removeObject(forKey: key as NSString)
         untrack(key)
-        try? FileManager.default.removeItem(at: diskCacheURL(for: key))
+        let fileURL = diskCacheURL(for: key)
+        diskCoordinator.enqueueDiskOperationIfCurrent(generation, for: key) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     func clear() {
+        diskCoordinator.invalidateAllReads()
+        diskCoordinator.invalidate(trackedKeysSnapshot())
         memoryCache.removeAllObjects()
         replaceTrackedKeys(with: Set<String>())
 
-        do {
-            let files = try FileManager.default.contentsOfDirectory(at: diskCacheDirectory, includingPropertiesForKeys: nil)
-            for file in files {
-                try? FileManager.default.removeItem(at: file)
+        let diskCacheDirectory = diskCacheDirectory
+        let logger = logger
+        diskCoordinator.enqueueDiskOperation {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: diskCacheDirectory, includingPropertiesForKeys: nil)
+                for file in files {
+                    try? FileManager.default.removeItem(at: file)
+                }
+                logger.info("🗑️ Cleared all cached images (memory + disk)")
+            } catch {
+                logger.error("Failed to clear disk cache: \(error.localizedDescription)")
             }
-            logger.info("🗑️ Cleared all cached images (memory + disk)")
-        } catch {
-            logger.error("Failed to clear disk cache: \(error.localizedDescription)")
         }
     }
 
@@ -142,8 +269,21 @@ class ImageCache {
         remove(keys: keys)
     }
 
+    /// Test/support barrier for callers that must observe completed disk work.
+    /// Production rendering never waits on this path.
+    func waitForPendingDiskOperations() async {
+        await diskCoordinator.performDiskOperation { () }
+    }
+
     nonisolated static func profileImageKey(userId: UUID) -> String {
         "profile_\(userId.uuidString)"
+    }
+
+    nonisolated static func profileImageKey(for photo: ProfileAvatarRepresentation.PhotoIdentity) -> String {
+        let digest = SHA256.hash(data: Data(photo.cacheIdentity.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "profile_\(photo.ownerID.uuidString)_\(digest)"
     }
 
     nonisolated static func recipeImageKey(recipeId: UUID, variant: String = "default") -> String {
@@ -171,16 +311,23 @@ class ImageCache {
     }
 
     private func remove(keys: some Sequence<String>) {
-        var removedCount = 0
+        let keys = Array(keys)
+        let generations = Dictionary(uniqueKeysWithValues: keys.map { key in
+            (key, diskCoordinator.generation(for: key, advancing: true))
+        })
         for key in keys {
             memoryCache.removeObject(forKey: key as NSString)
             untrack(key)
-            try? FileManager.default.removeItem(at: diskCacheURL(for: key))
-            removedCount += 1
+            let fileURL = diskCacheURL(for: key)
+            if let generation = generations[key] {
+                diskCoordinator.enqueueDiskOperationIfCurrent(generation, for: key) {
+                    try? FileManager.default.removeItem(at: fileURL)
+                }
+            }
         }
 
-        if removedCount > 0 {
-            logger.info("🗑️ Cleared \(removedCount) cached images")
+        if !keys.isEmpty {
+            logger.info("🗑️ Cleared \(keys.count) cached images")
         }
     }
 
@@ -223,11 +370,7 @@ class ImageCache {
         }
     }
 
-    private nonisolated static func saveToDisk(image: UIImage, at fileURL: URL) {
-        guard let data = image.jpegData(compressionQuality: 0.8) else {
-            return
-        }
-
+    private nonisolated static func saveToDisk(data: Data, at fileURL: URL) {
         do {
             try data.write(to: fileURL, options: .atomic)
         } catch {

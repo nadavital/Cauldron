@@ -8,12 +8,49 @@
 import SwiftUI
 import UIKit
 import CloudKit
+import os
+
+struct ImageCacheWriteGenerationTracker {
+    private var generations: [String: UInt] = [:]
+
+    mutating func generation(for cacheKey: String, advancing: Bool = false) -> UInt {
+        if advancing {
+            generations[cacheKey, default: 0] &+= 1
+        }
+        return generations[cacheKey, default: 0]
+    }
+
+    func isCurrent(_ generation: UInt, for cacheKey: String) -> Bool {
+        (generations[cacheKey] ?? 0) == generation
+    }
+}
+
+struct RecipeImageCacheKeyPolicy {
+    nonisolated static func variant(
+        baseVariant: String,
+        hasExplicitVariant: Bool,
+        targetPixelSize: CGFloat?,
+        cacheIdentity: String?
+    ) -> String {
+        let requestedPixelEdge = targetPixelSize.map { Int(ceil($0)) } ?? 0
+        let sizedVariant = hasExplicitVariant && requestedPixelEdge > 0
+            ? "\(baseVariant)_px_\(requestedPixelEdge)"
+            : baseVariant
+        return cacheIdentity.map { "\(sizedVariant)_v_\($0)" } ?? sizedVariant
+    }
+}
 
 /// Centralized service for loading and caching recipe images
 @MainActor
 class RecipeImageService {
+    private static let performanceSignposter = OSSignposter(
+        subsystem: "com.cauldron",
+        category: "RecipeImages"
+    )
     private let imageManager: RecipeImageManager
     private var inFlightLoads: [String: Task<Result<UIImage, ImageLoadError>, Never>] = [:]
+    private var inFlightRecipeLoads: [String: Task<Result<UIImage, ImageLoadError>, Never>] = [:]
+    private var cacheWriteGenerationTracker = ImageCacheWriteGenerationTracker()
 
     init(imageManager: RecipeImageManager) {
         self.imageManager = imageManager
@@ -28,7 +65,8 @@ class RecipeImageService {
     func loadImage(
         from url: URL?,
         targetPixelSize: CGFloat? = nil,
-        cacheIdentity: String? = nil
+        cacheIdentity: String? = nil,
+        forceRefresh: Bool = false
     ) async -> Result<UIImage, ImageLoadError> {
         guard let url = url else {
             return .failure(.invalidURL)
@@ -40,14 +78,17 @@ class RecipeImageService {
             cacheIdentity: cacheIdentity
         )
 
-        // Check cache first
-        if let cachedImage = await ImageCache.shared.load(cacheKey) {
+        if forceRefresh {
+            ImageCache.shared.remove(cacheKey)
+        } else if let cachedImage = await ImageCache.shared.load(cacheKey) {
             return .success(cachedImage)
         }
 
-        if let existingTask = inFlightLoads[cacheKey] {
+        let inFlightKey = forceRefresh ? "\(cacheKey)|refresh" : cacheKey
+        if let existingTask = inFlightLoads[inFlightKey] {
             return await existingTask.value
         }
+        let writeGeneration = cacheWriteGeneration(for: cacheKey, advancing: forceRefresh)
 
         let loadTask = Task<Result<UIImage, ImageLoadError>, Never> {
             do {
@@ -56,11 +97,14 @@ class RecipeImageService {
                 if url.isFileURL {
                     image = try await ImageLoadingPipeline.loadImage(fromFileURL: url, maxPixelSize: targetPixelSize)
                 } else {
-                    let data = try await self.downloadImageWithRetry(from: url)
+                    let data = try await self.downloadImageWithRetry(
+                        from: url,
+                        forceRefresh: forceRefresh
+                    )
                     image = try await ImageLoadingPipeline.decodeImage(from: data, maxPixelSize: targetPixelSize)
                 }
 
-                await MainActor.run {
+                if self.cacheWriteGeneration(for: cacheKey) == writeGeneration {
                     ImageCache.shared.set(cacheKey, image: image)
                 }
 
@@ -74,21 +118,25 @@ class RecipeImageService {
             }
         }
 
-        inFlightLoads[cacheKey] = loadTask
+        inFlightLoads[inFlightKey] = loadTask
         let result = await loadTask.value
-        inFlightLoads[cacheKey] = nil
+        inFlightLoads[inFlightKey] = nil
         return result
     }
 
     /// Download image from remote URL with retry logic
-    private func downloadImageWithRetry(from url: URL, maxRetries: Int = 2) async throws -> Data {
+    private func downloadImageWithRetry(
+        from url: URL,
+        forceRefresh: Bool = false,
+        maxRetries: Int = 2
+    ) async throws -> Data {
         var lastError: Error?
 
         for attempt in 0...maxRetries {
             do {
                 var request = URLRequest(url: url)
                 request.timeoutInterval = 15
-                request.cachePolicy = .returnCacheDataElseLoad
+                request.cachePolicy = forceRefresh ? .reloadIgnoringLocalCacheData : .returnCacheDataElseLoad
 
                 let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -141,21 +189,74 @@ class RecipeImageService {
         targetPixelSize: CGFloat? = nil,
         cacheVariant: String? = nil,
         privateRecordName: String? = nil,
-        cacheIdentity: String? = nil
+        cacheIdentity: String? = nil,
+        forceRefresh: Bool = false
     ) async -> Result<UIImage, ImageLoadError> {
+        let requestedPixelEdge = targetPixelSize.map { Int(ceil($0)) } ?? 0
         let baseVariant = cacheVariant ?? variantKey(for: targetPixelSize)
-        let versionedVariant = cacheIdentity.map { "\(baseVariant)_v_\($0)" } ?? baseVariant
+        let versionedVariant = RecipeImageCacheKeyPolicy.variant(
+            baseVariant: baseVariant,
+            hasExplicitVariant: cacheVariant != nil,
+            targetPixelSize: targetPixelSize,
+            cacheIdentity: cacheIdentity
+        )
         let recipeCacheKey = ImageCache.recipeImageKey(
             recipeId: recipeId,
             variant: versionedVariant
         )
+        let inFlightKey = "\(recipeCacheKey)|pixels:\(requestedPixelEdge)|refresh:\(forceRefresh)"
 
-        if let cachedImage = await ImageCache.shared.load(recipeCacheKey) {
+        if forceRefresh {
+            ImageCache.shared.remove(recipeCacheKey)
+        } else if let cachedImage = await ImageCache.shared.load(recipeCacheKey) {
             if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
                 return .success(cachedImage)
             }
             ImageCache.shared.remove(recipeCacheKey)
         }
+
+        if let existingTask = inFlightRecipeLoads[inFlightKey] {
+            return await existingTask.value
+        }
+        let writeGeneration = cacheWriteGeneration(for: recipeCacheKey, advancing: forceRefresh)
+
+        let loadTask = Task<Result<UIImage, ImageLoadError>, Never> {
+            let signpostID = Self.performanceSignposter.makeSignpostID()
+            let interval = Self.performanceSignposter.beginInterval(
+                "RecipeImageLoad",
+                id: signpostID
+            )
+            let result = await self.performRecipeImageLoad(
+                recipeId: recipeId,
+                localURL: url,
+                ownerId: ownerId,
+                targetPixelSize: targetPixelSize,
+                recipeCacheKey: recipeCacheKey,
+                privateRecordName: privateRecordName,
+                cacheIdentity: cacheIdentity,
+                forceRefresh: forceRefresh,
+                writeGeneration: writeGeneration
+            )
+            Self.performanceSignposter.endInterval("RecipeImageLoad", interval)
+            return result
+        }
+        inFlightRecipeLoads[inFlightKey] = loadTask
+        let result = await loadTask.value
+        inFlightRecipeLoads[inFlightKey] = nil
+        return result
+    }
+
+    private func performRecipeImageLoad(
+        recipeId: UUID,
+        localURL url: URL?,
+        ownerId: UUID?,
+        targetPixelSize: CGFloat?,
+        recipeCacheKey: String,
+        privateRecordName: String?,
+        cacheIdentity: String?,
+        forceRefresh: Bool,
+        writeGeneration: UInt
+    ) async -> Result<UIImage, ImageLoadError> {
 
         // Try loading from local URL first
         if let url = url {
@@ -170,10 +271,11 @@ class RecipeImageService {
                     let result = await loadImage(
                         from: url,
                         targetPixelSize: targetPixelSize,
-                        cacheIdentity: cacheIdentity
+                        cacheIdentity: cacheIdentity,
+                        forceRefresh: forceRefresh
                     )
                     if case .success(let image) = result {
-                        ImageCache.shared.set(recipeCacheKey, image: image)
+                        cacheImageIfCurrent(recipeCacheKey, image: image, generation: writeGeneration)
                         return result
                     }
                 }
@@ -182,10 +284,11 @@ class RecipeImageService {
                 let result = await loadImage(
                     from: url,
                     targetPixelSize: targetPixelSize,
-                    cacheIdentity: cacheIdentity
+                    cacheIdentity: cacheIdentity,
+                    forceRefresh: forceRefresh
                 )
                 if case .success(let image) = result {
-                    ImageCache.shared.set(recipeCacheKey, image: image)
+                    cacheImageIfCurrent(recipeCacheKey, image: image, generation: writeGeneration)
                     return result
                 }
             }
@@ -216,10 +319,11 @@ class RecipeImageService {
                     let result = await loadImage(
                         from: imageURL,
                         targetPixelSize: targetPixelSize,
-                        cacheIdentity: cacheIdentity
+                        cacheIdentity: cacheIdentity,
+                        forceRefresh: forceRefresh
                     )
                     if case .success(let image) = result {
-                        ImageCache.shared.set(recipeCacheKey, image: image)
+                        cacheImageIfCurrent(recipeCacheKey, image: image, generation: writeGeneration)
                     }
                     return result
                 }
@@ -272,6 +376,15 @@ class RecipeImageService {
 
         let identityKey = cacheIdentity.map { "_v_\($0)" } ?? ""
         return "image_\(url.absoluteString)_\(sizeKey)\(identityKey)"
+    }
+
+    private func cacheWriteGeneration(for cacheKey: String, advancing: Bool = false) -> UInt {
+        cacheWriteGenerationTracker.generation(for: cacheKey, advancing: advancing)
+    }
+
+    private func cacheImageIfCurrent(_ cacheKey: String, image: UIImage, generation: UInt) {
+        guard cacheWriteGenerationTracker.isCurrent(generation, for: cacheKey) else { return }
+        ImageCache.shared.set(cacheKey, image: image)
     }
 
     private func variantKey(for targetPixelSize: CGFloat?) -> String {

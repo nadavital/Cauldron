@@ -9,6 +9,10 @@ import os
 import UIKit
 
 struct RecipeDetailView: View {
+    private static let performanceSignposter = OSSignposter(
+        subsystem: "com.cauldron",
+        category: "RecipeDetail"
+    )
     let initialRecipe: Recipe
     let dependencies: DependencyContainer
 
@@ -44,6 +48,7 @@ struct RecipeDetailView: View {
     @State var isLoadingCreator = false
     @State var relatedRecipes: [Recipe] = []
     @State var imageRefreshID = UUID()
+    @State private var previewPersistenceTask: Task<Void, Never>?
 
     @State var originalRecipe: Recipe?
     @State var isCheckingForUpdates = false
@@ -233,10 +238,13 @@ struct RecipeDetailView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             if hasHeroImage {
-                                HeroRecipeImageView(recipe: recipe, recipeImageService: dependencies.recipeImageService)
+                                HeroRecipeImageView(
+                                    recipe: recipe,
+                                    recipeImageService: dependencies.recipeImageService,
+                                    reloadToken: imageRefreshID
+                                )
                                     .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
                                     .ignoresSafeArea(edges: .top)
-                                    .id("\(recipe.imageURL?.absoluteString ?? "no-url")-\(recipe.id)-\(imageRefreshID)")
                             }
 
                             if horizontalSizeClass == .regular {
@@ -420,6 +428,11 @@ struct RecipeDetailView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .recipeImageUpdated)) { notification in
+            guard let updatedRecipeId = notification.object as? UUID,
+                  updatedRecipeId == recipe.id else { return }
+            Task { await refreshRecipeImageMetadata() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { notification in
             if let deletedRecipeId = notification.object as? UUID,
                deletedRecipeId == recipe.id {
@@ -456,6 +469,14 @@ struct RecipeDetailView: View {
             }
         }
         .task {
+            let signpostID = Self.performanceSignposter.makeSignpostID()
+            let interval = Self.performanceSignposter.beginInterval(
+                "InitialDetailLoad",
+                id: signpostID
+            )
+            defer {
+                Self.performanceSignposter.endInterval("InitialDetailLoad", interval)
+            }
             dependencies.libraryPresentationStore.seedRecipe(
                 recipe,
                 sharedBy: sharedBy,
@@ -468,28 +489,40 @@ struct RecipeDetailView: View {
                 await refreshPublicRecipeIfNeeded()
 
                 if RecipeDetailDisplayPolicy.shouldSaveAsPreviewOnOpen(recipe, currentUserId: currentUserId) {
-                    await saveAsPreviewIfNeeded()
+                    let canonicalRecipe = recipe
+                    previewPersistenceTask?.cancel()
+                    previewPersistenceTask = Task(priority: .utility) {
+                        await persistPreviewInBackground(canonicalRecipe)
+                    }
                 }
             }
 
-            if !recipe.isOwnedByCurrentUser() {
-                await checkForOwnedCopy()
+            let hydratedRecipe = recipe
+            let creatorIsOwner = hydratedRecipe.originalCreatorId == hydratedRecipe.ownerId
+            let shouldLoadRecipeOwner = !hydratedRecipe.isOwnedByCurrentUser() && hydratedRecipe.ownerId != nil
+            await withTaskGroup(of: Void.self) { group in
+                if !hydratedRecipe.isOwnedByCurrentUser() {
+                    group.addTask { await checkForOwnedCopy() }
+                    if let ownerId = hydratedRecipe.ownerId {
+                        group.addTask { await loadRecipeOwner(ownerId) }
+                    }
+                }
 
-                if let ownerId = recipe.ownerId {
-                    await loadRecipeOwner(ownerId)
+                if let creatorId = hydratedRecipe.originalCreatorId,
+                   creatorId != hydratedRecipe.ownerId || !shouldLoadRecipeOwner {
+                    group.addTask { await loadOriginalCreator(creatorId) }
+                }
+
+                if hydratedRecipe.isFollowingSourceUpdates {
+                    group.addTask { await checkForRecipeUpdates() }
+                }
+
+                if !hydratedRecipe.relatedRecipeIds.isEmpty {
+                    group.addTask { await loadRelatedRecipes() }
                 }
             }
-
-            if let creatorId = recipe.originalCreatorId {
-                await loadOriginalCreator(creatorId)
-            }
-
-            if recipe.isFollowingSourceUpdates {
-                await checkForRecipeUpdates()
-            }
-
-            if !recipe.relatedRecipeIds.isEmpty {
-                await loadRelatedRecipes()
+            if creatorIsOwner, let recipeOwner {
+                originalCreator = recipeOwner
             }
         }
     }

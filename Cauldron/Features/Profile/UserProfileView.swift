@@ -34,15 +34,24 @@ private actor ArchiveRestoreProgressTracker {
     }
 }
 
+private enum ProfileContentSelection: String, CaseIterable, Identifiable {
+    case recipes = "Recipes"
+    case collections = "Collections"
+
+    var id: Self { self }
+}
+
 /// User profile view - displays user information and manages connections
 struct UserProfileView: View {
     let user: User
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: UserProfileViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showingEditProfile = false
     @State private var hasLoadedInitialData = false
+    @State private var selectedContent: ProfileContentSelection = .recipes
     
     // External sharing
     @State private var shareLink: ShareableLink?
@@ -65,6 +74,7 @@ struct UserProfileView: View {
     @State private var isRestoringArchive = false
     @State private var archiveStatusMessage: String?
     @Namespace private var recipeTransition
+    @Namespace private var collectionTransition
 
     init(user: User, dependencies: DependencyContainer) {
         self.user = user
@@ -85,7 +95,7 @@ struct UserProfileView: View {
 
     var body: some View {
         ScrollView {
-            GlassEffectContainer(spacing: 2) {
+            GlassEffectContainer(spacing: Theme.Spacing.sm) {
                 VStack(spacing: Theme.Spacing.lg) {
                     // Profile Header
                     profileHeader
@@ -99,11 +109,12 @@ struct UserProfileView: View {
                         connectionSection
                     }
 
-                    // Recipes Section
-                    recipesSection
+                    profileContentPicker
 
-                    // Collections Section (only show if user has collections OR still loading the first time)
-                    if !viewModel.userCollections.isEmpty || viewModel.isColdLoadingCollections || RuntimeEnvironment.forceSkeletonLoading {
+                    switch selectedContent {
+                    case .recipes:
+                        recipesSection
+                    case .collections:
                         collectionsSection
                     }
                 }
@@ -115,11 +126,11 @@ struct UserProfileView: View {
         .navigationTitle(displayUser.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .modifier(ProfileRecipeSearchModifier(
-            isEnabled: !viewModel.isCurrentUser,
+            isEnabled: !viewModel.isCurrentUser && selectedContent == .recipes,
             text: $viewModel.searchText
         ))
         .refreshable {
-            await viewModel.refreshProfile()
+            await viewModel.refreshProfile(includeCollections: selectedContent == .collections)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecipeDeleted"))) { _ in
             // Only refresh if viewing own profile
@@ -137,6 +148,11 @@ struct UserProfileView: View {
                     await viewModel.loadProfileData()
                 }
             }
+        }
+        .task(id: selectedContent) {
+            guard selectedContent == .collections,
+                  !viewModel.hasResolvedCollections else { return }
+            await viewModel.loadUserCollections()
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { }
@@ -211,26 +227,47 @@ struct UserProfileView: View {
         }
     }
 
+    private var profileContentPicker: some View {
+        Picker("Profile content", selection: $selectedContent) {
+            ForEach(ProfileContentSelection.allCases) { selection in
+                Text(selection.rawValue).tag(selection)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Profile content")
+    }
+
     private var profileQuickActions: some View {
         GlassEffectContainer(spacing: Theme.Spacing.sm) {
-            HStack(spacing: Theme.Spacing.sm) {
-                profileActionButton("Edit", systemImage: "pencil") {
-                    showingEditProfile = true
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: Theme.Spacing.sm) {
+                    profileQuickActionButtons
                 }
+            } else {
+                HStack(spacing: Theme.Spacing.sm) {
+                    profileQuickActionButtons
+                }
+            }
+        }
+    }
 
-                profileActionButton("Invite", systemImage: "person.badge.plus") {
-                    shareWithFriends()
-                }
+    @ViewBuilder
+    private var profileQuickActionButtons: some View {
+        profileActionButton("Edit", systemImage: "pencil") {
+            showingEditProfile = true
+        }
 
-                if appIconManager.supportsAlternateIcons {
-                    profileActionButton("App Icons", systemImage: "app.dashed") {
-                        showAppIconPicker = true
-                    }
-                } else {
-                    profileActionButton("Progress", systemImage: viewModel.userTier.icon) {
-                        showTierRoadmap = true
-                    }
-                }
+        profileActionButton("Invite", systemImage: "person.badge.plus") {
+            shareWithFriends()
+        }
+
+        if appIconManager.supportsAlternateIcons {
+            profileActionButton("App Icons", systemImage: "app.dashed") {
+                showAppIconPicker = true
+            }
+        } else {
+            profileActionButton("Progress", systemImage: viewModel.userTier.icon) {
+                showTierRoadmap = true
             }
         }
     }
@@ -257,16 +294,19 @@ struct UserProfileView: View {
 
     private var profileHeader: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            HStack(alignment: .center, spacing: Theme.Spacing.md) {
                 ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
+                    .fixedSize()
                 profileIdentityInfo
             }
 
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 ProfileAvatar(user: displayUser, size: 70, dependencies: viewModel.dependencies)
+                    .fixedSize()
                 profileIdentityInfo
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
         .padding()
         .glassCard(cornerRadius: 16)
     }
@@ -485,12 +525,12 @@ struct UserProfileView: View {
                 }
             )
             archiveStatusMessage = Self.archiveRestoreMessage(report)
-            await viewModel.refreshProfile()
+            await viewModel.refreshProfile(includeCollections: selectedContent == .collections)
         } catch {
             if let partialReport = await progressTracker.latest(),
                Self.archiveRestoreDidChangeLibrary(partialReport) {
                 archiveStatusMessage = Self.archivePartialRestoreMessage(partialReport)
-                await viewModel.refreshProfile()
+                await viewModel.refreshProfile(includeCollections: selectedContent == .collections)
             } else {
                 archiveStatusMessage = "Cauldron couldn't restore that backup. Your existing library was not removed."
             }
@@ -911,22 +951,8 @@ struct UserProfileView: View {
 
     private var collectionsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            // Section header
-            HStack {
-                SectionHeaderLabel(title: "Collections", systemImage: "folder.fill", iconColor: .purple)
-
-                Spacer()
-
-                if !viewModel.userCollections.isEmpty {
-                    Text("See All")
-                        .font(.subheadline)
-                        .foregroundColor(.cauldronOrange)
-                }
-            }
-
-            // Content
             if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoadingCollections {
-                CollectionCardSkeletonRail(count: 2, horizontalPadding: 0)
+                CollectionCardSkeletonGrid(columns: profileCollectionColumns, count: 4)
             } else if viewModel.userCollections.isEmpty {
                 emptyCollectionsState
             } else {
@@ -940,30 +966,42 @@ struct UserProfileView: View {
                     }
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.Spacing.md) {
-                        ForEach(viewModel.userCollections.prefix(10), id: \.id) { collection in
-                            NavigationLink(destination: CollectionDetailView(
+                LazyVGrid(columns: profileCollectionColumns, spacing: Theme.Spacing.md) {
+                    ForEach(viewModel.userCollections, id: \.id) { collection in
+                        let transitionID = "profile-collection-\(collection.id.uuidString)"
+                        NavigationLink {
+                            CollectionDetailView(
                                 collection: collection,
                                 dependencies: viewModel.dependencies,
                                 initialOwner: user,
                                 initialRecipeImages: viewModel.getRecipeImages(for: collection),
                                 initialRecipeImageSources: viewModel.getRecipeImageSources(for: collection),
                                 initialRelation: viewModel.isCurrentUser ? .owned : .unknown
-                            )) {
-                                CollectionCardView(
-                                    collection: collection,
-                                    recipeImages: viewModel.getRecipeImages(for: collection),
-                                    recipeImageSources: viewModel.getRecipeImageSources(for: collection),
-                                    dependencies: viewModel.dependencies
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            )
+                            .navigationTransition(.zoom(sourceID: transitionID, in: collectionTransition))
+                        } label: {
+                            CollectionCardView(
+                                collection: collection,
+                                recipeImages: viewModel.getRecipeImages(for: collection),
+                                recipeImageSources: viewModel.getRecipeImageSources(for: collection),
+                                preferredWidth: nil,
+                                dependencies: viewModel.dependencies
+                            )
                         }
+                        .buttonStyle(.plain)
+                        .matchedTransitionSource(id: transitionID, in: collectionTransition)
+                        .accessibilityHint("Opens this collection")
                     }
                 }
             }
         }
+    }
+
+    private var profileCollectionColumns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            return [GridItem(.adaptive(minimum: 210, maximum: 280), spacing: Theme.Spacing.md)]
+        }
+        return [GridItem(.flexible(), spacing: Theme.Spacing.md)]
     }
 
     private var emptyCollectionsState: some View {
@@ -990,11 +1028,11 @@ struct UserProfileView: View {
                     )
             }
 
-            Text(viewModel.isCurrentUser ? "No Collections Yet" : "No Shared Collections")
+            Text(viewModel.isCurrentUser ? "No Public Collections Yet" : "No Shared Collections")
                 .font(.subheadline)
                 .fontWeight(.medium)
 
-            Text(viewModel.isCurrentUser ? "Create collections to organize recipes" : "\(user.displayName) hasn't shared any collections")
+            Text(viewModel.isCurrentUser ? "Make a collection public to show it on your profile" : "\(user.displayName) hasn't shared any collections")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -1005,34 +1043,11 @@ struct UserProfileView: View {
 
     private var recipesSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            // Section header
-            HStack {
-                SectionHeaderLabel(
-                    title: viewModel.searchText.isEmpty ? "Recipes" : "Search Results",
-                    systemImage: "book.fill"
-                )
-
-                Spacer()
-
-                if !viewModel.filteredRecipes.isEmpty && viewModel.searchText.isEmpty {
-                    NavigationLink(destination: AllProfileRecipesListView(
-                        recipes: viewModel.filteredRecipes,
-                        user: user,
-                        dependencies: viewModel.dependencies
-                    )) {
-                        Text("See All")
-                            .font(.subheadline)
-                            .foregroundColor(.cauldronOrange)
-                    }
-                }
-            }
-
-            // Content
             if RuntimeEnvironment.forceSkeletonLoading || viewModel.isColdLoadingRecipes {
-                if horizontalSizeClass == .regular {
+                if horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
                     RecipeCardSkeletonGrid(columns: RecipeLayoutMode.defaultGridColumns, count: 4)
                 } else {
-                    RecipeCardSkeletonRail(count: 2, horizontalPadding: 0)
+                    RecipeRowSkeletonList(count: 5)
                 }
             } else if viewModel.filteredRecipes.isEmpty {
                 emptyRecipesState
@@ -1047,9 +1062,9 @@ struct UserProfileView: View {
                     }
                 }
 
-                if horizontalSizeClass == .regular {
+                if horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
                     LazyVGrid(columns: RecipeLayoutMode.defaultGridColumns, spacing: Theme.Spacing.md) {
-                        ForEach(displayedRecipes, id: \.id) { sharedRecipe in
+                        ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
                             let transitionID = "profile-grid-\(sharedRecipe.recipe.id.uuidString)"
                             NavigationLink {
                                 RecipeDetailView(
@@ -1064,49 +1079,31 @@ struct UserProfileView: View {
                             }
                             .buttonStyle(.plain)
                             .matchedTransitionSource(id: transitionID, in: recipeTransition)
+                            .accessibilityHint("Opens this recipe")
                         }
                     }
                 } else {
-                    if viewModel.searchText.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: Theme.Spacing.md) {
-                                ForEach(displayedRecipes, id: \.id) { sharedRecipe in
-                                    let transitionID = "profile-rail-\(sharedRecipe.recipe.id.uuidString)"
-                                    NavigationLink {
-                                        RecipeDetailView(
-                                            recipe: sharedRecipe.recipe,
-                                            dependencies: viewModel.dependencies,
-                                            sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
-                                            sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
-                                        )
-                                        .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
-                                    } label: {
-                                        profileRecipeCard(sharedRecipe)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .matchedTransitionSource(id: transitionID, in: recipeTransition)
-                                }
-                            }
-                        }
-                    } else {
-                        // List view for search results (matches Search tab style)
-                        VStack(spacing: Theme.Spacing.sm) {
-                            ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
-                                let transitionID = "profile-search-\(sharedRecipe.recipe.id.uuidString)"
-                                NavigationLink {
-                                    RecipeDetailView(
-                                        recipe: sharedRecipe.recipe,
-                                        dependencies: viewModel.dependencies,
-                                        sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
-                                        sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
-                                    )
-                                    .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
-                                } label: {
+                    LazyVStack(spacing: Theme.Spacing.sm) {
+                        ForEach(viewModel.filteredRecipes, id: \.id) { sharedRecipe in
+                            let transitionID = "profile-list-\(sharedRecipe.recipe.id.uuidString)"
+                            NavigationLink {
+                                RecipeDetailView(
+                                    recipe: sharedRecipe.recipe,
+                                    dependencies: viewModel.dependencies,
+                                    sharedBy: viewModel.isCurrentUser ? nil : sharedRecipe.sharedBy,
+                                    sharedAt: viewModel.isCurrentUser ? nil : sharedRecipe.sharedAt
+                                )
+                                .navigationTransition(.zoom(sourceID: transitionID, in: recipeTransition))
+                            } label: {
+                                if viewModel.isCurrentUser {
                                     RecipeRowView(recipe: sharedRecipe.recipe, dependencies: viewModel.dependencies)
+                                } else {
+                                    SharedRecipeRowView(sharedRecipe: sharedRecipe, dependencies: viewModel.dependencies)
                                 }
-                                .buttonStyle(.plain)
-                                .matchedTransitionSource(id: transitionID, in: recipeTransition)
                             }
+                            .buttonStyle(.plain)
+                            .matchedTransitionSource(id: transitionID, in: recipeTransition)
+                            .accessibilityHint("Opens this recipe")
                         }
                     }
                 }
@@ -1127,13 +1124,6 @@ struct UserProfileView: View {
                 dependencies: viewModel.dependencies
             )
         }
-    }
-
-    private var displayedRecipes: [SharedRecipe] {
-        if viewModel.searchText.isEmpty {
-            return Array(viewModel.filteredRecipes.prefix(10))
-        }
-        return viewModel.filteredRecipes
     }
 
     private var emptyRecipesState: some View {

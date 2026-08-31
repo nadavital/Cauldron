@@ -50,8 +50,16 @@ actor UserCloudService {
             return nil
         }
 
-        let db = try await core.getPublicDatabase()
         let systemUserRecordID = try await core.getCurrentUserRecordID()
+        return try await fetchCurrentUserProfile(verifiedSystemRecordID: systemUserRecordID)
+    }
+
+    /// Fetch an existing profile after the caller has already verified the
+    /// active iCloud account and obtained its system record ID. Session startup
+    /// uses this path so the account boundary stays strict without repeating the
+    /// same two CloudKit requests inside this service.
+    func fetchCurrentUserProfile(verifiedSystemRecordID systemUserRecordID: CKRecord.ID) async throws -> User? {
+        let db = try await core.getPublicDatabase()
         let customRecordName = "user_\(systemUserRecordID.recordName)"
         let customRecordID = CKRecord.ID(recordName: customRecordName)
 
@@ -66,7 +74,7 @@ actor UserCloudService {
             }
         } catch let error as CKError where error.code == .unknownItem {
             // Not found in public DB, try migration
-            if let migratedUser = try await migrateUserFromPrivateToPublic() {
+            if let migratedUser = try await migrateUserFromPrivateToPublic(systemUserRecordID: systemUserRecordID) {
                 return migratedUser
             }
         } catch {
@@ -95,11 +103,10 @@ actor UserCloudService {
     }
 
     /// Migrate user from PRIVATE database to PUBLIC database
-    private func migrateUserFromPrivateToPublic() async throws -> User? {
+    private func migrateUserFromPrivateToPublic(systemUserRecordID: CKRecord.ID) async throws -> User? {
         logger.info("Checking for user in PRIVATE database (migration)...")
 
         let privateDB = try await core.getPrivateDatabase()
-        let systemUserRecordID = try await core.getCurrentUserRecordID()
         let customRecordName = "user_\(systemUserRecordID.recordName)"
         let customRecordID = CKRecord.ID(recordName: customRecordName)
 
@@ -150,11 +157,11 @@ actor UserCloudService {
             throw CloudKitError.accountNotAvailable(accountStatus)
         }
 
-        if let existingUser = try await fetchCurrentUserProfile() {
+        let systemUserRecordID = try await core.getCurrentUserRecordID()
+        if let existingUser = try await fetchCurrentUserProfile(verifiedSystemRecordID: systemUserRecordID) {
             return existingUser
         }
 
-        let systemUserRecordID = try await core.getCurrentUserRecordID()
         let customRecordName = "user_\(systemUserRecordID.recordName)"
 
         let normalizedUsername = username.trimmingCharacters(in: .whitespaces).lowercased()
@@ -377,6 +384,11 @@ actor UserCloudService {
         identityRecordID: CKRecord.ID,
         in db: CKDatabase
     ) async throws {
+        // A username is also a durable public-profile URL. Preserve historical
+        // claims while the account exists so a rename cannot make an old
+        // /u/{username} link point at somebody else. Account deletion passes
+        // nil and remains the one path that releases every reserved name.
+        guard Self.shouldReleaseUsernameClaims(keeping: retainedUsername) else { return }
         let records = try await fetchRecords(
             in: db,
             recordType: CloudKitCore.RecordType.usernameClaim,
@@ -392,14 +404,16 @@ actor UserCloudService {
             expectedUsername: record["username"] as? String ?? "",
             expectedIdentityRecordName: identityRecordID.recordName
         ) {
-            let username = record["username"] as? String
-            guard username != retainedUsername else { continue }
             do {
                 _ = try await db.deleteRecord(withID: record.recordID)
             } catch let error as CKError where error.code == .unknownItem {
                 continue
             }
         }
+    }
+
+    static func shouldReleaseUsernameClaims(keeping retainedUsername: String?) -> Bool {
+        retainedUsername == nil
     }
 
     private func deterministicUserID(for identityRecordName: String) -> UUID {

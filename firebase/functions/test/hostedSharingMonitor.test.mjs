@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { generateHomePageHtml } from "../lib/index.js";
 
 import {
     dataAPIMonitorRequests,
@@ -22,10 +23,7 @@ const recipeExpected = {
     creatorHandle: "nadav",
 };
 
-const productionHomeHTML = readFileSync(
-    fileURLToPath(new URL("../../public/index.html", import.meta.url)),
-    "utf8",
-);
+const productionHomeHTML = generateHomePageHtml([]);
 
 function recipeHTML(overrides = {}) {
     const structured = {
@@ -68,11 +66,11 @@ test("AASA validator rejects a missing canonical profile path", () => {
 });
 
 test("validators enforce exact profile, recipe, collection, and invite identities", () => {
-    validateHTML("home", '<title>Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/"><meta property="og:image" content="https://cauldronrecipes.com/social-card.png"><link href="/icon-small-light.svg"><a href="https://apps.apple.com/app/id6754004943">', {
+    validateHTML("home", '<title>Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/"><meta property="og:image" content="https://cauldronrecipes.com/social-card.png"><link href="/icon-small-light.svg"><link href="/favicon.svg"><link href="/apple-touch-icon.png"><a href="https://apps.apple.com/app/id6754004943">', {
         canonicalURL: "https://cauldronrecipes.com/",
     });
-    validateHTML("profile", '<title>Nadav · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/profile/user-id"><h1>Nadav</h1><p>@nadav</p><a href="cauldron://import/profile/nadav">', {
-        canonicalURL: "https://cauldronrecipes.com/profile/user-id",
+    validateHTML("profile", '<title>Nadav · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/u/nadav"><h1>Nadav</h1><p>@nadav</p><a href="cauldron://import/profile/nadav">', {
+        canonicalURL: "https://cauldronrecipes.com/u/nadav",
         deepLinkIdentity: "nadav",
         displayName: "Nadav",
         handle: "nadav",
@@ -88,17 +86,24 @@ test("validators enforce exact profile, recipe, collection, and invite identitie
 
 test("home validator requires canonical branding and App Store metadata", () => {
     const expected = { canonicalURL: "https://cauldronrecipes.com/" };
-    const complete = '<title>Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/"><meta property="og:image" content="https://cauldronrecipes.com/social-card.png"><link href="/icon-small-light.svg"><a href="https://apps.apple.com/app/id6754004943">';
+    const complete = '<title>Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/"><meta property="og:image" content="https://cauldronrecipes.com/social-card.png"><link href="/icon-small-light.svg"><link href="/favicon.svg"><link href="/apple-touch-icon.png"><a href="https://apps.apple.com/app/id6754004943">';
     assert.throws(() => validateHTML("home", complete.replace("social-card.png", "other.png"), expected), /Open Graph/);
     assert.throws(() => validateHTML("home", complete.replace("icon-small-light.svg", "other.svg"), expected), /logo/);
     assert.throws(() => validateHTML("home", complete.replace("id6754004943", "id1"), expected), /App Store/);
 });
 
-test("checked-in production homepage satisfies the hosted contract", () => {
+test("generated production homepage satisfies the hosted contract", () => {
     validateHTML("home", productionHomeHTML, { canonicalURL: "https://cauldronrecipes.com/" });
     assert.match(productionHomeHTML, /application\/ld\+json/);
     assert.match(productionHomeHTML, /prefers-reduced-motion/);
     assert.match(productionHomeHTML, /prefers-color-scheme:dark/);
+});
+
+test("production favicon assets include SVG, ICO, and Apple touch formats", () => {
+    const asset = (name) => readFileSync(fileURLToPath(new URL(`../../public/${name}`, import.meta.url)));
+    assert.match(asset("favicon.svg").toString("utf8"), /<svg/);
+    assert.deepEqual([...asset("favicon.ico").subarray(0, 4)], [0, 0, 1, 0]);
+    assert.deepEqual([...asset("apple-touch-icon.png").subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 });
 
 test("collection validator rejects an empty or mismatched fixture", () => {
@@ -152,9 +157,9 @@ test("recipe validator rejects mismatched canonical, deep-link, creator, and vis
 });
 
 test("profile validator rejects a stale identity", () => {
-    const html = '<title>Other · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/profile/user-id"><h1>Other</h1><p>@other</p><a href="cauldron://import/profile/other">';
+    const html = '<title>Other · Cauldron</title><link rel="canonical" href="https://cauldronrecipes.com/u/nadav"><h1>Other</h1><p>@other</p><a href="cauldron://import/profile/other">';
     assert.throws(() => validateHTML("profile", html, {
-        canonicalURL: "https://cauldronrecipes.com/profile/user-id",
+        canonicalURL: "https://cauldronrecipes.com/u/nadav",
         deepLinkIdentity: "nadav",
         displayName: "Nadav",
         handle: "nadav",

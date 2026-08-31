@@ -26,7 +26,10 @@ final class EntityImageLoader {
     nonisolated deinit {}
 
     func loadProfileImage(for user: User, dependencies: DependencyContainer?) async -> ProfileImageResult {
-        let cacheKey = ImageCache.profileImageKey(userId: user.id)
+        guard case .photo(let photo) = user.avatarRepresentation else {
+            return ProfileImageResult(image: nil, downloadedURL: nil)
+        }
+        let cacheKey = ImageCache.profileImageKey(for: photo)
 
         if let cachedImage = ImageCache.shared.get(cacheKey) {
             return ProfileImageResult(image: cachedImage, downloadedURL: nil)
@@ -42,8 +45,7 @@ final class EntityImageLoader {
         }
 
         guard let dependencies = dependencies,
-              user.cloudProfileImageRecordName != nil,
-              user.profileImageURL == nil else {
+              photo.cloudRecordName != nil else {
             return ProfileImageResult(image: nil, downloadedURL: nil)
         }
 
@@ -111,7 +113,8 @@ final class EntityImageLoader {
 
     func ensureProfileImagesInCache(users: [User]) async {
         for user in users {
-            let cacheKey = ImageCache.profileImageKey(userId: user.id)
+            guard case .photo(let photo) = user.avatarRepresentation else { continue }
+            let cacheKey = ImageCache.profileImageKey(for: photo)
             if ImageCache.shared.get(cacheKey) != nil {
                 continue
             }
@@ -130,47 +133,45 @@ final class EntityImageLoader {
         let profileImageManager = dependencies.profileImageManager
         let logger = self.logger
 
-        await withTaskGroup(of: (UUID, UIImage?).self) { group in
+        await withTaskGroup(of: (String, UIImage?).self) { group in
             for user in users {
-                guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
-                    continue
-                }
+                guard case .photo(let photo) = user.avatarRepresentation else { continue }
 
                 group.addTask {
-                    let cacheKey = ImageCache.profileImageKey(userId: user.id)
+                    let cacheKey = ImageCache.profileImageKey(for: photo)
 
                     if !forceRefresh,
                        await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
-                        return (user.id, nil)
+                        return (cacheKey, nil)
                     }
 
                     if !forceRefresh,
                        let image = await ImageCache.shared.getFromDisk(cacheKey) {
-                        return (user.id, image)
+                        return (cacheKey, image)
                     }
 
-                    if let image = await Self.loadImageFile(from: user.profileImageURL) {
-                        return (user.id, image)
+                    if !forceRefresh,
+                       let image = await Self.loadImageFile(from: user.profileImageURL) {
+                        return (cacheKey, image)
                     }
 
-                    if forceRefresh || user.profileImageURL == nil {
+                    if photo.cloudRecordName != nil {
                         do {
                             if let downloadedURL = try await profileImageManager.downloadImageFromCloud(userId: user.id),
                                let image = await Self.loadImageFile(from: downloadedURL) {
-                                return (user.id, image)
+                                return (cacheKey, image)
                             }
                         } catch {
                             logger.warning("Failed to preload profile image for \(user.username): \(error.localizedDescription)")
                         }
                     }
 
-                    return (user.id, nil)
+                    return (cacheKey, nil)
                 }
             }
 
-            for await (userId, image) in group {
+            for await (cacheKey, image) in group {
                 if let image = image {
-                    let cacheKey = ImageCache.profileImageKey(userId: userId)
                     await MainActor.run {
                         ImageCache.shared.set(cacheKey, image: image)
                     }
@@ -183,8 +184,13 @@ final class EntityImageLoader {
         var needsPreload = false
         for sharedRecipe in sharedRecipes {
             let recipeKey = ImageCache.recipeImageKey(recipeId: sharedRecipe.recipe.id, variant: "thumbnail")
-            let profileKey = ImageCache.profileImageKey(userId: sharedRecipe.sharedBy.id)
-            if ImageCache.shared.get(recipeKey) == nil || ImageCache.shared.get(profileKey) == nil {
+            let profileNeedsPreload: Bool
+            if case .photo(let photo) = sharedRecipe.sharedBy.avatarRepresentation {
+                profileNeedsPreload = ImageCache.shared.get(ImageCache.profileImageKey(for: photo)) == nil
+            } else {
+                profileNeedsPreload = false
+            }
+            if ImageCache.shared.get(recipeKey) == nil || profileNeedsPreload {
                 needsPreload = true
                 break
             }
@@ -213,19 +219,20 @@ final class EntityImageLoader {
                     return (cacheKey, nil)
                 }
 
-                let userId = sharedRecipe.sharedBy.id
-                group.addTask {
-                    let cacheKey = ImageCache.profileImageKey(userId: userId)
-                    if await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
+                if case .photo(let photo) = sharedRecipe.sharedBy.avatarRepresentation {
+                    group.addTask {
+                        let cacheKey = ImageCache.profileImageKey(for: photo)
+                        if await MainActor.run(body: { ImageCache.shared.get(cacheKey) != nil }) {
+                            return (cacheKey, nil)
+                        }
+                        if let image = await ImageCache.shared.getFromDisk(cacheKey) {
+                            return (cacheKey, image)
+                        }
+                        if let image = await Self.loadImageFile(from: sharedRecipe.sharedBy.profileImageURL) {
+                            return (cacheKey, image)
+                        }
                         return (cacheKey, nil)
                     }
-                    if let image = await ImageCache.shared.getFromDisk(cacheKey) {
-                        return (cacheKey, image)
-                    }
-                    if let image = await Self.loadImageFile(from: sharedRecipe.sharedBy.profileImageURL) {
-                        return (cacheKey, image)
-                    }
-                    return (cacheKey, nil)
                 }
             }
 

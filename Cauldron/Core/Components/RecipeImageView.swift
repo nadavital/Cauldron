@@ -52,18 +52,32 @@ extension UIImage {
 }
 
 private enum RecipeImageLoadingPipeline {
+    struct Outcome {
+        let result: Result<UIImage, ImageLoadError>
+        let shouldAnimateAppearance: Bool
+    }
+
     static func initialCachedImage(
         recipeId: UUID?,
         variant: String,
-        fallbackVariants: [String] = [],
+        targetPixelSizes: [CGFloat?],
+        fallbackVariants: [(variant: String, targetPixelSizes: [CGFloat?])] = [],
         cacheIdentity: String? = nil
     ) -> UIImage? {
         guard let recipeId = recipeId else { return nil }
-        for candidate in [variant] + fallbackVariants {
-            let versionedCandidate = cacheIdentity.map { "\(candidate)_v_\($0)" } ?? candidate
-            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: versionedCandidate)
-            if let image = ImageCache.shared.get(cacheKey) {
-                return image
+        for candidate in [(variant, targetPixelSizes)] + fallbackVariants {
+            for targetPixelSize in candidate.targetPixelSizes + [nil] {
+                let cacheVariant = RecipeImageCacheKeyPolicy.variant(
+                    baseVariant: candidate.variant,
+                    hasExplicitVariant: true,
+                    targetPixelSize: targetPixelSize,
+                    cacheIdentity: cacheIdentity
+                )
+                let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: cacheVariant)
+                if let image = ImageCache.shared.get(cacheKey),
+                   cachedImageSatisfiesRequest(image, targetPixelSize: targetPixelSize) {
+                    return image
+                }
             }
         }
         return nil
@@ -77,43 +91,75 @@ private enum RecipeImageLoadingPipeline {
         targetPixelSize: CGFloat?,
         cacheVariant: String,
         privateRecordName: String? = nil,
-        cacheIdentity: String? = nil
-    ) async -> Result<UIImage, ImageLoadError> {
+        cacheIdentity: String? = nil,
+        forceRefresh: Bool = false
+    ) async -> Outcome {
         if let recipeId = recipeId {
-            return await service.loadImage(
+            let versionedVariant = RecipeImageCacheKeyPolicy.variant(
+                baseVariant: cacheVariant,
+                hasExplicitVariant: true,
+                targetPixelSize: targetPixelSize,
+                cacheIdentity: cacheIdentity
+            )
+            let cacheKey = ImageCache.recipeImageKey(recipeId: recipeId, variant: versionedVariant)
+            if !forceRefresh, let cachedImage = await ImageCache.shared.load(cacheKey) {
+                if cachedImageSatisfiesRequest(cachedImage, targetPixelSize: targetPixelSize) {
+                    return Outcome(result: .success(cachedImage), shouldAnimateAppearance: false)
+                }
+                ImageCache.shared.remove(cacheKey)
+            }
+
+            let result = await service.loadImage(
                 forRecipeId: recipeId,
                 localURL: imageURL,
                 ownerId: ownerId,
                 targetPixelSize: targetPixelSize,
                 cacheVariant: cacheVariant,
                 privateRecordName: privateRecordName,
-                cacheIdentity: cacheIdentity
+                cacheIdentity: cacheIdentity,
+                forceRefresh: forceRefresh
             )
+            return Outcome(result: result, shouldAnimateAppearance: true)
         }
-        return await service.loadImage(
+        return Outcome(result: await service.loadImage(
             from: imageURL,
             targetPixelSize: targetPixelSize,
-            cacheIdentity: cacheIdentity
-        )
+            cacheIdentity: cacheIdentity,
+            forceRefresh: forceRefresh
+        ), shouldAnimateAppearance: true)
+    }
+
+    private static func cachedImageSatisfiesRequest(
+        _ image: UIImage,
+        targetPixelSize: CGFloat?
+    ) -> Bool {
+        guard let targetPixelSize, targetPixelSize > 0 else { return true }
+        let pixelWidth = image.cgImage.map { CGFloat($0.width) } ?? image.size.width * image.scale
+        let pixelHeight = image.cgImage.map { CGFloat($0.height) } ?? image.size.height * image.scale
+        let longestEdge = max(pixelWidth, pixelHeight)
+        return longestEdge <= 0 || longestEdge + 1 >= targetPixelSize
     }
 
     static func applyLoadedImage(
         _ image: UIImage,
         loadedImage: inout UIImage?,
-        imageOpacity: inout Double
+        imageOpacity: inout Double,
+        shouldAnimateAppearance: Bool
     ) {
         if let currentImage = loadedImage {
             // The load task is already keyed by recipe, URL, and cache variant.
             // Avoid a full pixel-buffer comparison on the main actor here.
             if image !== currentImage {
                 loadedImage = image
-                withAnimation(.easeOut(duration: 0.3)) {
-                    imageOpacity = 1.0
-                }
+                imageOpacity = 1.0
             }
         } else {
             loadedImage = image
-            withAnimation(.easeOut(duration: 0.3)) {
+            if shouldAnimateAppearance {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    imageOpacity = 1.0
+                }
+            } else {
                 imageOpacity = 1.0
             }
         }
@@ -139,6 +185,8 @@ struct RecipeImageView: View {
     @Environment(\.displayScale) private var displayScale
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
+    @State private var imageReloadGeneration = 0
+    @State private var forceRefreshNextLoad = false
 
     private var cacheVariant: String {
         size.cacheVariant
@@ -151,7 +199,7 @@ struct RecipeImageView: View {
     private var loadTaskKey: String {
         let recipeKey = recipeId?.uuidString ?? "no-recipe"
         let imageKey = imageURL?.absoluteString ?? "no-image"
-        return "\(recipeKey)|\(imageKey)|\(cacheVariant)|\(imageCacheIdentity ?? "unversioned")"
+        return "\(recipeKey)|\(imageKey)|\(cacheVariant)|\(imageCacheIdentity ?? "unversioned")|\(imageReloadGeneration)"
     }
 
     init(
@@ -179,7 +227,11 @@ struct RecipeImageView: View {
         if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(
             recipeId: recipeId,
             variant: cacheVariant,
-            fallbackVariants: ["card", "thumbnail"],
+            targetPixelSizes: size.initialTargetPixelSizes,
+            fallbackVariants: [
+                ("card", ImageSize.card.initialTargetPixelSizes),
+                ("thumbnail", ImageSize.thumbnail.initialTargetPixelSizes),
+            ],
             cacheIdentity: imageCacheIdentity
         ) {
             _loadedImage = State(initialValue: cachedImage)
@@ -209,6 +261,11 @@ struct RecipeImageView: View {
         .task(id: loadTaskKey) {
             await loadImage()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .recipeImageUpdated)) { notification in
+            guard notification.object as? UUID == recipeId else { return }
+            forceRefreshNextLoad = true
+            imageReloadGeneration &+= 1
+        }
     }
 
     private var placeholderView: some View {
@@ -216,6 +273,7 @@ struct RecipeImageView: View {
     }
 
     private func loadImage() async {
+        let forceRefresh = forceRefreshNextLoad
         let result = await RecipeImageLoadingPipeline.loadImage(
             with: recipeImageService,
             recipeId: recipeId,
@@ -224,14 +282,20 @@ struct RecipeImageView: View {
             targetPixelSize: targetPixelSize,
             cacheVariant: cacheVariant,
             privateRecordName: privateRecordName,
-            cacheIdentity: imageCacheIdentity
+            cacheIdentity: imageCacheIdentity,
+            forceRefresh: forceRefresh
         )
-        switch result {
+        guard !Task.isCancelled else { return }
+        if forceRefresh {
+            forceRefreshNextLoad = false
+        }
+        switch result.result {
         case .success(let image):
             RecipeImageLoadingPipeline.applyLoadedImage(
                 image,
                 loadedImage: &loadedImage,
-                imageOpacity: &imageOpacity
+                imageOpacity: &imageOpacity,
+                shouldAnimateAppearance: result.shouldAnimateAppearance
             )
             if let onLuminance, let luminance = image.topRegionLuminance() {
                 onLuminance(luminance)
@@ -339,6 +403,13 @@ extension RecipeImageView {
                 return 900
             }
         }
+
+        /// Initializers cannot read SwiftUI's environment display scale. Probe
+        /// the finite set of cache keys the live view can generate, largest
+        /// first, and let the task use the exact environment-backed key later.
+        var initialTargetPixelSizes: [CGFloat?] {
+            [3.0, 2.0, 1.0].map(targetPixelSize(displayScale:))
+        }
     }
 }
 
@@ -382,8 +453,8 @@ extension RecipeImageView {
 
 extension HeroRecipeImageView {
     /// Create from a Recipe object (with CloudKit fallback)
-    init(recipe: Recipe, recipeImageService: RecipeImageService) {
-        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName, imageCacheIdentity: recipe.imageModifiedAt.map { String($0.timeIntervalSinceReferenceDate.bitPattern, radix: 16) })
+    init(recipe: Recipe, recipeImageService: RecipeImageService, reloadToken: UUID? = nil) {
+        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName, imageCacheIdentity: recipe.imageModifiedAt.map { String($0.timeIntervalSinceReferenceDate.bitPattern, radix: 16) }, reloadToken: reloadToken)
     }
 }
 
@@ -399,12 +470,15 @@ struct HeroRecipeImageView: View {
     /// name differs from their UUID). Enables the private-database image fallback.
     let privateRecordName: String?
     let imageCacheIdentity: String?
+    let reloadToken: UUID?
 
     @Environment(\.displayScale) private var displayScale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var loadedImage: UIImage?
     @State private var imageOpacity: Double = 0
     @State private var containerWidth: CGFloat = 0
+    @State private var imageReloadGeneration = 0
+    @State private var forceRefreshNextLoad = false
 
     private let cacheVariant = "hero"
     private var heroHeight: CGFloat {
@@ -415,19 +489,20 @@ struct HeroRecipeImageView: View {
         let recipeKey = recipeId?.uuidString ?? "no-recipe"
         let imageKey = imageURL?.absoluteString ?? "no-image"
         let pixelKey = Int(targetPixelSize.rounded(.up))
-        return "\(recipeKey)|\(imageKey)|\(pixelKey)|\(imageCacheIdentity ?? "unversioned")"
+        return "\(recipeKey)|\(imageKey)|\(pixelKey)|\(imageCacheIdentity ?? "unversioned")|\(reloadToken?.uuidString ?? "no-reload")|\(imageReloadGeneration)"
     }
     private var targetPixelSize: CGFloat {
         max(containerWidth, 500) * displayScale
     }
 
-    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil, privateRecordName: String? = nil, imageCacheIdentity: String? = nil) {
+    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil, privateRecordName: String? = nil, imageCacheIdentity: String? = nil, reloadToken: UUID? = nil) {
         self.imageURL = imageURL
         self.recipeImageService = recipeImageService
         self.recipeId = recipeId
         self.ownerId = ownerId
         self.privateRecordName = privateRecordName
         self.imageCacheIdentity = imageCacheIdentity
+        self.reloadToken = reloadToken
 
         // A card image is already visible at the moment this view is pushed.
         // Reuse it immediately, then replace it with the hero-sized decode in
@@ -436,7 +511,11 @@ struct HeroRecipeImageView: View {
         if let cachedImage = RecipeImageLoadingPipeline.initialCachedImage(
             recipeId: recipeId,
             variant: cacheVariant,
-            fallbackVariants: ["card", "thumbnail"],
+            targetPixelSizes: [1_500, 1_000, 500],
+            fallbackVariants: [
+                ("card", RecipeImageView.ImageSize.card.initialTargetPixelSizes),
+                ("thumbnail", RecipeImageView.ImageSize.thumbnail.initialTargetPixelSizes),
+            ],
             cacheIdentity: imageCacheIdentity
         ) {
             _loadedImage = State(initialValue: cachedImage)
@@ -486,6 +565,11 @@ struct HeroRecipeImageView: View {
         .task(id: loadTaskKey) {
             await loadImage()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .recipeImageUpdated)) { notification in
+            guard notification.object as? UUID == recipeId else { return }
+            forceRefreshNextLoad = true
+            imageReloadGeneration &+= 1
+        }
     }
 
     private var placeholderView: some View {
@@ -495,6 +579,7 @@ struct HeroRecipeImageView: View {
     }
 
     private func loadImage() async {
+        let forceRefresh = forceRefreshNextLoad
         let result = await RecipeImageLoadingPipeline.loadImage(
             with: recipeImageService,
             recipeId: recipeId,
@@ -503,14 +588,20 @@ struct HeroRecipeImageView: View {
             targetPixelSize: targetPixelSize,
             cacheVariant: cacheVariant,
             privateRecordName: privateRecordName,
-            cacheIdentity: imageCacheIdentity
+            cacheIdentity: imageCacheIdentity,
+            forceRefresh: forceRefresh
         )
-        switch result {
+        guard !Task.isCancelled else { return }
+        if forceRefresh {
+            forceRefreshNextLoad = false
+        }
+        switch result.result {
         case .success(let image):
             RecipeImageLoadingPipeline.applyLoadedImage(
                 image,
                 loadedImage: &loadedImage,
-                imageOpacity: &imageOpacity
+                imageOpacity: &imageOpacity,
+                shouldAnimateAppearance: result.shouldAnimateAppearance
             )
         case .failure:
             break

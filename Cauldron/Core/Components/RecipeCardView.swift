@@ -27,6 +27,7 @@ import SwiftUI
 /// ```
 struct RecipeCardView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let recipe: Recipe
     let dependencies: DependencyContainer
     var sharedBy: User?
@@ -97,8 +98,12 @@ struct RecipeCardView: View {
             // Keep every card aligned while giving longer recipe names room.
             Text(recipe.title)
                 .font(Theme.Typography.cardTitle)
-                .lineLimit(2, reservesSpace: true)
-                .frame(width: cardWidth, height: 40, alignment: .topLeading)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2, reservesSpace: !dynamicTypeSize.isAccessibilitySize)
+                .frame(
+                    width: cardWidth,
+                    height: dynamicTypeSize.isAccessibilitySize ? nil : 40,
+                    alignment: .topLeading
+                )
 
             // Metadata row - time and tag
             metadataRow
@@ -197,35 +202,51 @@ struct RecipeCardView: View {
     // MARK: - Metadata Row
 
     private var metadataRow: some View {
-        HStack(spacing: 4) {
-            // Time - always reserve space
-            if let time = recipe.displayTime {
-                Label(time, systemImage: "clock")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                Text(" ")
-                    .font(.caption)
-                    .frame(width: 60)
-            }
-
-            Spacer()
-
-            // Tag
-            if let firstTag = recipe.tags.first {
-                TagView(firstTag)
-                    .scaleEffect(0.9)
-                    .frame(maxWidth: metadataTagMaxWidth, alignment: .trailing)
-                    .onTapGesture {
-                        onTagTap?(firstTag)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    timeMetadata
+                    if let firstTag = recipe.tags.first {
+                        TagView(firstTag)
+                            .frame(maxWidth: cardWidth, alignment: .leading)
+                            .onTapGesture { onTagTap?(firstTag) }
                     }
+                }
             } else {
-                Text(" ")
-                    .font(.caption2)
-                    .frame(width: 60)
+                HStack(spacing: 4) {
+                    timeMetadata
+                    Spacer()
+                    if let firstTag = recipe.tags.first {
+                        TagView(firstTag)
+                            .scaleEffect(0.9)
+                            .frame(maxWidth: metadataTagMaxWidth, alignment: .trailing)
+                            .onTapGesture { onTagTap?(firstTag) }
+                    } else {
+                        Text(" ")
+                            .font(.caption2)
+                            .frame(width: 60)
+                    }
+                }
             }
         }
-        .frame(width: cardWidth, height: 20)
+        .frame(
+            width: cardWidth,
+            height: dynamicTypeSize.isAccessibilitySize ? nil : 20,
+            alignment: .leading
+        )
+    }
+
+    @ViewBuilder
+    private var timeMetadata: some View {
+        if let time = recipe.displayTime {
+            Label(time, systemImage: "clock")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        } else if !dynamicTypeSize.isAccessibilitySize {
+            Text(" ")
+                .font(.caption)
+                .frame(width: 60)
+        }
     }
 }
 

@@ -894,8 +894,9 @@ actor RecipeSyncService {
 
                 // Notify views that recipe image was downloaded (so they can refresh and show the image)
                 await MainActor.run {
+                    ImageCache.shared.clearRecipeImages(for: recipe.id)
                     NotificationCenter.default.post(
-                        name: NSNotification.Name("RecipeUpdated"),
+                        name: .recipeImageUpdated,
                         object: recipe.id
                     )
                 }

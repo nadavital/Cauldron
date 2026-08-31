@@ -247,15 +247,17 @@ struct SearchTabView: View {
 
     @ToolbarContentBuilder
     private var searchToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarTrailing) {
-            if let user = currentUserSession.currentUser {
-                Button {
-                    showingProfileSheet = true
-                } label: {
-                    ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
+        if !RuntimeEnvironment.prefersDesktopWorkspace {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if let user = currentUserSession.currentUser {
+                    Button {
+                        showingProfileSheet = true
+                    } label: {
+                        ProfileAvatar(user: user, size: 32, dependencies: viewModel.dependencies)
+                    }
+                    .accessibilityLabel("Profile and settings")
+                    .accessibilityHint("Opens your profile and app settings")
                 }
-                .accessibilityLabel("Profile and settings")
-                .accessibilityHint("Opens your profile and app settings")
             }
         }
     }

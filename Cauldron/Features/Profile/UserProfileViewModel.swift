@@ -47,6 +47,8 @@ import os
     private var collectionImageRecipesById: [UUID: Recipe] = [:]
     private var authoritativeRecipeCount: Int?
     private let profileRecipeDisplayLimit = 500
+    private var recipeLoadGeneration = 0
+    private var collectionLoadGeneration = 0
 
     var currentUserId: UUID {
         dependencies.connectionManager.currentUserId
@@ -92,17 +94,31 @@ import os
         await updateConnectionState()
     }
 
-    func loadProfileData(forceRefresh: Bool = false) async {
-        await loadConnectionStatus()
+    func loadProfileData(
+        forceRefresh: Bool = false,
+        includeCollections: Bool = false
+    ) async {
+        if includeCollections {
+            async let relationship: Void = loadConnectionStatus()
+            async let recipes: Void = loadUserRecipes(forceRefresh: forceRefresh)
+            async let collections: Void = loadUserCollections(forceRefresh: forceRefresh)
 
-        async let recipes: Void = loadUserRecipes(forceRefresh: forceRefresh)
-        async let collections: Void = loadUserCollections(forceRefresh: forceRefresh)
-
-        if isCurrentUser {
-            async let connections: Void = loadConnections()
-            _ = await (recipes, collections, connections)
+            if isCurrentUser {
+                async let connections: Void = loadConnections()
+                _ = await (relationship, recipes, collections, connections)
+            } else {
+                _ = await (relationship, recipes, collections)
+            }
         } else {
-            _ = await (recipes, collections)
+            async let relationship: Void = loadConnectionStatus()
+            async let recipes: Void = loadUserRecipes(forceRefresh: forceRefresh)
+
+            if isCurrentUser {
+                async let connections: Void = loadConnections()
+                _ = await (relationship, recipes, connections)
+            } else {
+                _ = await (relationship, recipes)
+            }
         }
     }
 
@@ -116,16 +132,16 @@ import os
         await dependencies.connectionManager.loadConnections(forUserId: currentUserId)
         connections = dependencies.connectionManager.connections.values.filter { $0.connection.isAccepted }
 
-        // Load user details for all connections
-        for managedConnection in connections {
-            if let otherUserId = managedConnection.connection.otherUserId(currentUserId: currentUserId) {
-                do {
-                    let user = try await dependencies.userCloudService.fetchUser(byUserId: otherUserId)
-                    usersMap[otherUserId] = user
-                } catch {
-                    AppLogger.general.error("Failed to load user \(otherUserId): \(error.localizedDescription)")
-                }
-            }
+        let userIDs = Array(Set(connections.compactMap {
+            $0.connection.otherUserId(currentUserId: currentUserId)
+        }))
+        do {
+            let users = try await dependencies.recipeDiscoveryCache.fetchUsers(byUserIds: userIDs)
+            usersMap = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLogger.general.error("Failed to batch-load profile connections: \(error.localizedDescription)")
         }
     }
 
@@ -238,22 +254,31 @@ import os
             collectionImageRecipesById = cachedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
                 partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
             }
-            await refreshAuthoritativeRecipeCount(forceRefresh: false)
             recipeLoadFailed = false
             updateTierFromRecipes()
             isLoadingRecipes = false
             hasResolvedRecipes = true
+            refreshAuthoritativeRecipeCountInBackground(forceRefresh: false)
             return
         }
+
+        recipeLoadGeneration &+= 1
+        let loadGeneration = recipeLoadGeneration
 
         // Only show loading state when actually fetching
         isLoadingRecipes = true
 
         do {
-            userRecipes = try await fetchUserRecipes()
+            let loadedRecipes = try await fetchUserRecipes(forceRefresh: forceRefresh)
+            guard loadGeneration == recipeLoadGeneration else { return }
+            userRecipes = loadedRecipes
+            recipeImageURLsById = loadedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
+                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe.imageURL
+            }
+            collectionImageRecipesById = loadedRecipes.reduce(into: [:]) { partialResult, sharedRecipe in
+                partialResult[sharedRecipe.recipe.id] = sharedRecipe.recipe
+            }
             recipeLoadFailed = false
-            await refreshAuthoritativeRecipeCount(forceRefresh: forceRefresh)
-
             // Cache the results
             dependencies.profileCacheManager.cacheRecipes(
                 userRecipes,
@@ -265,7 +290,13 @@ import os
             updateTierFromRecipes()
 
             AppLogger.general.info("✅ Loaded \(self.userRecipes.count) recipes for user \(self.user.username)")
+        } catch is CancellationError {
+            if loadGeneration == recipeLoadGeneration {
+                isLoadingRecipes = false
+            }
+            return
         } catch {
+            guard loadGeneration == recipeLoadGeneration else { return }
             recipeLoadFailed = true
             AppLogger.general.error("❌ Failed to load user recipes: \(error.localizedDescription)")
             errorMessage = "Failed to load recipes: \(error.localizedDescription)"
@@ -274,6 +305,7 @@ import os
 
         isLoadingRecipes = false
         hasResolvedRecipes = true
+        refreshAuthoritativeRecipeCountInBackground(forceRefresh: forceRefresh)
     }
 
     /// Update the user's tier based on their recipe count
@@ -299,7 +331,15 @@ import os
         }
     }
 
-    private func fetchUserRecipes() async throws -> [SharedRecipe] {
+    private func refreshAuthoritativeRecipeCountInBackground(forceRefresh: Bool) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refreshAuthoritativeRecipeCount(forceRefresh: forceRefresh)
+            self.updateTierFromRecipes()
+        }
+    }
+
+    private func fetchUserRecipes(forceRefresh: Bool) async throws -> [SharedRecipe] {
         // Get current user to check connection status
         guard CurrentUserSession.shared.userId != nil else {
             return []
@@ -320,23 +360,16 @@ import os
                 ownerIds: [user.id],
                 visibility: .publicRecipe,
                 includeDerivedCopies: true,
-                limit: profileRecipeDisplayLimit
+                limit: profileRecipeDisplayLimit,
+                forceRefresh: forceRefresh
             )
             AppLogger.general.info("Found \(recipes.count) public recipes from \(self.user.username)")
         }
 
         // Filter out recipes that are only referenced by other recipes (to avoid duplicates)
         // A recipe that appears in another recipe's relatedRecipeIds should not be shown separately
-        collectionImageRecipesById = recipes.reduce(into: [:]) { partialResult, recipe in
-            partialResult[recipe.id] = recipe
-        }
-        recipeImageURLsById = recipes.reduce(into: [:]) { partialResult, recipe in
-            partialResult[recipe.id] = recipe.imageURL
-        }
-
         let filteredRecipes = RecipeGroupingService.hideRelatedRecipeReferences(
-            recipes,
-            currentUserId: user.id
+            recipes
         )
         AppLogger.general.info("Filtered from \(recipes.count) to \(filteredRecipes.count) visible profile recipes")
 
@@ -369,10 +402,14 @@ import os
             return
         }
 
+        collectionLoadGeneration &+= 1
+        let loadGeneration = collectionLoadGeneration
         isLoadingCollections = true
 
         do {
-            userCollections = try await fetchUserCollections()
+            let loadedCollections = try await fetchUserCollections()
+            guard loadGeneration == collectionLoadGeneration else { return }
+            userCollections = loadedCollections
 
             // Cache the results
             dependencies.profileCacheManager.cacheCollections(
@@ -382,12 +419,19 @@ import os
             )
 
             AppLogger.general.info("✅ Loaded \(self.userCollections.count) collections for user \(self.user.username)")
+        } catch is CancellationError {
+            if loadGeneration == collectionLoadGeneration {
+                isLoadingCollections = false
+            }
+            return
         } catch {
+            guard loadGeneration == collectionLoadGeneration else { return }
             AppLogger.general.error("❌ Failed to load user collections: \(error.localizedDescription)")
             errorMessage = "Failed to load collections: \(error.localizedDescription)"
             showError = true
         }
 
+        guard loadGeneration == collectionLoadGeneration else { return }
         isLoadingCollections = false
         hasResolvedCollections = true
     }
@@ -445,8 +489,11 @@ import os
     // MARK: - Refresh
 
     /// Refreshes all profile data (used for pull-to-refresh)
-    func refreshProfile() async {
-        await loadProfileData(forceRefresh: true)
+    func refreshProfile(includeCollections: Bool) async {
+        await loadProfileData(
+            forceRefresh: true,
+            includeCollections: includeCollections
+        )
     }
 
     /// Get first 4 recipe image URLs for a collection (for grid display)

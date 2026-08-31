@@ -13,6 +13,7 @@ struct ProfileAvatar: View {
     let size: CGFloat
     let dependencies: DependencyContainer?
     @State private var profileImage: UIImage?
+    @State private var loadedPhotoCacheKey: String?
     @ObservedObject private var currentUserSession = CurrentUserSession.shared
 
     init(user: User, size: CGFloat, dependencies: DependencyContainer? = nil) {
@@ -22,8 +23,14 @@ struct ProfileAvatar: View {
 
         // CRITICAL: Initialize with cached image if available
         // This prevents showing emoji/color placeholder when navigating back
-        let cacheKey = ImageCache.profileImageKey(userId: user.id)
-        _profileImage = State(initialValue: ImageCache.shared.get(cacheKey))
+        if case .photo(let photo) = user.avatarRepresentation {
+            let cacheKey = ImageCache.profileImageKey(for: photo)
+            _profileImage = State(initialValue: ImageCache.shared.get(cacheKey))
+            _loadedPhotoCacheKey = State(initialValue: cacheKey)
+        } else {
+            _profileImage = State(initialValue: nil)
+            _loadedPhotoCacheKey = State(initialValue: nil)
+        }
     }
 
     /// Use the live session user when rendering the signed-in user's avatar so profile edits
@@ -42,22 +49,25 @@ struct ProfileAvatar: View {
         return .profileOrange // Default fallback
     }
 
-    private var displayContent: String {
-        if let emoji = displayUser.profileEmoji, !emoji.isEmpty {
-            return emoji
-        }
-        // Fallback to initials
-        return String(displayUser.displayName.prefix(2).uppercased())
-    }
-
     private var fontSize: CGFloat {
         size * 0.5
     }
 
     var body: some View {
-        Group {
-            if let profileImage = profileImage {
-                // Priority 1: Show profile image if available
+        avatarContent
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(displayUser.displayName), profile picture")
+            .task(id: displayUser.avatarRepresentation) {
+                await loadProfileImageIfNeeded()
+            }
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        switch displayUser.avatarRepresentation {
+        case .photo(let photo):
+            if let profileImage,
+               loadedPhotoCacheKey == ImageCache.profileImageKey(for: photo) {
                 Circle()
                     .fill(Color.cauldronSecondaryBackground)
                     .frame(width: size, height: size)
@@ -69,41 +79,53 @@ struct ProfileAvatar: View {
                             .clipShape(Circle())
                     )
             } else {
-                // Show emoji or initials (no loading spinner)
-                // Images load silently in background and update when ready
                 Circle()
-                    .fill(backgroundColor.opacity(0.3))
+                    .fill(Color.cauldronSecondaryBackground)
                     .frame(width: size, height: size)
                     .overlay(
-                        Text(displayContent)
+                        Image(systemName: "person.crop.circle.fill")
                             .font(.system(size: fontSize))
-                            .fontWeight(displayUser.profileEmoji != nil ? .regular : .bold)
-                            .foregroundColor(backgroundColor)
+                            .foregroundStyle(.tertiary)
                     )
             }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(displayUser.displayName), profile picture")
-        .task(id: ProfileAvatarState(user: displayUser)) {
-            if displayUser.profileImageURL == nil {
-                profileImage = nil
-            }
-            await loadProfileImage()
+        case .emoji(let value, _):
+            fallbackCircle(text: value, isEmoji: true)
+        case .initials(let value, _):
+            fallbackCircle(text: value, isEmoji: false)
         }
     }
 
-    private func loadProfileImage() async {
+    private func fallbackCircle(text: String, isEmoji: Bool) -> some View {
+        Circle()
+            .fill(backgroundColor.opacity(0.3))
+            .frame(width: size, height: size)
+            .overlay(
+                Text(text)
+                    .font(.system(size: fontSize))
+                    .fontWeight(isEmoji ? .regular : .bold)
+                    .foregroundStyle(backgroundColor)
+            )
+    }
+
+    private func loadProfileImageIfNeeded() async {
         let requestedUser = displayUser
+        guard case .photo(let requestedPhoto) = requestedUser.avatarRepresentation else {
+            profileImage = nil
+            loadedPhotoCacheKey = nil
+            return
+        }
+
+        let requestedCacheKey = ImageCache.profileImageKey(for: requestedPhoto)
+        if loadedPhotoCacheKey != requestedCacheKey {
+            profileImage = ImageCache.shared.get(requestedCacheKey)
+            loadedPhotoCacheKey = requestedCacheKey
+        }
         let loader = dependencies?.entityImageLoader ?? EntityImageLoader.shared
         let result = await loader.loadProfileImage(for: requestedUser, dependencies: dependencies)
 
         guard !Task.isCancelled,
-              displayUser.id == requestedUser.id,
-              displayUser.profileEmoji == requestedUser.profileEmoji,
-              displayUser.profileColor == requestedUser.profileColor,
-              displayUser.profileImageURL == requestedUser.profileImageURL,
-              displayUser.cloudProfileImageRecordName == requestedUser.cloudProfileImageRecordName,
-              displayUser.profileImageModifiedAt == requestedUser.profileImageModifiedAt else {
+              case .photo(let currentPhoto) = displayUser.avatarRepresentation,
+              ImageCache.profileImageKey(for: currentPhoto) == requestedCacheKey else {
             return
         }
 
@@ -117,6 +139,7 @@ struct ProfileAvatar: View {
             } else {
                 profileImage = image
             }
+            loadedPhotoCacheKey = requestedCacheKey
         }
 
         // Session metadata is owned by CurrentUserSession's verified download

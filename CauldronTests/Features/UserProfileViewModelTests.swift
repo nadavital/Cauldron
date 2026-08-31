@@ -120,4 +120,15 @@ final class UserProfileViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.displayedConnections.count, 3)
     }
+
+    func testProfileCacheRemainsUsableAcrossRelationshipRefresh() {
+        let cache = ProfileCacheManager()
+        let userID = UUID()
+        let recipes = [makeSharedRecipe(title: "Cached Recipe")]
+        cache.cacheRecipes(recipes, for: userID, connectionState: .syncing)
+
+        let cached = cache.getCachedRecipes(for: userID, connectionState: .connected)
+
+        XCTAssertEqual(cached?.map(\.id), recipes.map(\.id))
+    }
 }

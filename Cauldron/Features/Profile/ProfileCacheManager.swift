@@ -35,9 +35,9 @@ final class ProfileCacheManager: @unchecked Sendable {
 
         // Check if cache is still valid
         let isCacheValid = Date().timeIntervalSince(cached.lastRecipeLoadTime) < cacheValidityDuration
-        let connectionStateMatches = cached.connectionState == connectionState
-
-        if isCacheValid && connectionStateMatches {
+        // Profile recipes are either the owner's local library or public
+        // CloudKit content; relationship state no longer changes visibility.
+        if isCacheValid {
             AppLogger.general.info("📦 Using cached recipes for user \(userId.uuidString)")
             return cached.recipes
         }
@@ -82,9 +82,7 @@ final class ProfileCacheManager: @unchecked Sendable {
 
         // Check if cache is still valid
         let isCacheValid = Date().timeIntervalSince(cached.lastCollectionLoadTime) < cacheValidityDuration
-        let connectionStateMatches = cached.connectionState == connectionState
-
-        if isCacheValid && connectionStateMatches {
+        if isCacheValid {
             AppLogger.general.info("📦 Using cached collections for user \(userId.uuidString)")
             return cached.collections
         }

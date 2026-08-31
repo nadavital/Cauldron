@@ -9,6 +9,7 @@ import SwiftUI
 
 /// Reusable recipe row view for list displays
 struct RecipeRowView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let recipe: Recipe
     let dependencies: DependencyContainer
     var onTagTap: ((Tag) -> Void)? = nil
@@ -35,39 +36,16 @@ struct RecipeRowView: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    if let time = recipe.displayTime {
-                        HStack(spacing: 4) {
-                            Image(systemName: "clock")
-                            Text(time)
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) {
+                        timeAndYield
+                        firstTag
                     }
-
-                    Text(recipe.yields)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-
-                    Spacer(minLength: 4)
-
-                    if !recipe.tags.isEmpty, onTagTap != nil {
-                        // Show only first tag to prevent overflow - tappable if callback provided
-                        TagView(recipe.tags.first!)
-                            .frame(maxWidth: 120)
-                            .lineLimit(1)
-                            .onTapGesture {
-                                onTagTap?(recipe.tags.first!)
-                            }
-                    } else if !recipe.tags.isEmpty {
-                        // Show tag but not tappable
-                        TagView(recipe.tags.first!)
-                            .frame(maxWidth: 120)
-                            .lineLimit(1)
+                } else {
+                    HStack(spacing: 8) {
+                        timeAndYield
+                        Spacer(minLength: 4)
+                        firstTag
                     }
                 }
             }
@@ -75,6 +53,28 @@ struct RecipeRowView: View {
         }
         .frame(minHeight: 68)
         .padding(.vertical, 4)
+    }
+
+    private var timeAndYield: some View {
+        HStack(spacing: 8) {
+            if let time = recipe.displayTime {
+                Label(time, systemImage: "clock")
+            }
+            Text(recipe.yields)
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var firstTag: some View {
+        if let tag = recipe.tags.first {
+            TagView(tag)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .onTapGesture { onTagTap?(tag) }
+        }
     }
     
 }

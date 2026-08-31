@@ -180,16 +180,6 @@ struct FriendsTabView: View {
             } label: {
                 Label("Invite", systemImage: "square.and.arrow.up")
             }
-
-            if let user = userSession.currentUser {
-                Button {
-                    showingProfileSheet = true
-                } label: {
-                    ProfileAvatar(user: user, size: 30, dependencies: dependencies)
-                }
-                .accessibilityLabel("Profile and settings")
-                .accessibilityHint("Opens your profile and app settings")
-            }
         }
     }
 
@@ -301,14 +291,16 @@ struct FriendsTabView: View {
                 Label("Invite", systemImage: "square.and.arrow.up")
             }
 
-            if let user = userSession.currentUser {
-                Button {
-                    showingProfileSheet = true
-                } label: {
-                    ProfileAvatar(user: user, size: 30, dependencies: dependencies)
+            if !RuntimeEnvironment.prefersDesktopWorkspace {
+                if let user = userSession.currentUser {
+                    Button {
+                        showingProfileSheet = true
+                    } label: {
+                        ProfileAvatar(user: user, size: 30, dependencies: dependencies)
+                    }
+                    .accessibilityLabel("Profile and settings")
+                    .accessibilityHint("Opens your profile and app settings")
                 }
-                .accessibilityLabel("Profile and settings")
-                .accessibilityHint("Opens your profile and app settings")
             }
         }
     }

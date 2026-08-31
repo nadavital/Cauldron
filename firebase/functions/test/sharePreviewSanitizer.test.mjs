@@ -8,12 +8,24 @@ import {
     cloudKitReferralQueryResolvesUniquely,
     canonicalCloudKitOwnerRecord,
     canonicalCloudKitRecipeCreator,
+    canonicalOwnerRecipesFromCloudKitRecords,
+    hideRelatedWebRecipeReferences,
+    publicWebRecipeData,
+    canonicalProfileImageRecordName,
+    canonicalProfileURL,
+    canonicalProfileRedirectURL,
+    profileShareRequestMatchesCanonicalUsername,
+    profileBackfillFailureState,
     cloudKitOwnerQuery,
     cloudKitRecipeShelfLookupBody,
     cloudKitRecordsPayloadDisposition,
+    cloudKitQueryPayloadHasErrors,
     cloudKitRecordsPayloadIsRetryableError,
     cloudKitSignatureInput,
     generateCompactRecipeIndexPageHtml,
+    generateHomePageHtml,
+    HOMEPAGE_CACHE_CONTROL,
+    rotatingHomepageRecipeCandidates,
     generateCompactRecipePageHtml,
     generateInvitePreviewHtml,
     generatePublicStatusPageHtml,
@@ -21,6 +33,7 @@ import {
     generatePreviewHtml,
     isValidUUID,
     isCurrentResourceMutationGeneration,
+    ownerManifestStateMatches,
     isTransientCloudKitHTTPStatus,
     publicSecurityHeaders,
     PUBLIC_WEB_ORIGIN,
@@ -31,6 +44,8 @@ import {
     detectedImageContentType,
     recipeSocialImageURL,
     recipeIndexItemsWithCloudKitImages,
+    permanentlyInvalidRecipeShelfIDs,
+    resolveCloudKitCollectionMembershipRecipeIDs,
     retryTransientCloudKitOperation,
     renderCanonicalRecipePage,
     resourceMutationCannotSupersede,
@@ -39,15 +54,150 @@ import {
     sanitizeCollectionShareInput,
     sanitizeCollectionUnshareInput,
     sanitizeCloudKitRecipeForWeb,
+    sanitizeCloudKitCollectionForWeb,
     sanitizeProfileShareInput,
     sanitizeProfileUnshareInput,
+    sanitizeOwnerManifestInput,
     sanitizeRecipeShareInput,
     sanitizeStoredRecipeShareInput,
     sanitizeStoredProfileShareInput,
     sanitizeStoredCollectionShareInput,
     retiredCapabilityCannotSupersedeRestoration,
+    revocationCreatorMatches,
+    restorationRevocationIsValid,
     sanitizeRecipeUnshareInput,
 } from "../lib/index.js";
+
+test("web avatar resolution matches the native emoji-first recovery rule", () => {
+    assert.equal(canonicalProfileImageRecordName("🍳", "stale-profile-photo"), null);
+    assert.equal(canonicalProfileImageRecordName("  ", "current-profile-photo"), "current-profile-photo");
+    assert.equal(canonicalProfileImageRecordName(null, null), null);
+});
+
+test("profile aliases must still match the owner's canonical username", () => {
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    assert.equal(profileShareRequestMatchesCanonicalUsername(ownerId, "nadav"), true);
+    assert.equal(profileShareRequestMatchesCanonicalUsername("NADAV", "nadav"), true);
+    assert.equal(profileShareRequestMatchesCanonicalUsername("old-name", "nadav"), false);
+});
+
+test("public profile URLs expose the normalized username rather than the owner UUID", () => {
+    assert.equal(canonicalProfileURL("NADAV"), "https://cauldronrecipes.com/u/nadav");
+    assert.equal(canonicalProfileRedirectURL("nadav", "nadav"), null);
+    assert.equal(
+        canonicalProfileRedirectURL("9f082214-0c9e-4e30-94d7-072fc359d2f4", "nadav"),
+        "https://cauldronrecipes.com/u/nadav"
+    );
+    assert.equal(canonicalProfileRedirectURL("NADAV", "nadav"), "https://cauldronrecipes.com/u/nadav");
+    assert.equal(canonicalProfileRedirectURL("old_name", "nadav"), "https://cauldronrecipes.com/u/nadav");
+});
+
+test("profile backfill retries are bounded and quarantine does not retain retry state", () => {
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const first = profileBackfillFailureState({}, [], ownerId);
+    assert.equal(first.shouldRetry, true);
+    assert.equal(first.retryCounts[ownerId], 1);
+
+    const second = profileBackfillFailureState(first.retryCounts, first.failedOwnerIds, ownerId);
+    assert.equal(second.shouldRetry, true);
+    assert.equal(second.retryCounts[ownerId], 2);
+
+    const third = profileBackfillFailureState(second.retryCounts, second.failedOwnerIds, ownerId);
+    assert.equal(third.shouldRetry, false);
+    assert.equal(ownerId in third.retryCounts, false);
+    assert.deepEqual(third.failedOwnerIds, [ownerId]);
+});
+
+test("CloudKit collection validation rejects stale or private pointers", () => {
+    const collectionId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const creator = "creator-record";
+    const record = {
+        recordName: collectionId,
+        recordType: "Collection",
+        created: { userRecordName: creator },
+        fields: {
+            collectionId: { value: collectionId },
+            userId: { value: ownerId },
+            visibility: { value: "public" },
+            name: { value: "Weeknight" },
+            recipeIds: { value: JSON.stringify([collectionId]) },
+        },
+    };
+    assert.deepEqual(sanitizeCloudKitCollectionForWeb(record, collectionId, ownerId, creator), {
+        collectionId,
+        ownerId,
+        title: "Weeknight",
+        recipeIds: [collectionId],
+    });
+    assert.equal(sanitizeCloudKitCollectionForWeb({
+        ...record,
+        fields: { ...record.fields, visibility: { value: "private" } },
+    }, collectionId, ownerId, creator), null);
+    assert.equal(sanitizeCloudKitCollectionForWeb(record, collectionId, ownerId, "attacker"), null);
+});
+
+test("collection membership edges override the legacy recipe list safely", () => {
+    const collectionId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const firstRecipeId = "601e40f5-3abe-42cb-9d9d-f37530cd3963";
+    const secondRecipeId = "dbf6f739-1e1b-472c-b571-5607f300740d";
+    const edge = (recipeId, status, updatedAt, sortOrder, creator = "creator") => ({
+        recordType: "CollectionMembership",
+        created: { userRecordName: creator },
+        fields: {
+            collectionId: { value: collectionId },
+            ownerId: { value: ownerId },
+            recipeId: { value: recipeId },
+            status: { value: status },
+            updatedAt: { value: updatedAt },
+            sortOrder: { value: sortOrder },
+        },
+    });
+    assert.deepEqual(resolveCloudKitCollectionMembershipRecipeIDs([
+        edge(firstRecipeId, "active", "2026-01-01T00:00:00Z", 0),
+        edge(firstRecipeId, "removed", "2026-01-02T00:00:00Z", 0),
+        edge(secondRecipeId, "active", "2026-01-03T00:00:00Z", 2),
+        edge(firstRecipeId, "active", "2026-01-04T00:00:00Z", 1, "attacker"),
+    ], collectionId, ownerId, "creator"), [secondRecipeId]);
+    assert.equal(resolveCloudKitCollectionMembershipRecipeIDs([], collectionId, ownerId, "creator"), null);
+    assert.equal(resolveCloudKitCollectionMembershipRecipeIDs([
+        edge(firstRecipeId, "active", "2026-01-01T00:00:00Z", 0, "attacker"),
+    ], collectionId, ownerId, "creator"), null);
+    assert.equal(resolveCloudKitCollectionMembershipRecipeIDs([
+        edge(firstRecipeId, "active", "2026-01-01T00:00:00Z", 0),
+        edge(firstRecipeId, "removed", "2026-01-01T00:00:00Z", 0),
+    ], collectionId, ownerId, "creator")?.length, 0);
+    assert.equal(resolveCloudKitCollectionMembershipRecipeIDs([
+        edge(firstRecipeId, "removed", "2026-01-01T00:00:00Z", 0),
+        edge(firstRecipeId, "active", "2026-01-01T00:00:00Z", 0),
+    ], collectionId, ownerId, "creator")?.length, 0);
+    assert.equal(resolveCloudKitCollectionMembershipRecipeIDs([
+        edge(firstRecipeId, "active", "2026-01-01T00:00:00Z", 0),
+    ], collectionId, ownerId, null), null);
+});
+
+test("automatic recipe materialization accepts only the canonical user's records", () => {
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const recipeId = "601e40f5-3abe-42cb-9d9d-f37530cd3963";
+    const record = (creator) => ({
+        recordName: recipeId,
+        recordType: "SharedRecipe",
+        created: { userRecordName: creator },
+        fields: {
+            recipeId: { value: recipeId },
+            ownerId: { value: ownerId },
+            visibility: { value: "public" },
+            title: { value: "Soup" },
+        },
+    });
+    assert.equal(canonicalOwnerRecipesFromCloudKitRecords([
+        record("attacker"),
+    ], ownerId, "creator").length, 0);
+    assert.equal(canonicalOwnerRecipesFromCloudKitRecords([
+        record("creator"),
+    ], ownerId, "creator").length, 1);
+});
 
 test("share publication responses expose the write outcome on every endpoint", () => {
     assert.equal(PUBLIC_WEB_ORIGIN, "https://cauldronrecipes.com");
@@ -295,12 +445,77 @@ test("account unshare requires owner UUID, CloudKit identity, and capability", (
     });
 });
 
+test("owner manifests require exact unique public UUID sets", () => {
+    const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const recipeId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const collectionId = "b1b7d3ee-8039-4fa7-a21f-4a57a7f05e75";
+    const valid = sanitizeOwnerManifestInput({
+        ownerId,
+        identityRecordName: "user_current-user-record",
+        capability: "m".repeat(43),
+        publicRecipeIds: [recipeId],
+        publicCollectionIds: [collectionId],
+    });
+    assert.equal(valid.ok, true);
+    assert.deepEqual(valid.value.publicRecipeIds, [recipeId]);
+    assert.equal(sanitizeOwnerManifestInput({
+        ownerId,
+        identityRecordName: "user_current-user-record",
+        capability: "m".repeat(43),
+        publicRecipeIds: [recipeId, recipeId],
+        publicCollectionIds: [],
+    }).ok, false);
+    assert.equal(sanitizeOwnerManifestInput({
+        ownerId,
+        identityRecordName: "user_current-user-record",
+        capability: "m".repeat(43),
+        publicRecipeIds: ["not-a-uuid"],
+        publicCollectionIds: [],
+    }).ok, false);
+});
+
+test("stale owner manifest generations cannot delete newer derived snapshots", () => {
+    const capabilityHash = "a".repeat(64);
+    assert.equal(ownerManifestStateMatches({
+        generation: 4,
+        capabilityHash,
+    }, 4, capabilityHash), true);
+    assert.equal(ownerManifestStateMatches({
+        generation: 5,
+        capabilityHash,
+    }, 4, capabilityHash), false);
+    assert.equal(ownerManifestStateMatches({
+        generation: 4,
+        capabilityHash: "b".repeat(64),
+    }, 4, capabilityHash), false);
+});
+
 test("retired account capability cannot supersede an in-flight or completed restoration", () => {
     const oldHash = "a".repeat(64);
     const newHash = "b".repeat(64);
     assert.equal(retiredCapabilityCannotSupersedeRestoration("restore", newHash, undefined, oldHash), true);
     assert.equal(retiredCapabilityCannotSupersedeRestoration("unshare", oldHash, newHash, oldHash), true);
     assert.equal(retiredCapabilityCannotSupersedeRestoration("restore", newHash, newHash, newHash), false);
+});
+
+test("account sharing restoration is bound to the original CloudKit creator record", () => {
+    assert.equal(revocationCreatorMatches("user_original", "user_original"), true);
+    assert.equal(revocationCreatorMatches("user_original", "user_attacker"), false);
+    assert.equal(revocationCreatorMatches(undefined, "user_original"), false);
+    assert.equal(restorationRevocationIsValid(
+        true,
+        "a".repeat(64),
+        "user_original",
+        "b".repeat(64),
+        "user_original"
+    ), true);
+    assert.equal(restorationRevocationIsValid(
+        true,
+        "a".repeat(64),
+        "user_original",
+        "b".repeat(64),
+        "user_attacker"
+    ), false);
 });
 
 test("stale resource mutations cannot commit privacy state", () => {
@@ -364,7 +579,7 @@ test("CloudKit authority binds identity, owner, and capability hash", async () =
     };
     assert.deepEqual(
         canonicalCloudKitRecipeCreator([attackerRecord, creatorRecord], ownerId),
-        { username: "nadav", displayName: "Nadav", profileEmoji: "🧑‍🍳", profileColor: "#E9792F" }
+        { username: "nadav", displayName: "Nadav", profileEmoji: "🧑‍🍳", profileColor: "#E9792F", profileImageURL: null }
     );
     assert.equal(canonicalCloudKitRecipeCreator([attackerRecord], ownerId), null);
 });
@@ -388,6 +603,13 @@ test("CloudKit HTTP-200 record errors distinguish missing data from retryable fa
     assert.equal(cloudKitRecordsPayloadDisposition({
         records: [{ recordName: "recipe-id", recordType: "SharedRecipe" }],
     }), "records");
+    assert.equal(cloudKitQueryPayloadHasErrors({ records: [] }), false);
+    assert.equal(cloudKitQueryPayloadHasErrors({
+        records: [
+            { recordName: "recipe-id", recordType: "SharedRecipe" },
+            { serverErrorCode: "TRY_AGAIN_LATER" },
+        ],
+    }), true);
     assert.equal(cloudKitRecordsPayloadIsRetryableError({
         records: [{ serverErrorCode: "TRY_AGAIN_LATER" }],
     }), true);
@@ -565,7 +787,8 @@ test("recipe web content is summary-only, normalized, and safe", () => {
     assert.match(html, /href="https:\/\/apps\.apple\.com\/app\/id6754004943">Get the app<\/a>/);
     assert.match(html, /window\.location\.assign\(appURL\)/);
     assert.match(html, /id="openCompactRecipe"/);
-    assert.doesNotMatch(html, /surface|secondary|<footer/);
+    assert.doesNotMatch(html, /class="surface"|class="secondary"/);
+    assert.match(html, /<footer class="site-footer">/);
     assert.doesNotMatch(html, /application\/ld\+json/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /javascript:alert/);
@@ -614,15 +837,95 @@ test("profile and collection pages expose clean recipe shelves without managemen
     assert.match(html, /id="openRecipeShelf"/);
     assert.match(html, /href="https:\/\/apps\.apple\.com\/us\/app\/cauldron-magical-recipes\/id6754004943">Get the app<\/a>/);
     assert.match(html, /window\.location\.assign\(appURL\)/);
-    assert.doesNotMatch(html, /class="surface"|<footer|Get Cauldron/);
+    assert.doesNotMatch(html, /class="surface"/);
+    assert.match(html, /<footer class="site-footer">/);
+    assert.match(html, />Get Cauldron<\/a>/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /unshare|stop sharing|make private/i);
     assert.doesNotMatch(html, /Shared recipe|Shared page|personal shelf|recipe shelf shared from Cauldron/i);
 });
 
+test("homepage presents only supplied validated recipes and complete icon metadata", () => {
+    const recipe = sanitizeRecipeShareInput({
+        recipeId: "018f9344-54ff-42fc-83a8-c2a92e2d1b10",
+        ownerId: "9f082214-0c9e-4e30-94d7-072fc359d2f4",
+        identityRecordName: "user_current-user-record",
+        title: "Tomato & Basil Soup",
+        capability: "a".repeat(43),
+        totalMinutes: 30,
+        tags: ["Dessert"],
+    });
+    assert.equal(recipe.ok, true);
+    const html = generateHomePageHtml([{
+        ...recipe.value,
+        imageURL: "https://cvws.icloud-content.com/recipe.jpg?token=ephemeral",
+        creatorDisplayName: "Nadav",
+    }]);
+    assert.match(html, /<h1 id="recipes-title"[^>]*>Recipes<\/h1>/);
+    assert.match(html, /Tomato &amp; Basil Soup/);
+    assert.match(html, /href="\/recipe\/018f9344-54ff-42fc-83a8-c2a92e2d1b10"/);
+    assert.match(html, /src="https:\/\/cvws\.icloud-content\.com\/recipe\.jpg\?token=ephemeral"/);
+    assert.match(html, /Get Cauldron/);
+    assert.match(html, /class="creator-name">Nadav<\/span>/);
+    assert.match(html, /data-filter="Dessert"/);
+    assert.match(html, /class="discovery-grid"/);
+    assert.match(html, /class="discovery-card"/);
+    assert.match(html, /fetchpriority="high"/);
+    assert.match(html, /window\.cauldronRecipeImageFailed/);
+    assert.match(html, /https:\/\/www\.nadavavital\.com\/apps\/support\/\?app=Cauldron/);
+    assert.match(html, /https:\/\/www\.nadavavital\.com\/cauldron\/privacy-policy\//);
+    assert.doesNotMatch(html, /From the community|From found to familiar|Your recipes, remembered|Cauldron for iPhone/);
+    assert.match(html, /rel="icon" type="image\/svg\+xml" href="\/favicon\.svg"/);
+    assert.match(html, /rel="alternate icon" href="\/favicon\.ico"/);
+    assert.match(html, /rel="apple-touch-icon" href="\/apple-touch-icon\.png"/);
+    assert.doesNotMatch(generateHomePageHtml([recipe.value]), /class="recipe-media"/);
+    assert.doesNotMatch(generateHomePageHtml([recipe.value]), /class="placeholder"/);
+    assert.match(generateHomePageHtml([]), /Open Cauldron/);
+});
+
+test("homepage responses remain private while daily rotation prioritizes diverse owners", () => {
+    assert.equal(HOMEPAGE_CACHE_CONTROL, "private, no-store, max-age=0");
+    const recipes = Array.from({ length: 16 }, (_, index) => ({
+        recipeId: `recipe-${index}`,
+        ownerId: index < 8 ? "owner-repeat" : `owner-${index}`,
+    }));
+    const first = rotatingHomepageRecipeCandidates(recipes, "2026-08-29", 8, 2);
+    const repeated = rotatingHomepageRecipeCandidates(recipes, "2026-08-29", 8, 2);
+    const nextDay = rotatingHomepageRecipeCandidates(recipes, "2026-08-30", 8, 2);
+    assert.deepEqual(first, repeated);
+    assert.notDeepEqual(first.map((recipe) => recipe.recipeId), nextDay.map((recipe) => recipe.recipeId));
+    assert.ok(first.filter((recipe) => recipe.ownerId === "owner-repeat").length <= 2);
+    assert.ok(new Set(first.map((recipe) => recipe.ownerId)).size > 1);
+
+    const oneCreator = recipes.filter((recipe) => recipe.ownerId === "owner-repeat");
+    const filled = rotatingHomepageRecipeCandidates(oneCreator, "2026-08-29", 6, 2);
+    assert.equal(filled.length, 6);
+    assert.equal(new Set(filled.map((recipe) => recipe.recipeId)).size, 6);
+});
+
+test("resolved web profile photos render without persisting signed asset URLs", () => {
+    const imageURL = "https://cvws.icloud-content.com/profile.jpg?token=ephemeral";
+    const html = generateCompactRecipeIndexPageHtml({
+        handle: "@chef_nadav",
+        title: "Nadav",
+        description: "Public recipes",
+        canonicalURL: "https://cauldronrecipes.com/u/chef_nadav",
+        appURL: "cauldron://import/profile/chef_nadav",
+        downloadURL: "https://apps.apple.com/app/id6754004943",
+        recipes: [],
+        totalRecipeCount: 0,
+        avatarEmoji: "🧑‍🍳",
+        avatarColor: "#E9792F",
+        avatarImageURL: imageURL,
+    });
+    assert.match(html, /class="profile-avatar"[^>]*><img src="https:\/\/cvws\.icloud-content\.com\/profile\.jpg\?token=ephemeral"/);
+    assert.doesNotMatch(html, /🧑‍🍳/);
+});
+
 test("recipe shelves use only owner-validated CloudKit image assets", () => {
     const recipeId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
     const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const creator = "creator-record";
     const summary = sanitizeRecipeShareInput({
         recipeId,
         ownerId,
@@ -635,6 +938,7 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
     const record = {
         recordName: recipeId,
         recordType: "SharedRecipe",
+        created: { userRecordName: creator },
         fields: {
             recipeId: { value: recipeId },
             ownerId: { value: ownerId },
@@ -647,14 +951,19 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
         },
     };
 
-    const [valid] = recipeIndexItemsWithCloudKitImages([summary.value], [record]);
+    const creatorNames = new Map([[ownerId, creator]]);
+    const [valid] = recipeIndexItemsWithCloudKitImages([summary.value], [record], creatorNames);
     assert.equal(valid.imageURL, "https://cvws.icloud-content.com/image.jpg?token=signed");
 
-    const [wrongOwner] = recipeIndexItemsWithCloudKitImages([summary.value], [{
+    const wrongOwner = recipeIndexItemsWithCloudKitImages([summary.value], [{
         ...record,
         fields: { ...record.fields, ownerId: { value: "018f9344-54ff-42fc-83a8-c2a92e2d1b10" } },
-    }]);
-    assert.equal(wrongOwner.imageURL, null);
+    }], creatorNames);
+    assert.deepEqual(wrongOwner, []);
+    assert.deepEqual(recipeIndexItemsWithCloudKitImages([summary.value], [{
+        ...record,
+        created: { userRecordName: "attacker" },
+    }], creatorNames), []);
 
     const html = generateCompactRecipeIndexPageHtml({
         title: "Favorites",
@@ -678,7 +987,16 @@ test("profile and collection shelves bind CloudKit secrets and request image-onl
     assert.deepEqual(endpointSecrets(previewCollection), expectedSecrets);
     assert.deepEqual(cloudKitRecipeShelfLookupBody([{ recipeId: "recipe-id" }]), {
         records: [{ recordName: "recipe-id" }],
-        desiredKeys: ["recipeId", "ownerId", "visibility", "title", "imageAsset"],
+        desiredKeys: [
+            "recipeId",
+            "ownerId",
+            "visibility",
+            "title",
+            "imageAsset",
+            "relatedRecipeIdsData",
+            "originalRecipeId",
+            "followsSourceUpdates",
+        ],
     });
 });
 
@@ -724,10 +1042,12 @@ test("compact recipe preview never emits recipe images or structured instruction
 test("CloudKit public recipes render complete cookbook pages", () => {
     const recipeId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
     const ownerId = "9f082214-0c9e-4e30-94d7-072fc359d2f4";
+    const creator = "creator-record";
     const bytes = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64");
     const record = {
         recordName: recipeId,
         recordType: "SharedRecipe",
+        created: { userRecordName: creator },
         fields: {
             recipeId: { value: recipeId },
             ownerId: { value: ownerId },
@@ -757,7 +1077,7 @@ test("CloudKit public recipes render complete cookbook pages", () => {
         },
     };
 
-    const recipe = sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId);
+    const recipe = sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId, creator);
     assert.ok(recipe);
     assert.equal(recipe.ingredients.length, 1);
     assert.equal(recipe.steps.length, 1);
@@ -792,7 +1112,9 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.match(html, /id="openRecipe"/);
     assert.match(html, /window\.location\.assign\(appURL\)/);
     assert.doesNotMatch(html, /window\.location\.href=downloadURL/);
-    assert.doesNotMatch(html, /<footer|top-action|Get Cauldron/);
+    assert.doesNotMatch(html, /top-action/);
+    assert.match(html, /<footer class="site-footer">/);
+    assert.match(html, />Get Cauldron<\/a>/);
     assert.match(html, /@media print/);
     assert.match(html, /id="shareRecipe"/);
     assert.match(html, /class="method-section" role="presentation"><h3>Cook<\/h3><\/li>/);
@@ -804,7 +1126,75 @@ test("CloudKit public recipes render complete cookbook pages", () => {
     assert.match(html, /application\/ld\+json/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
     assert.doesNotMatch(html, /unshare|stop sharing|make private/i);
-    assert.equal(sanitizeCloudKitRecipeForWeb(record, recipeId, crypto.randomUUID()), null);
+    assert.equal(sanitizeCloudKitRecipeForWeb(record, recipeId, crypto.randomUUID(), creator), null);
+    assert.equal(sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId, "attacker"), null);
+});
+
+test("web profile materialization hides recipes referenced by a canonical parent", () => {
+    const parentId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const childId = "601e40f5-3abe-42cb-9d9d-f37530cd3963";
+    const base = {
+        ownerId: "9f082214-0c9e-4e30-94d7-072fc359d2f4",
+        title: "Recipe",
+        yields: null,
+        totalMinutes: null,
+        tags: [],
+        ingredients: [],
+        steps: [],
+        relatedGraphReferenceId: parentId,
+        imageURL: null,
+    };
+    assert.deepEqual(hideRelatedWebRecipeReferences([
+        { ...base, recipeId: parentId, relatedRecipeIds: [childId] },
+        { ...base, recipeId: childId, relatedRecipeIds: [], relatedGraphReferenceId: childId },
+    ]).map((recipe) => recipe.recipeId), [parentId]);
+
+    const savedCopyId = "f4181742-d7f8-414f-a03e-eaed2d0bb301";
+    assert.deepEqual(hideRelatedWebRecipeReferences([
+        { ...base, recipeId: parentId, relatedRecipeIds: [childId] },
+        {
+            ...base,
+            recipeId: savedCopyId,
+            relatedRecipeIds: [],
+            relatedGraphReferenceId: childId,
+        },
+    ]).map((recipe) => recipe.recipeId), [parentId]);
+
+    assert.deepEqual(hideRelatedWebRecipeReferences([
+        { ...base, recipeId: parentId, relatedRecipeIds: [childId] },
+        { ...base, recipeId: childId, relatedRecipeIds: [parentId], relatedGraphReferenceId: childId },
+    ]).map((recipe) => recipe.recipeId), [parentId, childId]);
+
+    assert.deepEqual(permanentlyInvalidRecipeShelfIDs(
+        [parentId, childId],
+        [{ recordName: parentId }, { recordName: childId }],
+        [parentId, childId]
+    ), []);
+    assert.deepEqual(permanentlyInvalidRecipeShelfIDs(
+        [parentId, childId],
+        [{ recordName: parentId }, { recordName: childId, serverErrorCode: "UNKNOWN_ITEM" }],
+        [parentId]
+    ), [childId]);
+});
+
+test("public recipe data omits internal related recipe graph identifiers", () => {
+    const recipeId = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
+    const childId = "601e40f5-3abe-42cb-9d9d-f37530cd3963";
+    const publicData = publicWebRecipeData({
+        recipeId,
+        ownerId: "9f082214-0c9e-4e30-94d7-072fc359d2f4",
+        title: "Recipe",
+        yields: null,
+        totalMinutes: null,
+        tags: [],
+        ingredients: [],
+        steps: [],
+        relatedRecipeIds: [childId],
+        imageURL: null,
+    });
+
+    assert.equal(publicData.recipeId, recipeId);
+    assert.equal("relatedRecipeIds" in publicData, false);
 });
 
 test("canonical recipe routes never render a Firebase-only compact fallback", () => {
@@ -828,7 +1218,9 @@ test("public status pages use the shared restrained design and escape messages",
     assert.match(html, /Recipe &lt;unavailable&gt;/);
     assert.match(html, /Try again &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.match(html, /icon-small-light\.svg/);
-    assert.doesNotMatch(html, /class="surface"|<footer|Get Cauldron/);
+    assert.doesNotMatch(html, /class="surface"/);
+    assert.match(html, /<footer class="site-footer">/);
+    assert.match(html, />Get Cauldron<\/a>/);
     assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
 });
 

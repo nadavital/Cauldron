@@ -10,14 +10,16 @@ import CryptoKit
 
 @MainActor
 final class ImageCacheTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         ImageCache.shared.clear()
+        await ImageCache.shared.waitForPendingDiskOperations()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         ImageCache.shared.clear()
-        super.tearDown()
+        await ImageCache.shared.waitForPendingDiskOperations()
+        try await super.tearDown()
     }
 
     func testGetFromDiskReturnsSavedImage() async throws {
@@ -40,7 +42,10 @@ final class ImageCacheTests: XCTestCase {
             displayName: "Disk User",
             cloudProfileImageRecordName: "cloud-profile-record"
         )
-        let cacheKey = ImageCache.profileImageKey(userId: user.id)
+        guard case .photo(let photo) = user.avatarRepresentation else {
+            return XCTFail("Expected a photo avatar")
+        }
+        let cacheKey = ImageCache.profileImageKey(for: photo)
         let image = makeImage(color: .systemBlue)
 
         try writeDiskImage(image, for: cacheKey)
@@ -53,6 +58,108 @@ final class ImageCacheTests: XCTestCase {
         XCTAssertNotNil(cachedImage)
         XCTAssertEqual(cachedImage?.cgImage?.width, image.cgImage?.width)
         XCTAssertEqual(cachedImage?.cgImage?.height, image.cgImage?.height)
+    }
+
+    func testEmojiAvatarNeverReadsLegacyPhotoCache() async {
+        let user = User(
+            id: UUID(),
+            username: "emoji-user",
+            displayName: "Emoji User",
+            profileEmoji: "🍲",
+            profileColor: "#FF9900"
+        )
+        let legacyKey = ImageCache.profileImageKey(userId: user.id)
+        ImageCache.shared.set(legacyKey, image: makeImage(color: .systemRed))
+
+        let result = await EntityImageLoader.shared.loadProfileImage(for: user, dependencies: nil)
+
+        XCTAssertNil(result.image)
+    }
+
+    func testPhotoCacheKeyChangesWithCloudRevision() {
+        let ownerID = UUID()
+        let first = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            cloudProfileImageRecordName: "profile-image",
+            profileImageModifiedAt: Date(timeIntervalSince1970: 10)
+        )
+        let second = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            cloudProfileImageRecordName: "profile-image",
+            profileImageModifiedAt: Date(timeIntervalSince1970: 20)
+        )
+        guard case .photo(let firstPhoto) = first.avatarRepresentation,
+              case .photo(let secondPhoto) = second.avatarRepresentation else {
+            return XCTFail("Expected photo avatars")
+        }
+
+        XCTAssertNotEqual(
+            ImageCache.profileImageKey(for: firstPhoto),
+            ImageCache.profileImageKey(for: secondPhoto)
+        )
+    }
+
+    func testCloudPhotoCacheKeySurvivesLocalHydration() {
+        let ownerID = UUID()
+        let modifiedAt = Date(timeIntervalSince1970: 20)
+        let cloudOnly = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            cloudProfileImageRecordName: "profile-image",
+            profileImageModifiedAt: modifiedAt
+        )
+        let hydrated = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            profileImageURL: URL(fileURLWithPath: "/tmp/profile-image.jpg"),
+            cloudProfileImageRecordName: "profile-image",
+            profileImageModifiedAt: modifiedAt,
+            profileImageLocalRevision: UUID()
+        )
+        guard case .photo(let cloudPhoto) = cloudOnly.avatarRepresentation,
+              case .photo(let hydratedPhoto) = hydrated.avatarRepresentation else {
+            return XCTFail("Expected photo avatars")
+        }
+
+        XCTAssertEqual(
+            ImageCache.profileImageKey(for: cloudPhoto),
+            ImageCache.profileImageKey(for: hydratedPhoto)
+        )
+    }
+
+    func testPendingLocalReplacementDoesNotReusePreviousCloudPhotoKey() {
+        let ownerID = UUID()
+        let previous = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            cloudProfileImageRecordName: "profile-image",
+            profileImageModifiedAt: Date(timeIntervalSince1970: 20)
+        )
+        let pendingReplacement = User(
+            id: ownerID,
+            username: "photo-user",
+            displayName: "Photo User",
+            profileImageURL: URL(fileURLWithPath: "/tmp/new-profile-image.jpg"),
+            cloudProfileImageRecordName: nil,
+            profileImageModifiedAt: nil,
+            profileImageLocalRevision: UUID()
+        )
+        guard case .photo(let previousPhoto) = previous.avatarRepresentation,
+              case .photo(let replacementPhoto) = pendingReplacement.avatarRepresentation else {
+            return XCTFail("Expected photo avatars")
+        }
+
+        XCTAssertNotEqual(
+            ImageCache.profileImageKey(for: previousPhoto),
+            ImageCache.profileImageKey(for: replacementPhoto)
+        )
     }
 
     func testSavingProfileImageInvalidatesIdBasedCacheEntry() async throws {

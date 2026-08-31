@@ -70,11 +70,15 @@ extension RecipeRepository {
             // Remove from pending uploads for this scope only
             await imageSyncManager.removePendingUpload(recipe.id, scope: scope)
 
-            // Notify views that recipe was updated (so RecipeDetailView can refresh and show the image)
-            NotificationCenter.default.post(
-                name: NSNotification.Name("RecipeUpdated"),
-                object: recipe.id
-            )
+            // Image metadata changes do not require every library surface to
+            // refetch and regroup the complete recipe table.
+            await ImageCache.shared.clearRecipeImages(for: recipe.id)
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .recipeImageUpdated,
+                    object: recipe.id
+                )
+            }
 
         } catch let error as CloudKitError {
             logger.error("❌ Image upload failed: \(error.localizedDescription)")

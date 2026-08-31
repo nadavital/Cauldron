@@ -108,8 +108,6 @@ final class RecipeIntentEntityTests: XCTestCase {
             id: userID,
             username: "before",
             displayName: "Before Edit",
-            profileEmoji: "🍲",
-            profileColor: "AA0000",
             cloudProfileImageRecordName: "image-record",
             profileImageModifiedAt: cloudModifiedAt
         )
@@ -138,8 +136,8 @@ final class RecipeIntentEntityTests: XCTestCase {
         XCTAssertEqual(merged.displayName, "After Edit")
         XCTAssertEqual(merged.email, "after@example.com")
         XCTAssertEqual(merged.referralCode, "REFRESH")
-        XCTAssertEqual(merged.profileEmoji, "🍲")
-        XCTAssertEqual(merged.profileColor, "AA0000")
+        XCTAssertNil(merged.profileEmoji)
+        XCTAssertNil(merged.profileColor)
         XCTAssertEqual(merged.profileImageURL, downloadedURL)
         XCTAssertEqual(merged.cloudProfileImageRecordName, "image-record")
         XCTAssertEqual(merged.profileImageModifiedAt, cloudModifiedAt)

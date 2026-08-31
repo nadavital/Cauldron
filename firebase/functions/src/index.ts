@@ -1,4 +1,5 @@
 import { onRequest, Request } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import {
@@ -36,11 +37,11 @@ const MAX_WEB_INGREDIENTS = 250;
 const MAX_WEB_STEPS = 200;
 const MAX_WEB_RECIPE_TEXT_LENGTH = 4_000;
 const MAX_WEB_RECIPE_CARDS = 12;
-const WEB_RECIPE_CARD_QUERY_LIMIT = MAX_WEB_RECIPE_CARDS + 1;
 const CLOUDKIT_WEB_REQUEST_TIMEOUT_MS = 4_000;
 const CLOUDKIT_WEB_MAX_ATTEMPTS = 2;
 const CLOUDKIT_WEB_RETRY_DELAY_MS = 150;
 const SOCIAL_IMAGE_MAX_BYTES = 10_000_000;
+export const HOMEPAGE_CACHE_CONTROL = "private, no-store, max-age=0";
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const usernamePattern = /^[A-Za-z0-9_]{3,20}$/;
 const capabilityPattern = /^[A-Za-z0-9_-]{43,128}$/;
@@ -85,6 +86,10 @@ type SanitizedRecipeShare = {
 
 type WebRecipeIndexItem = SanitizedRecipeShare & {
     imageURL?: string | null;
+    relatedRecipeIds?: string[];
+    relatedGraphReferenceId?: string;
+    creatorDisplayName?: string;
+    creatorUsername?: string;
 };
 
 type WebRecipeQuantity = {
@@ -116,6 +121,8 @@ export type WebRecipeContent = {
     tags: string[];
     ingredients: WebRecipeIngredient[];
     steps: WebRecipeStep[];
+    relatedRecipeIds: string[];
+    relatedGraphReferenceId: string;
     imageURL: string | null;
 };
 
@@ -124,6 +131,25 @@ export type WebRecipeCreator = {
     displayName: string;
     profileEmoji: string | null;
     profileColor: string | null;
+    profileImageURL: string | null;
+};
+
+type WebProfileContent = WebRecipeCreator & {
+    userId: string;
+    usernameClaimCreatedAt: number;
+    creatorRecordName: string;
+};
+
+type WebCollectionContent = {
+    collectionId: string;
+    ownerId: string;
+    title: string;
+    recipeIds: string[];
+};
+
+type RecipeShelfValidation = {
+    items: WebRecipeIndexItem[];
+    permanentlyInvalidRecipeIds: string[];
 };
 
 type SanitizedProfileShare = {
@@ -156,6 +182,14 @@ type SanitizedAccountUnshare = {
     userId: string;
     identityRecordName: string;
     capability: string;
+};
+
+type SanitizedOwnerManifest = {
+    ownerId: string;
+    identityRecordName: string;
+    capability: string;
+    publicRecipeIds: string[];
+    publicCollectionIds: string[];
 };
 
 type SanitizedCollectionShare = {
@@ -382,6 +416,11 @@ export function cloudKitRecordsPayloadDisposition(
     return "error";
 }
 
+export function cloudKitQueryPayloadHasErrors(payload: CloudKitRecordsPayload): boolean {
+    return typeof payload.serverErrorCode === "string" ||
+        (payload.records ?? []).some((record) => typeof record.serverErrorCode === "string");
+}
+
 type VerifiedCloudKitAuthority = {
     record: CloudKitRecordLike;
     usernameClaimCreatedAt?: number;
@@ -440,7 +479,7 @@ export function canonicalCloudKitRecipeCreator(
         /^#[0-9a-f]{6}$/i.test(record.fields.profileColor.value)
         ? record.fields.profileColor.value
         : null;
-    return { username, displayName, profileEmoji, profileColor };
+    return { username, displayName, profileEmoji, profileColor, profileImageURL: null };
 }
 
 export function cloudKitOwnerQuery(ownerId: string): object {
@@ -757,12 +796,14 @@ function safeCloudKitAssetURL(value: unknown): string | null {
 export function sanitizeCloudKitRecipeForWeb(
     record: CloudKitRecordLike,
     expectedRecipeId: string,
-    expectedOwnerId: string
+    expectedOwnerId: string,
+    expectedCreatorRecordName: string
 ): WebRecipeContent | null {
     const fields = record.fields ?? {};
     if (record.recordName !== expectedRecipeId || record.recordType !== "SharedRecipe" ||
         fields.recipeId?.value !== expectedRecipeId || fields.ownerId?.value !== expectedOwnerId ||
-        fields.visibility?.value !== "public") {
+        fields.visibility?.value !== "public" ||
+        record.created?.userRecordName !== expectedCreatorRecordName) {
         return null;
     }
 
@@ -830,6 +871,13 @@ export function sanitizeCloudKitRecipeForWeb(
         ? asset as Record<string, unknown>
         : null;
     const assetSize = typeof assetRecord?.size === "number" ? assetRecord.size : null;
+    const relatedRecipeIds = decodeCloudKitJSONList(fields.relatedRecipeIdsData?.value)
+        .filter(isValidUUID)
+        .slice(0, 100);
+    const originalRecipeId = fields.followsSourceUpdates?.value === 1 &&
+        isValidUUID(fields.originalRecipeId?.value)
+        ? fields.originalRecipeId.value
+        : expectedRecipeId;
 
     return {
         recipeId: expectedRecipeId,
@@ -840,6 +888,8 @@ export function sanitizeCloudKitRecipeForWeb(
         tags: sanitizedTagList(tags),
         ingredients,
         steps,
+        relatedRecipeIds,
+        relatedGraphReferenceId: originalRecipeId,
         imageURL: assetSize !== null && assetSize <= 25_000_000
             ? safeCloudKitAssetURL(assetRecord?.downloadURL)
             : null,
@@ -854,6 +904,10 @@ async function fetchPublicCloudKitRecipe(
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
     if (!keyID || !privateKey) {
         throw new Error("CloudKit web recipe credentials are unavailable");
+    }
+    const canonicalOwner = await fetchCanonicalCloudKitProfile(ownerId);
+    if (!canonicalOwner) {
+        return null;
     }
     try {
         return await retryTransientCloudKitOperation(async (attempt) => {
@@ -901,7 +955,12 @@ async function fetchPublicCloudKitRecipe(
             const record = payload.records?.find((candidate) =>
                 typeof candidate.serverErrorCode !== "string"
             );
-            return record ? sanitizeCloudKitRecipeForWeb(record, recipeId, ownerId) : null;
+            return record ? sanitizeCloudKitRecipeForWeb(
+                record,
+                recipeId,
+                ownerId,
+                canonicalOwner.creatorRecordName
+            ) : null;
         });
     } catch (error) {
         logger.warn("CloudKit web recipe lookup failed", { recipeId, error });
@@ -909,40 +968,428 @@ async function fetchPublicCloudKitRecipe(
     }
 }
 
+export function sanitizeCloudKitCollectionForWeb(
+    record: CloudKitRecordLike,
+    expectedCollectionId: string,
+    expectedOwnerId: string,
+    expectedCreatorRecordName: string
+): WebCollectionContent | null {
+    const fields = record.fields ?? {};
+    if (record.recordName !== expectedCollectionId || record.recordType !== "Collection" ||
+        fields.collectionId?.value !== expectedCollectionId ||
+        fields.userId?.value !== expectedOwnerId || fields.visibility?.value !== "public" ||
+        record.created?.userRecordName !== expectedCreatorRecordName) {
+        return null;
+    }
+    const title = requiredPublicText(fields.name?.value, "title", MAX_TITLE_LENGTH);
+    if (!title.ok) {
+        return null;
+    }
+    let recipeIds: string[] = [];
+    if (typeof fields.recipeIds?.value === "string") {
+        try {
+            const decoded = JSON.parse(fields.recipeIds.value) as unknown;
+            if (Array.isArray(decoded)) {
+                recipeIds = decoded.filter(isValidUUID).slice(0, 500);
+            }
+        } catch {
+            recipeIds = [];
+        }
+    }
+    return {
+        collectionId: expectedCollectionId,
+        ownerId: expectedOwnerId,
+        title: title.value,
+        recipeIds,
+    };
+}
+
+async function fetchPublicCloudKitCollection(
+    collectionId: string,
+    ownerId: string
+): Promise<WebCollectionContent | null> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const canonicalOwner = await fetchCanonicalCloudKitProfile(ownerId);
+    if (!canonicalOwner) {
+        return null;
+    }
+    return retryTransientCloudKitOperation(async () => {
+        const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+        const body = JSON.stringify({ records: [{ recordName: collectionId }] });
+        const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const signature = createSign("SHA256")
+            .update(cloudKitSignatureInput(body, date, subpath))
+            .end()
+            .sign(privateKey)
+            .toString("base64");
+        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Apple-CloudKit-Request-KeyID": keyID,
+                "X-Apple-CloudKit-Request-ISO8601Date": date,
+                "X-Apple-CloudKit-Request-SignatureV1": signature,
+            },
+            body,
+            signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            const message = `CloudKit web collection lookup returned ${response.status}`;
+            throw isTransientCloudKitHTTPStatus(response.status)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        const payload = await response.json() as CloudKitRecordsPayload;
+        const disposition = cloudKitRecordsPayloadDisposition(payload);
+        if (disposition === "error") {
+            const message = "CloudKit web collection lookup returned a record error";
+            throw cloudKitRecordsPayloadIsRetryableError(payload)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        if (disposition === "notFound") {
+            return null;
+        }
+        const record = payload.records?.find((candidate) =>
+            typeof candidate.serverErrorCode !== "string"
+        );
+        const collection = record
+            ? sanitizeCloudKitCollectionForWeb(
+                record,
+                collectionId,
+                ownerId,
+                canonicalOwner.creatorRecordName
+            )
+            : null;
+        if (!collection || !record) {
+            return null;
+        }
+        const membershipRecipeIDs = await fetchPublicCloudKitCollectionMembershipRecipeIDs(
+            collectionId,
+            ownerId,
+            canonicalOwner.creatorRecordName
+        );
+        return membershipRecipeIDs === null
+            ? collection
+            : { ...collection, recipeIds: membershipRecipeIDs };
+    });
+}
+
+async function fetchPublicCloudKitCollectionMembershipRecipeIDs(
+    collectionId: string,
+    ownerId: string,
+    expectedCreatorRecordName: string
+): Promise<string[] | null> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
+    let continuationMarker: string | null = null;
+    const records: CloudKitRecordLike[] = [];
+    let pageCount = 0;
+    do {
+        pageCount += 1;
+        if (pageCount > 3) {
+            throw new Error("CloudKit collection membership query exceeded its safety cap");
+        }
+        const body = JSON.stringify(continuationMarker
+            ? { continuationMarker }
+            : {
+                query: {
+                    recordType: "CollectionMembership",
+                    filterBy: [
+                        {
+                            fieldName: "collectionId",
+                            comparator: "EQUALS",
+                            fieldValue: { value: collectionId },
+                        },
+                        {
+                            fieldName: "ownerId",
+                            comparator: "EQUALS",
+                            fieldValue: { value: ownerId },
+                        },
+                    ],
+                },
+                resultsLimit: 500,
+            });
+        const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const signature = createSign("SHA256")
+            .update(cloudKitSignatureInput(body, date, subpath))
+            .end()
+            .sign(privateKey)
+            .toString("base64");
+        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Apple-CloudKit-Request-KeyID": keyID,
+                "X-Apple-CloudKit-Request-ISO8601Date": date,
+                "X-Apple-CloudKit-Request-SignatureV1": signature,
+            },
+            body,
+            signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            const message = `CloudKit collection membership query returned ${response.status}`;
+            throw isTransientCloudKitHTTPStatus(response.status)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        const payload = await response.json() as CloudKitRecordsPayload & {
+            continuationMarker?: unknown;
+        };
+        if (cloudKitQueryPayloadHasErrors(payload)) {
+            const message = "CloudKit collection membership query returned a record error";
+            throw cloudKitRecordsPayloadIsRetryableError(payload)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        records.push(...(payload.records ?? []).filter((candidate) =>
+            typeof candidate.serverErrorCode !== "string"
+        ));
+        continuationMarker = typeof payload.continuationMarker === "string"
+            ? payload.continuationMarker
+            : null;
+    } while (continuationMarker);
+
+    return resolveCloudKitCollectionMembershipRecipeIDs(
+        records,
+        collectionId,
+        ownerId,
+        expectedCreatorRecordName
+    );
+}
+
+export function resolveCloudKitCollectionMembershipRecipeIDs(
+    records: CloudKitRecordLike[],
+    collectionId: string,
+    ownerId: string,
+    expectedCreatorRecordName: string | null
+): string[] | null {
+    if (records.length === 0 || expectedCreatorRecordName === null) return null;
+    const newestByRecipeID = new Map<string, { active: boolean; sortOrder: number; updatedAt: number }>();
+    for (const record of records) {
+        const fields = record.fields ?? {};
+        const recipeId = fields.recipeId?.value;
+        const recordCreator = record.created?.userRecordName;
+        if (record.recordType !== "CollectionMembership" ||
+            fields.collectionId?.value !== collectionId ||
+            fields.ownerId?.value !== ownerId ||
+            !isValidUUID(recipeId) ||
+            (expectedCreatorRecordName !== null && recordCreator !== expectedCreatorRecordName)) {
+            continue;
+        }
+        const rawUpdatedAt = fields.updatedAt?.value;
+        const updatedAt = typeof rawUpdatedAt === "number"
+            ? rawUpdatedAt
+            : typeof rawUpdatedAt === "string"
+                ? Date.parse(rawUpdatedAt)
+                : 0;
+        const candidate = {
+            active: fields.status?.value === "active",
+            sortOrder: typeof fields.sortOrder?.value === "number" ? fields.sortOrder.value : 0,
+            updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+        };
+        const existing = newestByRecipeID.get(recipeId);
+        if (!existing || candidate.updatedAt > existing.updatedAt ||
+            (candidate.updatedAt === existing.updatedAt && !candidate.active && existing.active)) {
+            newestByRecipeID.set(recipeId, candidate);
+        }
+    }
+    // An untrusted record must never make a legacy collection appear empty. Only
+    // authoritative edges may opt a collection into the edge-based model.
+    if (newestByRecipeID.size === 0) return null;
+    return [...newestByRecipeID.entries()]
+        .filter(([, edge]) => edge.active)
+        .sort(([, lhs], [, rhs]) => lhs.sortOrder - rhs.sortOrder || lhs.updatedAt - rhs.updatedAt)
+        .map(([recipeId]) => recipeId)
+        .slice(0, 500);
+}
+
+async function fetchCanonicalCloudKitRecipesByOwner(
+    ownerId: string,
+    expectedCreatorRecordName: string
+): Promise<{ recipes: WebRecipeContent[]; complete: boolean }> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
+    let continuationMarker: string | null = null;
+    const recipes: WebRecipeContent[] = [];
+    for (let page = 0; page < 5; page += 1) {
+        const body = JSON.stringify(continuationMarker
+            ? { continuationMarker }
+            : {
+                query: {
+                    recordType: "SharedRecipe",
+                    filterBy: [{
+                        fieldName: "ownerId",
+                        comparator: "EQUALS",
+                        fieldValue: { value: ownerId },
+                    }],
+                },
+                resultsLimit: 100,
+            });
+        const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+        const signature = createSign("SHA256")
+            .update(cloudKitSignatureInput(body, date, subpath))
+            .end()
+            .sign(privateKey)
+            .toString("base64");
+        const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Apple-CloudKit-Request-KeyID": keyID,
+                "X-Apple-CloudKit-Request-ISO8601Date": date,
+                "X-Apple-CloudKit-Request-SignatureV1": signature,
+            },
+            body,
+            signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+            const message = `CloudKit owner recipe query returned ${response.status}`;
+            throw isTransientCloudKitHTTPStatus(response.status)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        const payload = await response.json() as CloudKitRecordsPayload & {
+            continuationMarker?: unknown;
+        };
+        if (cloudKitQueryPayloadHasErrors(payload)) {
+            const message = "CloudKit owner recipe query returned a record error";
+            throw cloudKitRecordsPayloadIsRetryableError(payload)
+                ? new RetryableCloudKitError(message)
+                : new Error(message);
+        }
+        recipes.push(...canonicalOwnerRecipesFromCloudKitRecords(
+            payload.records ?? [],
+            ownerId,
+            expectedCreatorRecordName
+        ));
+        continuationMarker = typeof payload.continuationMarker === "string"
+            ? payload.continuationMarker
+            : null;
+        if (!continuationMarker) {
+            return { recipes: hideRelatedWebRecipeReferences(recipes), complete: true };
+        }
+    }
+    logger.warn("CloudKit owner recipe materialization reached its 500-recipe safety cap", { ownerId });
+    return { recipes: hideRelatedWebRecipeReferences(recipes), complete: false };
+}
+
+export function hideRelatedWebRecipeReferences<Recipe extends {
+    recipeId: string;
+    relatedRecipeIds?: string[];
+    relatedGraphReferenceId?: string;
+}>(recipes: Recipe[]): Recipe[] {
+    const relatedRecipeIds = new Set(recipes.flatMap((recipe) => recipe.relatedRecipeIds ?? []));
+    const visibleRecipes = recipes.filter((recipe) =>
+        !relatedRecipeIds.has(recipe.recipeId) &&
+        (!recipe.relatedGraphReferenceId || !relatedRecipeIds.has(recipe.relatedGraphReferenceId))
+    );
+    // Legacy or cyclic graphs can reference every recipe. Match the native
+    // safety behavior and preserve the owner's valid recipes rather than
+    // publishing an empty profile and deleting every existing snapshot.
+    return visibleRecipes.length === 0 ? recipes : visibleRecipes;
+}
+
+export function publicWebRecipeData(recipe: WebRecipeContent): Record<string, unknown> {
+    const publicData: Record<string, unknown> = { ...recipe };
+    delete publicData.relatedRecipeIds;
+    delete publicData.relatedGraphReferenceId;
+    return publicData;
+}
+
+export function canonicalOwnerRecipesFromCloudKitRecords(
+    records: CloudKitRecordLike[],
+    ownerId: string,
+    expectedCreatorRecordName: string
+): WebRecipeContent[] {
+    return records.flatMap((record) => {
+        if (record.created?.userRecordName !== expectedCreatorRecordName) {
+            return [];
+        }
+        const recipeId = record.fields?.recipeId?.value;
+        if (!isValidUUID(recipeId)) {
+            return [];
+        }
+        const recipe = sanitizeCloudKitRecipeForWeb(
+            record,
+            recipeId,
+            ownerId,
+            expectedCreatorRecordName
+        );
+        return recipe ? [recipe] : [];
+    });
+}
+
 export function recipeIndexItemsWithCloudKitImages(
     recipes: SanitizedRecipeShare[],
-    records: CloudKitRecordLike[]
+    records: CloudKitRecordLike[],
+    canonicalCreatorRecordNamesByOwner: ReadonlyMap<string, string>
 ): WebRecipeIndexItem[] {
     const recordsByName = new Map(records.flatMap((record) =>
         typeof record.recordName === "string" && typeof record.serverErrorCode !== "string"
             ? [[record.recordName, record] as const]
             : []
     ));
-    return recipes.map((recipe) => {
+    return recipes.flatMap((recipe): WebRecipeIndexItem[] => {
         const record = recordsByName.get(recipe.recipeId);
-        const canonical = record
-            ? sanitizeCloudKitRecipeForWeb(record, recipe.recipeId, recipe.ownerId)
+        const expectedCreatorRecordName = canonicalCreatorRecordNamesByOwner.get(recipe.ownerId);
+        const canonical = record && expectedCreatorRecordName
+            ? sanitizeCloudKitRecipeForWeb(
+                record,
+                recipe.recipeId,
+                recipe.ownerId,
+                expectedCreatorRecordName
+            )
             : null;
-        return {
+        return canonical ? [{
             ...recipe,
-            imageURL: canonical?.imageURL ?? null,
-        };
+            imageURL: canonical.imageURL,
+            relatedRecipeIds: canonical.relatedRecipeIds,
+            relatedGraphReferenceId: canonical.relatedGraphReferenceId,
+        }] : [];
     });
 }
 
 async function fetchPublicCloudKitRecipeIndexItems(
     recipes: SanitizedRecipeShare[]
-): Promise<WebRecipeIndexItem[]> {
+): Promise<RecipeShelfValidation> {
     if (recipes.length === 0) {
-        return [];
+        return { items: [], permanentlyInvalidRecipeIds: [] };
     }
     const keyID = cloudKitServerKeyID.value();
     const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
     if (!keyID || !privateKey) {
         throw new Error("CloudKit web recipe credentials are unavailable");
     }
+    const canonicalOwners: WebProfileContent[] = [];
+    const ownerIds = [...new Set(recipes.map((recipe) => recipe.ownerId))];
+    for (let index = 0; index < ownerIds.length; index += 4) {
+        const ownerChunk = ownerIds.slice(index, index + 4);
+        const results = await Promise.all(ownerChunk.map(async (ownerId) => {
+            try {
+                return await fetchCanonicalCloudKitProfile(ownerId);
+            } catch (error) {
+                logger.warn("CloudKit recipe shelf skipped an unavailable owner", { ownerId, error });
+                return null;
+            }
+        }));
+        canonicalOwners.push(...results.filter((owner): owner is WebProfileContent => owner !== null));
+    }
+    const canonicalCreatorRecordNamesByOwner = new Map(canonicalOwners.flatMap((owner) =>
+        owner ? [[owner.userId, owner.creatorRecordName] as const] : []
+    ));
+    const canonicalOwnersByID = new Map(canonicalOwners.map((owner) => [owner.userId, owner] as const));
+    const recipesWithValidatedOwners = recipes.filter((recipe) =>
+        canonicalCreatorRecordNamesByOwner.has(recipe.ownerId)
+    );
+    if (recipesWithValidatedOwners.length === 0) {
+        return { items: [], permanentlyInvalidRecipeIds: [] };
+    }
     const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
-    const body = JSON.stringify(cloudKitRecipeShelfLookupBody(recipes));
+    const body = JSON.stringify(cloudKitRecipeShelfLookupBody(recipesWithValidatedOwners));
     const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const signature = createSign("SHA256")
         .update(cloudKitSignatureInput(body, date, subpath))
@@ -970,7 +1417,47 @@ async function fetchPublicCloudKitRecipeIndexItems(
         payload.serverErrorCode.toUpperCase() !== "UNKNOWN_ITEM") {
         throw new Error("CloudKit web recipe shelf lookup returned a server error");
     }
-    return recipeIndexItemsWithCloudKitImages(recipes, payload.records ?? []);
+    const records = payload.records ?? [];
+    const canonicalItems = recipeIndexItemsWithCloudKitImages(
+        recipesWithValidatedOwners,
+        records,
+        canonicalCreatorRecordNamesByOwner
+    ).map((recipe) => {
+        const owner = canonicalOwnersByID.get(recipe.ownerId);
+        return owner ? {
+            ...recipe,
+            creatorDisplayName: owner.displayName,
+            creatorUsername: owner.username,
+        } : recipe;
+    });
+    const items = hideRelatedWebRecipeReferences(canonicalItems);
+    return {
+        items,
+        permanentlyInvalidRecipeIds: permanentlyInvalidRecipeShelfIDs(
+            recipesWithValidatedOwners.map((recipe) => recipe.recipeId),
+            records,
+            canonicalItems.map((item) => item.recipeId)
+        ),
+    };
+}
+
+export function permanentlyInvalidRecipeShelfIDs(
+    requestedRecipeIds: string[],
+    records: Array<Pick<CloudKitRecordLike, "recordName" | "serverErrorCode">>,
+    canonicalRecipeIds: string[]
+): string[] {
+    const validIDs = new Set(canonicalRecipeIds);
+    const permanentFailures = new Set(records.flatMap((record) => {
+        const code = typeof record.serverErrorCode === "string"
+            ? record.serverErrorCode.toUpperCase()
+            : null;
+        const recordName = typeof record.recordName === "string" ? record.recordName : null;
+        return recordName && (code === "UNKNOWN_ITEM" ||
+            (code === null && !validIDs.has(recordName)))
+            ? [recordName]
+            : [];
+    }));
+    return requestedRecipeIds.filter((recipeId) => permanentFailures.has(recipeId));
 }
 
 export function cloudKitRecipeShelfLookupBody(
@@ -978,19 +1465,86 @@ export function cloudKitRecipeShelfLookupBody(
 ): Readonly<{ records: Array<{ recordName: string }>; desiredKeys: string[] }> {
     return {
         records: recipes.map((recipe) => ({ recordName: recipe.recipeId })),
-        desiredKeys: ["recipeId", "ownerId", "visibility", "title", "imageAsset"],
+        desiredKeys: [
+            "recipeId",
+            "ownerId",
+            "visibility",
+            "title",
+            "imageAsset",
+            "relatedRecipeIdsData",
+            "originalRecipeId",
+            "followsSourceUpdates",
+        ],
     };
 }
 
 async function bestEffortRecipeIndexItems(
-    recipes: SanitizedRecipeShare[]
-): Promise<WebRecipeIndexItem[]> {
+    recipes: SanitizedRecipeShare[],
+    deadlineMilliseconds?: number
+): Promise<RecipeShelfValidation> {
     try {
-        return await fetchPublicCloudKitRecipeIndexItems(recipes);
+        const request = fetchPublicCloudKitRecipeIndexItems(recipes);
+        if (!deadlineMilliseconds) {
+            return await request;
+        }
+        let timer: NodeJS.Timeout | undefined;
+        try {
+            return await Promise.race([
+                request,
+                new Promise<RecipeShelfValidation>((_, reject) => {
+                    timer = setTimeout(
+                        () => reject(new Error("CloudKit recipe shelf validation deadline exceeded")),
+                        deadlineMilliseconds
+                    );
+                }),
+            ]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
     } catch (error) {
-        logger.warn("CloudKit recipe shelf imagery is temporarily unavailable", { error });
-        return recipes.map((recipe) => ({ ...recipe, imageURL: null }));
+        logger.warn("CloudKit recipe shelf validation is temporarily unavailable", { error });
+        // Firebase is only a derived index. Never emit a link that CloudKit has
+        // not confirmed during this response; doing so creates dead profile and
+        // collection cards when an old snapshot outlives its canonical record.
+        return { items: [], permanentlyInvalidRecipeIds: [] };
     }
+}
+
+function stableHomepageScore(value: string): number {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+export function rotatingHomepageRecipeCandidates(
+    recipes: SanitizedRecipeShare[],
+    rotationKey: string,
+    maximumRecipes = 18,
+    maximumPerOwner = 2
+): SanitizedRecipeShare[] {
+    const ordered = [...recipes]
+        .sort((lhs, rhs) => stableHomepageScore(`${rotationKey}:${lhs.recipeId}`) -
+            stableHomepageScore(`${rotationKey}:${rhs.recipeId}`));
+    const ownerCounts = new Map<string, number>();
+    const diverse = ordered.filter((recipe) => {
+            const ownerCount = ownerCounts.get(recipe.ownerId) ?? 0;
+            if (ownerCount >= maximumPerOwner) return false;
+            ownerCounts.set(recipe.ownerId, ownerCount + 1);
+            return true;
+        });
+    if (diverse.length >= maximumRecipes) return diverse.slice(0, maximumRecipes);
+
+    // Prefer creator diversity, but do not leave the showcase nearly empty
+    // while the public index is still small. Remaining real, validated recipes
+    // fill the shelf only after every available creator received priority.
+    const selectedIds = new Set(diverse.map((recipe) => recipe.recipeId));
+    return [
+        ...diverse,
+        ...ordered.filter((recipe) => !selectedIds.has(recipe.recipeId)),
+    ].slice(0, maximumRecipes);
 }
 
 async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRecipeCreator | null> {
@@ -1055,13 +1609,419 @@ async function fetchPublicCloudKitRecipeCreator(ownerId: string): Promise<WebRec
             ) === null) {
                 return null;
             }
-            return creator;
+            const imageRecordName = canonicalProfileImageRecordName(
+                creator.profileEmoji,
+                canonicalRecord.fields?.cloudProfileImageRecordName?.value
+            );
+            const profileImageURL = typeof imageRecordName === "string"
+                ? await fetchPublicCloudKitProfileImage(imageRecordName, ownerId).catch((error) => {
+                    logger.warn("CloudKit creator image lookup failed", { ownerId, error });
+                    return null;
+                })
+                : null;
+            return { ...creator, profileImageURL };
         });
         return identity;
     } catch (error) {
         logger.warn("CloudKit web recipe creator lookup failed", { ownerId, error });
         throw error;
     }
+}
+
+async function fetchPublicCloudKitProfileImage(
+    recordName: string,
+    ownerId: string
+): Promise<string | null> {
+    if (recordName !== `profileImage_${ownerId}`) {
+        return null;
+    }
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+    const body = JSON.stringify({
+        records: [{ recordName }],
+        desiredKeys: ["userId", "imageAsset"],
+    });
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const signature = createSign("SHA256")
+        .update(cloudKitSignatureInput(body, date, subpath))
+        .end()
+        .sign(privateKey)
+        .toString("base64");
+    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Apple-CloudKit-Request-KeyID": keyID,
+            "X-Apple-CloudKit-Request-ISO8601Date": date,
+            "X-Apple-CloudKit-Request-SignatureV1": signature,
+        },
+        body,
+        signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+        throw new Error(`CloudKit profile image lookup returned ${response.status}`);
+    }
+    const payload = await response.json() as CloudKitRecordsPayload;
+    const record = payload.records?.find((candidate) =>
+        candidate.recordName === recordName && typeof candidate.serverErrorCode !== "string"
+    );
+    if (record?.recordType !== "ProfileImage" || record.fields?.userId?.value !== ownerId) {
+        return null;
+    }
+    const asset = record.fields?.imageAsset?.value;
+    const assetRecord = asset && typeof asset === "object" && !Array.isArray(asset)
+        ? asset as Record<string, unknown>
+        : null;
+    const assetSize = typeof assetRecord?.size === "number" ? assetRecord.size : null;
+    return assetSize !== null && assetSize <= 10_000_000
+        ? safeCloudKitAssetURL(assetRecord?.downloadURL)
+        : null;
+}
+
+async function queryCanonicalCloudKitProfileByOwner(ownerId: string): Promise<WebProfileContent | null> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
+    const body = JSON.stringify(cloudKitOwnerQuery(ownerId));
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const signature = createSign("SHA256")
+        .update(cloudKitSignatureInput(body, date, subpath))
+        .end()
+        .sign(privateKey)
+        .toString("base64");
+    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Apple-CloudKit-Request-KeyID": keyID,
+            "X-Apple-CloudKit-Request-ISO8601Date": date,
+            "X-Apple-CloudKit-Request-SignatureV1": signature,
+        },
+        body,
+        signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+        const message = `CloudKit profile lookup returned ${response.status}`;
+        throw isTransientCloudKitHTTPStatus(response.status)
+            ? new RetryableCloudKitError(message)
+            : new Error(message);
+    }
+    const payload = await response.json() as CloudKitRecordsPayload;
+    if (cloudKitQueryPayloadHasErrors(payload)) {
+        const message = "CloudKit profile lookup returned a record error";
+        throw cloudKitRecordsPayloadIsRetryableError(payload)
+            ? new RetryableCloudKitError(message)
+            : new Error(message);
+    }
+    const records = (payload.records ?? []).filter((record) =>
+        typeof record.serverErrorCode !== "string"
+    );
+    const canonicalRecord = canonicalCloudKitOwnerRecord(records, ownerId);
+    const creator = canonicalCloudKitRecipeCreator(records, ownerId);
+    if (!canonicalRecord || !creator) {
+        return null;
+    }
+    const usernameClaimCreatedAt = await verifyCloudKitUsernameClaim(
+        creator.username,
+        ownerId,
+        canonicalRecord
+    );
+    if (usernameClaimCreatedAt === null) {
+        return null;
+    }
+    const imageRecordName = canonicalProfileImageRecordName(
+        creator.profileEmoji,
+        canonicalRecord.fields?.cloudProfileImageRecordName?.value
+    );
+    const profileImageURL = typeof imageRecordName === "string"
+        ? await fetchPublicCloudKitProfileImage(imageRecordName, ownerId).catch((error) => {
+            logger.warn("CloudKit profile image lookup failed", { ownerId, error });
+            return null;
+        })
+        : null;
+    const creatorRecordName = canonicalRecord.created?.userRecordName;
+    if (typeof creatorRecordName !== "string") {
+        return null;
+    }
+    return { ...creator, userId: ownerId, usernameClaimCreatedAt, creatorRecordName, profileImageURL };
+}
+
+export function canonicalProfileImageRecordName(
+    profileEmoji: unknown,
+    cloudImageRecordName: unknown
+): string | null {
+    // Match the native canonical avatar rule: a surviving explicit emoji is
+    // the user's intent after an interrupted legacy transition, so stale photo
+    // metadata must not win on the web.
+    if (typeof profileEmoji === "string" && profileEmoji.trim().length > 0) {
+        return null;
+    }
+    return typeof cloudImageRecordName === "string" && cloudImageRecordName.length > 0
+        ? cloudImageRecordName
+        : null;
+}
+
+export function profileShareRequestMatchesCanonicalUsername(
+    requestedShareId: string,
+    canonicalUsername: string
+): boolean {
+    return uuidPattern.test(requestedShareId) ||
+        requestedShareId.toLocaleLowerCase() === canonicalUsername.toLocaleLowerCase();
+}
+
+export function canonicalProfileURL(username: string): string {
+    return `${PUBLIC_WEB_ORIGIN}/u/${encodeURIComponent(username.toLocaleLowerCase())}`;
+}
+
+export function canonicalProfileRedirectURL(
+    requestedShareId: string,
+    canonicalUsername: string
+): string | null {
+    return requestedShareId === canonicalUsername
+        ? null
+        : canonicalProfileURL(canonicalUsername);
+}
+
+async function ownerIDForCloudKitUsername(username: string): Promise<string | null> {
+    const normalized = username.toLocaleLowerCase();
+    if (!usernamePattern.test(normalized)) {
+        return null;
+    }
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+    const body = JSON.stringify({ records: [{ recordName: `username_${normalized}` }] });
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const signature = createSign("SHA256")
+        .update(cloudKitSignatureInput(body, date, subpath))
+        .end()
+        .sign(privateKey)
+        .toString("base64");
+    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Apple-CloudKit-Request-KeyID": keyID,
+            "X-Apple-CloudKit-Request-ISO8601Date": date,
+            "X-Apple-CloudKit-Request-SignatureV1": signature,
+        },
+        body,
+        signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+        throw new Error(`CloudKit username lookup returned ${response.status}`);
+    }
+    const payload = await response.json() as CloudKitRecordsPayload;
+    const claim = payload.records?.find((record) =>
+        record.recordName === `username_${normalized}` &&
+        record.recordType === "UsernameClaim" &&
+        typeof record.serverErrorCode !== "string"
+    );
+    const ownerId = claim?.fields?.userId?.value;
+    return isValidUUID(ownerId) && claim?.fields?.username?.value === normalized
+        ? ownerId
+        : null;
+}
+
+async function fetchCanonicalCloudKitProfile(reference: string): Promise<WebProfileContent | null> {
+    const ownerId = isValidUUID(reference)
+        ? reference
+        : await ownerIDForCloudKitUsername(reference);
+    return ownerId ? queryCanonicalCloudKitProfileByOwner(ownerId) : null;
+}
+
+async function materializeCanonicalProfile(profile: WebProfileContent): Promise<void> {
+    if (await isShareRevoked(profile.userId) ||
+        await isResourcePrivacyBlocked("profile", profile.userId)) {
+        return;
+    }
+    const profileRef = db.collection("shared_profiles").doc(profile.userId);
+    const aliasRef = db.collection("shared_profiles").doc(profile.username);
+    await db.runTransaction(async (transaction) => {
+        const [revocation, privacyRoot, existingProfile, existingAlias] = await Promise.all([
+            transaction.get(shareRevocationRef(profile.userId)),
+            transaction.get(resourcePrivacyRootRef("profile", profile.userId)),
+            transaction.get(profileRef),
+            transaction.get(aliasRef),
+        ]);
+        if (revocation.exists && typeof revocation.data()?.restoredCapabilityHash !== "string") {
+            return;
+        }
+        if (privacyRoot.data()?.blocked === true) {
+            return;
+        }
+        const aliasOwner = existingAlias.data()?.ownerId;
+        const aliasClaimCreatedAt = existingAlias.data()?.usernameClaimCreatedAt;
+        if (existingAlias.exists && aliasOwner !== profile.userId &&
+            typeof aliasClaimCreatedAt === "number" &&
+            aliasClaimCreatedAt >= profile.usernameClaimCreatedAt) {
+            return;
+        }
+        const canonicalProfileFields = {
+            userId: profile.userId,
+            ownerId: profile.userId,
+            username: profile.username,
+            displayName: profile.displayName,
+            profileEmoji: profile.profileImageURL ? null : profile.profileEmoji,
+            profileColor: profile.profileColor,
+        };
+        const existingProfileData = existingProfile.data();
+        const profileChanged = !existingProfile.exists || Object.entries(canonicalProfileFields)
+            .some(([key, value]) => existingProfileData?.[key] !== value);
+        if (profileChanged) {
+            transaction.set(profileRef, {
+                ...canonicalProfileFields,
+                updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+        }
+        const canonicalAliasFields = {
+            ownerId: profile.userId,
+            userId: profile.userId,
+            redirectShareId: profile.userId,
+            usernameClaimCreatedAt: profile.usernameClaimCreatedAt,
+        };
+        const existingAliasData = existingAlias.data();
+        const aliasChanged = !existingAlias.exists || Object.entries(canonicalAliasFields)
+            .some(([key, value]) => existingAliasData?.[key] !== value);
+        if (aliasChanged) {
+            transaction.set(aliasRef, {
+                ...canonicalAliasFields,
+                updatedAt: FieldValue.serverTimestamp(),
+            });
+        }
+    });
+}
+
+async function materializeCanonicalRecipeSummaries(
+    ownerId: string,
+    expectedCreatorRecordName: string
+): Promise<void> {
+    if (await isShareRevoked(ownerId)) {
+        return;
+    }
+    const stateRef = db.collection("share_maintenance").doc(`owner_recipes_${ownerId}`);
+    const state = await stateRef.get();
+    const lastMaterializedAt = state.data()?.lastMaterializedAt?.toMillis?.();
+    if (typeof lastMaterializedAt === "number" && Date.now() - lastMaterializedAt < 6 * 60 * 60 * 1_000) {
+        return;
+    }
+
+    // Never reconcile deletions from an incomplete or transient CloudKit read.
+    // Retrying here keeps temporary service failures from becoming destructive
+    // changes to the public snapshot index.
+    const canonical = await retryTransientCloudKitOperation(() =>
+        fetchCanonicalCloudKitRecipesByOwner(ownerId, expectedCreatorRecordName)
+    );
+    const blocked = new Set<string>();
+    for (let index = 0; index < canonical.recipes.length; index += 100) {
+        const chunk = canonical.recipes.slice(index, index + 100);
+        const privacy = await db.getAll(...chunk.map((recipe) =>
+            resourcePrivacyRootRef("recipe", recipe.recipeId)
+        ));
+        privacy.forEach((snapshot, privacyIndex) => {
+            if (snapshot.data()?.blocked === true) {
+                blocked.add(chunk[privacyIndex].recipeId);
+            }
+        });
+    }
+    const publishable = canonical.recipes.filter((recipe) => !blocked.has(recipe.recipeId));
+    const canonicalIDs = new Set(publishable.map((recipe) => recipe.recipeId));
+    const existing = await db.collection("shared_recipes").where("ownerId", "==", ownerId).get();
+
+    const existingByID = new Map(existing.docs.map((document) => [document.id, document] as const));
+    type MaterializationMutation = {
+        kind: "upsert" | "delete";
+        recipeId: string;
+        recipe?: WebRecipeContent;
+        observedUpdateTime: number | null;
+    };
+    const operations: MaterializationMutation[] = publishable.flatMap((recipe) => {
+        const existingDocument = existingByID.get(recipe.recipeId);
+        const existingData = existingDocument?.data();
+        const unchanged = existingDocument?.exists === true &&
+            existingData?.recipeId === recipe.recipeId &&
+            existingData?.ownerId === ownerId &&
+            existingData?.title === recipe.title &&
+            existingData?.totalMinutes === recipe.totalMinutes &&
+            Array.isArray(existingData?.tags) &&
+            existingData.tags.length === recipe.tags.length &&
+            existingData.tags.every((tag: unknown, index: number) => tag === recipe.tags[index]);
+        if (unchanged) {
+            return [];
+        }
+        return [{
+            kind: "upsert" as const,
+            recipeId: recipe.recipeId,
+            recipe,
+            observedUpdateTime: existingDocument?.updateTime?.toMillis() ?? null,
+        }];
+    });
+    if (canonical.complete) {
+        operations.push(...existing.docs
+            .filter((document) => !canonicalIDs.has(document.id))
+            .map((document) => ({
+                kind: "delete" as const,
+                recipeId: document.id,
+                observedUpdateTime: document.updateTime?.toMillis() ?? null,
+            })));
+    }
+    for (let index = 0; index < operations.length; index += 75) {
+        const chunk = operations.slice(index, index + 75);
+        await db.runTransaction(async (transaction) => {
+            const targetRefs = chunk.map((operation) =>
+                db.collection("shared_recipes").doc(operation.recipeId)
+            );
+            const privacyRefs = chunk.map((operation) =>
+                resourcePrivacyRootRef("recipe", operation.recipeId)
+            );
+            const [revocation, targets, privacy] = await Promise.all([
+                transaction.get(shareRevocationRef(ownerId)),
+                Promise.all(targetRefs.map((ref) => transaction.get(ref))),
+                Promise.all(privacyRefs.map((ref) => transaction.get(ref))),
+            ]);
+            if (revocation.exists && typeof revocation.data()?.restoredCapabilityHash !== "string") {
+                return;
+            }
+            chunk.forEach((operation, operationIndex) => {
+                const target = targets[operationIndex];
+                const targetUpdateTime = target.updateTime?.toMillis() ?? null;
+                if (targetUpdateTime !== operation.observedUpdateTime) {
+                    return;
+                }
+                if (operation.kind === "delete") {
+                    if (target.exists && target.data()?.ownerId === ownerId) {
+                        transaction.delete(target.ref);
+                    }
+                    return;
+                }
+                const recipe = operation.recipe;
+                if (!recipe || privacy[operationIndex].data()?.blocked === true ||
+                    (target.exists && target.data()?.ownerId !== ownerId)) {
+                    return;
+                }
+                transaction.set(target.ref, {
+                    recipeId: recipe.recipeId,
+                    ownerId,
+                    title: recipe.title,
+                    totalMinutes: recipe.totalMinutes,
+                    tags: recipe.tags,
+                    updatedAt: FieldValue.serverTimestamp(),
+                }, { merge: true });
+            });
+        });
+    }
+    await db.runTransaction(async (transaction) => {
+        const revocation = await transaction.get(shareRevocationRef(ownerId));
+        if (revocation.exists && typeof revocation.data()?.restoredCapabilityHash !== "string") {
+            return;
+        }
+        transaction.set(stateRef, {
+            lastMaterializedAt: FieldValue.serverTimestamp(),
+            recipeCount: publishable.length,
+            complete: canonical.complete,
+        }, { merge: true });
+    });
 }
 
 export function cloudKitSignatureInput(body: string, date: string, subpath: string): string {
@@ -1184,7 +2144,7 @@ function sanitizedTagList(value: unknown): string[] {
     return tags;
 }
 
-function sanitizedUUIDList(value: unknown): string[] {
+function sanitizedUUIDList(value: unknown, maximumCount = MAX_RECIPE_IDS_PER_COLLECTION): string[] {
     if (!Array.isArray(value)) {
         return [];
     }
@@ -1199,12 +2159,44 @@ function sanitizedUUIDList(value: unknown): string[] {
 
         seen.add(item);
         ids.push(item);
-        if (ids.length >= MAX_RECIPE_IDS_PER_COLLECTION) {
+        if (ids.length >= maximumCount) {
             break;
         }
     }
 
     return ids;
+}
+
+export function sanitizeOwnerManifestInput(
+    input: Record<string, unknown>
+): ValidationResult<SanitizedOwnerManifest> {
+    if (!isValidUUID(input.ownerId)) {
+        return { ok: false, error: "ownerId must be a UUID" };
+    }
+    const capability = sanitizedCapability(input.capability);
+    const identityRecordName = sanitizedRecordName(input.identityRecordName);
+    if (!capability || !identityRecordName) {
+        return { ok: false, error: "a valid management capability is required" };
+    }
+    const publicRecipeIds = sanitizedUUIDList(input.publicRecipeIds, 5_000);
+    const publicCollectionIds = sanitizedUUIDList(input.publicCollectionIds, 2_000);
+    if ((Array.isArray(input.publicRecipeIds) && publicRecipeIds.length !== input.publicRecipeIds.length) ||
+        (Array.isArray(input.publicCollectionIds) && publicCollectionIds.length !== input.publicCollectionIds.length)) {
+        return { ok: false, error: "public manifests must contain unique UUIDs" };
+    }
+    if (!Array.isArray(input.publicRecipeIds) || !Array.isArray(input.publicCollectionIds)) {
+        return { ok: false, error: "public manifests are required" };
+    }
+    return {
+        ok: true,
+        value: {
+            ownerId: input.ownerId,
+            identityRecordName,
+            capability,
+            publicRecipeIds,
+            publicCollectionIds,
+        },
+    };
 }
 
 export function sanitizeRecipeShareInput(input: Record<string, unknown>): ValidationResult<SanitizedRecipeShare> {
@@ -1464,10 +2456,32 @@ export function retiredCapabilityCannotSupersedeRestoration(
         (typeof restoredCapabilityHash === "string" && restoredCapabilityHash !== suppliedHash);
 }
 
+export function revocationCreatorMatches(
+    revokedIdentityRecordName: unknown,
+    suppliedIdentityRecordName: string
+): boolean {
+    return typeof revokedIdentityRecordName === "string" &&
+        revokedIdentityRecordName === suppliedIdentityRecordName;
+}
+
+export function restorationRevocationIsValid(
+    revocationExists: boolean,
+    revokedCapabilityHash: unknown,
+    revokedIdentityRecordName: unknown,
+    suppliedCapabilityHash: string,
+    suppliedIdentityRecordName: string
+): boolean {
+    return revocationExists &&
+        typeof revokedCapabilityHash === "string" &&
+        revokedCapabilityHash !== suppliedCapabilityHash &&
+        revocationCreatorMatches(revokedIdentityRecordName, suppliedIdentityRecordName);
+}
+
 async function beginAccountMutation(
     ownerId: string,
     intent: "unshare" | "restore",
-    suppliedHash: string
+    suppliedHash: string,
+    identityRecordName?: string
 ): Promise<number> {
     const stateRef = accountMutationRef(ownerId);
     return db.runTransaction(async (transaction) => {
@@ -1482,6 +2496,14 @@ async function beginAccountMutation(
             )) {
                 throw new StaleShareMutationError();
             }
+        } else if (!identityRecordName || !restorationRevocationIsValid(
+            revocation.exists,
+            revocation.data()?.revokedCapabilityHash,
+            revocation.data()?.identityRecordName,
+            suppliedHash,
+            identityRecordName
+        )) {
+            throw new ShareAuthorizationError();
         }
         const generation = (typeof state.data()?.generation === "number" ? state.data()!.generation : 0) + 1;
         transaction.set(stateRef, {
@@ -1754,6 +2776,284 @@ export const unshareProfile = upgradeRequired;
 export const unshareAccount = upgradeRequired;
 export const shareCollection = upgradeRequired;
 export const unshareCollection = upgradeRequired;
+
+function ownerManifestStateRef(ownerId: string): DocumentReference {
+    return db.collection("share_owner_manifest_states").doc(ownerId);
+}
+
+export function ownerManifestStateMatches(
+    state: Record<string, unknown> | undefined,
+    generation: number,
+    suppliedHash: string
+): boolean {
+    return state?.generation === generation && state?.capabilityHash === suppliedHash;
+}
+
+async function beginOwnerManifestReconciliation(
+    ownerId: string,
+    suppliedHash: string,
+    manifestHash: string
+): Promise<number> {
+    const stateRef = ownerManifestStateRef(ownerId);
+    return db.runTransaction(async (transaction) => {
+        const [state, revocation] = await Promise.all([
+            transaction.get(stateRef),
+            transaction.get(shareRevocationRef(ownerId)),
+        ]);
+        if (revocationBlocksCapability(revocation, suppliedHash)) {
+            throw new ShareAuthorizationError();
+        }
+        const generation = (typeof state.data()?.generation === "number"
+            ? state.data()!.generation
+            : 0) + 1;
+        transaction.set(stateRef, {
+            generation,
+            capabilityHash: suppliedHash,
+            manifestHash,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+        return generation;
+    });
+}
+
+async function canonicalPublicResourceIDs(
+    kind: "recipe" | "collection",
+    candidates: Array<{ id: string; ownerId: string }>
+): Promise<Set<string>> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const valid = new Set<string>();
+    const canonicalOwners = await Promise.all([...new Set(candidates.map((candidate) => candidate.ownerId))]
+        .map((ownerId) => fetchCanonicalCloudKitProfile(ownerId)));
+    const canonicalCreatorRecordNamesByOwner = new Map(canonicalOwners.flatMap((owner) =>
+        owner ? [[owner.userId, owner.creatorRecordName] as const] : []
+    ));
+    for (let index = 0; index < candidates.length; index += 150) {
+        const chunk = candidates.slice(index, index + 150);
+        const payload = await retryTransientCloudKitOperation(async () => {
+            const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/lookup`;
+            const body = JSON.stringify({ records: chunk.map((candidate) => ({ recordName: candidate.id })) });
+            const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+            const signature = createSign("SHA256")
+                .update(cloudKitSignatureInput(body, date, subpath))
+                .end()
+                .sign(privateKey)
+                .toString("base64");
+            const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Apple-CloudKit-Request-KeyID": keyID,
+                    "X-Apple-CloudKit-Request-ISO8601Date": date,
+                    "X-Apple-CloudKit-Request-SignatureV1": signature,
+                },
+                body,
+                signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+            });
+            if (!response.ok) {
+                const message = `CloudKit manifest validation returned ${response.status}`;
+                throw isTransientCloudKitHTTPStatus(response.status)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            const value = await response.json() as CloudKitRecordsPayload;
+            if (cloudKitRecordsPayloadDisposition(value) === "error") {
+                const message = "CloudKit manifest validation returned a record error";
+                throw cloudKitRecordsPayloadIsRetryableError(value)
+                    ? new RetryableCloudKitError(message)
+                    : new Error(message);
+            }
+            const nonMissingRecordError = (value.records ?? []).find((record) => {
+                const code = typeof record.serverErrorCode === "string"
+                    ? record.serverErrorCode.toUpperCase()
+                    : null;
+                return code !== null && !missingCloudKitRecordCodes.has(code);
+            });
+            if (nonMissingRecordError) {
+                const retryable = typeof nonMissingRecordError.serverErrorCode === "string" &&
+                    transientCloudKitRecordCodes.has(nonMissingRecordError.serverErrorCode.toUpperCase());
+                const message = "CloudKit manifest validation returned a per-record error";
+                throw retryable ? new RetryableCloudKitError(message) : new Error(message);
+            }
+            return value;
+        });
+        const recordsByName = new Map((payload.records ?? []).flatMap((record) =>
+            typeof record.recordName === "string" && typeof record.serverErrorCode !== "string"
+                ? [[record.recordName, record] as const]
+                : []
+        ));
+        for (const candidate of chunk) {
+            const record = recordsByName.get(candidate.id);
+            const expectedCreatorRecordName = canonicalCreatorRecordNamesByOwner.get(candidate.ownerId);
+            const canonical = record && expectedCreatorRecordName && (kind === "recipe"
+                ? sanitizeCloudKitRecipeForWeb(
+                    record,
+                    candidate.id,
+                    candidate.ownerId,
+                    expectedCreatorRecordName
+                )
+                : sanitizeCloudKitCollectionForWeb(
+                    record,
+                    candidate.id,
+                    candidate.ownerId,
+                    expectedCreatorRecordName
+                ));
+            if (canonical) {
+                valid.add(candidate.id);
+            }
+        }
+    }
+    return valid;
+}
+
+async function deleteSnapshotsAbsentFromOwnerManifest(
+    kind: "recipe" | "collection",
+    ownerId: string,
+    desiredIDs: Set<string>,
+    generation: number,
+    suppliedHash: string
+): Promise<number> {
+    const collectionName = kind === "recipe" ? "shared_recipes" : "shared_collections";
+    const idField = kind === "recipe" ? "recipeId" : "collectionId";
+    const snapshot = await db.collection(collectionName).where("ownerId", "==", ownerId).get();
+    const absentCandidates = snapshot.docs.filter((document) => !desiredIDs.has(document.id));
+    // The app manifest can race a newer device. Preserve canonical roots that
+    // are missing from this device, while allowing canonical related children
+    // to disappear from the derived web index. The owner query uses the same
+    // graph reduction as native profile shelves; incomplete queries fail safe
+    // to the per-record preservation check.
+    const absentResources = absentCandidates.flatMap((document) => {
+        const owner = document.data()?.ownerId;
+        return typeof owner === "string" ? [{ id: document.id, ownerId: owner }] : [];
+    });
+    let stillCanonical: Set<string>;
+    if (kind === "recipe" && absentResources.length > 0) {
+        const canonicalOwner = await fetchCanonicalCloudKitProfile(ownerId);
+        if (canonicalOwner) {
+            const canonicalRecipes = await fetchCanonicalCloudKitRecipesByOwner(
+                ownerId,
+                canonicalOwner.creatorRecordName
+            );
+            stillCanonical = canonicalRecipes.complete
+                ? new Set(canonicalRecipes.recipes.map((recipe) => recipe.recipeId))
+                : await canonicalPublicResourceIDs(kind, absentResources);
+        } else {
+            stillCanonical = new Set();
+        }
+    } else {
+        stillCanonical = await canonicalPublicResourceIDs(kind, absentResources);
+    }
+    const stale = absentCandidates.filter((document) => !stillCanonical.has(document.id));
+    let deleted = 0;
+    for (let index = 0; index < stale.length; index += 250) {
+        const chunk = stale.slice(index, index + 250);
+        deleted += await db.runTransaction(async (transaction) => {
+            const [state, revocation, ...currentDocuments] = await Promise.all([
+                transaction.get(ownerManifestStateRef(ownerId)),
+                transaction.get(shareRevocationRef(ownerId)),
+                ...chunk.map((document) => transaction.get(document.ref)),
+            ]);
+            if (!ownerManifestStateMatches(state.data(), generation, suppliedHash)) {
+                throw new StaleShareMutationError();
+            }
+            if (revocationBlocksCapability(revocation, suppliedHash)) {
+                throw new ShareAuthorizationError();
+            }
+            let transactionDeletes = 0;
+            currentDocuments.forEach((document, documentIndex) => {
+                const observed = chunk[documentIndex];
+                if (!document.exists ||
+                    document.data()?.ownerId !== ownerId ||
+                    document.data()?.[idField] !== document.id ||
+                    document.updateTime?.toMillis() !== observed.updateTime?.toMillis() ||
+                    desiredIDs.has(document.id)) {
+                    return;
+                }
+                transaction.delete(document.ref);
+                transactionDeletes += 1;
+            });
+            return transactionDeletes;
+        });
+    }
+    return deleted;
+}
+
+export const reconcileOwnerPublicWebV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+    if (!await enforceMutationRateLimit(req)) {
+        rejectRateLimitedMutation(res);
+        return;
+    }
+    try {
+        const sanitized = sanitizeOwnerManifestInput(req.body ?? {});
+        if (!sanitized.ok) {
+            res.status(400).json({ error: sanitized.error });
+            return;
+        }
+        const manifest = sanitized.value;
+        if (!await verifyCloudKitAuthority(
+            manifest.identityRecordName,
+            manifest.ownerId,
+            manifest.capability
+        )) {
+            throw new ShareAuthorizationError();
+        }
+        const suppliedHash = capabilityHash(manifest.capability);
+        const manifestHash = createHash("sha256").update(JSON.stringify({
+            recipes: [...manifest.publicRecipeIds].sort(),
+            collections: [...manifest.publicCollectionIds].sort(),
+        })).digest("hex");
+        const generation = await beginOwnerManifestReconciliation(
+            manifest.ownerId,
+            suppliedHash,
+            manifestHash
+        );
+        const [existingRecipeSnapshots, existingCollectionSnapshots] = await Promise.all([
+            db.collection("shared_recipes").where("ownerId", "==", manifest.ownerId).get(),
+            db.collection("shared_collections").where("ownerId", "==", manifest.ownerId).get(),
+        ]);
+        const existingRecipeIDs = new Set(existingRecipeSnapshots.docs.map((document) => document.id));
+        const existingCollectionIDs = new Set(existingCollectionSnapshots.docs.map((document) => document.id));
+        const missingRecipeIds = manifest.publicRecipeIds.filter((id) => !existingRecipeIDs.has(id));
+        const missingCollectionIds = manifest.publicCollectionIds.filter((id) => !existingCollectionIDs.has(id));
+        const deletedRecipes = await deleteSnapshotsAbsentFromOwnerManifest(
+            "recipe",
+            manifest.ownerId,
+            new Set(manifest.publicRecipeIds),
+            generation,
+            suppliedHash
+        );
+        const deletedCollections = await deleteSnapshotsAbsentFromOwnerManifest(
+            "collection",
+            manifest.ownerId,
+            new Set(manifest.publicCollectionIds),
+            generation,
+            suppliedHash
+        );
+        res.status(200).json({
+            success: true,
+            manifestHash,
+            deletedRecipes,
+            deletedCollections,
+            missingRecipeIds,
+            missingCollectionIds,
+        });
+    } catch (error) {
+        if (error instanceof StaleShareMutationError) {
+            res.status(409).json({ error: "A newer public manifest superseded this request" });
+            return;
+        }
+        if (error instanceof ShareAuthorizationError) {
+            res.status(403).json({ error: "Share capability or owner mismatch" });
+            return;
+        }
+        logger.error("Error reconciling public owner manifest", error);
+        res.status(500).json({ error: "Failed to reconcile public web content" });
+    }
+});
 
 // Share Recipe
 export const shareRecipeV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, res) => {
@@ -2048,41 +3348,16 @@ export const shareProfileV2 = onRequest(cloudAuthorizedHTTPOptions, async (req, 
         if (!published) {
             res.status(200).json(publishedShareResponse(
                 shareId,
-                `${PUBLIC_WEB_ORIGIN}/profile/${shareId}`,
+                canonicalProfileURL(share.username),
                 false
             ));
             return;
         }
 
-        // Remove aliases for usernames this owner no longer has. Usernames are
-        // reusable in CloudKit, so retaining an old redirect would misroute the
-        // next owner's profile and block them from publishing it.
-        const ownerProfiles = await db.collection('shared_profiles').where('ownerId', '==', share.userId).get();
-        const legacyProfiles = ownerProfiles.docs.filter((profileDoc) =>
-            profileDoc.id !== shareId && profileDoc.id !== share.username
-        );
-        for (let index = 0; index < legacyProfiles.length; index += 400) {
-            const profileChunk = legacyProfiles.slice(index, index + 400);
-            await db.runTransaction(async (transaction) => {
-                const revocation = await transaction.get(shareRevocationRef(share.userId));
-                const mutationState = await transaction.get(resourceMutationRef("profile", share.userId));
-                const currentProfiles = await Promise.all(
-                    profileChunk.map((profileDoc) => transaction.get(profileDoc.ref))
-                );
-                if (revocationBlocksCapability(revocation, suppliedHash)) {
-                    throw new ShareAuthorizationError();
-                }
-                requireCurrentResourceMutation(mutationState, mutationGeneration);
-                for (const profileDoc of currentProfiles) {
-                    if (!profileDoc.exists || profileDoc.data()?.ownerId !== share.userId) {
-                        continue;
-                    }
-                    transaction.delete(profileDoc.ref);
-                }
-            });
-        }
-
-        const shareUrl = `${PUBLIC_WEB_ORIGIN}/profile/${shareId}`;
+        // Historical alias documents intentionally remain in place. CloudKit
+        // preserves the matching UsernameClaim for the life of the account, so
+        // an old /u/{username} URL can safely redirect to the current handle.
+        const shareUrl = canonicalProfileURL(share.username);
 
         res.status(200).json(publishedShareResponse(shareId, shareUrl, true));
     } catch (error) {
@@ -2195,6 +3470,7 @@ export const unshareAccountV2 = onRequest(cloudAuthorizedHTTPOptions, async (req
             requireCurrentResourceMutation(state, accountGeneration);
             transaction.set(shareRevocationRef(userId), {
                 ownerId: userId,
+                identityRecordName,
                 revokedCapabilityHash: suppliedHash,
                 revokedAt: FieldValue.serverTimestamp(),
             });
@@ -2239,7 +3515,12 @@ export const restoreAccountSharingV2 = onRequest(cloudAuthorizedHTTPOptions, asy
             throw new ShareAuthorizationError();
         }
         const suppliedHash = capabilityHash(capability);
-        const accountGeneration = await beginAccountMutation(userId, "restore", suppliedHash);
+        const accountGeneration = await beginAccountMutation(
+            userId,
+            "restore",
+            suppliedHash,
+            identityRecordName
+        );
         await deleteAllSnapshotsForOwnerAtGeneration(userId, accountGeneration);
         await db.runTransaction(async (transaction) => {
             const state = await transaction.get(accountMutationRef(userId));
@@ -2247,11 +3528,18 @@ export const restoreAccountSharingV2 = onRequest(cloudAuthorizedHTTPOptions, asy
             const revocation = await transaction.get(revocationRef);
             requireCurrentResourceMutation(state, accountGeneration);
             const revokedHash = revocation.data()?.revokedCapabilityHash;
-            if (!revocation.exists || typeof revokedHash !== "string" || revokedHash === suppliedHash) {
+            if (!restorationRevocationIsValid(
+                revocation.exists,
+                revokedHash,
+                revocation.data()?.identityRecordName,
+                suppliedHash,
+                identityRecordName
+            )) {
                 throw new ShareAuthorizationError();
             }
             transaction.set(revocationRef, {
                 ownerId: userId,
+                identityRecordName,
                 revokedCapabilityHash: revokedHash,
                 restoredCapabilityHash: suppliedHash,
                 restoredAt: FieldValue.serverTimestamp(),
@@ -2431,8 +3719,26 @@ export const unshareCollectionV2 = onRequest(cloudAuthorizedHTTPOptions, async (
     }
 });
 
+async function deleteSnapshotIfUnchanged(
+    collectionName: string,
+    snapshot: DocumentSnapshot,
+    expectedOwnerId: string
+): Promise<void> {
+    const updateTimeMillis = snapshot.updateTime?.toMillis();
+    if (typeof updateTimeMillis !== "number") {
+        return;
+    }
+    await db.runTransaction(async (transaction) => {
+        const current = await transaction.get(db.collection(collectionName).doc(snapshot.id));
+        if (current.exists && current.data()?.ownerId === expectedOwnerId &&
+            current.updateTime?.toMillis() === updateTimeMillis) {
+            transaction.delete(current.ref);
+        }
+    });
+}
+
 // Generic Data Fetcher
-export const api = onRequest(publicReadHTTPOptions, async (req, res) => {
+export const api = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     res.set("Cache-Control", "private, no-store, max-age=0");
     if (!await enforcePublicReadRateLimit(req)) {
@@ -2468,11 +3774,21 @@ export const api = onRequest(publicReadHTTPOptions, async (req, res) => {
             }
 
             let doc = await db.collection(collectionName).doc(shareId).get();
+            if (!doc.exists && type === "profile") {
+                const canonicalProfile = await fetchCanonicalCloudKitProfile(shareId);
+                if (canonicalProfile) {
+                    await materializeCanonicalProfile(canonicalProfile);
+                    doc = await db.collection(collectionName).doc(
+                        isValidUUID(shareId) ? shareId : canonicalProfile.username
+                    ).get();
+                }
+            }
             if (!doc.exists) {
                 res.status(404).json({ error: 'Share not found' });
                 return;
             }
 
+            const requestedProfileDocument = type === "profile" ? doc : null;
             if (type === 'profile') {
                 const redirectShareId = doc.data()?.redirectShareId;
                 if (typeof redirectShareId === 'string' && isValidUUID(redirectShareId)) {
@@ -2503,29 +3819,79 @@ export const api = onRequest(publicReadHTTPOptions, async (req, res) => {
                     res.status(404).json({ error: "Share not found" });
                     return;
                 }
-                publicData = {
-                    recipeId: sanitized.value.recipeId,
-                    ownerId: sanitized.value.ownerId,
-                    title: sanitized.value.title,
-                    totalMinutes: sanitized.value.totalMinutes,
-                    tags: sanitized.value.tags,
-                };
+                const canonicalRecipe = await fetchPublicCloudKitRecipe(
+                    sanitized.value.recipeId,
+                    sanitized.value.ownerId
+                );
+                if (!canonicalRecipe) {
+                    await deleteSnapshotIfUnchanged(collectionName, doc, sanitized.value.ownerId);
+                    res.status(404).json({ error: "Share not found" });
+                    return;
+                }
+                publicData = publicWebRecipeData(canonicalRecipe);
             } else if (type === "profile") {
                 const sanitized = sanitizeStoredProfileShareInput(rawData);
                 if (!sanitized.ok) {
                     res.status(404).json({ error: "Share not found" });
                     return;
                 }
-                const { identityRecordName: _identity, capability: _capability, shouldCreate: _create, ...snapshot } = sanitized.value;
-                publicData = { ...snapshot, ownerId: sanitized.value.userId };
+                const canonicalProfile = await fetchCanonicalCloudKitProfile(sanitized.value.userId);
+                if (!canonicalProfile) {
+                    if (requestedProfileDocument) {
+                        await deleteSnapshotIfUnchanged(
+                            collectionName,
+                            requestedProfileDocument,
+                            sanitized.value.userId
+                        );
+                    }
+                    res.status(404).json({ error: "Share not found" });
+                    return;
+                }
+                const requestedAliasOwnerId = uuidPattern.test(shareId) ||
+                    shareId.toLocaleLowerCase() === canonicalProfile.username.toLocaleLowerCase()
+                    ? sanitized.value.userId
+                    : await ownerIDForCloudKitUsername(shareId);
+                if (requestedAliasOwnerId !== sanitized.value.userId) {
+                    if (requestedProfileDocument) {
+                        await deleteSnapshotIfUnchanged(
+                            collectionName,
+                            requestedProfileDocument,
+                            sanitized.value.userId
+                        );
+                    }
+                    res.status(404).json({ error: "Share not found" });
+                    return;
+                }
+                await materializeCanonicalProfile(canonicalProfile);
+                publicData = {
+                    userId: canonicalProfile.userId,
+                    ownerId: canonicalProfile.userId,
+                    username: canonicalProfile.username,
+                    displayName: canonicalProfile.displayName,
+                    profileImageURL: canonicalProfile.profileImageURL,
+                };
             } else {
                 const sanitized = sanitizeStoredCollectionShareInput(rawData);
                 if (!sanitized.ok) {
                     res.status(404).json({ error: "Share not found" });
                     return;
                 }
-                const { identityRecordName: _identity, capability: _capability, shouldCreate: _create, ...snapshot } = sanitized.value;
-                publicData = snapshot;
+                const canonicalCollection = await fetchPublicCloudKitCollection(
+                    sanitized.value.collectionId,
+                    sanitized.value.ownerId
+                );
+                if (!canonicalCollection) {
+                    await deleteSnapshotIfUnchanged(collectionName, doc, sanitized.value.ownerId);
+                    res.status(404).json({ error: "Share not found" });
+                    return;
+                }
+                publicData = {
+                    collectionId: canonicalCollection.collectionId,
+                    ownerId: canonicalCollection.ownerId,
+                    title: canonicalCollection.title,
+                    recipeCount: canonicalCollection.recipeIds.length,
+                    recipeIds: canonicalCollection.recipeIds,
+                };
             }
             if (type === 'profile' && isValidUUID(rawData.ownerId)) {
                 const recipeCount = await db.collection('shared_recipes')
@@ -2778,63 +4144,79 @@ type RecipeIndexPageOptions = {
     openGraphType?: "profile" | "website";
     avatarEmoji?: string | null;
     avatarColor?: string | null;
+    avatarImageURL?: string | null;
 };
 
 function compactPageStyles(): string {
     return `<style>
-        :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#1C1C1E; --muted:#6E6E73; --accent:#FF9933; --accent-text:#995100; --soft:#FFFFFF; }
-        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } }
+        :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#241A14; --muted:#756A62; --accent:#E6801A; --accent-text:#995100; --surface:#FFFFFF; --separator:#E5DDD2; --control:rgba(255,255,255,.72); }
+        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F8F0E8; --muted:#B5AAA2; --accent:#F09837; --accent-text:#FFB45F; --surface:#262220; --separator:#39332F; --control:rgba(49,44,40,.7); } }
         * { box-sizing:border-box; }
-        body { margin:0; min-height:100vh; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
-        .bar,main { width:min(960px,calc(100% - 64px)); margin-inline:auto; }
-        .bar { min-height:82px; display:flex; align-items:center; }
-        .brand { display:flex; align-items:center; gap:10px; }
-        .brand picture,.brand img { width:32px; height:32px; display:block; }
-        .brand span { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:21px; font-weight:700; letter-spacing:-.02em; }
-        main { margin-top:58px; margin-bottom:110px; }
+        html { background:var(--paper); }
+        body { margin:0; min-height:100svh; background:var(--paper); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+        .bar,main,.site-footer { width:min(1120px,calc(100% - 48px)); margin-inline:auto; }
+        .bar { min-height:80px; display:flex; align-items:center; justify-content:space-between; }
+        .brand { display:flex; align-items:center; gap:10px; color:inherit; text-decoration:none; }
+        .brand picture,.brand img { width:34px; height:34px; display:block; }
+        .brand span { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:600; letter-spacing:-.015em; }
+        .bar-store,.action { min-height:42px; display:inline-flex; align-items:center; justify-content:center; padding:9px 14px; border:1px solid color-mix(in srgb,var(--separator) 82%,transparent); border-radius:999px; background:var(--control); color:var(--ink); box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); font-size:13px; font-weight:500; text-decoration:none; }
+        main { margin-top:46px; margin-bottom:104px; }
         .intro { max-width:720px; }
         .identity { display:flex; align-items:center; gap:18px; }
         .identity-text { min-width:0; }
-        .profile-avatar { width:58px; height:58px; flex:0 0 58px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb,var(--avatar-color) 18%,transparent); font-size:28px; }
-        h1 { margin:0; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:clamp(44px,7vw,68px); line-height:1; letter-spacing:-.04em; overflow-wrap:anywhere; }
-        .handle { margin:9px 0 0; color:var(--muted); font-size:14px; font-weight:600; }
+        .profile-avatar { width:58px; height:58px; flex:0 0 58px; display:grid; place-items:center; overflow:hidden; border-radius:50%; background:color-mix(in srgb,var(--avatar-color) 18%,transparent); font-size:27px; }
+        .profile-avatar img { width:100%; height:100%; display:block; object-fit:cover; }
+        h1 { margin:0; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:clamp(40px,6vw,60px); font-weight:500; line-height:1.02; letter-spacing:-.035em; overflow-wrap:anywhere; }
+        .handle { margin:8px 0 0; color:var(--muted); font-size:14px; font-weight:400; }
         .description { max-width:48ch; margin:18px 0 0; color:var(--muted); font-size:16px; line-height:1.55; }
         .meta { display:flex; flex-wrap:wrap; gap:10px 16px; margin:22px 0 0; padding:0; color:var(--muted); list-style:none; font-size:13px; }
-        .action { min-height:44px; width:max-content; margin-top:28px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
-        .download-action { min-height:44px; width:max-content; margin:28px 0 0 14px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
-        .shelf { margin-top:68px; }
-        .count { margin:0 0 18px; color:var(--muted); font-size:13px; font-weight:650; }
-        .recipe-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:34px 20px; margin:0; padding:0; list-style:none; }
+        .action { width:max-content; margin-top:26px; background:var(--accent); color:#28160A; border-color:transparent; }
+        .download-action { min-height:42px; width:max-content; margin:26px 0 0 12px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:400; text-decoration:none; }
+        .shelf { margin-top:62px; }
+        .count { margin:0 0 18px; color:var(--muted); font-size:13px; font-weight:400; }
+        .recipe-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:36px 18px; margin:0; padding:0; list-style:none; }
         .recipe-list li { min-width:0; }
         .recipe-row { display:block; color:inherit; text-decoration:none; }
-        .recipe-media { position:relative; aspect-ratio:4/3; display:grid; place-items:center; overflow:hidden; border-radius:18px; background:color-mix(in srgb,var(--accent) 10%,var(--soft)); }
-        .recipe-photo { width:100%; height:100%; display:block; object-fit:cover; transition:transform .24s ease; }
-        .recipe-placeholder,.recipe-placeholder img { width:38px; height:38px; display:block; opacity:.7; }
-        .recipe-copy { display:block; padding:12px 2px 0; }
-        .recipe-name { display:block; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:650; line-height:1.2; overflow-wrap:anywhere; }
-        .recipe-meta { min-height:19px; display:flex; align-items:center; gap:9px; margin-top:7px; color:var(--muted); font-size:12px; font-weight:620; }
-        .recipe-tag { --tag-color:#FF9933; --tag-color-dark:#FF9933; display:inline-flex; align-items:center; gap:4px; color:color-mix(in srgb,var(--tag-color) 72%,#3A210A); }
-        @media (prefers-color-scheme:dark) { .recipe-tag { color:color-mix(in srgb,var(--tag-color-dark) 74%,white); } }
+        .recipe-media { position:relative; aspect-ratio:4/3; display:grid; place-items:center; overflow:hidden; border-radius:16px; background:color-mix(in srgb,var(--accent) 8%,var(--surface)); }
+        .recipe-photo { width:100%; height:100%; grid-area:1/1; display:block; object-fit:cover; transition:transform .24s ease; }
+        .recipe-placeholder { grid-area:1/1; }
+        .recipe-placeholder,.recipe-placeholder img { width:38px; height:38px; display:block; opacity:.72; }
+        .recipe-copy { display:block; padding:11px 2px 0; }
+        .recipe-name { display:-webkit-box; min-height:2.4em; overflow:hidden; font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:19px; font-weight:500; line-height:1.2; overflow-wrap:anywhere; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+        .recipe-meta { min-height:19px; display:flex; align-items:center; gap:9px; margin-top:6px; color:var(--muted); font-size:12px; font-weight:400; }
+        .recipe-tag { --tag-color:#FF9933; --tag-color-dark:#FF9933; display:inline-flex; align-items:center; gap:4px; color:color-mix(in srgb,var(--tag-color) 40%,#3A210A); }
+        @media (prefers-color-scheme:dark) { .recipe-tag { color:color-mix(in srgb,var(--tag-color-dark) 55%,white); } }
         .empty { margin:0; color:var(--muted); font-size:16px; }
         .compact-recipe { max-width:720px; }
         .compact-recipe .meta { margin-top:24px; }
+        .site-footer { display:flex; justify-content:space-between; gap:20px; padding:24px 0 30px; border-top:1px solid var(--separator); color:var(--muted); font-size:12px; }
+        .site-footer nav { display:flex; gap:18px; }
+        .site-footer a { color:inherit; text-decoration:none; }
         a:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
-        @media (hover:hover) { .recipe-row:hover .recipe-name { color:var(--accent-text); } .recipe-row:hover .recipe-photo { transform:scale(1.025); } .action:hover { filter:brightness(.97); } }
+        @media (hover:hover) { .recipe-row:hover .recipe-name,.site-footer a:hover { color:var(--accent-text); } .recipe-row:hover .recipe-photo { transform:scale(1.018); } .action:hover,.bar-store:hover { filter:brightness(.98); } }
         @media (max-width:760px) { .recipe-list { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-        @media (max-width:520px) { .bar,main { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } main { margin-top:30px; margin-bottom:72px; } .recipe-list { grid-template-columns:1fr; gap:28px; } .recipe-media { aspect-ratio:16/10; } .shelf { margin-top:58px; } .identity { align-items:flex-start; } }
-        @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action,.download-action { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
+        @media (max-width:520px) { .bar,main,.site-footer { width:min(calc(100% - 32px),560px); } .bar { min-height:68px; } .bar-store { min-height:38px; padding:8px 12px; } main { margin-top:28px; margin-bottom:72px; } .recipe-list { gap:30px 12px; } .shelf { margin-top:52px; } .identity { align-items:flex-start; } .recipe-name { font-size:17px; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
+        @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .bar,.action,.download-action,.site-footer { display:none; } main { width:100%; margin:0; } .shelf { margin-top:48px; } }
     </style>`;
+}
+
+function faviconHeadLinks(): string {
+    return `<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="alternate icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png">`;
 }
 
 function compactPageHead(title: string, description: string, canonicalURL: string, openGraphType: "profile" | "website" = "website"): string {
     const safeTitle = escapeHtml(title);
     const safeDescription = escapeHtml(description);
     const safeCanonicalURL = escapeHtml(canonicalURL);
-    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)"><title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}`;
+    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme: dark)">${faviconHeadLinks()}<title>${safeTitle} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="${openGraphType}"><meta property="og:title" content="${safeTitle}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${safeTitle}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}">${compactPageStyles()}`;
 }
 
 function compactBrandHeader(): string {
-    return `<header class="bar"><div class="brand"><picture><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span>Cauldron</span></div></header>`;
+    return `<header class="bar"><a class="brand" href="/"><picture><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span>Cauldron</span></a><a class="bar-store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header>`;
+}
+
+function compactPageFooter(): string {
+    return `<footer class="site-footer"><span>© ${new Date().getUTCFullYear()} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer>`;
 }
 
 function appOpenFallbackScript(elementId: string, appURL: string): string {
@@ -2850,7 +4232,7 @@ function appOpenFallbackScript(elementId: string, appURL: string): string {
 export function generatePublicStatusPageHtml(title: string, message: string): string {
     const safeTitle = escapeHtml(title);
     const safeMessage = escapeHtml(message);
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(title, message, `${PUBLIC_WEB_ORIGIN}/`)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(title, message, `${PUBLIC_WEB_ORIGIN}/`)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${safeTitle}</h1><p class="description">${safeMessage}</p></article></main>${compactPageFooter()}</body></html>`;
 }
 
 export function generateCompactRecipePageHtml(
@@ -2865,7 +4247,7 @@ export function generateCompactRecipePageHtml(
         ...recipe.tags.slice(0, 3),
     ].filter((value): value is string => Boolean(value));
     const metaHTML = metadata.map((value) => `<li>${escapeHtml(value)}</li>`).join("");
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(recipe.title, description, canonicalURL)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${escapeHtml(recipe.title)}</h1>${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}<a class="action" id="openCompactRecipe" href="${escapeHtml(appURL)}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a></article></main>${appOpenFallbackScript("openCompactRecipe", appURL)}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(recipe.title, description, canonicalURL)}</head><body>${compactBrandHeader()}<main><article class="compact-recipe"><h1>${escapeHtml(recipe.title)}</h1>${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}<a class="action" id="openCompactRecipe" href="${escapeHtml(appURL)}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a></article></main>${compactPageFooter()}${appOpenFallbackScript("openCompactRecipe", appURL)}</body></html>`;
 }
 
 function formatWebQuantityValue(value: number): string {
@@ -2949,7 +4331,7 @@ function recipePageHead(recipe: WebRecipeContent, description: string, canonical
         }),
         recipeInstructions: recipe.steps.map((step) => ({ "@type": "HowToStep", text: step.text })),
     }).replace(/</g, "\\u003c");
-    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA"><title>${title} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="article"><meta property="og:title" content="${title}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${previewImage}"><meta property="og:image:secure_url" content="${previewImage}"><meta property="og:image:alt" content="${previewImageAlt}"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${previewImage}"><meta name="twitter:image:alt" content="${previewImageAlt}"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}"><script type="application/ld+json">${structuredData}</script>`;
+    return `<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F6F1EA">${faviconHeadLinks()}<title>${title} · Cauldron</title><meta name="description" content="${safeDescription}"><link rel="canonical" href="${safeCanonicalURL}"><meta property="og:type" content="article"><meta property="og:title" content="${title}"><meta property="og:description" content="${safeDescription}"><meta property="og:image" content="${previewImage}"><meta property="og:image:secure_url" content="${previewImage}"><meta property="og:image:alt" content="${previewImageAlt}"><meta property="og:url" content="${safeCanonicalURL}"><meta property="og:site_name" content="Cauldron"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${safeDescription}"><meta name="twitter:image" content="${previewImage}"><meta name="twitter:image:alt" content="${previewImageAlt}"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${safeCanonicalURL}"><script type="application/ld+json">${structuredData}</script>`;
 }
 
 export const recipeCategoryPresentation: Readonly<Record<string, Readonly<{
@@ -3078,23 +4460,29 @@ export function generateRecipePageHtml(
         const avatarColor = creator.profileColor && /^#[0-9a-f]{6}$/i.test(creator.profileColor)
             ? creator.profileColor
             : "#FF9933";
-        return `<a class="creator" href="/u/${encodeURIComponent(creator.username)}"><span class="creator-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(avatar)}</span><span class="creator-copy"><strong>${escapeHtml(creator.displayName)}</strong><small>@${escapeHtml(creator.username)}</small></span></a>`;
+        const imageURL = safeCloudKitAssetURL(creator.profileImageURL);
+        const avatarHTML = imageURL
+            ? `<span class="creator-avatar" aria-hidden="true"><img src="${escapeHtml(imageURL)}" alt="" referrerpolicy="no-referrer"></span>`
+            : `<span class="creator-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(avatar)}</span>`;
+        return `<a class="creator" href="/u/${encodeURIComponent(creator.username)}">${avatarHTML}<span class="creator-copy"><strong>${escapeHtml(creator.displayName)}</strong><small>@${escapeHtml(creator.username)}</small></span></a>`;
     })() : "";
     const ingredientsClass = recipe.ingredients.length <= 12 ? "ingredients-column sticky-eligible" : "ingredients-column";
     const safeCanonicalJSON = JSON.stringify(canonicalURL).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html><html lang="en"><head>${recipePageHead(recipe, description, canonicalURL)}<style>
         :root { color-scheme:light dark; --paper:#F6F1EA; --ink:#1C1C1E; --muted:#6E6E73; --accent:#FF9933; --accent-text:#995100; --soft:#FFFFFF; }
-        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } .tags li { color:var(--tag-color-dark); background:color-mix(in srgb,var(--tag-color-dark) 15%,transparent); } }
+        @media (prefers-color-scheme:dark) { :root { --paper:#18120D; --ink:#F2F2F7; --muted:#AEAEB2; --accent:#FF9933; --accent-text:#FFB45F; --soft:#262220; } .tags li { color:#FFD3A1; background:color-mix(in srgb,var(--tag-color-dark) 15%,transparent); } }
         * { box-sizing:border-box; }
         html { background:var(--paper); }
         body { margin:0; color:var(--ink); background:var(--paper); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; -webkit-font-smoothing:antialiased; }
         a { color:inherit; }
-        .topbar { width:min(1180px,calc(100% - 64px)); min-height:82px; margin:auto; display:flex; align-items:center; }
+        .topbar { width:min(1180px,calc(100% - 64px)); min-height:82px; margin:auto; display:flex; align-items:center; justify-content:space-between; }
         .brand { display:flex; align-items:center; gap:10px; text-decoration:none; }
         .brand-icon { width:32px; height:32px; display:grid; place-items:center; }
         .brand-icon img { display:block; width:32px; height:32px; object-fit:contain; }
-        .brand-name { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:21px; font-weight:700; letter-spacing:-.02em; }
+        .brand-name { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:20px; font-weight:600; letter-spacing:-.015em; }
+        .store-action,.intro-action { border:1px solid color-mix(in srgb,var(--soft) 70%,transparent); box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 5px 18px rgba(37,25,17,.06); -webkit-backdrop-filter:blur(20px) saturate(180%); backdrop-filter:blur(20px) saturate(180%); }
+        .store-action { min-height:42px; display:inline-flex; align-items:center; padding:9px 14px; border-radius:999px; background:color-mix(in srgb,var(--soft) 78%,transparent); font-size:13px; font-weight:500; text-decoration:none; }
         main { width:min(1180px,calc(100% - 64px)); margin:48px auto 120px; }
         .recipe-masthead { display:grid; grid-template-columns:minmax(0,1.42fr) minmax(320px,.78fr); gap:clamp(48px,7vw,96px); align-items:center; }
         .recipe-masthead.no-image { grid-template-columns:minmax(0,760px); min-height:360px; align-content:center; }
@@ -3102,34 +4490,34 @@ export function generateRecipePageHtml(
         .hero-image { display:block; width:100%; aspect-ratio:5/4; max-height:720px; object-fit:cover; border-radius:14px; background:var(--soft); }
         .recipe-intro { padding:20px 0; }
         h1,h2,h3 { font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; }
-        h1 { max-width:12ch; margin:0; font-size:clamp(46px,5.25vw,68px); line-height:1; letter-spacing:-.04em; overflow-wrap:anywhere; }
+        h1 { max-width:12ch; margin:0; font-size:clamp(44px,5.1vw,66px); font-weight:500; line-height:1.02; letter-spacing:-.038em; overflow-wrap:anywhere; }
         .creator { width:max-content; max-width:100%; margin-top:26px; display:flex; align-items:center; gap:11px; text-decoration:none; }
         .creator-avatar { width:36px; height:36px; flex:0 0 36px; display:grid; place-items:center; border-radius:50%; background:color-mix(in srgb,var(--avatar-color) 18%,transparent); font-size:18px; }
         .creator-copy { min-width:0; display:flex; gap:6px; align-items:baseline; }
-        .creator strong { font-size:14px; font-weight:700; }
+        .creator strong { font-size:14px; font-weight:500; }
         .creator small { color:var(--muted); font-size:12px; }
         .meta { display:flex; flex-wrap:wrap; gap:18px; margin:28px 0 0; padding:0; list-style:none; color:var(--muted); }
-        .meta li { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; }
+        .meta li { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:400; }
         .meta svg { width:15px; height:15px; fill:none; stroke:var(--accent-text); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
         .tags { display:flex; flex-wrap:wrap; gap:8px; margin:15px 0 0; padding:0; list-style:none; }
-        .tags li { display:flex; gap:5px; align-items:center; min-height:28px; padding:5px 10px; border-radius:999px; color:var(--tag-color); background:color-mix(in srgb,var(--tag-color) 15%,transparent); font-size:12px; font-weight:600; }
+        .tags li { display:flex; gap:5px; align-items:center; min-height:28px; padding:5px 10px; border-radius:999px; color:#5B3517; background:color-mix(in srgb,var(--tag-color) 15%,transparent); font-size:12px; font-weight:500; }
         .recipe-actions { margin-top:34px; display:flex; flex-wrap:wrap; align-items:center; gap:18px; }
-        .intro-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:750; text-decoration:none; }
-        .download-action { min-height:44px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:650; text-decoration:none; }
-        .share-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 0; border:0; color:var(--muted); background:none; font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
+        .intro-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 16px; border-radius:999px; color:#2B1600; background:var(--accent); font-size:14px; font-weight:500; text-decoration:none; }
+        .download-action { min-height:44px; display:inline-flex; align-items:center; color:var(--muted); font-size:13px; font-weight:400; text-decoration:none; }
+        .share-action { min-height:44px; display:inline-flex; align-items:center; padding:10px 0; border:0; color:var(--muted); background:none; font:inherit; font-size:13px; font-weight:400; cursor:pointer; }
         .share-action:hover { color:var(--ink); }
         .share-status { color:var(--muted); font-size:12px; }
         .recipe-body { display:grid; grid-template-columns:minmax(320px,.85fr) minmax(0,1.65fr); gap:clamp(58px,8vw,108px); margin-top:88px; align-items:start; }
         .ingredients-column { min-width:0; }
-        .section-title { margin:0 0 30px; font-size:28px; letter-spacing:-.025em; }
+        .section-title { margin:0 0 28px; font-size:27px; font-weight:500; letter-spacing:-.022em; }
         .ingredients { margin:0; padding:0; list-style:none; }
         .ingredient { width:100%; display:flex; align-items:flex-start; gap:10px; padding:8px 0; font-size:15px; line-height:1.5; }
         .ingredient > span:last-child { min-width:0; flex:1; overflow-wrap:anywhere; }
         .ingredient-dot { width:6px; height:6px; flex:0 0 6px; margin-top:8px; border-radius:50%; background:var(--accent); }
         .ingredient-amount { color:var(--muted); font-variant-numeric:tabular-nums; }
-        .ingredient strong { font-weight:600; }
+        .ingredient strong { font-weight:500; }
         .ingredient small { display:block; margin-top:2px; color:var(--muted); font-size:13px; }
-        .section-label,.method-section { color:var(--accent-text); font-size:11px; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
+        .section-label,.method-section { color:var(--accent-text); font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
         .section-label { padding:24px 0 5px; }
         .section-label:first-child { padding-top:0; }
         .method { max-width:720px; margin:0; padding:0; list-style:none; }
@@ -3137,14 +4525,17 @@ export function generateRecipePageHtml(
         .method-section h3 { margin:0; color:inherit; font:inherit; overflow-wrap:anywhere; }
         .method-section:first-child { padding-top:0; }
         .step { display:grid; grid-template-columns:42px minmax(0,1fr); gap:16px; padding:0 0 26px; }
-        .step-number { padding-top:4px; color:var(--accent-text); font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; }
+        .step-number { padding-top:4px; color:var(--accent-text); font-family:"New York",ui-serif,"Iowan Old Style",Palatino,Georgia,serif; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; }
         .step p { min-width:0; margin:0; font-size:17px; line-height:1.66; overflow-wrap:anywhere; }
+        .site-footer { width:min(1180px,calc(100% - 64px)); margin:0 auto; display:flex; justify-content:space-between; gap:20px; padding:24px 0 30px; border-top:1px solid color-mix(in srgb,var(--muted) 22%,transparent); color:var(--muted); font-size:12px; }
+        .site-footer nav { display:flex; gap:18px; }
+        .site-footer a { color:inherit; text-decoration:none; }
         a:focus-visible,button:focus-visible { outline:3px solid color-mix(in srgb,var(--accent) 78%,white); outline-offset:4px; }
         @media (min-width:900px) and (min-height:720px) { .ingredients-column.sticky-eligible { position:sticky; top:32px; } }
-        @media (max-width:820px) { .topbar,main { width:min(calc(100% - 32px),680px); } .topbar { min-height:68px; } main { margin:24px auto 80px; } .recipe-masthead { grid-template-columns:1fr; gap:30px; } .hero-image { aspect-ratio:4/3; border-radius:12px; } .recipe-intro { padding:0; } h1 { max-width:16ch; font-size:clamp(40px,11vw,56px); } .meta { margin-top:22px; } .recipe-actions { margin-top:28px; } .recipe-body { grid-template-columns:1fr; gap:58px; margin-top:72px; } .ingredients-column { position:static; } .method { max-width:none; } }
+        @media (max-width:820px) { .topbar,main,.site-footer { width:min(calc(100% - 32px),680px); } .topbar { min-height:68px; } .store-action { min-height:38px; padding:8px 12px; } main { margin:24px auto 80px; } .recipe-masthead { grid-template-columns:1fr; gap:30px; } .hero-image { aspect-ratio:4/3; border-radius:12px; } .recipe-intro { padding:0; } h1 { max-width:16ch; font-size:clamp(38px,10.5vw,54px); } .meta { margin-top:22px; } .recipe-actions { margin-top:28px; } .recipe-body { grid-template-columns:1fr; gap:58px; margin-top:72px; } .ingredients-column { position:static; } .method { max-width:none; } .site-footer { align-items:flex-start; flex-direction:column-reverse; } }
         @media (max-width:430px) { .brand-name { font-size:19px; } .brand-icon,.brand-icon img { width:30px; height:30px; } .creator-copy { flex-direction:column; gap:1px; align-items:flex-start; } }
         @media print { :root { --paper:#fff; --ink:#000; --muted:#444; --accent-text:#7A330E; } .topbar,.recipe-actions { display:none; } body { background:#fff; } main { width:100%; margin:0; } .recipe-masthead { grid-template-columns:42% 1fr; gap:32px; align-items:start; } .hero-image { max-height:360px; border-radius:0; } h1 { font-size:42px; } .recipe-body { grid-template-columns:34% 1fr; gap:44px; margin-top:48px; } .ingredients-column { position:static !important; } .step { break-inside:avoid; } }
-    </style></head><body><header class="topbar"><div class="brand"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></div></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main><script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
+    </style></head><body><header class="topbar"><a class="brand" href="/"><picture class="brand-icon"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture><span class="brand-name">Cauldron</span></a><a class="store-action" href="${escapeHtml(downloadURL)}">Get Cauldron</a></header><main><article><section class="recipe-masthead${recipe.imageURL ? "" : " no-image"}">${recipe.imageURL ? `<div class="hero-media"><img class="hero-image" src="${escapeHtml(recipe.imageURL)}" alt="${escapeHtml(recipe.title)}" fetchpriority="high"></div>` : ""}<header class="recipe-intro"><h1>${escapeHtml(recipe.title)}</h1>${creatorHTML}${metaHTML ? `<ul class="meta" aria-label="Recipe details">${metaHTML}</ul>` : ""}${tagsHTML ? `<ul class="tags" aria-label="Recipe tags">${tagsHTML}</ul>` : ""}<div class="recipe-actions"><a class="intro-action" id="openRecipe" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(downloadURL)}">Get the app</a><button class="share-action" id="shareRecipe" type="button">Share</button><span class="share-status" id="shareStatus" role="status" aria-live="polite"></span></div></header></section><div class="recipe-body"><aside class="${ingredientsClass}"><h2 class="section-title">Ingredients</h2><ul class="ingredients">${ingredientsHTML || `<li class="ingredient"><span></span><span>Ingredients are being prepared.</span></li>`}</ul></aside><section class="instructions-column" aria-labelledby="instructions-title"><h2 class="section-title" id="instructions-title">Instructions</h2><ol class="method">${stepsHTML || `<li class="step"><span class="step-number">1</span><p>Open this recipe in Cauldron for the instructions.</p></li>`}</ol></section></div></article></main>${compactPageFooter()}<script>(function(){var button=document.getElementById("shareRecipe");var status=document.getElementById("shareStatus");var url=${safeCanonicalJSON};if(!button)return;button.addEventListener("click",async function(){try{if(navigator.share){await navigator.share({title:document.title,url:url});return;}await navigator.clipboard.writeText(url);button.textContent="Copied";if(status)status.textContent="Recipe link copied.";}catch(error){if(error&&error.name==="AbortError")return;if(status)status.textContent="Could not share this recipe.";}});})();</script>${appOpenFallbackScript("openRecipe", appURL)}</body></html>`;
 }
 
 export function renderCanonicalRecipePage(
@@ -3180,9 +4571,10 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
         })[0] ?? null;
         const presentation = categoryName ? recipeCategoryPresentation[categoryName] : null;
         const verifiedImageURL = safeCloudKitAssetURL(recipe.imageURL);
+        const placeholder = `<picture class="recipe-placeholder"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture>`;
         const media = verifiedImageURL
-            ? `<img class="recipe-photo" src="${escapeHtml(verifiedImageURL)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
-            : `<picture class="recipe-placeholder"><source media="(prefers-color-scheme: dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt="" aria-hidden="true"></picture>`;
+            ? `${placeholder}<img class="recipe-photo" src="${escapeHtml(verifiedImageURL)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`
+            : placeholder;
         const tag = presentation && categoryName
             ? `<span class="recipe-tag" style="--tag-color:${presentation.light};--tag-color-dark:${presentation.dark}"><span aria-hidden="true">${presentation.emoji}</span>${escapeHtml(categoryName)}</span>`
             : "";
@@ -3194,10 +4586,91 @@ export function generateCompactRecipeIndexPageHtml(options: RecipeIndexPageOptio
         ? options.avatarColor
         : "#FF9933";
     const handleHTML = options.handle ? `<p class="handle">${escapeHtml(options.handle)}</p>` : "";
-    const identity = options.avatarEmoji
-        ? `<div class="identity"><span class="profile-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(options.avatarEmoji)}</span><div class="identity-text"><h1>${escapeHtml(options.title)}</h1>${handleHTML}</div></div>`
+    const avatarImageURL = safeCloudKitAssetURL(options.avatarImageURL);
+    const avatarHTML = avatarImageURL
+        ? `<span class="profile-avatar" aria-hidden="true"><img src="${escapeHtml(avatarImageURL)}" alt="" referrerpolicy="no-referrer"></span>`
+        : options.avatarEmoji
+            ? `<span class="profile-avatar" style="--avatar-color:${avatarColor}" aria-hidden="true">${escapeHtml(options.avatarEmoji)}</span>`
+            : "";
+    const identity = avatarHTML
+        ? `<div class="identity">${avatarHTML}<div class="identity-text"><h1>${escapeHtml(options.title)}</h1>${handleHTML}</div></div>`
         : `<h1>${escapeHtml(options.title)}</h1>`;
-    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(options.title, options.description, options.canonicalURL, options.openGraphType)}</head><body>${compactBrandHeader()}<main><section class="intro">${identity}<a class="action" id="openRecipeShelf" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(options.downloadURL)}">Get the app</a></section><section class="shelf" aria-labelledby="recipe-count"><p class="count" id="recipe-count">${count} ${noun}</p>${rows ? `<ol class="recipe-list">${rows}</ol>` : `<p class="empty">No public recipes have been shared here yet.</p>`}</section></main>${appOpenFallbackScript("openRecipeShelf", options.appURL)}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head>${compactPageHead(options.title, options.description, options.canonicalURL, options.openGraphType)}</head><body>${compactBrandHeader()}<main><section class="intro">${identity}<a class="action" id="openRecipeShelf" href="${safeAppURL}">Open in Cauldron</a><a class="download-action" href="${escapeHtml(options.downloadURL)}">Get the app</a></section><section class="shelf" aria-labelledby="recipe-count"><p class="count" id="recipe-count">${count} ${noun}</p>${rows ? `<ol class="recipe-list">${rows}</ol>` : `<p class="empty">No public recipes have been shared here yet.</p>`}</section></main>${compactPageFooter()}${appOpenFallbackScript("openRecipeShelf", options.appURL)}</body></html>`;
+}
+
+export function generateHomePageHtml(recipes: WebRecipeIndexItem[]): string {
+    const visibleRecipes = recipes.flatMap((recipe) => {
+        const imageURL = safeCloudKitAssetURL(recipe.imageURL);
+        if (!imageURL) return [];
+        const categoryName = recipe.tags
+            .map(canonicalRecipeCategoryName)
+            .find((name): name is string => name !== null) ?? null;
+        const category = categoryName ? recipeCategoryPresentation[categoryName] : null;
+        return [{ recipe, imageURL, categoryName, category }];
+    }).slice(0, 12);
+
+    const categoryCounts = new Map<string, number>();
+    visibleRecipes.forEach(({ categoryName }) => {
+        if (categoryName) categoryCounts.set(categoryName, (categoryCounts.get(categoryName) ?? 0) + 1);
+    });
+    const categories = [...categoryCounts.keys()]
+        .sort((lhs, rhs) => (categoryCounts.get(rhs) ?? 0) - (categoryCounts.get(lhs) ?? 0) || lhs.localeCompare(rhs))
+        .slice(0, 6);
+    const filters = categories.map((name) => {
+        const presentation = recipeCategoryPresentation[name];
+        return `<button type="button" data-filter="${escapeHtml(name)}" aria-pressed="false"><span aria-hidden="true">${presentation.emoji}</span>${escapeHtml(name)}</button>`;
+    }).join("");
+
+    const recipeRows = visibleRecipes.map(({ recipe, imageURL, categoryName, category }, index) => {
+        const tag = category && categoryName
+            ? `<span class="recipe-tag" style="--tag-color:${category.light};--tag-color-dark:${category.dark}"><span aria-hidden="true">${category.emoji}</span>${escapeHtml(categoryName)}</span>`
+            : "";
+        const time = recipe.totalMinutes ? `<span>${recipe.totalMinutes} min</span>` : "";
+        const creator = recipe.creatorDisplayName
+            ? `<span class="creator-name">${escapeHtml(recipe.creatorDisplayName)}</span>`
+            : "";
+        const metadata = creator || tag || time
+            ? `<span class="recipe-meta">${creator}${tag}${time}</span>`
+            : "";
+        const loading = index === 0 ? `fetchpriority="high"` : `loading="lazy" decoding="async"`;
+        return `<li class="discovery-card" data-category="${escapeHtml(categoryName ?? "")}"><a href="/recipe/${encodeURIComponent(recipe.recipeId)}"><span class="recipe-media"><img src="${escapeHtml(imageURL)}" alt="${escapeHtml(recipe.title)}" ${loading} referrerpolicy="no-referrer" onerror="window.cauldronRecipeImageFailed(this)"></span><span class="recipe-copy"><span class="recipe-title">${escapeHtml(recipe.title)}</span>${metadata}</span></a></li>`;
+    }).join("");
+
+    const shelf = recipeRows
+        ? `<section class="discovery" aria-labelledby="recipes-title"><div class="discovery-head"><h1 id="recipes-title">Recipes</h1>${filters ? `<nav class="filters" aria-label="Recipe categories"><button class="selected" type="button" data-filter="" aria-pressed="true">All</button>${filters}</nav>` : ""}</div><ol class="discovery-grid">${recipeRows}</ol><p class="no-results" role="status" hidden>No recipes in this category today.</p></section>`
+        : `<section class="empty" aria-labelledby="recipes-title"><h1 id="recipes-title">Recipes</h1><a href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Open Cauldron</a></section>`;
+    const year = new Date().getUTCFullYear();
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Cauldron Recipes</title><meta name="description" content="Recipes shared from Cauldron."><meta name="theme-color" content="#F6F1EA" media="(prefers-color-scheme:light)"><meta name="theme-color" content="#18120D" media="(prefers-color-scheme:dark)"><link rel="canonical" href="${PUBLIC_WEB_ORIGIN}/"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="alternate icon" href="/favicon.ico"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta property="og:type" content="website"><meta property="og:site_name" content="Cauldron"><meta property="og:title" content="Cauldron Recipes"><meta property="og:description" content="Recipes shared from Cauldron."><meta property="og:url" content="${PUBLIC_WEB_ORIGIN}/"><meta property="og:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${PUBLIC_WEB_ORIGIN}/social-card.png"><meta name="apple-itunes-app" content="app-id=6754004943, app-argument=${PUBLIC_WEB_ORIGIN}/"><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Cauldron", applicationCategory: "LifestyleApplication", operatingSystem: "iOS, iPadOS, macOS", url: `${PUBLIC_WEB_ORIGIN}/`, downloadUrl: "https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943" }).replace(/</g, "\\u003c")}</script><style>
+    :root{color-scheme:light dark;--paper:#f6f1ea;--ink:#251b15;--muted:#766b63;--accent:#e6801a;--surface:#fff;--separator:#e4dbd0;--control:rgba(255,255,255,.7)}
+    *{box-sizing:border-box}
+    html{background:var(--paper)}
+    body{min-height:100svh;margin:0;background:radial-gradient(circle at 12% 0,color-mix(in srgb,var(--accent) 7%,transparent),transparent 28rem),var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    a{color:inherit}.page{width:calc(100% - 48px);max-width:1220px;min-height:100svh;margin:auto;display:grid;grid-template-rows:auto 1fr auto}
+    header{height:82px;display:flex;align-items:center;justify-content:space-between}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif;font-size:20px;font-weight:600;letter-spacing:-.015em}.brand img{width:35px;height:35px;display:block}
+    .store,.filters button{border:1px solid color-mix(in srgb,var(--separator) 82%,transparent);background:var(--control);box-shadow:0 1px 0 rgba(255,255,255,.24) inset,0 5px 18px rgba(37,25,17,.05);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}
+    .store{min-height:42px;display:inline-flex;align-items:center;padding:9px 14px;border-radius:999px;font-size:13px;font-weight:500;text-decoration:none}
+    main{min-width:0;padding:42px 0 92px}.discovery{min-width:0}.discovery-head{display:flex;align-items:end;justify-content:space-between;gap:28px;margin-bottom:30px}
+    h1{margin:0;font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif;font-size:clamp(42px,5.2vw,62px);font-weight:500;letter-spacing:-.042em;line-height:.96}
+    .filters{display:flex;gap:7px;max-width:min(70%,760px);padding:4px;overflow:auto;scrollbar-width:none}.filters::-webkit-scrollbar{display:none}
+    .filters button{min-height:36px;display:inline-flex;align-items:center;gap:5px;padding:7px 11px;border-radius:999px;color:var(--muted);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}.filters button.selected{border-color:transparent;background:var(--ink);color:var(--paper)}
+    .discovery-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-flow:row dense;gap:38px 18px;margin:0;padding:0;list-style:none}
+    .discovery-card{min-width:0;grid-column:span 3}.discovery-card>a{display:block;text-decoration:none}.recipe-media{aspect-ratio:4/3;display:block;overflow:hidden;border-radius:16px;background:color-mix(in srgb,var(--surface) 74%,var(--separator))}.recipe-media img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+    .recipe-copy{display:block}.recipe-title{display:-webkit-box;min-height:2.4em;margin-top:11px;overflow:hidden;font-family:"New York",ui-serif,"Iowan Old Style",Georgia,serif;font-size:19px;font-weight:500;letter-spacing:-.014em;line-height:1.2;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+    .recipe-meta{display:flex;min-height:20px;align-items:center;gap:8px;margin-top:6px;overflow:hidden;color:var(--muted);font-size:11px;white-space:nowrap}.creator-name{overflow:hidden;text-overflow:ellipsis}.creator-name:not(:last-child)::after{content:"·";margin-left:8px}.recipe-tag{display:inline-flex;align-items:center;gap:4px;color:color-mix(in srgb,var(--tag-color) 64%,var(--ink))}
+    .discovery-card:first-child{grid-column:1/span 7;grid-row:1/span 2}.discovery-card:first-child>a{height:100%;display:flex;flex-direction:column}.discovery-card:first-child .recipe-media{min-height:420px;flex:1;aspect-ratio:auto;border-radius:20px}.discovery-card:first-child .recipe-title{min-height:auto;font-size:clamp(28px,3.1vw,42px);line-height:1.04;letter-spacing:-.032em}.discovery-card:first-child .recipe-meta{font-size:12px}
+    .discovery-card:nth-child(2),.discovery-card:nth-child(3){grid-column:8/span 5}.discovery-card:nth-child(2)>a,.discovery-card:nth-child(3)>a{min-height:191px;display:grid;grid-template-columns:minmax(0,46%) minmax(0,1fr);align-items:center;gap:20px}.discovery-card:nth-child(2) .recipe-media,.discovery-card:nth-child(3) .recipe-media{height:100%;aspect-ratio:auto}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title{margin-top:0;font-size:clamp(20px,2vw,28px);line-height:1.08;letter-spacing:-.024em}
+    .discovery-grid.uniform .discovery-card{grid-column:span 3;grid-row:auto}.discovery-grid.uniform .discovery-card>a{height:auto;min-height:0;display:block}.discovery-grid.uniform .recipe-media{min-height:0;height:auto;aspect-ratio:4/3;border-radius:16px}.discovery-grid.uniform .recipe-title{min-height:2.4em;margin-top:11px;font-size:19px;line-height:1.2;letter-spacing:-.014em}.discovery-grid.uniform .recipe-meta{font-size:11px}
+    .discovery-card[hidden]{display:none}.discovery-card>a:hover .recipe-media img{transform:scale(1.018)}.discovery-card>a:hover .recipe-title{color:var(--accent)}
+    .no-results{margin:44px 0 0;color:var(--muted);font-size:14px}.empty a{display:inline-flex;margin-top:24px;padding:10px 14px;border-radius:999px;background:var(--accent);color:#2b1600;font-size:13px;font-weight:500;text-decoration:none}
+    footer{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 0 30px;border-top:1px solid var(--separator);color:var(--muted);font-size:12px}footer nav{display:flex;gap:18px}footer a{text-decoration:none}footer a:hover{color:var(--ink)}
+    a:focus-visible,button:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:4px}
+    @media(max-width:980px){.discovery-head{align-items:flex-start;flex-direction:column}.filters{max-width:100%;width:100%;margin-left:-4px}.discovery-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.discovery-card:first-child{grid-column:span 6;grid-row:auto}.discovery-card:first-child .recipe-media{min-height:0;aspect-ratio:16/10}.discovery-card:nth-child(2),.discovery-card:nth-child(3){grid-column:span 3}.discovery-card:nth-child(2)>a,.discovery-card:nth-child(3)>a{min-height:0;display:block}.discovery-card:nth-child(2) .recipe-media,.discovery-card:nth-child(3) .recipe-media{height:auto;aspect-ratio:4/3}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title{min-height:2.2em;margin-top:11px}.discovery-card{grid-column:span 2}.discovery-grid.uniform .discovery-card{grid-column:span 2}}
+    @media(max-width:700px){.page{width:calc(100% - 32px);max-width:620px}header{height:70px}.store{min-height:38px;padding:8px 12px}main{padding:30px 0 72px}.discovery-head{gap:20px;margin-bottom:22px}.discovery-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:30px 12px}.discovery-card,.discovery-card:nth-child(2),.discovery-card:nth-child(3),.discovery-grid.uniform .discovery-card{grid-column:span 1}.discovery-card:first-child{grid-column:span 2}.discovery-card:first-child .recipe-media{aspect-ratio:4/3;border-radius:16px}.discovery-card:first-child .recipe-title{font-size:30px}.discovery-card:nth-child(2) .recipe-title,.discovery-card:nth-child(3) .recipe-title,.discovery-grid.uniform .recipe-title,.recipe-title{font-size:17px}.recipe-meta{min-height:0;align-items:flex-start;flex-direction:column;gap:4px;white-space:normal}.creator-name:not(:last-child)::after{display:none}footer{align-items:flex-start;flex-direction:column-reverse}}
+    @media(max-width:340px){.brand span{display:none}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+    @media(prefers-color-scheme:dark){:root{--paper:#18120d;--ink:#f8f0e8;--muted:#b5aaa2;--accent:#f09837;--surface:#262220;--separator:#39332f;--control:rgba(49,44,40,.7)}body{background:radial-gradient(circle at 12% 0,rgba(240,152,55,.065),transparent 28rem),var(--paper)}.recipe-tag{color:color-mix(in srgb,var(--tag-color-dark) 72%,var(--ink))}}
+    </style></head><body><div class="page"><header><a class="brand" href="/" aria-label="Cauldron home"><picture><source media="(prefers-color-scheme:dark)" srcset="/icon-small-dark.svg"><img src="/icon-small-light.svg" alt=""></picture><span>Cauldron</span></a><a class="store" href="https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943">Get Cauldron</a></header><main>${shelf}</main><footer><span>© ${year} Nadav Avital</span><nav aria-label="Footer"><a href="https://www.nadavavital.com/apps/support/?app=Cauldron">Support</a><a href="https://www.nadavavital.com/cauldron/privacy-policy/">Privacy</a></nav></footer></div><script>(function(){var grid=document.querySelector(".discovery-grid");var buttons=Array.from(document.querySelectorAll("[data-filter]"));var cards=Array.from(document.querySelectorAll(".discovery-card"));var empty=document.querySelector(".no-results");function update(filter){var count=0;cards.forEach(function(card){var failed=card.dataset.imageError==="true";var matches=!filter||card.getAttribute("data-category")===filter;card.hidden=failed||!matches;if(!card.hidden)count+=1;});if(grid)grid.classList.toggle("uniform",Boolean(filter)||Boolean(cards[0]&&cards[0].hidden));if(empty)empty.hidden=count!==0;}window.cauldronRecipeImageFailed=function(image){var card=image.closest(".discovery-card");if(card)card.dataset.imageError="true";var selected=document.querySelector("[data-filter].selected");update(selected?selected.getAttribute("data-filter")||"":"");};buttons.forEach(function(button){button.addEventListener("click",function(){var filter=button.getAttribute("data-filter")||"";buttons.forEach(function(item){var selected=item===button;item.classList.toggle("selected",selected);item.setAttribute("aria-pressed",String(selected));});update(filter);});});update("");})();</script></body></html>`;
 }
 
 type InviteRequestLike = {
@@ -3463,6 +4936,201 @@ export const previewInvite = onRequest(cloudAuthorizedHTTPOptions, async (req, r
     res.send(generateInvitePreviewHtml(activeInviteCode));
 });
 
+async function fetchCloudKitProfileBackfillPage(
+    continuationMarker: string | null
+): Promise<{ ownerIds: string[]; continuationMarker: string | null }> {
+    const keyID = cloudKitServerKeyID.value();
+    const privateKey = cloudKitServerPrivateKey.value().replace(/\\n/g, "\n");
+    const subpath = `/database/1/${CLOUDKIT_CONTAINER}/production/public/records/query`;
+    const body = JSON.stringify(continuationMarker
+        ? { continuationMarker }
+        : { query: { recordType: "User" }, resultsLimit: 25 });
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const signature = createSign("SHA256")
+        .update(cloudKitSignatureInput(body, date, subpath))
+        .end()
+        .sign(privateKey)
+        .toString("base64");
+    const response = await fetch(`https://api.apple-cloudkit.com${subpath}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Apple-CloudKit-Request-KeyID": keyID,
+            "X-Apple-CloudKit-Request-ISO8601Date": date,
+            "X-Apple-CloudKit-Request-SignatureV1": signature,
+        },
+        body,
+        signal: AbortSignal.timeout(CLOUDKIT_WEB_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+        const message = `CloudKit profile backfill returned ${response.status}`;
+        throw isTransientCloudKitHTTPStatus(response.status)
+            ? new RetryableCloudKitError(message)
+            : new Error(message);
+    }
+    const payload = await response.json() as CloudKitRecordsPayload & {
+        records?: CloudKitRecordLike[];
+        continuationMarker?: unknown;
+    };
+    if (cloudKitQueryPayloadHasErrors(payload)) {
+        const message = "CloudKit profile backfill returned a record error";
+        throw cloudKitRecordsPayloadIsRetryableError(payload)
+            ? new RetryableCloudKitError(message)
+            : new Error(message);
+    }
+    const ownerIds = [...new Set((payload.records ?? []).flatMap((record) => {
+        const ownerId = record.fields?.userId?.value;
+        return record.recordType === "User" && isValidUUID(ownerId)
+            ? [ownerId]
+            : [];
+    }))];
+    return {
+        ownerIds,
+        continuationMarker: typeof payload.continuationMarker === "string"
+            ? payload.continuationMarker
+            : null,
+    };
+}
+
+export function profileBackfillFailureState(
+    retryCounts: Record<string, number>,
+    failedOwnerIds: string[],
+    ownerId: string,
+    maxAttempts = 3
+): {
+    attempt: number;
+    shouldRetry: boolean;
+    retryCounts: Record<string, number>;
+    failedOwnerIds: string[];
+} {
+    const attempt = (retryCounts[ownerId] ?? 0) + 1;
+    if (attempt >= maxAttempts) {
+        const nextRetryCounts = { ...retryCounts };
+        delete nextRetryCounts[ownerId];
+        return {
+            attempt,
+            shouldRetry: false,
+            retryCounts: nextRetryCounts,
+            failedOwnerIds: [
+                ...failedOwnerIds.filter((failedOwnerId) => failedOwnerId !== ownerId),
+                ownerId,
+            ].slice(-100),
+        };
+    }
+    return {
+        attempt,
+        shouldRetry: true,
+        retryCounts: { ...retryCounts, [ownerId]: attempt },
+        failedOwnerIds,
+    };
+}
+
+export const backfillPublicProfiles = onSchedule({
+    schedule: "every 2 hours",
+    timeZone: "Etc/UTC",
+    secrets: [cloudKitServerKeyID, cloudKitServerPrivateKey],
+    timeoutSeconds: 300,
+    maxInstances: 1,
+}, async () => {
+    const stateRef = db.collection("share_maintenance").doc("public_profile_backfill");
+    const state = await stateRef.get();
+    const stateData = state.data();
+    const previousMarker = typeof stateData?.continuationMarker === "string"
+        ? stateData.continuationMarker as string
+        : null;
+    let pendingOwnerIds = Array.isArray(stateData?.pendingOwnerIds)
+        ? stateData.pendingOwnerIds.filter((value: unknown): value is string => isValidUUID(value))
+        : [];
+    let nextContinuationMarker = typeof stateData?.nextContinuationMarker === "string"
+        ? stateData.nextContinuationMarker as string
+        : null;
+    let retryCounts = stateData?.retryCounts && typeof stateData.retryCounts === "object"
+        ? Object.fromEntries(Object.entries(stateData.retryCounts as Record<string, unknown>)
+            .filter(([ownerId, count]) => isValidUUID(ownerId) &&
+                typeof count === "number" && Number.isInteger(count) && count > 0)) as Record<string, number>
+        : {};
+    let failedOwnerIds = Array.isArray(stateData?.failedOwnerIds)
+        ? stateData.failedOwnerIds.filter((value: unknown): value is string => isValidUUID(value))
+        : [];
+    if (pendingOwnerIds.length === 0) {
+        const page = await retryTransientCloudKitOperation(() =>
+            fetchCloudKitProfileBackfillPage(previousMarker)
+        );
+        pendingOwnerIds = page.ownerIds;
+        nextContinuationMarker = page.continuationMarker;
+    }
+    let materialized = 0;
+    let unprocessedOwnerIds = pendingOwnerIds;
+    const retryOwnerIds: string[] = [];
+    const ownerIdsThisRun = pendingOwnerIds.slice(0, 12);
+    for (let index = 0; index < ownerIdsThisRun.length; index += 4) {
+        const chunk = ownerIdsThisRun.slice(index, index + 4);
+        unprocessedOwnerIds = unprocessedOwnerIds.slice(chunk.length);
+        const results = await Promise.all(chunk.map(async (ownerId) => {
+            try {
+                const profile = await retryTransientCloudKitOperation(() =>
+                    queryCanonicalCloudKitProfileByOwner(ownerId)
+                );
+                if (!profile || await isShareRevoked(ownerId) ||
+                    await isResourcePrivacyBlocked("profile", ownerId)) {
+                    return { ownerId, retry: false, materialized: false };
+                }
+                await materializeCanonicalProfile(profile);
+                await materializeCanonicalRecipeSummaries(ownerId, profile.creatorRecordName);
+                delete retryCounts[ownerId];
+                failedOwnerIds = failedOwnerIds.filter((failedOwnerId) => failedOwnerId !== ownerId);
+                return { ownerId, retry: false, materialized: true };
+            } catch (error) {
+                const failureState = profileBackfillFailureState(
+                    retryCounts,
+                    failedOwnerIds,
+                    ownerId
+                );
+                retryCounts = failureState.retryCounts;
+                failedOwnerIds = failureState.failedOwnerIds;
+                if (!failureState.shouldRetry) {
+                    logger.error("Automatic public profile backfill skipped a persistently failing profile", {
+                        ownerId,
+                        attempt: failureState.attempt,
+                        error,
+                    });
+                    return { ownerId, retry: false, materialized: false };
+                }
+                logger.warn("Automatic public profile backfill will retry a failed profile", {
+                    ownerId,
+                    attempt: failureState.attempt,
+                    error,
+                });
+                return { ownerId, retry: true, materialized: false };
+            }
+        }));
+        materialized += results.filter((result) => result.materialized).length;
+        retryOwnerIds.push(...results.filter((result) => result.retry).map((result) => result.ownerId));
+        pendingOwnerIds = [...unprocessedOwnerIds, ...retryOwnerIds];
+        const pageComplete = pendingOwnerIds.length === 0;
+        await stateRef.set({
+            continuationMarker: pageComplete ? nextContinuationMarker : previousMarker,
+            nextContinuationMarker: pageComplete ? FieldValue.delete() : nextContinuationMarker,
+            pendingOwnerIds: pageComplete ? FieldValue.delete() : pendingOwnerIds,
+            retryCounts,
+            failedOwnerIds,
+            lastRunAt: FieldValue.serverTimestamp(),
+            lastMaterializedCount: materialized,
+        }, { merge: true });
+    }
+    if (ownerIdsThisRun.length === 0) {
+        await stateRef.set({
+            continuationMarker: nextContinuationMarker,
+            nextContinuationMarker: FieldValue.delete(),
+            pendingOwnerIds: FieldValue.delete(),
+            retryCounts,
+            failedOwnerIds,
+            lastRunAt: FieldValue.serverTimestamp(),
+            lastMaterializedCount: 0,
+        }, { merge: true });
+    }
+});
+
 export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
     if (!await enforcePublicReadRateLimit(req)) {
@@ -3519,6 +5187,9 @@ export const previewRecipe = onRequest(cloudBackedPublicReadHTTPOptions, async (
             fetchPublicCloudKitRecipe(recipeId, sanitized.value.ownerId),
             fetchPublicCloudKitRecipeCreator(sanitized.value.ownerId),
         ]);
+        if (!fullRecipe) {
+            await deleteSnapshotIfUnchanged("shared_recipes", doc, sanitized.value.ownerId);
+        }
 
         const rendered = renderCanonicalRecipePage(
             fullRecipe,
@@ -3629,9 +5300,13 @@ async function browsableRecipes(
         return [result.value];
     });
     if (expectedOwnerId) {
-        // The enclosing profile check already verifies the owner's account and
-        // recipe unpublishing atomically removes the corresponding snapshot.
-        return sanitized;
+        const visibility = await Promise.all(sanitized.map(async (recipe) => ({
+            recipe,
+            isBlocked: await isResourcePrivacyBlocked("recipe", recipe.recipeId),
+        })));
+        return visibility
+            .filter(({ isBlocked }) => !isBlocked)
+            .map(({ recipe }) => recipe);
     }
     const ownerRevocations = new Map<string, boolean>();
     await Promise.all([...new Set(sanitized.map((recipe) => recipe.ownerId))].map(async (ownerId) => {
@@ -3646,6 +5321,68 @@ async function browsableRecipes(
         .filter(({ isBlocked }) => !isBlocked)
         .map(({ recipe }) => recipe);
 }
+
+type ObservedRecipeSnapshot = {
+    recipeId: string;
+    ownerId: string;
+    updateTimeMillis: number;
+};
+
+async function cleanupPermanentlyInvalidRecipeSnapshots(
+    snapshots: ObservedRecipeSnapshot[],
+    invalidRecipeIds: string[]
+): Promise<void> {
+    const invalid = new Set(invalidRecipeIds);
+    const candidates = snapshots.filter((snapshot) => invalid.has(snapshot.recipeId));
+    await Promise.all(candidates.map(async (candidate) => {
+        const ref = db.collection("shared_recipes").doc(candidate.recipeId);
+        await db.runTransaction(async (transaction) => {
+            const current = await transaction.get(ref);
+            if (!current.exists ||
+                current.data()?.ownerId !== candidate.ownerId ||
+                current.updateTime?.toMillis() !== candidate.updateTimeMillis) {
+                return;
+            }
+            transaction.delete(ref);
+        });
+    }));
+}
+
+export const previewHome = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
+    res.set(publicSecurityHeaders());
+    if (!await enforcePublicReadRateLimit(req)) {
+        rejectRateLimitedRead(res);
+        return;
+    }
+    try {
+        const snapshot = await db.collection("shared_recipes")
+            .orderBy("updatedAt", "desc")
+            .limit(36)
+            .get();
+        const documents = snapshot.docs;
+        const summaries = await browsableRecipes(documents);
+        const rotationKey = new Date().toISOString().slice(0, 10);
+        const candidates = rotatingHomepageRecipeCandidates(summaries, rotationKey, 18, 2);
+        const validation = await bestEffortRecipeIndexItems(candidates, 6_000);
+        const observed = documents.flatMap((document): ObservedRecipeSnapshot[] => {
+            const ownerId = document.data()?.ownerId;
+            const updateTimeMillis = document.updateTime?.toMillis();
+            return typeof ownerId === "string" && typeof updateTimeMillis === "number"
+                ? [{ recipeId: document.id, ownerId, updateTimeMillis }]
+                : [];
+        });
+        await cleanupPermanentlyInvalidRecipeSnapshots(
+            observed,
+            validation.permanentlyInvalidRecipeIds
+        );
+        res.set("Cache-Control", HOMEPAGE_CACHE_CONTROL);
+        res.status(200).send(generateHomePageHtml(validation.items));
+    } catch (error) {
+        logger.warn("Homepage recipe shelf is unavailable; serving the product page", { error });
+        res.set("Cache-Control", HOMEPAGE_CACHE_CONTROL);
+        res.status(200).send(generateHomePageHtml([]));
+    }
+});
 
 export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async (req, res) => {
     res.set(publicSecurityHeaders());
@@ -3669,13 +5406,22 @@ export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async 
     try {
         let doc = await db.collection('shared_profiles').doc(shareId).get();
         if (!doc.exists) {
-            // Because we use username as ID, this is a direct lookup
-            // If it fails, we might want to try to look up by user ID if shareId matches UUID format??
-            // For now, assume username.
-            res.status(404).send(generatePublicStatusPageHtml("Profile unavailable", "This profile is no longer shared on the web."));
-            return;
+            const canonicalProfile = await fetchCanonicalCloudKitProfile(shareId);
+            if (!canonicalProfile ||
+                await isShareRevoked(canonicalProfile.userId) ||
+                await isResourcePrivacyBlocked("profile", canonicalProfile.userId)) {
+                res.status(404).send(generatePublicStatusPageHtml("Profile unavailable", "This profile is no longer shared on the web."));
+                return;
+            }
+            await materializeCanonicalProfile(canonicalProfile);
+            doc = await db.collection('shared_profiles').doc(canonicalProfile.userId).get();
+            if (!doc.exists) {
+                res.status(404).send(generatePublicStatusPageHtml("Profile unavailable", "This profile is no longer shared on the web."));
+                return;
+            }
         }
 
+        const requestedProfileDocument = doc;
         const redirectShareId = doc.data()?.redirectShareId;
         if (typeof redirectShareId === 'string' && isValidUUID(redirectShareId)) {
             doc = await db.collection('shared_profiles').doc(redirectShareId).get();
@@ -3693,9 +5439,41 @@ export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async 
             return;
         }
         const data = sanitized.value;
+        const canonicalProfile = await fetchCanonicalCloudKitProfile(data.userId);
+        if (!canonicalProfile) {
+            await deleteSnapshotIfUnchanged(
+                "shared_profiles",
+                requestedProfileDocument,
+                data.userId
+            );
+            res.status(404).send(generatePublicStatusPageHtml("Profile unavailable", "This profile is no longer shared on the web."));
+            return;
+        }
+        const requestedAliasOwnerId = uuidPattern.test(shareId) ||
+            shareId.toLocaleLowerCase() === canonicalProfile.username.toLocaleLowerCase()
+            ? data.userId
+            : await ownerIDForCloudKitUsername(shareId);
+        if (requestedAliasOwnerId !== data.userId) {
+            await deleteSnapshotIfUnchanged(
+                "shared_profiles",
+                requestedProfileDocument,
+                data.userId
+            );
+            res.status(404).send(generatePublicStatusPageHtml("Profile unavailable", "This profile is no longer shared on the web."));
+            return;
+        }
+        await materializeCanonicalProfile(canonicalProfile);
+        const canonicalURL = canonicalProfileURL(canonicalProfile.username);
+        const redirectURL = canonicalProfileRedirectURL(shareId, canonicalProfile.username);
+        if (redirectURL) {
+            res.redirect(308, redirectURL);
+            return;
+        }
         const browsable: SanitizedRecipeShare[] = [];
+        const observedSnapshots: ObservedRecipeSnapshot[] = [];
         let profileCursor: QueryDocumentSnapshot | null = null;
-        for (let page = 0; page < 4 && browsable.length < WEB_RECIPE_CARD_QUERY_LIMIT; page += 1) {
+        let profileSourceExhausted = false;
+        for (let page = 0; page < 4; page += 1) {
             let recipeQuery: Query = db.collection('shared_recipes')
                 .where('ownerId', '==', data.userId)
                 .limit(25);
@@ -3703,35 +5481,47 @@ export const previewProfile = onRequest(cloudBackedPublicReadHTTPOptions, async 
                 recipeQuery = recipeQuery.startAfter(profileCursor);
             }
             const recipeSnapshot = await recipeQuery.get();
+            observedSnapshots.push(...recipeSnapshot.docs.flatMap((recipeDocument) => {
+                const ownerId = recipeDocument.data()?.ownerId;
+                const updateTimeMillis = recipeDocument.updateTime?.toMillis();
+                return typeof ownerId === "string" && typeof updateTimeMillis === "number"
+                    ? [{ recipeId: recipeDocument.id, ownerId, updateTimeMillis }]
+                    : [];
+            }));
             browsable.push(...await browsableRecipes(recipeSnapshot.docs, data.userId));
             if (recipeSnapshot.size < 25) {
+                profileSourceExhausted = true;
                 break;
             }
             profileCursor = recipeSnapshot.docs[recipeSnapshot.docs.length - 1];
         }
-        const hasMoreRecipes = browsable.length > MAX_WEB_RECIPE_CARDS;
-        const recipes = browsable.slice(0, MAX_WEB_RECIPE_CARDS);
-        recipes.sort((lhs, rhs) => lhs.title.localeCompare(rhs.title));
-        const indexItems = await bestEffortRecipeIndexItems(recipes);
+        browsable.sort((lhs, rhs) => lhs.title.localeCompare(rhs.title));
+        const validation = await bestEffortRecipeIndexItems(browsable);
+        const recipes = validation.items.slice(0, MAX_WEB_RECIPE_CARDS);
+        const hasMoreRecipes = validation.items.length > MAX_WEB_RECIPE_CARDS || !profileSourceExhausted;
+        await cleanupPermanentlyInvalidRecipeSnapshots(
+            observedSnapshots,
+            validation.permanentlyInvalidRecipeIds
+        );
         const description = "A recipe shelf shared from Cauldron.";
-        const canonicalURL = `${PUBLIC_WEB_ORIGIN}/profile/${encodeURIComponent(data.userId)}`;
         const appURL = `cauldron://import/profile/${shareId}`;
         const downloadURL = 'https://apps.apple.com/us/app/cauldron-magical-recipes/id6754004943';
 
         res.set("Cache-Control", "private, no-store, max-age=0");
         res.send(generateCompactRecipeIndexPageHtml({
-            handle: `@${data.username}`,
-            title: data.displayName,
+            handle: `@${canonicalProfile.username}`,
+            title: canonicalProfile.displayName,
             description,
             canonicalURL,
             appURL,
             downloadURL,
-            recipes: indexItems,
-            totalRecipeCount: recipes.length,
+            recipes,
+            totalRecipeCount: validation.items.length,
             hasMoreRecipes,
             openGraphType: "profile",
-            avatarEmoji: data.profileEmoji,
-            avatarColor: data.profileColor,
+            avatarEmoji: canonicalProfile.profileImageURL ? null : canonicalProfile.profileEmoji,
+            avatarColor: canonicalProfile.profileColor,
+            avatarImageURL: canonicalProfile.profileImageURL,
         }));
     } catch (error) {
         logger.error('Error loading profile preview:', error);
@@ -3768,23 +5558,50 @@ export const previewCollection = onRequest(cloudBackedPublicReadHTTPOptions, asy
             res.status(404).send(generatePublicStatusPageHtml("Collection unavailable", "This collection is no longer shared on the web."));
             return;
         }
-        const data = sanitized.value;
+        const storedData = sanitized.value;
+        const canonicalCollection = await fetchPublicCloudKitCollection(
+            storedData.collectionId,
+            storedData.ownerId
+        );
+        if (!canonicalCollection) {
+            await deleteSnapshotIfUnchanged("shared_collections", doc, storedData.ownerId);
+            res.status(404).send(generatePublicStatusPageHtml("Collection unavailable", "This collection is no longer shared on the web."));
+            return;
+        }
+        const data = {
+            ...storedData,
+            title: canonicalCollection.title,
+            recipeIds: canonicalCollection.recipeIds,
+            recipeCount: canonicalCollection.recipeIds.length,
+        };
         const browsable: SanitizedRecipeShare[] = [];
+        const observedSnapshots: ObservedRecipeSnapshot[] = [];
         let collectionCursor = 0;
-        while (collectionCursor < data.recipeIds.length && browsable.length < WEB_RECIPE_CARD_QUERY_LIMIT) {
+        while (collectionCursor < data.recipeIds.length && collectionCursor < 100) {
             const candidateRecipeIds = data.recipeIds.slice(collectionCursor, collectionCursor + 25);
             const recipeDocuments = await db.getAll(
                 ...candidateRecipeIds.map((recipeId) => db.collection('shared_recipes').doc(recipeId))
             );
+            observedSnapshots.push(...recipeDocuments.flatMap((recipeDocument) => {
+                const ownerId = recipeDocument.data()?.ownerId;
+                const updateTimeMillis = recipeDocument.updateTime?.toMillis();
+                return typeof ownerId === "string" && typeof updateTimeMillis === "number"
+                    ? [{ recipeId: recipeDocument.id, ownerId, updateTimeMillis }]
+                    : [];
+            }));
             browsable.push(...await browsableRecipes(recipeDocuments));
             collectionCursor += candidateRecipeIds.length;
         }
-        const hasMoreRecipes = browsable.length > MAX_WEB_RECIPE_CARDS || collectionCursor < data.recipeIds.length;
-        const recipes = browsable.slice(0, MAX_WEB_RECIPE_CARDS);
         const recipeOrder = new Map(data.recipeIds.map((recipeId, index) => [recipeId, index]));
-        recipes.sort((lhs, rhs) => (recipeOrder.get(lhs.recipeId) ?? Number.MAX_SAFE_INTEGER) -
+        browsable.sort((lhs, rhs) => (recipeOrder.get(lhs.recipeId) ?? Number.MAX_SAFE_INTEGER) -
             (recipeOrder.get(rhs.recipeId) ?? Number.MAX_SAFE_INTEGER));
-        const indexItems = await bestEffortRecipeIndexItems(recipes);
+        const validation = await bestEffortRecipeIndexItems(browsable);
+        const recipes = validation.items.slice(0, MAX_WEB_RECIPE_CARDS);
+        const hasMoreRecipes = validation.items.length > MAX_WEB_RECIPE_CARDS || collectionCursor < data.recipeIds.length;
+        await cleanupPermanentlyInvalidRecipeSnapshots(
+            observedSnapshots,
+            validation.permanentlyInvalidRecipeIds
+        );
         const description = "A recipe collection shared from Cauldron.";
         const canonicalURL = `${PUBLIC_WEB_ORIGIN}/collection/${encodeURIComponent(shareId)}`;
         const appURL = `cauldron://import/collection/${shareId}`;
@@ -3797,8 +5614,8 @@ export const previewCollection = onRequest(cloudBackedPublicReadHTTPOptions, asy
             canonicalURL,
             appURL,
             downloadURL,
-            recipes: indexItems,
-            totalRecipeCount: recipes.length,
+            recipes,
+            totalRecipeCount: data.recipeIds.length,
             hasMoreRecipes,
             openGraphType: "website",
         }));

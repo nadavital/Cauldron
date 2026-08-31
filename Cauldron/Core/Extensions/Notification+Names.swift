@@ -35,6 +35,10 @@ extension Notification.Name {
     /// Posted when a new recipe is added to the library
     static let recipeAdded = Notification.Name("RecipeAdded")
 
+    /// Posted when only a recipe's local/cloud image metadata changed. List
+    /// surfaces should refresh the affected image instead of reloading the library.
+    static let recipeImageUpdated = Notification.Name("RecipeImageUpdated")
+
     /// Posted when an App Intent has persisted a recipe route for the app to consume.
     nonisolated static let openRecipeFromIntent = Notification.Name("OpenRecipeFromIntent")
 

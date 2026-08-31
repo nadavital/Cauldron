@@ -7,6 +7,40 @@
 
 import Foundation
 
+enum ProfileAvatarRepresentation: Hashable, Sendable {
+    struct PhotoIdentity: Hashable, Sendable {
+        let ownerID: UUID
+        let localURL: URL?
+        let cloudRecordName: String?
+        let modifiedAt: Date?
+        let localRevision: UUID?
+
+        nonisolated var cacheIdentity: String {
+            if let cloudRecordName {
+                return [
+                    ownerID.uuidString,
+                    cloudRecordName,
+                    modifiedAt.map { String($0.timeIntervalSinceReferenceDate) } ?? "no-modified-date"
+                ].joined(separator: "|")
+            }
+            return [
+                ownerID.uuidString,
+                localRevision?.uuidString ?? "no-local-revision",
+                localURL?.absoluteString ?? "no-local-url"
+            ].joined(separator: "|")
+        }
+    }
+
+    case photo(PhotoIdentity)
+    case emoji(value: String, colorHex: String?)
+    case initials(value: String, colorHex: String?)
+
+    nonisolated var isPhoto: Bool {
+        if case .photo = self { return true }
+        return false
+    }
+}
+
 /// Represents a user who can share recipes
 struct User: Sendable, Hashable, Identifiable {
     let id: UUID
@@ -61,12 +95,32 @@ struct User: Sendable, Hashable, Identifiable {
         self.cloudRecordName = cloudRecordName
         self.referralCode = referralCode
         self.createdAt = createdAt
-        self.profileEmoji = profileEmoji
-        self.profileColor = profileColor
-        self.profileImageURL = profileImageURL
-        self.cloudProfileImageRecordName = cloudProfileImageRecordName
-        self.profileImageModifiedAt = profileImageModifiedAt
-        self.profileImageLocalRevision = profileImageLocalRevision
+        let normalizedEmoji = profileEmoji?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedEmoji, !normalizedEmoji.isEmpty {
+            // Legacy records can contain both emoji and photo metadata after an
+            // interrupted avatar transition. Every valid photo commit clears the
+            // emoji, so a remaining explicit emoji deterministically wins.
+            self.profileEmoji = normalizedEmoji
+            self.profileColor = profileColor
+            self.profileImageURL = nil
+            self.cloudProfileImageRecordName = nil
+            self.profileImageModifiedAt = nil
+            self.profileImageLocalRevision = nil
+        } else if profileImageURL != nil || cloudProfileImageRecordName != nil {
+            self.profileEmoji = nil
+            self.profileColor = nil
+            self.profileImageURL = profileImageURL
+            self.cloudProfileImageRecordName = cloudProfileImageRecordName
+            self.profileImageModifiedAt = profileImageModifiedAt
+            self.profileImageLocalRevision = profileImageLocalRevision
+        } else {
+            self.profileEmoji = nil
+            self.profileColor = profileColor
+            self.profileImageURL = nil
+            self.cloudProfileImageRecordName = nil
+            self.profileImageModifiedAt = nil
+            self.profileImageLocalRevision = nil
+        }
     }
 
     /// Get user's initials from display name
@@ -78,6 +132,22 @@ struct User: Sendable, Hashable, Identifiable {
             return String(displayName.prefix(2)).uppercased()
         }
         return "?"
+    }
+
+    nonisolated var avatarRepresentation: ProfileAvatarRepresentation {
+        if let profileEmoji, !profileEmoji.isEmpty {
+            return .emoji(value: profileEmoji, colorHex: profileColor)
+        }
+        if profileImageURL != nil || cloudProfileImageRecordName != nil {
+            return .photo(.init(
+                ownerID: id,
+                localURL: profileImageURL,
+                cloudRecordName: cloudProfileImageRecordName,
+                modifiedAt: profileImageModifiedAt,
+                localRevision: profileImageLocalRevision
+            ))
+        }
+        return .initials(value: initials, colorHex: profileColor)
     }
 
     /// Create a copy with updated profile fields
@@ -173,19 +243,21 @@ struct User: Sendable, Hashable, Identifiable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(UUID.self, forKey: .id)
-        self.username = try container.decode(String.self, forKey: .username)
-        self.displayName = try container.decode(String.self, forKey: .displayName)
-        self.email = try container.decodeIfPresent(String.self, forKey: .email)
-        self.cloudRecordName = try container.decodeIfPresent(String.self, forKey: .cloudRecordName)
-        self.referralCode = try container.decodeIfPresent(String.self, forKey: .referralCode)
-        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
-        self.profileEmoji = try container.decodeIfPresent(String.self, forKey: .profileEmoji)
-        self.profileColor = try container.decodeIfPresent(String.self, forKey: .profileColor)
-        self.profileImageURL = try container.decodeIfPresent(URL.self, forKey: .profileImageURL)
-        self.cloudProfileImageRecordName = try container.decodeIfPresent(String.self, forKey: .cloudProfileImageRecordName)
-        self.profileImageModifiedAt = try container.decodeIfPresent(Date.self, forKey: .profileImageModifiedAt)
-        self.profileImageLocalRevision = try container.decodeIfPresent(UUID.self, forKey: .profileImageLocalRevision)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            username: try container.decode(String.self, forKey: .username),
+            displayName: try container.decode(String.self, forKey: .displayName),
+            email: try container.decodeIfPresent(String.self, forKey: .email),
+            cloudRecordName: try container.decodeIfPresent(String.self, forKey: .cloudRecordName),
+            referralCode: try container.decodeIfPresent(String.self, forKey: .referralCode),
+            createdAt: try container.decode(Date.self, forKey: .createdAt),
+            profileEmoji: try container.decodeIfPresent(String.self, forKey: .profileEmoji),
+            profileColor: try container.decodeIfPresent(String.self, forKey: .profileColor),
+            profileImageURL: try container.decodeIfPresent(URL.self, forKey: .profileImageURL),
+            cloudProfileImageRecordName: try container.decodeIfPresent(String.self, forKey: .cloudProfileImageRecordName),
+            profileImageModifiedAt: try container.decodeIfPresent(Date.self, forKey: .profileImageModifiedAt),
+            profileImageLocalRevision: try container.decodeIfPresent(UUID.self, forKey: .profileImageLocalRevision)
+        )
     }
 
     nonisolated func encode(to encoder: Encoder) throws {

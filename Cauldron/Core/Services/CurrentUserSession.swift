@@ -494,8 +494,12 @@ class CurrentUserSession: ObservableObject {
             profileEmoji: nil,
             profileColor: nil,
             profileImageURL: profileImageURL,
-            cloudProfileImageRecordName: expectedUser.cloudProfileImageRecordName,
-            profileImageModifiedAt: expectedUser.profileImageModifiedAt,
+            // A newly authored local image must not inherit the previous
+            // CloudKit revision. Keeping that metadata would reuse the old
+            // cloud-derived cache key and briefly show stale pixels while the
+            // replacement upload is still pending.
+            cloudProfileImageRecordName: nil,
+            profileImageModifiedAt: nil,
             profileImageLocalRevision: profileImageLocalRevision
         )
         let supersededStagedImageURL = restorePendingProfileSync(ownerID: updatedUser.id)?.stagedImageURL
@@ -526,8 +530,8 @@ class CurrentUserSession: ObservableObject {
             profileEmoji: nil,
             profileColor: nil,
             profileImageURL: profileImageURL,
-            cloudProfileImageRecordName: expectedUser.cloudProfileImageRecordName,
-            profileImageModifiedAt: expectedUser.profileImageModifiedAt,
+            cloudProfileImageRecordName: nil,
+            profileImageModifiedAt: nil,
             profileImageLocalRevision: profileImageLocalRevision,
             basicInfoToken: basicInfoToken,
             username: username,
@@ -734,10 +738,13 @@ class CurrentUserSession: ObservableObject {
             if accountStatus.isAvailable {
                 var verifiedSystemRecordName: String?
                 do {
-                    let systemRecordName = try await dependencies.cloudKitCore.getCurrentUserRecordID().recordName
+                    let systemRecordID = try await dependencies.cloudKitCore.getCurrentUserRecordID()
+                    let systemRecordName = systemRecordID.recordName
                     guard identityVerificationGate.token == identityToken else { return }
                     verifiedSystemRecordName = systemRecordName
-                    if let cloudUser = try await dependencies.userCloudService.fetchCurrentUserProfile() {
+                    if let cloudUser = try await dependencies.userCloudService.fetchCurrentUserProfile(
+                        verifiedSystemRecordID: systemRecordID
+                    ) {
                         guard identityVerificationGate.token == identityToken else { return }
                         let pendingProfile = restorePendingProfileSync(ownerID: cloudUser.id)
                         let effectiveUser = pendingProfile?.user ?? cloudUser

@@ -689,6 +689,12 @@ struct ContentView: View {
                 return
             }
 
+            // Public web repair is durable derived-state maintenance, not an
+            // interactive launch requirement. Leave the first navigation and
+            // image-loading window uncontended before starting its full sync.
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+
             do {
                 try await PublicWebRepairWorkflow.reconcileOnLaunch(
                     ownerID: userId,
@@ -704,6 +710,7 @@ struct ContentView: View {
                         await recipeRepository.migratePublicRecipeSearchMetadata()
                         try await Self.repairPublicWebSnapshots(
                             for: userId,
+                            recipeRepository: recipeRepository,
                             collectionRepository: collectionRepository,
                             externalShareService: externalShareService
                         )
@@ -720,6 +727,7 @@ struct ContentView: View {
 
     private nonisolated static func repairPublicWebSnapshots(
         for userId: UUID,
+        recipeRepository: RecipeRepository,
         collectionRepository: CollectionRepository,
         externalShareService: ExternalShareService
     ) async throws {
@@ -728,14 +736,28 @@ struct ContentView: View {
             return session.userId == userId ? session.currentUser : nil
         }) else { throw CancellationError() }
 
-        let profilePublished = await externalShareService.updateProfileShareMetadata(for: user)
+        async let ownedRecipesTask = recipeRepository.fetchLibraryRecipes(ownerId: userId)
+        async let collectionsTask = collectionRepository.fetchUserCollections(
+            ownerId: userId,
+            visibility: .publicRecipe
+        )
+        let ownedRecipes = try await ownedRecipesTask
+        let publicRecipes = ownedRecipes.filter {
+            $0.ownerId == userId && $0.visibility == .publicRecipe && !$0.isPreview
+        }
+        // Keep the app's manifest aligned with the server-side profile
+        // materializer: recipes that are only related children are reachable
+        // through their canonical parent, not published as duplicate roots.
+        let visiblePublicRecipes = RecipeGroupingService.hideRelatedRecipeReferences(publicRecipes)
+        let collections = try await collectionsTask
+
+        let profilePublished = await externalShareService.updateProfileShareMetadata(
+            for: user,
+            recipeCount: visiblePublicRecipes.count
+        )
         try Task.checkCancellation()
 
         do {
-            let collections = try await collectionRepository.fetchUserCollections(
-                ownerId: userId,
-                visibility: .publicRecipe
-            )
             var collectionsPublished = true
             for collection in collections {
                 try Task.checkCancellation()
@@ -746,9 +768,30 @@ struct ContentView: View {
                 collectionsPublished = collectionsPublished && published
             }
 
-            if !profilePublished || !collectionsPublished {
+            guard profilePublished, collectionsPublished else {
                 AppLogger.general.warning("Public web snapshot repair remains pending")
                 throw ExternalShareError.invalidResponse
+            }
+
+            let missing = try await externalShareService.reconcileOwnerPublicManifest(
+                ownerId: userId,
+                publicRecipeIds: visiblePublicRecipes.map(\.id),
+                publicCollectionIds: collections.map(\.id)
+            )
+            for recipe in visiblePublicRecipes where missing.missingRecipeIds.contains(recipe.id) {
+                try Task.checkCancellation()
+                guard await externalShareService.updateShareMetadata(for: recipe, force: true) else {
+                    throw ExternalShareError.invalidResponse
+                }
+            }
+            for collection in collections where missing.missingCollectionIds.contains(collection.id) {
+                try Task.checkCancellation()
+                guard await externalShareService.updateCollectionShareMetadata(
+                    for: collection,
+                    recipeIds: collection.recipeIds
+                ) else {
+                    throw ExternalShareError.invalidResponse
+                }
             }
         } catch {
             AppLogger.general.warning("Public web snapshot repair failed: \(error.localizedDescription)")
@@ -813,38 +856,36 @@ struct ContentView: View {
                 }
             }
 
-            await withTaskGroup(of: (UUID, UIImage?).self) { group in
+            await withTaskGroup(of: (String, UIImage?).self) { group in
                 for user in usersById.values {
-                    guard user.cloudProfileImageRecordName != nil || user.profileImageURL != nil else {
-                        continue
-                    }
+                    guard case .photo(let photo) = user.avatarRepresentation else { continue }
 
                     group.addTask {
-                        if let imageURL = user.profileImageURL,
+                        let cacheKey = ImageCache.profileImageKey(for: photo)
+                        if let imageURL = photo.localURL,
                            let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: imageURL, maxPixelSize: 300) {
-                            return (user.id, image)
+                            return (cacheKey, image)
                         }
 
-                        guard user.cloudProfileImageRecordName != nil else {
-                            return (user.id, nil)
+                        guard photo.cloudRecordName != nil else {
+                            return (cacheKey, nil)
                         }
 
                         do {
                             if let downloadedURL = try await profileImageManager.downloadImageFromCloud(userId: user.id),
                                let image = try? await ImageLoadingPipeline.loadImage(fromFileURL: downloadedURL, maxPixelSize: 300) {
-                                return (user.id, image)
+                                return (cacheKey, image)
                             }
                         } catch {
                             AppLogger.general.warning("⚠️ Failed to warm profile image for \(user.username): \(error.localizedDescription)")
                         }
 
-                        return (user.id, nil)
+                        return (cacheKey, nil)
                     }
                 }
 
-                for await (warmedUserId, image) in group {
+                for await (cacheKey, image) in group {
                     if let image {
-                        let cacheKey = ImageCache.profileImageKey(userId: warmedUserId)
                         await MainActor.run {
                             guard CurrentUserSession.shared.userId == userId else { return }
                             ImageCache.shared.set(cacheKey, image: image)

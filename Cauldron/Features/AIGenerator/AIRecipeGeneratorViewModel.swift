@@ -116,6 +116,13 @@ final class AIRecipeGeneratorViewModel {
         return !prompt.trimmed.isEmpty || hasSelectedCategories
     }
 
+    func primaryActionState(isAvailable: Bool) -> AIRecipePrimaryActionState {
+        if isSaving { return .saving }
+        if isGenerating { return .generating }
+        if generatedRecipe != nil { return .save }
+        return .generate(isEnabled: isAvailable && canGenerate)
+    }
+
     var hasSelectedCategories: Bool {
         !selectedCuisines.isEmpty || !selectedDiets.isEmpty ||
         !selectedTimes.isEmpty || !selectedTypes.isEmpty

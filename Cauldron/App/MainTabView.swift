@@ -22,6 +22,14 @@ enum AppTab: Hashable {
 
 /// Main tab-based navigation view
 struct MainTabView: View {
+    private enum DesktopProfileLayout {
+        static let avatarSize: CGFloat = 18
+        static let rowHeight: CGFloat = 32
+        static let contentSpacing: CGFloat = 10
+        static let horizontalInset: CGFloat = 30
+        static let bottomInset: CGFloat = 8
+    }
+
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let dependencies: DependencyContainer
@@ -36,8 +44,10 @@ struct MainTabView: View {
     @State private var sidebarRefreshTask: Task<Void, Never>?
     @State private var activeShareImportAcknowledgement: ShareImportAcknowledgement?
     @State private var isOpeningRecipeIntent = false
+    @State private var showingDesktopProfileSheet = false
     @Binding private var pendingSharedContent: ContentView.SharedContentWrapper?
     @ObservedObject private var connectionManager: ConnectionManager
+    @ObservedObject private var currentUserSession = CurrentUserSession.shared
 
     @State private var searchNavigationPath = NavigationPath()
 
@@ -119,6 +129,21 @@ struct MainTabView: View {
                 destinationRecipeID: request.destinationRecipeID,
                 onSuccessfulSave: completeActiveDurableImport
             )
+            .appSheetSizing(.large)
+        }
+        .sheet(isPresented: $showingDesktopProfileSheet) {
+            NavigationStack {
+                if let user = currentUserSession.currentUser {
+                    UserProfileView(user: user, dependencies: dependencies)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done", systemImage: "checkmark") {
+                                    showingDesktopProfileSheet = false
+                                }
+                            }
+                        }
+                }
+            }
             .appSheetSizing(.large)
         }
         .tint(.cauldronOrange)
@@ -426,6 +451,41 @@ struct MainTabView: View {
                 )
             }
             #endif
+        }
+        .tabViewSidebarBottomBar {
+            if RuntimeEnvironment.prefersDesktopWorkspace,
+               let user = currentUserSession.currentUser {
+                Button {
+                    showingDesktopProfileSheet = true
+                } label: {
+                    HStack(spacing: DesktopProfileLayout.contentSpacing) {
+                        ProfileAvatar(
+                            user: user,
+                            size: DesktopProfileLayout.avatarSize,
+                            dependencies: dependencies
+                        )
+                            .accessibilityHidden(true)
+                        Text(user.displayName)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: DesktopProfileLayout.rowHeight,
+                            maxHeight: DesktopProfileLayout.rowHeight,
+                            alignment: .leading
+                        )
+                        .contentShape(.rect)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(user.displayName), profile and settings")
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DesktopProfileLayout.horizontalInset)
+                .padding(.bottom, DesktopProfileLayout.bottomInset)
+                .foregroundStyle(.secondary)
+                .accessibilityHint("Opens your profile and app settings")
+            }
         }
         // The adaptive tab container owns Catalyst's native toolbar. Remove
         // its redundant app-title item here so feature toolbar controls stay.

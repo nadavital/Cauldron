@@ -4,10 +4,14 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
+import argparse
+import hashlib
+from io import BytesIO
+import json
 import os
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageCms, ImageDraw, ImageFilter, ImageFont
 
 
 # Defaults to the repository's appstorescreenshots directory; can be overridden
@@ -22,7 +26,7 @@ OUT_ROOT = ROOT / 'output' / 'cauldron_2_0_appstore'
 
 IPHONE_SOURCE = ROOT / 'appscreenshots' / 'iPhone' / '2.0'
 IPAD_SOURCE = ROOT / 'appscreenshots' / 'iPad' / '2.0'
-MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '1.3'
+MAC_SOURCE = ROOT / 'appscreenshots' / 'Mac' / '2.0'
 
 BG_MOBILE = ROOT / 'background.png'
 BG_MAC = ROOT / 'mac wallpaper'
@@ -66,6 +70,7 @@ IPAD_FRAME = first_existing_path(
 MAC_FRAME = first_existing_path(
     'CAULDRON_MAC_FRAME',
     (
+        str(ROOT / 'frames' / 'MacBook Pro M5 14-inch Silver.png'),
         '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro M5 14-inch Silver.png',
         '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro*14*Silver.png',
         '/Volumes/Bezel-MacBook-Pro-M5/PNG/MacBook Pro*.png',
@@ -105,7 +110,7 @@ class PlatformSpec:
 IPHONE_SHOTS = (
     Shot('cook_tab', 'All your recipes. Finally together.', ''),
     Shot('recipe_view', 'Cook without losing your place.', ''),
-    Shot('search_tab', 'Find tonight\'s answer in seconds.', ''),
+    Shot('search_tab', 'Find your next favorite recipe.', ''),
     Shot('generate_recipe', 'Turn what you have into dinner.', ''),
     Shot('friends_tab', 'Share recipes, not screenshots.', ''),
     Shot('collection_view', 'Organize it your way.', ''),
@@ -115,19 +120,19 @@ IPHONE_SHOTS = (
 IPAD_SHOTS = (
     Shot('cook_tab', 'All your recipes. Finally together.', ''),
     Shot('recipe_view', 'Cook without losing your place.', ''),
-    Shot('search_results', 'Find tonight\'s answer in seconds.', ''),
+    Shot('search_results', 'Find your next favorite recipe.', ''),
     Shot('friends_tab', 'Share recipes, not screenshots.', ''),
     Shot('cook_mode', 'Cook with everything in view.', ''),
 )
 
 MAC_SHOTS = (
-    Shot('cook_tab', '', 'Add. Cook. Share.'),
-    Shot('recipe_view', 'Recipe View', 'Follow every recipe step by step with ingredients and timing in view.'),
-    Shot('friends_tab', 'Share', 'Follow friends, swap recipes, and discover what to cook next.'),
-    Shot('generate_recipe', 'Generate', 'Turn ingredients you have into instant recipe ideas.'),
-    Shot('search_tab', 'Search', 'Find your next favorite recipe.'),
-    Shot('profile_view', 'Level Up', 'Earn progress and unlock new app icons as you cook.'),
-    Shot('collection_view', 'Collections', 'Organize favorites into collections faster.'),
+    Shot('cook_tab', 'All your recipes. Finally together.', ''),
+    Shot('recipe_view', 'Cook with everything in view.', ''),
+    Shot('friends_tab', 'Share recipes, not screenshots.', ''),
+    Shot('generate_recipe', 'Turn what you have into dinner.', ''),
+    Shot('search_tab', 'Find your next favorite recipe.', ''),
+    Shot('profile_view', 'Your recipes. Your cooking story.', ''),
+    Shot('collection_view', 'Organize it your way.', ''),
 )
 
 WEBSITE_SOURCE_NAMES = {
@@ -182,10 +187,10 @@ SPECS = (
     PlatformSpec(
         name='Mac',
         canvas_size=(2560, 1600),
-        top_area=316,
-        bottom_area=142,
-        side_margin=136,
-        title_size=128,
+        top_area=250,
+        bottom_area=60,
+        side_margin=96,
+        title_size=100,
         body_size=52,
         text_left_margin=128,
         icon_size_first=98,
@@ -446,12 +451,26 @@ def make_generated_mac_wallpaper(size: tuple[int, int]) -> Image.Image:
 
 def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Image.Image | None, corner_radius: int) -> Image.Image:
     if not frame_path.exists():
-        return compose_generated_mac_frame(screenshot_path, corner_radius)
+        raise RuntimeError('Missing official MacBook bezel. Set CAULDRON_MAC_FRAME or install the frame under appstorescreenshots/frames.')
 
     frame = Image.open(frame_path).convert('RGBA')
-    shot = crop_black_border(Image.open(screenshot_path).convert('RGB'))
-    x0, y0, x1, y1 = find_screen_bbox(frame)
-    sw, sh = x1 - x0 + 1, y1 - y0 + 1
+    shot = Image.open(screenshot_path).convert('RGBA')
+    # macOS window captures carry the display's ICC profile. Convert instead
+    # of discarding it, so the app's orange and food photos retain their color.
+    if source_profile := shot.info.get('icc_profile'):
+        shot = ImageCms.profileToProfile(
+            shot,
+            ImageCms.ImageCmsProfile(BytesIO(source_profile)),
+            ImageCms.createProfile('sRGB'),
+            outputMode='RGBA',
+        )
+    # Window captures include transparent padding and a system drop shadow.
+    # Trim only that outer capture chrome; preserve the actual UI and corners.
+    opaque_bbox = shot.getchannel('A').point(lambda value: 255 if value > 250 else 0).getbbox()
+    if opaque_bbox:
+        shot = shot.crop(opaque_bbox)
+    (x0, y0, x1, y1), screen_mask = find_screen_region(frame)
+    sw, sh = x1 - x0, y1 - y0
 
     if wallpaper is None:
         screen_bg = make_generated_mac_wallpaper((sw, sh)).convert('RGBA')
@@ -459,16 +478,14 @@ def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Im
         screen_bg = fit_cover(wallpaper, (sw, sh)).convert('RGBA')
 
     # Floating app window on top of wallpaper inside the Mac screen.
-    window_w = int(round(sw * 0.78))
+    window_w = int(round(sw * 0.90))
     window_h = int(round(window_w * shot.height / shot.width))
-    if window_h > int(sh * 0.70):
-        window_h = int(sh * 0.70)
+    if window_h > int(sh * 0.88):
+        window_h = int(sh * 0.88)
         window_w = int(round(window_h * shot.width / shot.height))
 
     window_img = fit_cover(shot, (window_w, window_h)).convert('RGBA')
-    window_mask = rounded_mask((window_w, window_h), corner_radius)
-    window = Image.new('RGBA', (window_w, window_h), (0, 0, 0, 0))
-    window.paste(window_img, (0, 0), window_mask)
+    window = window_img
     shadow = Image.new('RGBA', (window_w + 80, window_h + 80), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow)
     shadow_draw.rounded_rectangle((40, 40, 40 + window_w, 40 + window_h), radius=corner_radius, fill=(0, 0, 0, 105))
@@ -477,11 +494,11 @@ def compose_macbook_frame(frame_path: Path, screenshot_path: Path, wallpaper: Im
     sx = (sw - window_w) // 2
     sy = int(round((sh - window_h) * 0.48))
 
-    screen_bg.paste(shadow, (sx - 40, sy - 34), shadow)
-    screen_bg.paste(window, (sx, sy), window)
+    screen_bg.alpha_composite(shadow, (sx - 40, sy - 34))
+    screen_bg.alpha_composite(window, (sx, sy))
 
     base = Image.new('RGBA', frame.size, (0, 0, 0, 0))
-    base.paste(screen_bg, (x0, y0), screen_bg)
+    base.paste(screen_bg, (x0, y0), screen_mask)
     out = Image.alpha_composite(base, frame)
     return crop_to_visible_alpha(out)
 
@@ -516,7 +533,7 @@ def draw_copy(panel_rgb: Image.Image, shot: Shot, spec: PlatformSpec, idx: int, 
     max_width = spec.canvas_size[0] - (2 * spec.text_left_margin)
     title_lines = wrap_text(shot.title, title_font, max_width)
 
-    if spec.name in ('iPhone', 'iPad'):
+    if spec.name in ('iPhone', 'iPad', 'Mac'):
         line_boxes = [draw.textbbox((0, 0), line, font=title_font) for line in title_lines]
         line_heights = [box[3] - box[1] for box in line_boxes]
         total_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
@@ -668,7 +685,10 @@ def render_platform(spec: PlatformSpec, icon_source: Image.Image) -> None:
         draw_copy(panel, shot, spec, i, icon_source)
 
         out_path = out_dir / f'{i:02d}_{shot.key}.png'
-        panel.save(out_path, format='PNG', optimize=True)
+        color_metadata = {}
+        if spec.name == 'Mac':
+            color_metadata['icc_profile'] = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+        panel.save(out_path, format='PNG', optimize=True, **color_metadata)
         print(f'wrote {out_path}')
 
 
@@ -701,6 +721,13 @@ def write_sequence_preview(spec: PlatformSpec) -> None:
     )
     print(f'wrote {full}')
     print(f'wrote {preview}')
+    if platform == 'Mac':
+        tile_w, tile_h = 800, 500
+        grid = Image.new('RGB', (tile_w * 2, tile_h * ((len(ims) + 1) // 2)), (251, 248, 243))
+        for index, im in enumerate(ims):
+            grid.paste(im.resize((tile_w, tile_h), Image.Resampling.LANCZOS),
+                       ((index % 2) * tile_w, (index // 2) * tile_h))
+        grid.save(qa_dir / 'mac_review_grid.png', format='PNG', optimize=True)
 
 
 def write_iphone_65_outputs(spec: PlatformSpec) -> None:
@@ -722,6 +749,9 @@ def write_iphone_65_outputs(spec: PlatformSpec) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description='Render the Cauldron App Store screenshot sets.')
+    parser.add_argument('--platform', action='append', choices=('iPhone', 'iPad', 'Mac'))
+    args = parser.parse_args()
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     icon_path = ICON_PATH
     if not icon_path.exists():
@@ -729,6 +759,8 @@ def main() -> None:
     icon = Image.open(icon_path).convert('RGBA')
 
     for spec in SPECS:
+        if args.platform and spec.name not in args.platform:
+            continue
         if spec.name == 'iPhone' and not IPHONE_SOURCE.exists():
             spec = PlatformSpec(
                 name=spec.name,
@@ -756,6 +788,23 @@ def main() -> None:
         write_sequence_preview(spec)
         if spec.name == 'iPhone':
             write_iphone_65_outputs(spec)
+
+        manifest = {
+            'platform': spec.name,
+            'dimensions': spec.canvas_size,
+            'frame': str(spec.frame_path),
+            'wallpaper': str(BG_MAC) if spec.name == 'Mac' else None,
+            'screenshots': [
+                {
+                    'file': f'{index:02d}_{shot.key}.png',
+                    'headline': shot.title,
+                    'source': str(source_path(spec, shot.key)),
+                    'source_sha256': hashlib.sha256(source_path(spec, shot.key).read_bytes()).hexdigest(),
+                }
+                for index, shot in enumerate(spec.shots, start=1)
+            ],
+        }
+        (OUT_ROOT / spec.name / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
     print(f'Done. Output root: {OUT_ROOT}')
 

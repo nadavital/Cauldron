@@ -214,6 +214,24 @@ extension RecipeDetailView {
         }
     }
 
+    func refreshRecipeImageMetadata() async {
+        do {
+            guard let updatedRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id),
+                  RecipeDetailDisplayPolicy.shouldRefreshHeroImage(from: recipe, to: updatedRecipe) else {
+                return
+            }
+            recipe = updatedRecipe
+            dependencies.libraryPresentationStore.seedRecipe(
+                updatedRecipe,
+                sharedBy: sharedBy,
+                sharedAt: sharedAt,
+                relation: recipeLibraryRelation
+            )
+        } catch {
+            AppLogger.general.warning("Failed to refresh recipe image metadata: \(error.localizedDescription)")
+        }
+    }
+
     func refreshPublicRecipeIfNeeded() async {
         guard RecipeDetailDisplayPolicy.shouldRefreshPublicRecipeOnOpen(
             recipe,
@@ -365,158 +383,114 @@ extension RecipeDetailView {
         }
     }
 
-    func saveAsPreviewIfNeeded() async {
+    func persistPreviewInBackground(_ sourceRecipe: Recipe) async {
         // Safety check: Don't create preview for recipes owned by current user
         // This prevents race conditions where isOwnedByCurrentUser() returns false
         // for a recipe that was just created (before ownerId is properly set on the view's recipe object)
         if let currentUserId = CurrentUserSession.shared.userId,
-           let recipeOwnerId = recipe.ownerId,
+           let recipeOwnerId = sourceRecipe.ownerId,
            currentUserId == recipeOwnerId {
-            AppLogger.general.debug("Skipping preview save - recipe belongs to current user: \(recipe.title)")
+            AppLogger.general.debug("Skipping preview save - recipe belongs to current user: \(sourceRecipe.title)")
             return
         }
 
         do {
-            if let existingRecipe = try await dependencies.recipeRepository.fetch(id: recipe.id) {
-                // Recipe already exists locally - don't create a duplicate
-                // Only download image if this is a preview recipe (not user's own recipe)
-                if existingRecipe.isPreview {
-                    let refreshedPreview = Recipe(
-                        id: recipe.id,
-                        title: recipe.title,
-                        ingredients: recipe.ingredients,
-                        steps: recipe.steps,
-                        yields: recipe.yields,
-                        totalMinutes: recipe.totalMinutes,
-                        tags: recipe.tags,
-                        nutrition: recipe.nutrition,
-                        sourceURL: recipe.sourceURL,
-                        sourceTitle: recipe.sourceTitle,
-                        notes: recipe.notes,
-                        imageURL: existingRecipe.imageURL,
-                        isFavorite: existingRecipe.isFavorite,
-                        visibility: recipe.visibility,
-                        ownerId: recipe.ownerId,
-                        cloudRecordName: recipe.cloudRecordName,
-                        cloudImageRecordName: recipe.cloudImageRecordName,
-                        imageModifiedAt: recipe.imageModifiedAt,
-                        createdAt: recipe.createdAt,
-                        updatedAt: recipe.updatedAt,
-                        originalRecipeId: recipe.originalRecipeId,
-                        originalCreatorId: recipe.originalCreatorId,
-                        originalCreatorName: recipe.originalCreatorName,
-                        savedAt: recipe.savedAt,
-                        sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
-                        followsSourceUpdates: recipe.followsSourceUpdates,
-                        relatedRecipeIds: recipe.relatedRecipeIds,
-                        isPreview: true
-                    )
-
-                    try await dependencies.recipeRepository.update(
-                        refreshedPreview,
-                        shouldUpdateTimestamp: false,
-                        skipImageSync: true,
-                        skipCloudSync: true
-                    )
-                    self.recipe = refreshedPreview
-                    AppLogger.general.info("🔄 Refreshed existing preview recipe: \(recipe.title)")
-
-                    if refreshedPreview.imageURL == nil && recipe.cloudImageRecordName != nil {
-                        AppLogger.general.info("📥 Downloading image for existing preview recipe: \(recipe.title)")
-                        if let filename = try await dependencies.imageManager.downloadImageFromCloud(
-                            recipeId: recipe.id,
-                            fromPublic: true
-                        ) {
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                            let updatedRecipe = refreshedPreview.withImageState(
-                                imageURL: imageURL,
-                                cloudImageRecordName: refreshedPreview.cloudImageRecordName,
-                                imageModifiedAt: refreshedPreview.imageModifiedAt
-                            )
-                            try await dependencies.recipeRepository.update(
-                                updatedRecipe,
-                                shouldUpdateTimestamp: false,
-                                skipImageSync: true,
-                                skipCloudSync: true
-                            )
-                            AppLogger.general.info("✅ Updated preview with image: \(recipe.title)")
-
-                            self.recipe = updatedRecipe
-                            imageRefreshID = UUID()
-                        }
-                    } else if refreshedPreview.imageURL != existingRecipe.imageURL ||
-                                refreshedPreview.cloudImageRecordName != existingRecipe.cloudImageRecordName ||
-                                refreshedPreview.imageModifiedAt != existingRecipe.imageModifiedAt {
-                        imageRefreshID = UUID()
-                    }
-                }
-
+            let existingRecipe = try await dependencies.recipeRepository.fetch(id: sourceRecipe.id)
+            if let existingRecipe, !existingRecipe.isPreview {
                 return
             }
 
+            var stableImageURL = existingRecipe?.imageURL
+            if stableImageURL.map({ FileManager.default.fileExists(atPath: $0.path) }) != true {
+                stableImageURL = nil
+            }
+
+            try Task.checkCancellation()
             let previewRecipe = Recipe(
-                id: recipe.id,
-                title: recipe.title,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps,
-                yields: recipe.yields,
-                totalMinutes: recipe.totalMinutes,
-                tags: recipe.tags,
-                nutrition: recipe.nutrition,
-                sourceURL: recipe.sourceURL,
-                sourceTitle: recipe.sourceTitle,
-                notes: recipe.notes,
-                imageURL: nil,
-                isFavorite: false,
-                visibility: recipe.visibility,
-                ownerId: recipe.ownerId,
-                cloudRecordName: recipe.cloudRecordName,
-                cloudImageRecordName: recipe.cloudImageRecordName,
-                imageModifiedAt: recipe.imageModifiedAt,
-                createdAt: recipe.createdAt,
-                updatedAt: recipe.updatedAt,
-                originalRecipeId: recipe.originalRecipeId,
-                originalCreatorId: recipe.originalCreatorId,
-                originalCreatorName: recipe.originalCreatorName,
-                savedAt: recipe.savedAt,
-                sourceRecipeUpdatedAt: recipe.sourceRecipeUpdatedAt,
-                followsSourceUpdates: recipe.followsSourceUpdates,
-                relatedRecipeIds: recipe.relatedRecipeIds,
+                id: sourceRecipe.id,
+                title: sourceRecipe.title,
+                ingredients: sourceRecipe.ingredients,
+                steps: sourceRecipe.steps,
+                yields: sourceRecipe.yields,
+                totalMinutes: sourceRecipe.totalMinutes,
+                tags: sourceRecipe.tags,
+                nutrition: sourceRecipe.nutrition,
+                sourceURL: sourceRecipe.sourceURL,
+                sourceTitle: sourceRecipe.sourceTitle,
+                notes: sourceRecipe.notes,
+                imageURL: stableImageURL,
+                isFavorite: existingRecipe?.isFavorite ?? false,
+                visibility: sourceRecipe.visibility,
+                ownerId: sourceRecipe.ownerId,
+                cloudRecordName: sourceRecipe.cloudRecordName,
+                cloudImageRecordName: sourceRecipe.cloudImageRecordName,
+                imageModifiedAt: sourceRecipe.imageModifiedAt,
+                createdAt: sourceRecipe.createdAt,
+                updatedAt: sourceRecipe.updatedAt,
+                originalRecipeId: sourceRecipe.originalRecipeId,
+                originalCreatorId: sourceRecipe.originalCreatorId,
+                originalCreatorName: sourceRecipe.originalCreatorName,
+                savedAt: sourceRecipe.savedAt,
+                sourceRecipeUpdatedAt: sourceRecipe.sourceRecipeUpdatedAt,
+                followsSourceUpdates: sourceRecipe.followsSourceUpdates,
+                relatedRecipeIds: sourceRecipe.relatedRecipeIds,
                 isPreview: true
             )
 
-            try await dependencies.recipeRepository.create(previewRecipe, skipCloudSync: true)
-            AppLogger.general.info("📝 Saved recipe as preview: \(recipe.title)")
+            if existingRecipe != nil {
+                try await dependencies.recipeRepository.update(
+                    previewRecipe,
+                    shouldUpdateTimestamp: false,
+                    skipImageSync: true,
+                    skipCloudSync: true
+                )
+            } else {
+                try await dependencies.recipeRepository.create(previewRecipe, skipCloudSync: true)
+            }
+            AppLogger.general.info("📝 Persisted offline preview: \(sourceRecipe.title)")
 
-            if recipe.cloudImageRecordName != nil {
-                do {
-                    if let filename = try await dependencies.imageManager.downloadImageFromCloud(
-                        recipeId: previewRecipe.id,
-                        fromPublic: true
-                        ) {
-                            let imageURL = await dependencies.imageManager.imageURL(for: filename)
-                        let updatedPreview = previewRecipe.withImageState(
-                            imageURL: imageURL,
-                            cloudImageRecordName: previewRecipe.cloudImageRecordName,
-                            imageModifiedAt: previewRecipe.imageModifiedAt
+            // Make the recipe durable before any remote/retried image work.
+            // Image hydration is an optional second phase so suspension or
+            // termination cannot lose the canonical preview itself.
+            if stableImageURL == nil,
+               (sourceRecipe.imageURL != nil || sourceRecipe.cloudImageRecordName != nil) {
+                let imageResult = await dependencies.recipeImageService.loadImage(
+                    forRecipeId: sourceRecipe.id,
+                    localURL: sourceRecipe.imageURL,
+                    ownerId: sourceRecipe.ownerId,
+                    targetPixelSize: 1_200,
+                    cacheVariant: "hero",
+                    privateRecordName: sourceRecipe.cloudRecordName,
+                    cacheIdentity: sourceRecipe.imageModifiedAt.map(RecipeImageView.cacheIdentity)
+                )
+                if case .success(let image) = imageResult {
+                    let managedURL = await dependencies.imageManager.imageURL(recipeId: sourceRecipe.id)
+                    if FileManager.default.fileExists(atPath: managedURL.path) {
+                        stableImageURL = managedURL
+                    } else {
+                        let filename = try await dependencies.imageManager.saveImage(
+                            image,
+                            recipeId: sourceRecipe.id
                         )
+                        stableImageURL = await dependencies.imageManager.imageURL(for: filename)
+                    }
+                    try Task.checkCancellation()
+                    if let currentPreview = try await dependencies.recipeRepository.fetch(id: sourceRecipe.id),
+                       currentPreview.isPreview,
+                       currentPreview.imageURL != stableImageURL {
                         try await dependencies.recipeRepository.update(
-                            updatedPreview,
+                            currentPreview.withImageURL(stableImageURL),
                             shouldUpdateTimestamp: false,
                             skipImageSync: true,
                             skipCloudSync: true
                         )
-                        AppLogger.general.info("✅ Downloaded image for preview recipe: \(recipe.title)")
-
-                        self.recipe = updatedPreview
-                        imageRefreshID = UUID()
                     }
-                } catch {
-                    AppLogger.general.warning("Failed to download image for preview: \(error.localizedDescription)")
                 }
             }
+        } catch is CancellationError {
+            return
         } catch {
-            AppLogger.general.error("Failed to save preview recipe: \(error.localizedDescription)")
+            AppLogger.general.error("Failed to persist preview recipe: \(error.localizedDescription)")
         }
     }
 

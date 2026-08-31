@@ -20,7 +20,8 @@ private struct CookTabDerivedSections {
         stats: [UUID: (count: Int, lastCooked: Date)],
         now: Date = Date(),
         calendar: Calendar = .current
-    ) -> CookTabDerivedSections {
+    ) throws -> CookTabDerivedSections {
+        try Task.checkCancellation()
         let hour = calendar.component(.hour, from: now)
         let isWeekend = calendar.isDateInWeekend(now)
         let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
@@ -55,6 +56,7 @@ private struct CookTabDerivedSections {
             .shuffled()
             .prefix(10)
             .map { $0 }
+        try Task.checkCancellation()
 
         let rotationCandidates = allRecipes.filter { recipe in
             guard let stat = stats[recipe.id] else { return false }
@@ -78,11 +80,15 @@ private struct CookTabDerivedSections {
             return true
         }
         .shuffled()
-        .prefix(10)
-        .map { $0 }
+            .prefix(10)
+            .map { $0 }
+        try Task.checkCancellation()
 
         var tagGroups: [String: [Recipe]] = [:]
-        for recipe in allRecipes {
+        for (index, recipe) in allRecipes.enumerated() {
+            if index.isMultiple(of: 64) {
+                try Task.checkCancellation()
+            }
             for tag in recipe.tags {
                 tagGroups[tag.name, default: []].append(recipe)
             }
@@ -122,6 +128,7 @@ private struct CookTabDerivedSections {
             }
 
         finalTagRows.append(contentsOf: standardTags)
+        try Task.checkCancellation()
 
         return CookTabDerivedSections(
             quickRecipes: quickRecipes,
@@ -134,6 +141,10 @@ private struct CookTabDerivedSections {
 
 @MainActor
 @Observable final class CookTabViewModel {
+    private static let performanceSignposter = OSSignposter(
+        subsystem: "com.cauldron",
+        category: "CookDashboard"
+    )
     var allRecipes: [Recipe] = []
     var recentlyAddedRecipes: [Recipe] = []
     var recentlyCookedRecipes: [Recipe] = []
@@ -637,7 +648,7 @@ private struct CookTabDerivedSections {
             libraryRecipes,
             currentUserId: CurrentUserSession.shared.userId
         )
-        let recentIdSet = Set(try dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
+        let recentIdSet = Set(try await dependencies.cookingHistoryRepository.fetchUniqueRecentlyCookedRecipeIds(limit: 10))
 
         allRecipes = recipes
         recentlyAddedRecipes = recipes.sorted { $0.createdAt > $1.createdAt }
@@ -658,11 +669,26 @@ private struct CookTabDerivedSections {
         let allRecipes = self.allRecipes
         smartRecommendationsTask?.cancel()
         smartRecommendationsTask = Task { @MainActor in
+            let signpostID = Self.performanceSignposter.makeSignpostID()
+            let interval = Self.performanceSignposter.beginInterval(
+                "DerivedSections",
+                id: signpostID
+            )
+            defer {
+                Self.performanceSignposter.endInterval("DerivedSections", interval)
+            }
             do {
-                let stats = try dependencies.cookingHistoryRepository.fetchCookingStats()
-                let derivedSections = await Task.detached(priority: .utility) {
-                    CookTabDerivedSections.build(allRecipes: allRecipes, stats: stats)
-                }.value
+                let stats = try await dependencies.cookingHistoryRepository.fetchCookingStats(
+                    for: allRecipes.map(\.id)
+                )
+                let derivedTask = Task.detached(priority: .utility) {
+                    try CookTabDerivedSections.build(allRecipes: allRecipes, stats: stats)
+                }
+                let derivedSections = try await withTaskCancellationHandler {
+                    try await derivedTask.value
+                } onCancel: {
+                    derivedTask.cancel()
+                }
 
                 guard !Task.isCancelled else { return }
                 quickRecipes = derivedSections.quickRecipes
