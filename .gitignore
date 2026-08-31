@@ -156,3 +156,35 @@ tools/recipe_schema_model/artifacts/
 # resumable migration checkpoints out of source control.
 tools/cloudkit_public_search_backfill/backfill-checkpoint*.json
 tools/cloudkit_public_search_backfill/*.pem
+
+# Credentials and local release tooling (examples remain publishable).
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.p8
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+.asc/
+*.xcarchive/
+*.pkg
+node_modules/
+*.store
+*.sqlite
+*.sqlite3
+*.db
+!CauldronTests/Fixtures/LegacyStoreV1_5/default.store
+
+# Private operational notes and visual QA; keep reusable agent instructions.
+.agent/*
+!.agent/PLANS.md
+!.agent/workflows/
+!.agent/workflows/**
