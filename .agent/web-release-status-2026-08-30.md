@@ -1,5 +1,25 @@
 # Website follow-up status — 2026-08-30
 
+## Consolidation and domain completion (latest)
+
+- `main` and `origin/main` were fast-forwarded to `630f2c8`; all consolidated
+  app/website work is included. The feature branch and old detached worktrees
+  were preserved, along with unrelated local QA artifacts.
+- The updated hosted monitor passed on GitHub from main:
+  https://github.com/nadavital/Cauldron/actions/runs/33347677542
+- Vercel DNS additions saved and verified publicly:
+  - `www` CNAME `cauldron-f900a.web.app.`
+  - `_acme-challenge.www` TXT with Firebase's current certificate token.
+- Existing apex A `199.36.158.100`, Firebase ownership TXT, and apex certificate
+  TXT were not modified. Non-www remains the canonical app/web origin.
+- Firebase's existing www resource redirects to `cauldronrecipes.com`, but its
+  certificate is still validating. An HTTPS probe failed hostname validation;
+  do not claim www readiness until certificate issuance and a path/query-
+  preserving redirect are verified without disabling TLS verification.
+- Broader Production Readiness CI was still running at the last check:
+  https://github.com/nadavital/Cauldron/actions/runs/33347669028
+- No new App Store build or submission was initiated.
+
 ## Production release verification (latest)
 
 - User explicitly approved the previously blocked localhost and production
