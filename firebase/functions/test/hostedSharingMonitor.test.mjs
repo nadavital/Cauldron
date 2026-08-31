@@ -116,13 +116,15 @@ test("homepage monitor verifies bounded public image responses and reports broke
     let requests = 0;
     await verifyHomepageImages(productionHomeHTML, async (_url, options) => {
         requests++;
-        assert.equal(options.method, "HEAD");
+        assert.equal(options.method, "GET");
+        assert.equal(options.headers.Range, "bytes=0-31");
         assert.equal(options.redirect, "error");
-        return new Response(null, { headers: { "content-type": "image/jpeg" } });
+        return new Response(Uint8Array.from([255,216,255,224]), { status: 206, headers: { "content-type": "application/octet-stream" } });
     });
     assert.equal(requests, 1);
     await assert.rejects(verifyHomepageImages(productionHomeHTML, async () => new Response(null, { status: 404 })), /image unavailable/);
     await assert.rejects(verifyHomepageImages(productionHomeHTML, async () => new Response("not an image", { headers: { "content-type": "text/html" } })), /image unavailable/);
+    await assert.rejects(verifyHomepageImages(productionHomeHTML, async () => new Response("not an image", { headers: { "content-type": "image/jpeg" } })), /image unavailable/);
 });
 
 test("homepage monitor follows real recipe cards and rejects unavailable or mismatched pages", async () => {

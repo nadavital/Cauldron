@@ -86,12 +86,28 @@ export async function verifyHomepageImages(html, request = fetch) {
     const cards = homepageRecipeCards(html).slice(0, 3);
     for (const card of cards) {
         try {
-            let response = await request(card.imageURL, { method: "HEAD", redirect: "error", signal: AbortSignal.timeout(15_000) });
-            if ([405, 501].includes(response.status)) {
-                response = await request(card.imageURL, { method: "GET", headers: { Range: "bytes=0-31" }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+            // CloudKit can reject HEAD and return photos as octet-stream. Check
+            // bytes instead; cancel even if the origin ignores the Range header.
+            const response = await request(card.imageURL, { method: "GET", headers: { Range: "bytes=0-31" }, redirect: "error", signal: AbortSignal.timeout(15_000) });
+            const reader = response.body?.getReader();
+            const bytes = Buffer.alloc(32);
+            let length = 0;
+            try {
+                if (!response.ok || !reader) throw new Error();
+                while (length < bytes.length) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    const count = Math.min(chunk.value.length, bytes.length - length);
+                    bytes.set(chunk.value.subarray(0, count), length);
+                    length += count;
+                }
+            } finally {
+                await reader?.cancel();
             }
-            await response.body?.cancel();
-            if (!response.ok || !(response.headers.get("content-type") ?? "").startsWith("image/")) throw new Error();
+            const jpeg = length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+            const png = length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+            const webp = length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+            if (!jpeg && !png && !webp) throw new Error();
         } catch {
             throw new Error(`homepage image unavailable for ${card.path}`);
         }

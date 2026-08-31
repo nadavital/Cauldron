@@ -1,6 +1,36 @@
 # Website follow-up status — 2026-08-30
 
-## Subsequent header/discovery follow-up
+## Production release verification (latest)
+
+- User explicitly approved the previously blocked localhost and production
+  preflight operations. Browser access and signed checks succeeded.
+- Full preflight passed: 102 tests, production CloudKit User/UsernameClaim/
+  SharedRecipe/Collection checks, and the high-severity dependency audit gate.
+  Seven moderate transitive uuid advisory entries remain; no blind downgrade.
+- All seven legacy mutation endpoints returned HTTP 426 before deployment.
+- Firebase Functions deployment completed, including discovery, owner-manifest
+  reconciliation, and public-profile backfill. Hosting/rules/indexes deployed.
+- Backfill scheduler is ENABLED, every two hours; first successful execution
+  has not yet been observed. Do not claim additional creators were indexed.
+- Browser QA caught homepage image intrinsic sizing expanding the hero after
+  loading. Images now fill a positioned container; desktop hero stayed 420px
+  with all nine current photos loaded. The previewHome correction was deployed
+  separately and confirmed in production HTML.
+- Live desktop/mobile homepage/category checks and mobile recipe/collection
+  checks showed no horizontal overflow. Recipe had 10 ingredients and six steps.
+- `/u/nadav` now has matching canonical metadata. The legacy UUID profile route
+  redirects to it. Shared headers are present across checked live pages.
+- Hosted monitor passed all 17 route/API checks plus sampled homepage images
+  and recipe destinations. Initial image probe failed because Apple returns
+  HEAD 501 and JPEG bytes as octet-stream. It now checks bounded JPEG/PNG/WebP
+  signatures and cancels the response stream instead of relying on MIME alone.
+- QA screenshots: `.agent/web-release-qa-2026-08-30/` (local, not published).
+- Remaining: the default-branch scheduled GitHub monitor still uses old profile
+  expectations. User was asked whether to merge the consolidated branch into
+  main; no merge performed without that choice. `www` DNS remains unchanged
+  and pending its separate approval. Native device app-opening not retested.
+
+## Implementation history (before deployment)
 
 - All active public templates now use one header markup/style implementation.
 - Discovery combines 24 recent summaries with an age-independent, wrapping

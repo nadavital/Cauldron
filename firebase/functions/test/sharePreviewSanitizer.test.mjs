@@ -876,6 +876,8 @@ test("homepage presents only supplied validated recipes and complete icon metada
     assert.match(html, /data-categories="\[&quot;Dessert&quot;,&quot;Baking&quot;\]"/);
     assert.match(html, /class="discovery-grid"/);
     assert.match(html, /class="discovery-card"/);
+    assert.match(html, /\.recipe-media\{position:relative;aspect-ratio:4\/3/);
+    assert.match(html, /\.recipe-media img\{position:absolute;inset:0;width:100%;height:100%/);
     assert.match(html, /fetchpriority="high"/);
     assert.match(html, /window\.cauldronRecipeImageFailed/);
     assert.match(html, /https:\/\/www\.nadavavital\.com\/apps\/support\/\?app=Cauldron/);
