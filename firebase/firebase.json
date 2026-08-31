@@ -27,12 +27,24 @@
         ],
         "rewrites": [
             {
+                "source": "/recipes",
+                "function": "previewCatalog"
+            },
+            {
                 "source": "/sitemap.xml",
+                "function": "previewSitemap"
+            },
+            {
+                "source": "/sitemaps/**",
                 "function": "previewSitemap"
             },
             {
                 "source": "/",
                 "function": "previewHome"
+            },
+            {
+                "source": "/recipe/*/image/*.webp",
+                "function": "previewRecipeThumbnail"
             },
             {
                 "source": "/recipe/*/social-card.png",

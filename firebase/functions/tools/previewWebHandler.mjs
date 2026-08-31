@@ -27,7 +27,7 @@ export function createPreviewHandler({ publicDirectory, loadHome, renderHome, re
                 response.end(head ? undefined : html);
                 return;
             }
-            if (/^\/(recipe|u|profile|collection|invite)(\/|$)/.test(url.pathname)) {
+            if (/^\/(recipe|recipes|u|profile|collection|invite|sitemaps)(\/|$)/.test(url.pathname) || url.pathname === "/sitemap.xml") {
                 response.writeHead(302, { ...headers, Location: `https://cauldronrecipes.com${url.pathname}${url.search}` }).end();
                 return;
             }

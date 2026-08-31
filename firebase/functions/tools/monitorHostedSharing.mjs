@@ -37,10 +37,23 @@ export function validateSitemap(xml, origin) {
     for (const location of locations) {
         const url = new URL(location);
         if (url.origin !== origin || url.search || url.hash ||
-            (url.pathname !== "/" && !/^\/recipe\/[0-9a-f-]{36}$/i.test(url.pathname))) {
+            (url.pathname !== "/" && url.pathname !== "/recipes" && !/^\/recipe\/[0-9a-f-]{36}$/i.test(url.pathname))) {
             throw new Error("sitemap contains a noncanonical URL");
         }
     }
+}
+
+export function validateSitemapIndex(xml, origin) {
+    const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+    if (!xml.includes('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">') ||
+        !locations.length || new Set(locations).size !== locations.length) throw new Error("invalid sitemap index");
+    for (const location of locations) {
+        const url = new URL(location);
+        if (url.origin !== origin || url.search || url.hash || !/^\/sitemaps\/recipes-\d+\.xml$/.test(url.pathname)) {
+            throw new Error("sitemap index contains a noncanonical page");
+        }
+    }
+    return locations;
 }
 
 function requireText(html, text, message) {
@@ -83,9 +96,11 @@ export function homepageRecipeCards(html) {
         if (!path || !/^\/recipe\/[0-9a-f-]{36}$/i.test(path) || !rawImage) {
             throw new Error("homepage has an invalid recipe card");
         }
-        const image = new URL(rawImage.replaceAll("&amp;", "&"));
+        const image = new URL(rawImage.replaceAll("&amp;", "&"), DEFAULT_BASE_URL);
+        const thumbnail = image.origin === DEFAULT_BASE_URL &&
+            image.pathname === `${path}/image/640.webp` && !image.search && !image.hash;
         if (image.protocol !== "https:" || image.username || image.password || image.port ||
-            !image.hostname.endsWith(".icloud-content.com")) {
+            (!image.hostname.endsWith(".icloud-content.com") && !thumbnail)) {
             throw new Error("homepage recipe image has an unexpected origin");
         }
         return { path, imageURL: image.href };
@@ -349,7 +364,12 @@ async function monitorResponse(baseURL, check) {
         validateAASA(await response.json());
     } else if (check.kind === "sitemap") {
         if (!contentType.includes("application/xml")) throw new Error("sitemap returned unexpected content type");
-        validateSitemap(await response.text(), baseURL.origin);
+        const locations = validateSitemapIndex(await response.text(), baseURL.origin);
+        for (const location of locations.slice(0, 3)) {
+            const page = await fetchWithRetry(location);
+            if (!page.ok || !(page.headers.get("content-type") ?? "").includes("application/xml")) throw new Error("sitemap page unavailable");
+            validateSitemap(await page.text(), baseURL.origin);
+        }
     } else if (check.kind === "data") {
         if (!contentType.includes("application/json")) throw new Error(`${check.label} returned unexpected content type: ${contentType || "missing"}`);
         validateDataAPI(check.dataKind, await response.json(), check.expected);

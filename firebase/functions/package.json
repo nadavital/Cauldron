@@ -3,7 +3,7 @@
     "scripts": {
         "build": "tsc",
         "build:watch": "tsc --watch",
-        "test:sanitizer": "npm run build && node --test --test-force-exit test/sharePreviewSanitizer.test.mjs",
+        "test:sanitizer": "npm run build && node --test --test-force-exit test/sharePreviewSanitizer.test.mjs test/webOptimization.test.mjs",
         "test:monitor": "node --test test/hostedSharingMonitor.test.mjs",
         "test:preview": "node --test test/previewWeb.test.mjs",
         "test:rules": "firebase emulators:exec --config ../firebase.json --project demo-cauldron-rules --only firestore \"node --test --test-force-exit test/firestoreRules.test.mjs\"",
@@ -27,7 +27,8 @@
     "main": "lib/index.js",
     "dependencies": {
         "firebase-admin": "^14.2.0",
-        "firebase-functions": "^7.3.2"
+        "firebase-functions": "^7.3.2",
+        "sharp": "0.35.4"
     },
     "devDependencies": {
         "@firebase/rules-unit-testing": "^5.0.1",

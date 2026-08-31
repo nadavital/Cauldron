@@ -884,7 +884,8 @@ test("homepage presents only supplied validated recipes and complete icon metada
     assert.match(html, /<h1 id="recipes-title"[^>]*>Recipes<\/h1>/);
     assert.match(html, /Tomato &amp; Basil Soup/);
     assert.match(html, /href="\/recipe\/018f9344-54ff-42fc-83a8-c2a92e2d1b10"/);
-    assert.match(html, /src="https:\/\/cvws\.icloud-content\.com\/recipe\.jpg\?token=ephemeral"/);
+    assert.match(html, /src="\/recipe\/018f9344-54ff-42fc-83a8-c2a92e2d1b10\/image\/640.webp"/);
+    assert.match(html, /srcset="[^"]+320.webp 320w,[^"]+1280.webp 1280w"/);
     assert.match(html, /Get Cauldron/);
     assert.match(html, /class="creator-name">Nadav<\/span>/);
     assert.match(html, /data-filter="Dessert"/);
@@ -1077,7 +1078,7 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
         recipes: [valid],
         totalRecipeCount: 1,
     });
-    assert.match(html, /src="https:\/\/cvws\.icloud-content\.com\/image\.jpg\?token=signed"/);
+    assert.match(html, /class="recipe-photo" src="\/recipe\/[^/]+\/image\/640.webp"/);
     assert.match(html, /fetchpriority="high" decoding="async"/);
     assert.match(html, /\.recipe-photo \{ position:absolute; inset:0; z-index:1;/);
     assert.match(html, /\.recipe-placeholder \{ grid-area:1\/1; z-index:0;/);
@@ -1086,7 +1087,7 @@ test("recipe shelves use only owner-validated CloudKit image assets", () => {
 test("discovery sitemap lists only canonical valid unique recipe URLs", () => {
     const id = "018f9344-54ff-42fc-83a8-c2a92e2d1b10";
     const xml = generateDiscoverySitemap([{ recipeId: id }, { recipeId: id }, { recipeId: "<script>" }]);
-    assert.equal((xml.match(/<url>/g) || []).length, 2);
+    assert.equal((xml.match(/<url>/g) || []).length, 3);
     assert.match(xml, new RegExp(`https://cauldronrecipes.com/recipe/${id}`));
     assert.doesNotMatch(xml, /script|changefreq|priority/);
 });

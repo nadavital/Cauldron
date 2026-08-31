@@ -21,6 +21,9 @@ test("sitemap monitor rejects static-only, duplicate, or offsite discovery entri
     const xml = (locations) => `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${locations.map(l=>`<url><loc>${l}</loc></url>`).join("")}</urlset>`;
     const recipe = `${origin}/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C`;
     assert.doesNotThrow(() => validateSitemap(xml([`${origin}/`, recipe]), origin));
+    // A catalog leaf may lose all recipes between manifest refreshes after a
+    // legitimate deletion/privacy change; its stable browse entry stays valid.
+    assert.doesNotThrow(() => validateSitemap(xml([`${origin}/`, `${origin}/recipes`]), origin));
     assert.throws(() => validateSitemap(xml([`${origin}/`]), origin));
     assert.throws(() => validateSitemap(xml([`${origin}/`, recipe, recipe]), origin));
     assert.throws(() => validateSitemap(xml([`${origin}/`, "https://example.com/"]), origin));
@@ -127,8 +130,8 @@ test("generated production homepage satisfies the hosted contract", () => {
 test("homepage monitor rejects empty discovery, duplicate cards, and unsafe image hosts", () => {
     assert.throws(() => homepageRecipeCards(generateHomePageHtml([])), /no recipe cards/);
     assert.throws(() => homepageRecipeCards(productionHomeHTML + productionHomeHTML), /repeats/);
-    assert.throws(() => homepageRecipeCards(productionHomeHTML.replace("cvws.icloud-content.com", "example.com")), /unexpected origin/);
-    assert.equal(homepageRecipeCards(productionHomeHTML)[0].imageURL, "https://cvws.icloud-content.com/cake.jpg?token=public-test&v=1");
+    assert.throws(() => homepageRecipeCards(productionHomeHTML.replace('src="/recipe/', 'src="https://example.com/recipe/')), /unexpected origin/);
+    assert.equal(homepageRecipeCards(productionHomeHTML)[0].imageURL, "https://cauldronrecipes.com/recipe/7DBEAFFD-895F-43B1-9985-463F36EA5D8C/image/640.webp");
 });
 
 test("homepage monitor verifies bounded public image responses and reports broken images", async () => {

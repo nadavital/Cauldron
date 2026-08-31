@@ -48,7 +48,7 @@ test("preview rejects writes before loading any production data", async () => {
 });
 
 test("detail preview links explicitly use production while preserving paths and query", async () => {
-    for (const path of ["/recipe/one?source=web", "/u/nadav", "/collection/one", "/profile/one", "/invite/one"]) {
+    for (const path of ["/recipe/one?source=web", "/u/nadav", "/collection/one", "/profile/one", "/invite/one", "/recipes?after=one", "/sitemap.xml", "/sitemaps/recipes-0.xml", "/recipe/one/image/640.webp"]) {
         const result = await request(path);
         assert.equal(result.status, 302);
         assert.equal(result.headers.Location, `https://cauldronrecipes.com${path}`);
