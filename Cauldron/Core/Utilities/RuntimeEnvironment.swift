@@ -20,6 +20,14 @@ enum RuntimeEnvironment {
         return environment["XCTestConfigurationFilePath"] != nil || environment["XCTestBundlePath"] != nil
     }
 
+    nonisolated static var isPCCSmokeTest: Bool {
+        #if DEBUG
+        arguments.contains("--cauldron-pcc-smoke-test")
+        #else
+        false
+        #endif
+    }
+
     nonisolated static var isRunningCI: Bool {
         environment["CI"] == "true"
     }

@@ -26,6 +26,26 @@ final class AIRecipeGeneratorViewModel {
     var generatedRecipe: Recipe?
     var errorMessage: String?
     var generationProgress: GenerationProgress = .idle
+    var intelligenceStatus: RecipeIntelligenceStatus?
+
+    var modelStatusMessage: String? {
+        guard let status = intelligenceStatus else { return nil }
+        if status.privateCloudLimitReached {
+            return status.selectedRoute == .onDevice
+                ? "Cloud daily limit reached. Recipes will be generated on this device."
+                : "Cloud daily limit reached. Try again after your limit resets."
+        }
+        if let reason = status.fallbackReason { return reason }
+        if status.privateCloudApproachingLimit { return "You're nearing your daily cloud generation limit." }
+        return status.selectedRoute == .privateCloudCompute
+            ? "Uses Apple Intelligence with Private Cloud Compute."
+            : "Uses Apple Intelligence on this device."
+    }
+
+    func showCloudLimitOptions() async {
+        await dependencies.foundationModelsService.showCloudLimitOptions()
+        intelligenceStatus = await dependencies.foundationModelsService.generationStatus()
+    }
 
     let dependencies: DependencyContainer
     private var generationTask: Task<Void, Never>?
@@ -190,7 +210,8 @@ final class AIRecipeGeneratorViewModel {
     }
 
     func checkAvailability() async -> Bool {
-        return await dependencies.foundationModelsService.isAvailable
+        intelligenceStatus = await dependencies.foundationModelsService.generationStatus()
+        return intelligenceStatus?.selectedRoute != .deterministic
     }
 
     func generateRecipe() {
@@ -216,7 +237,9 @@ final class AIRecipeGeneratorViewModel {
             }
 
             do {
-                let stream = dependencies.foundationModelsService.generateRecipe(from: generationPrompt)
+                let stream = dependencies.foundationModelsService.generateRecipe(from: generationPrompt) { [weak self] status in
+                    await self?.receiveModelStatus(status, generationID: generationID)
+                }
 
                 for try await partial in stream {
                     guard !Task.isCancelled, self.activeGenerationID == generationID else { return }
@@ -253,6 +276,11 @@ final class AIRecipeGeneratorViewModel {
                 AppLogger.general.error("Recipe generation failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func receiveModelStatus(_ status: RecipeIntelligenceStatus, generationID: UUID) {
+        guard activeGenerationID == generationID else { return }
+        intelligenceStatus = status
     }
 
     func cancelGeneration() {

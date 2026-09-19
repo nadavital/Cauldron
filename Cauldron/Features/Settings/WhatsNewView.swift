@@ -48,9 +48,19 @@ struct WhatsNewView: View {
                         FeatureRow(
                             symbol: "rectangle.split.2x1",
                             title: "Room to cook",
-                            detail: "Flexible recipe layouts, a cooking workspace that adapts to iPhone Duo, and ingredient checklists on every screen size."
+                            detail: "Flexible recipe layouts, a cooking workspace that adapts to iPhone Duo, and ingredient checklists that remember your progress."
                         )
                         Divider().padding(.leading, 44)
+                        #if canImport(FoundationModels, _version: 2.0)
+                        if #available(iOS 27.0, macCatalyst 27.0, *) {
+                            FeatureRow(
+                                symbol: "cloud",
+                                title: "More capable recipe generation",
+                                detail: "Generate recipes with Apple Intelligence on Private Cloud Compute when available, with on-device fallback."
+                            )
+                            Divider().padding(.leading, 44)
+                        }
+                        #endif
                         FeatureRow(
                             symbol: "sparkles",
                             title: "A calmer Cauldron",

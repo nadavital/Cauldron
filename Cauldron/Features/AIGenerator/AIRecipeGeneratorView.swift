@@ -124,8 +124,14 @@ struct AIRecipeGeneratorView: View {
             ScrollView {
                 GlassEffectContainer(spacing: Theme.Spacing.md) {
                     VStack(spacing: Theme.Spacing.xl) {
+                        modelStatus
                         if !isAvailable {
-                            AIUnavailableCard()
+                            if viewModel.intelligenceStatus?.privateCloudLimitReached == true {
+                                ContentUnavailableView("Daily cloud limit reached", systemImage: "cloud",
+                                    description: Text("Try again after your limit resets, or review your cloud usage options."))
+                            } else {
+                                AIUnavailableCard()
+                            }
                         } else {
                             if isBusyOrDone {
                                 generationStatusStrip
@@ -147,6 +153,28 @@ struct AIRecipeGeneratorView: View {
         }
     }
 
+    private var modelStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let message = viewModel.modelStatusMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if viewModel.intelligenceStatus?.canIncreaseCloudLimit == true {
+                Button("Cloud usage options") {
+                    Task {
+                        await viewModel.showCloudLimitOptions()
+                        let available = await viewModel.checkAvailability()
+                        isAvailable = hasPreview || available
+                    }
+                }
+                .font(.footnote)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
     private var previewPane: some View {
         ScrollView {
             GlassEffectContainer(spacing: Theme.Spacing.md) {
@@ -166,6 +194,7 @@ struct AIRecipeGeneratorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 generationStatusStrip
+                modelStatus
                 Text("Your request")
                     .font(.headline)
                 Text(promptSummary)

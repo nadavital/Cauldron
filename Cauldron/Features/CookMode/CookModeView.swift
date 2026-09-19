@@ -22,11 +22,19 @@ struct CookModeView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
-    @State private var referencePage = 0
     @State private var showingIngredients = false
     @State private var showingIngredientSheet = false
     @State private var showingEndSessionAlert = false
-    @State private var checkedIngredientIDs: Set<UUID> = []
+    private var checkedIngredientIDs: Set<UUID> {
+        coordinator.referenceState.checkedIngredientIDs.intersection(recipe.ingredients.map(\.id))
+    }
+
+    private var referencePage: Binding<Int> {
+        Binding(
+            get: { coordinator.referenceState.page },
+            set: { coordinator.updateReference(.selectPage($0)) }
+        )
+    }
     @State private var experiencePreferences: ExperiencePreferences
 
     private var scaleFactor: Double { experiencePreferences.recipeScaleFactor }
@@ -439,7 +447,7 @@ struct CookModeView: View {
                         .controlSize(.regular)
                     }
 
-                    TabView(selection: $referencePage) {
+                    TabView(selection: referencePage) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(coordinator.isLastStep ? "FINAL STEP" : "UP NEXT")
                                 .font(.caption.weight(.semibold))
@@ -569,11 +577,7 @@ struct CookModeView: View {
     }
 
     private func toggleIngredientCheck(_ ingredientID: UUID) {
-        if checkedIngredientIDs.contains(ingredientID) {
-            checkedIngredientIDs.remove(ingredientID)
-        } else {
-            checkedIngredientIDs.insert(ingredientID)
-        }
+        coordinator.updateReference(.toggleIngredient(ingredientID))
     }
 
     private var navigationControls: some View {

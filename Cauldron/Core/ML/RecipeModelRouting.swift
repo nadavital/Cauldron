@@ -13,9 +13,9 @@ nonisolated enum RecipeIntelligenceTask: Sendable, Equatable {
 
     nonisolated var benefitsFromExtendedReasoning: Bool {
         switch self {
-        case .parseImage, .adaptRecipe:
+        case .parseImage, .adaptRecipe, .generateRecipe:
             return true
-        case .generateRecipe(let promptLength), .parseText(let promptLength):
+        case .parseText(let promptLength):
             return promptLength > 4_000
         case .clarifyStep:
             return false
@@ -88,4 +88,6 @@ nonisolated struct RecipeIntelligenceStatus: Sendable, Equatable {
     var selectedRoute: RecipeModelRoute
     var privateCloudApproachingLimit: Bool
     var fallbackReason: String?
+    var privateCloudLimitReached: Bool = false
+    var canIncreaseCloudLimit: Bool = false
 }

@@ -180,7 +180,8 @@ class DependencyContainer: ObservableObject {
         recipeImportInboxStore: RecipeImportInboxStore = RecipeImportInboxStore(),
         persistenceRecoveryReport: PersistenceRecoveryReport? = nil,
         allowsUnverifiedArchiveRestore: Bool = false,
-        collectionImageManager: CollectionImageManagerV2? = nil
+        collectionImageManager: CollectionImageManagerV2? = nil,
+        timerManager: TimerManager? = nil
     ) {
         self.modelContainer = modelContainer
         self.persistenceRecoveryReport = persistenceRecoveryReport
@@ -302,7 +303,7 @@ class DependencyContainer: ObservableObject {
         self.groceryCategorizer = GroceryCategorizer(foundationModelsService: foundationModelsService)
         self.recipeOCRService = RecipeOCRService()
         self.recipeLineClassificationService = RecipeLineClassificationService()
-        self.timerManager = TimerManager(experiencePreferences: .shared)
+        self.timerManager = timerManager ?? TimerManager(experiencePreferences: .shared)
         self.profileCacheManager = ProfileCacheManager()
         self.libraryPresentationStore = LibraryPresentationStore()
 
@@ -451,7 +452,13 @@ class DependencyContainer: ObservableObject {
             modelContainer: container,
             recipeImportInboxStore: recipeImportInboxStore,
             allowsUnverifiedArchiveRestore: true,
-            collectionImageManager: collectionImageManager
+            collectionImageManager: collectionImageManager,
+            timerManager: TimerManager(
+                sharedDefaults: nil,
+                requestNotificationPermission: false,
+                schedulesNotifications: false,
+                notificationScheduler: NoopTimerNotificationScheduler()
+            )
         )
     }
     

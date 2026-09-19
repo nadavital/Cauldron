@@ -32,7 +32,7 @@ struct ContentView: View {
     // When you ship a bug fix, leave this unchanged so no splash appears.
     /// Independent content gate so material release-note changes can be shown
     /// even when they ship within the same marketing version.
-    static let whatsNewContentVersion = "2.0-duo"
+    static let whatsNewContentVersion = "2.0-duo-cloud"
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
@@ -1055,16 +1055,10 @@ struct ScreenshotCookModeScene: View {
                     CookModeView(recipe: recipe, coordinator: coordinator, dependencies: dependencies)
                 }
             }
-            .onAppear {
+            .task {
                 guard !hasPreparedSession else { return }
                 hasPreparedSession = true
-                if coordinator.currentRecipe?.id != recipe.id || coordinator.totalSteps == 0 {
-                    coordinator.currentRecipe = recipe
-                    coordinator.currentStepIndex = 0
-                    coordinator.totalSteps = recipe.steps.count
-                    coordinator.sessionStartTime = Date()
-                    coordinator.isActive = true
-                }
+                _ = await coordinator.startCooking(recipe)
                 coordinator.expandToFullScreen()
             }
     }

@@ -97,11 +97,15 @@ final class CookModeAdaptiveRenderingTests: XCTestCase {
         }
     }
     func testScreenshotSceneMinimizesAndResumesWithoutResettingSession() async throws {
+        let previousUser = CurrentUserSession.shared.currentUser
+        CurrentUserSession.shared.currentUser = User(id: UUID(), username: "cook-test", displayName: "Cook Test", createdAt: .now)
+        defer { CurrentUserSession.shared.currentUser = previousUser }
         let dependencies = DependencyContainer.preview()
         let coordinator = CookModeCoordinator(dependencies: dependencies,
                                               applicationIsActive: false,
                                               observesApplicationLifecycle: false)
-        let recipe = Recipe(title: "Presentation regression", ingredients: [], steps: [
+        let ingredient = Ingredient(name: "Carrots")
+        let recipe = Recipe(title: "Presentation regression", ingredients: [ingredient], steps: [
             CookStep(index: 0, text: "Prepare."),
             CookStep(index: 1, text: "Cook.")
         ])
@@ -114,18 +118,26 @@ final class CookModeAdaptiveRenderingTests: XCTestCase {
         defer { window.isHidden = true; window.rootViewController = nil }
         try await Task.sleep(for: .seconds(1))
         XCTAssertNotNil(host.presentedViewController)
-        coordinator.currentStepIndex = 1
+        coordinator.nextStep()
+        coordinator.updateReference(.toggleIngredient(ingredient.id))
+        coordinator.updateReference(.selectPage(1))
+        let selectedStep = coordinator.currentStepIndex
         coordinator.minimizeToBackground()
         try await Task.sleep(for: .seconds(1))
         XCTAssertNil(host.presentedViewController)
         XCTAssertTrue(coordinator.isActive)
-        XCTAssertEqual(coordinator.currentStepIndex, 1)
+        XCTAssertEqual(coordinator.currentStepIndex, selectedStep)
+        XCTAssertEqual(coordinator.referenceState.checkedIngredientIDs, [ingredient.id])
+        XCTAssertEqual(coordinator.referenceState.page, 1)
         coordinator.expandToFullScreen()
         try await Task.sleep(for: .seconds(1))
         XCTAssertNotNil(host.presentedViewController)
-        XCTAssertEqual(coordinator.currentStepIndex, 1)
+        XCTAssertEqual(coordinator.currentStepIndex, selectedStep)
+        XCTAssertEqual(coordinator.referenceState.checkedIngredientIDs, [ingredient.id])
+        XCTAssertEqual(coordinator.referenceState.page, 1)
         coordinator.minimizeToBackground()
         try await Task.sleep(for: .milliseconds(500))
+        coordinator.endSession()
     }
 
 }

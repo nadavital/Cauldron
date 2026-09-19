@@ -19,6 +19,53 @@ final class CookSessionSharedStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    func testReferenceUpdatesPreserveConcurrentWidgetStepAndSurviveReload() throws {
+        let initial = CookSessionSharedSnapshot(recipeID: UUID(), ownerID: UUID(), stepIndex: 0,
+                                               totalSteps: 3, sessionStartTime: .now)
+        CookSessionSharedStore.saveForTesting(initial, defaults: defaults)
+        _ = CookSessionSharedStore.moveForTesting(by: 1, expected: initial, defaults: defaults)
+        let ingredient = UUID()
+        let updated = try XCTUnwrap(CookSessionSharedStore.updateReference(
+            .toggleIngredient(ingredient), expected: initial, defaults: defaults, usesFileAuthority: false
+        ))
+        XCTAssertEqual(updated.stepIndex, 1)
+        XCTAssertEqual(updated.revision, 2)
+        _ = CookSessionSharedStore.updateReference(.selectPage(1), expected: initial,
+                                                   defaults: defaults, usesFileAuthority: false)
+        let reloaded = try XCTUnwrap(CookSessionSharedStore.readForTesting(defaults: UserDefaults(suiteName: suiteName)))
+        XCTAssertEqual(reloaded.referenceState?.checkedIngredientIDs, [ingredient])
+        XCTAssertEqual(reloaded.referenceState?.page, 1)
+        let next = CookSessionSharedStore.moveForTesting(by: 1, expected: reloaded, defaults: defaults)
+        XCTAssertEqual(next?.referenceState, reloaded.referenceState)
+        XCTAssertEqual(next?.stepIndex, 2)
+    }
+
+    func testReferenceMutationRejectsReplacedSessionAndAnotherOwner() {
+        let initial = CookSessionSharedSnapshot(recipeID: UUID(), ownerID: UUID(), stepIndex: 0,
+                                               totalSteps: 3, sessionStartTime: .now)
+        var replacement = initial
+        replacement.sessionStartTime = initial.sessionStartTime.addingTimeInterval(1)
+        CookSessionSharedStore.saveForTesting(replacement, defaults: defaults)
+        XCTAssertNil(CookSessionSharedStore.updateReference(.selectPage(1), expected: initial,
+                                                             defaults: defaults, usesFileAuthority: false))
+        replacement = initial
+        replacement.ownerID = UUID()
+        CookSessionSharedStore.saveForTesting(replacement, defaults: defaults)
+        XCTAssertNil(CookSessionSharedStore.updateReference(.toggleIngredient(UUID()), expected: initial,
+                                                             defaults: defaults, usesFileAuthority: false))
+    }
+
+    func testLegacySnapshotWithoutReferenceStateStillDecodes() throws {
+        let initial = CookSessionSharedSnapshot(recipeID: UUID(), ownerID: UUID(), stepIndex: 1,
+                                               totalSteps: 3, sessionStartTime: .now)
+        let data = try JSONEncoder().encode(initial)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json.removeValue(forKey: "referenceState")
+        let decoded = try JSONDecoder().decode(CookSessionSharedSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.stepIndex, 1)
+        XCTAssertNil(decoded.referenceState)
+    }
+
     func testRoundTripAndBoundsNormalization() {
         let recipeID = UUID()
         let ownerID = UUID()

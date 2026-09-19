@@ -59,6 +59,8 @@ class CookModeCoordinator {
     /// Current step index in the recipe
     var currentStepIndex: Int = 0
 
+    private(set) var referenceState = CookSessionReferenceState()
+
     /// Total number of steps
     var totalSteps: Int = 0
 
@@ -249,6 +251,7 @@ class CookModeCoordinator {
         }
 
         // Start new session
+        referenceState = CookSessionReferenceState()
         currentRecipe = recipe
         currentStepIndex = 0
         totalSteps = recipe.steps.count
@@ -305,6 +308,7 @@ class CookModeCoordinator {
         endSession()
 
         // Start new session
+        referenceState = CookSessionReferenceState()
         let outcome = await startCooking(pending)
 
         return outcome
@@ -396,6 +400,7 @@ class CookModeCoordinator {
             totalSteps = 0
             sessionStartTime = nil
             sessionOwnerID = nil
+            referenceState = CookSessionReferenceState()
         }
 
         // Clear persisted state
@@ -479,6 +484,7 @@ class CookModeCoordinator {
 
                 sessionStartTime = persisted.sessionStartTime
                 sessionOwnerID = currentUserID
+                referenceState = persisted.referenceState ?? CookSessionReferenceState()
 
                 // Don't auto-show full screen - just show banner
                 showFullScreen = false
@@ -542,6 +548,7 @@ class CookModeCoordinator {
             return false
         }
 
+        referenceState = persisted.referenceState ?? CookSessionReferenceState()
         let persistedStep = persisted.stepIndex
         let validatedStep = min(max(persistedStep, 0), recipe.steps.count - 1)
         guard validatedStep != currentStepIndex else { return true }
@@ -550,6 +557,23 @@ class CookModeCoordinator {
         totalSteps = recipe.steps.count
         Task { await updateLiveActivity() }
         return true
+    }
+
+    func updateReference(_ action: CookSessionReferenceAction) {
+        guard isActive,
+              let recipe = currentRecipe,
+              sessionOwnerID == CurrentUserSession.shared.userId,
+              let expected = persistedSnapshot(),
+              expected.recipeID == recipe.id,
+              expected.ownerID == sessionOwnerID,
+              expected.sessionStartTime == sessionStartTime else { return }
+        if case .toggleIngredient(let id) = action,
+           !recipe.ingredients.contains(where: { $0.id == id }) { return }
+        guard let snapshot = CookSessionSharedStore.updateReference(
+            action, expected: expected, defaults: sharedDefaults
+        ) else { return }
+        referenceState = snapshot.referenceState ?? CookSessionReferenceState()
+        currentStepIndex = snapshot.stepIndex
     }
 
     // MARK: - Current Step Helpers
@@ -607,6 +631,7 @@ class CookModeCoordinator {
             defaults: sharedDefaults
         ) {
             currentStepIndex = synchronized.stepIndex
+            referenceState = synchronized.referenceState ?? CookSessionReferenceState()
         }
 
         AppLogger.general.debug("💾 Saved cook session state")

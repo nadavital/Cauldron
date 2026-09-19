@@ -8,6 +8,16 @@
 import Foundation
 import Darwin
 
+nonisolated struct CookSessionReferenceState: Codable, Sendable, Equatable {
+    var checkedIngredientIDs: Set<UUID> = []
+    var page: Int = 0
+}
+
+nonisolated enum CookSessionReferenceAction: Sendable {
+    case toggleIngredient(UUID)
+    case selectPage(Int)
+}
+
 nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
     var recipeID: UUID
     var ownerID: UUID?
@@ -17,6 +27,7 @@ nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
     var revision: Int
     var updatedAt: Date
     var stepInstructions: [String]?
+    var referenceState: CookSessionReferenceState?
 
     nonisolated init(
         recipeID: UUID,
@@ -26,7 +37,8 @@ nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
         sessionStartTime: Date,
         revision: Int = 0,
         updatedAt: Date = Date(),
-        stepInstructions: [String]? = nil
+        stepInstructions: [String]? = nil,
+        referenceState: CookSessionReferenceState? = nil
     ) {
         self.recipeID = recipeID
         self.ownerID = ownerID
@@ -36,6 +48,7 @@ nonisolated struct CookSessionSharedSnapshot: Codable, Sendable, Equatable {
         self.revision = revision
         self.updatedAt = updatedAt
         self.stepInstructions = stepInstructions
+        self.referenceState = referenceState
     }
 
     nonisolated func belongs(to userID: UUID) -> Bool {
@@ -102,7 +115,8 @@ enum CookSessionSharedStore {
                     : sessionStartTime,
                 revision: revision,
                 updatedAt: now,
-                stepInstructions: stepInstructions
+                stepInstructions: stepInstructions,
+                referenceState: isSameSession ? existing?.referenceState : nil
             )
             saveUnlocked(snapshot, defaults: defaults, usesFileAuthority: true)
             return snapshot
@@ -189,6 +203,41 @@ enum CookSessionSharedStore {
         return snapshot
     }
 
+    /// Changes reference state against the latest snapshot without overwriting
+    /// a step changed concurrently by a widget. Rejects replaced sessions.
+    @discardableResult
+    nonisolated static func updateReference(
+        _ action: CookSessionReferenceAction,
+        expected: CookSessionSharedSnapshot,
+        defaults: UserDefaults? = UserDefaults(suiteName: appGroupID),
+        usesFileAuthority: Bool = true,
+        now: Date = Date()
+    ) -> CookSessionSharedSnapshot? {
+        withExclusiveLock {
+            guard var snapshot = readUnlocked(defaults: defaults, usesFileAuthority: usesFileAuthority),
+                  snapshot.recipeID == expected.recipeID,
+                  snapshot.ownerID == expected.ownerID,
+                  snapshot.sessionStartTime == expected.sessionStartTime else { return nil }
+            var reference = snapshot.referenceState ?? CookSessionReferenceState()
+            switch action {
+            case .toggleIngredient(let id):
+                if reference.checkedIngredientIDs.contains(id) {
+                    reference.checkedIngredientIDs.remove(id)
+                } else {
+                    reference.checkedIngredientIDs.insert(id)
+                }
+            case .selectPage(let page):
+                reference.page = min(max(page, 0), 1)
+            }
+            guard snapshot.referenceState != reference else { return snapshot }
+            snapshot.referenceState = reference
+            snapshot.revision = nextRevision(snapshot.revision)
+            snapshot.updatedAt = now
+            saveUnlocked(snapshot, defaults: defaults, usesFileAuthority: usesFileAuthority)
+            return snapshot
+        }
+    }
+
     nonisolated private static func nextRevision(_ revision: Int) -> Int {
         revision == .max ? 0 : revision + 1
     }
@@ -257,6 +306,9 @@ enum CookSessionSharedStore {
     ) -> CookSessionSharedSnapshot {
         var value = snapshot
         value.stepIndex = min(max(value.stepIndex, 0), max(value.totalSteps - 1, 0))
+        if let page = value.referenceState?.page {
+            value.referenceState?.page = min(max(page, 0), 1)
+        }
         return value
     }
 }

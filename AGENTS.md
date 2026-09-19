@@ -7,7 +7,7 @@ Guidance for coding agents working in this repository.
 - Main targets: iOS/iPad app, Mac Catalyst app, Widget extension, Share extension
 - Core backend: CloudKit (+ Firebase for share-link hosting endpoints)
 - Parser stack: model-backed import pipeline with parity-tested assembly
-- Intelligence routing: deterministic parsing plus Apple on-device Foundation Models and availability-gated Private Cloud Compute
+- Intelligence routing: deterministic parsing plus Apple Foundation Models; recipe generation prefers availability- and quota-gated Private Cloud Compute on SDK/OS 27+, with on-device fallback before any streamed output. Grocery categorization stays local. PCC requires the managed capability on production/development app IDs and refreshed signing profiles. Preserve Xcode 26.6 compile guards.
 
 ## Repository Layout
 - App code: `/Users/nadav/Desktop/Cauldron/Cauldron`
@@ -42,6 +42,8 @@ Guidance for coding agents working in this repository.
 - Simulator QA mode:
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
   - Add `--cauldron-desktop-workspace` to preview the iPhone/iPad-on-Mac single-workspace layout in an iPad simulator.
+  - Debug-only `--cauldron-pcc-smoke-test` runs a fixed, non-personal prompt through the production generation service without opening the library. It reports the selected route and completion in the UI and `cauldron-pcc-smoke.json` under the app's temporary directory; cloud success requires no local fallback. A signed Catalyst build can verify real PCC access when no iPhone is connected.
+  - `DependencyContainer.preview()` uses nonpersistent timers and a no-op notification scheduler so previews and rendering tests do not restore or cancel system timer notifications.
 
 ## Current Product Priorities
 - Maintain first-class iPad and Mac experiences (not only iPhone layouts)
@@ -80,7 +82,7 @@ Guidance for coding agents working in this repository.
   - Collection membership correctness is represented by CloudKit `CollectionMembership` edge records; legacy collection `recipeIds` is a compatibility cache.
   - A durable collection mutation may rebind to a new canonical Cauldron user ID only when its persisted stable CloudKit identity exactly matches the verified current account; the creator-bound legacy collection graph is retired before canonical replay, and different identities remain deferred.
   - If the local SwiftData store cannot open, preserve it and its sidecars under `Cauldron Store Backups` before creating a clean store. Keep the committed 1.5 store fixture opening in current-schema tests.
-- Cook Mode state shared with Live Activities and App Intents is persisted through `CookSessionSharedStore`; app and widget navigation must use the shared reducer rather than independent defaults mutations.
+- Cook Mode state shared with Live Activities and App Intents is persisted through `CookSessionSharedStore`; app and widget navigation must use the shared reducer rather than independent defaults mutations. Ingredient checks and the reference page belong to that same owner-bound session; reference mutations must preserve concurrent widget step changes.
 - Update-surface behavior matters:
   - `What's New` is gated by content version and should be updated for meaningful user-visible changes.
 

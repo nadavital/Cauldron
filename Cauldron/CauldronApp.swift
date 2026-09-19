@@ -22,8 +22,15 @@ struct CauldronApp: App {
                 // Keep unit-test host lightweight to avoid unrelated SwiftUI teardown crashes.
                 Color.clear
             } else {
-                ContentView()
-                    .dependencies(DependencyContainer.shared)
+                #if DEBUG
+                if RuntimeEnvironment.isPCCSmokeTest {
+                    PCCSmokeTestView()
+                } else {
+                    ContentView().dependencies(DependencyContainer.shared)
+                }
+                #else
+                ContentView().dependencies(DependencyContainer.shared)
+                #endif
             }
         }
     }
@@ -172,7 +179,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             Self.configureNavigationBarAppearance()
         }
 
-        if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isSimulatorQAMode {
+        if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isSimulatorQAMode || RuntimeEnvironment.isPCCSmokeTest {
             return true
         }
 
@@ -447,7 +454,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 // Scene Delegate for handling URLs in SwiftUI lifecycle
 class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func sceneDidBecomeActive(_ scene: UIScene) {
-        if RuntimeEnvironment.isRunningTests {
+        if RuntimeEnvironment.isRunningTests || RuntimeEnvironment.isPCCSmokeTest {
             return
         }
 

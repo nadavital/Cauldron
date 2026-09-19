@@ -4,6 +4,15 @@ import XCTest
 final class RecipeModelRoutingTests: XCTestCase {
     private let policy = RecipeModelRoutingPolicy()
 
+    func testGenerationPrefersCloudEvenForShortPrompt() {
+        XCTAssertEqual(policy.route(task: .generateRecipe(promptLength: 20), availability: fullyAvailable), .privateCloudCompute)
+        var availability = fullyAvailable
+        availability.privateCloudQuotaReached = true
+        XCTAssertEqual(policy.route(task: .generateRecipe(promptLength: 20), availability: availability), .onDevice)
+        availability.onDeviceAvailable = false
+        XCTAssertEqual(policy.route(task: .generateRecipe(promptLength: 20), availability: availability), .deterministic)
+    }
+
     func testShortTasksPreferOnDevice() {
         XCTAssertEqual(
             policy.route(task: .clarifyStep, availability: fullyAvailable),
