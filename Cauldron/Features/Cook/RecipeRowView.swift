@@ -42,10 +42,16 @@ struct RecipeRowView: View {
                         firstTag
                     }
                 } else {
-                    HStack(spacing: 8) {
-                        timeAndYield
-                        Spacer(minLength: 4)
-                        firstTag
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            timeAndYield
+                            firstTag
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 6) {
+                            timeAndYield
+                            firstTag
+                        }
                     }
                 }
             }
@@ -56,15 +62,26 @@ struct RecipeRowView: View {
     }
 
     private var timeAndYield: some View {
-        HStack(spacing: 8) {
-            if let time = recipe.displayTime {
-                Label(time, systemImage: "clock")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                timeLabel
+                Text(recipe.yields)
             }
-            Text(recipe.yields)
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) {
+                timeLabel
+                Text(recipe.yields)
+            }
         }
         .font(.caption)
-        .foregroundColor(.secondary)
-        .lineLimit(1)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var timeLabel: some View {
+        if let time = recipe.displayTime {
+            Label(time, systemImage: "clock")
+        }
     }
 
     @ViewBuilder

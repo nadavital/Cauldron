@@ -22,7 +22,7 @@ enum RuntimeEnvironment {
 
     nonisolated static var isPCCSmokeTest: Bool {
         #if DEBUG
-        arguments.contains("--cauldron-pcc-smoke-test")
+        arguments.contains("--cauldron-pcc-smoke-test") || arguments.contains("--cauldron-pcc-import-smoke-test")
         #else
         false
         #endif

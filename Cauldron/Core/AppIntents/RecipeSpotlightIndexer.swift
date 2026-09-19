@@ -6,11 +6,12 @@ import Foundation
 struct RecipeSpotlightReconciliationQueue {
     enum Request {
         case accountBoundary(ownerID: UUID?)
+        case rebuild(ownerID: UUID?)
         case full(ownerID: UUID?, recipes: [Recipe]?)
 
         var ownerID: UUID? {
             switch self {
-            case .accountBoundary(let ownerID), .full(let ownerID, _):
+            case .accountBoundary(let ownerID), .full(let ownerID, _), .rebuild(let ownerID):
                 ownerID
             }
         }
@@ -29,7 +30,14 @@ struct RecipeSpotlightReconciliationQueue {
     /// while a worker is suspended at an await are coalesced to the newest one.
     mutating func enqueue(_ request: Request) -> Bool {
         nextGeneration &+= 1
-        pendingRequest = PendingRequest(generation: nextGeneration, request: request)
+        // Ordinary refreshes must not erase a pending system rebuild for this account.
+        let merged: Request
+        if case .rebuild(let ownerID) = pendingRequest?.request, ownerID == request.ownerID {
+            merged = .rebuild(ownerID: ownerID)
+        } else {
+            merged = request
+        }
+        pendingRequest = PendingRequest(generation: nextGeneration, request: merged)
 
         guard !isWorkerActive else { return false }
         isWorkerActive = true
@@ -112,6 +120,15 @@ final class RecipeSpotlightIndexer {
     private var workerTask: Task<Void, Never>?
     private var reconciliationQueue = RecipeSpotlightReconciliationQueue()
     private var retryPolicy = RecipeSpotlightRetryPolicy()
+    private var rebuildWaiters: [CheckedContinuation<Void, Error>] = []
+
+    /// System callbacks share the same serialized, account-checked writer as app updates.
+    func rebuildForSystemRequest() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            rebuildWaiters.append(continuation)
+            enqueue(.rebuild(ownerID: CurrentUserSession.shared.userId), origin: .external)
+        }
+    }
 
     init(
         index: CSSearchableIndex = .default(),
@@ -162,11 +179,13 @@ final class RecipeSpotlightIndexer {
     }
 
     private func drainRequests() async {
+        var failure: Error?
         while let pendingRequest = reconciliationQueue.takeNext() {
             do {
                 try await perform(pendingRequest.request)
                 resetRetryBudget()
             } catch {
+                failure = error
                 AppLogger.general.error("Recipe Spotlight reconciliation failed: \(error.localizedDescription)")
                 scheduleRetry()
             }
@@ -174,9 +193,19 @@ final class RecipeSpotlightIndexer {
 
         reconciliationQueue.finishWorker()
         workerTask = nil
+        let waiters = rebuildWaiters
+        rebuildWaiters.removeAll()
+        for waiter in waiters {
+            if let failure { waiter.resume(throwing: failure) }
+            else { waiter.resume() }
+        }
     }
 
     private func perform(_ request: RecipeSpotlightReconciliationQueue.Request) async throws {
+        if case .rebuild = request {
+            // Force deletion even if our fingerprints still describe an index the OS lost.
+            cleanupRequired = true
+        }
         // Identity reverification must be allowed to finish on MainActor. A
         // request captured before that boundary cannot be made safe by
         // synchronously re-enqueuing it: doing so hot-spins this drain loop and
@@ -201,10 +230,13 @@ final class RecipeSpotlightIndexer {
             return
         }
 
-        guard case .full(let ownerID, let preloadedRecipes) = request,
-              let ownerID else {
-            return
+        let preloadedRecipes: [Recipe]?
+        switch request {
+        case .accountBoundary: return
+        case .full(_, let recipes): preloadedRecipes = recipes
+        case .rebuild: preloadedRecipes = nil
         }
+        guard let ownerID = request.ownerID else { return }
 
         let recipes: [Recipe]
         if let preloadedRecipes {
@@ -343,7 +375,8 @@ final class RecipeSpotlightIndexer {
             String(entity.updatedAt.timeIntervalSinceReferenceDate.bitPattern),
             String(entity.createdAt.timeIntervalSinceReferenceDate.bitPattern),
             entity.creatorName ?? "",
-            entity.notes ?? ""
+            entity.notes ?? "",
+            entity.thumbnailURL?.absoluteString ?? ""
         ]
         let digest = SHA256.hash(data: Data(fields.joined(separator: "\u{1E}").utf8))
         return digest.map { String(format: "%02x", $0) }.joined()

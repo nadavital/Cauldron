@@ -17,6 +17,7 @@ struct ImporterView: View {
     @State private var previewContext: PreviewContext?
     @State private var hasTriggeredAutoImport = false
     @State private var hasPresentedPreparedPreview = false
+    @State private var showingSiriHelp = false
     @State private var showingOCRPicker = false
     @State private var showingOCRSourceDialog = false
     @State private var ocrSourceType: UIImagePickerController.SourceType = .photoLibrary
@@ -30,6 +31,8 @@ struct ImporterView: View {
         let id = UUID()
         let recipe: Recipe
         let sourceInfo: String
+        var sourceText: String? = nil
+        var sourceImage: UIImage? = nil
     }
 
     init(
@@ -108,12 +111,16 @@ struct ImporterView: View {
             .navigationTitle("Import Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Import with Siri", systemImage: "waveform") { showingSiriHelp = true }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                 }
             }
+            .sheet(isPresented: $showingSiriHelp) { SiriImportHelpView() }
             .task {
                 await autoImportIfNeeded()
             }
@@ -131,6 +138,8 @@ struct ImporterView: View {
                     importedRecipe: context.recipe,
                     dependencies: viewModel.dependencies,
                     sourceInfo: context.sourceInfo,
+                    sourceText: context.sourceText,
+                    sourceImage: context.sourceImage,
                     destinationRecipeID: destinationRecipeID,
                     onSave: onSuccessfulSave
                 )
@@ -427,7 +436,11 @@ struct ImporterView: View {
         if let recipe = viewModel.importedRecipe,
             let source = viewModel.sourceInfo
         {
-            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
+            previewContext = PreviewContext(
+                recipe: recipe, sourceInfo: source,
+                sourceText: viewModel.importType == .text ? viewModel.textInput : nil,
+                sourceImage: viewModel.importType == .image ? viewModel.selectedOCRImage : nil
+            )
         }
     }
 
@@ -438,7 +451,11 @@ struct ImporterView: View {
             let source = viewModel.sourceInfo
         {
             hasPresentedPreparedPreview = true
-            previewContext = PreviewContext(recipe: recipe, sourceInfo: source)
+            previewContext = PreviewContext(
+                recipe: recipe, sourceInfo: source,
+                sourceText: viewModel.importType == .text ? viewModel.textInput : nil,
+                sourceImage: viewModel.importType == .image ? viewModel.selectedOCRImage : nil
+            )
             return
         }
 

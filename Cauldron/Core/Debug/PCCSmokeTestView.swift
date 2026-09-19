@@ -19,6 +19,10 @@ struct PCCSmokeTestView: View {
 
     @MainActor
     private func run() async {
+        if ProcessInfo.processInfo.arguments.contains("--cauldron-pcc-import-smoke-test") {
+            await runImport()
+            return
+        }
         let service = FoundationModelsService()
         var evidence: [String: String] = ["result": "started"]
         func save() {
@@ -73,10 +77,56 @@ struct PCCSmokeTestView: View {
         evidence["elapsedSeconds"] = String(Date().timeIntervalSince(start))
         save()
     }
+    @MainActor
+    private func runImport() async {
+        let lines = ["Dough", "2 cups flour", "1 cup water", "Filling", "3 apples, diced", "1 tsp cinnamon",
+                     "Instructions", "Mix flour and water to form a dough.", "Roll out the dough.",
+                     "Combine apples and cinnamon, then fill the dough.", "Bake for 25 minutes at 180 C."]
+        var evidence: [String: String] = ["result": "started", "source": lines.joined(separator: "\n")]
+        func save() {
+            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cauldron-pcc-import-smoke.json")
+            if let data = try? JSONSerialization.data(withJSONObject: evidence, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: url, options: .atomic)
+                report = String(decoding: data, as: UTF8.self)
+            }
+        }
+        save()
+        let recorder = ImportSmokeRecorder()
+        let parser = TextRecipeParser(importStructurer: recorder)
+        let start = Date()
+        do {
+            let baseline = try await TextRecipeParser().parse(lines: lines, sourceURL: URL(string: "https://example.com/apple-pastry"), sourceTitle: "Apple Pastry", imageURL: nil)
+            let recipe = try await parser.parse(lines: lines, sourceURL: URL(string: "https://example.com/apple-pastry"), sourceTitle: "Apple Pastry", imageURL: nil)
+            evidence["baselineSections"] = baseline.ingredients.map { $0.section ?? "none" }.joined(separator: ",")
+            evidence["sections"] = recipe.ingredients.map { $0.section ?? "none" }.joined(separator: ",")
+            evidence["ingredients"] = recipe.ingredients.map { "\($0.quantity.map { String(describing: $0) } ?? "") \($0.name)" }.joined(separator: "\n")
+            evidence["steps"] = recipe.steps.map(\.text).joined(separator: "\n")
+            evidence["plan"] = await recorder.planDescription
+            let hasCloudPlan = await recorder.hasCloudPlan
+            evidence["result"] = hasCloudPlan && recipe.ingredients.map(\.section) == ["Dough", "Dough", "Filling", "Filling"]
+                && recipe.steps.count == 4 ? "cloudImportSuccess" : "qualityCheckFailedOrFallback"
+        } catch {
+            evidence["result"] = "failed"
+            evidence["error"] = String(describing: error)
+        }
+        evidence["elapsedSeconds"] = String(Date().timeIntervalSince(start))
+        save()
+    }
+
 }
 
 private actor PCCSmokeRouteRecorder {
     var routes: [RecipeModelRoute] = []
     func record(_ route: RecipeModelRoute) { routes.append(route) }
+}
+private actor ImportSmokeRecorder: RecipeImportStructuring {
+    var hasCloudPlan = false
+    var planDescription = ""
+    func structure(lines: [String]) async throws -> RecipeImportPlan? {
+        let plan = try await PCCRecipeImportStructurer().structure(lines: lines)
+        hasCloudPlan = plan != nil
+        planDescription = plan?.items.map { "\($0.line):\($0.role.rawValue):\($0.sectionLine ?? -1)" }.joined(separator: ",") ?? "unavailable"
+        return plan
+    }
 }
 #endif

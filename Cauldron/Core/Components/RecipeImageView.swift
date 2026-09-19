@@ -453,8 +453,8 @@ extension RecipeImageView {
 
 extension HeroRecipeImageView {
     /// Create from a Recipe object (with CloudKit fallback)
-    init(recipe: Recipe, recipeImageService: RecipeImageService, reloadToken: UUID? = nil) {
-        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName, imageCacheIdentity: recipe.imageModifiedAt.map { String($0.timeIntervalSinceReferenceDate.bitPattern, radix: 16) }, reloadToken: reloadToken)
+    init(recipe: Recipe, recipeImageService: RecipeImageService, reloadToken: UUID? = nil, height: CGFloat? = nil) {
+        self.init(imageURL: recipe.imageURL, recipeImageService: recipeImageService, recipeId: recipe.id, ownerId: recipe.ownerId, privateRecordName: recipe.cloudRecordName, imageCacheIdentity: recipe.imageModifiedAt.map { String($0.timeIntervalSinceReferenceDate.bitPattern, radix: 16) }, reloadToken: reloadToken, height: height)
     }
 }
 
@@ -471,6 +471,7 @@ struct HeroRecipeImageView: View {
     let privateRecordName: String?
     let imageCacheIdentity: String?
     let reloadToken: UUID?
+    let height: CGFloat?
 
     @Environment(\.displayScale) private var displayScale
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -482,7 +483,7 @@ struct HeroRecipeImageView: View {
 
     private let cacheVariant = "hero"
     private var heroHeight: CGFloat {
-        horizontalSizeClass == .regular ? 460 : 380
+        height ?? (horizontalSizeClass == .regular ? 460 : 380)
     }
 
     private var loadTaskKey: String {
@@ -495,7 +496,7 @@ struct HeroRecipeImageView: View {
         max(containerWidth, 500) * displayScale
     }
 
-    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil, privateRecordName: String? = nil, imageCacheIdentity: String? = nil, reloadToken: UUID? = nil) {
+    init(imageURL: URL?, recipeImageService: RecipeImageService, recipeId: UUID? = nil, ownerId: UUID? = nil, privateRecordName: String? = nil, imageCacheIdentity: String? = nil, reloadToken: UUID? = nil, height: CGFloat? = nil) {
         self.imageURL = imageURL
         self.recipeImageService = recipeImageService
         self.recipeId = recipeId
@@ -503,6 +504,7 @@ struct HeroRecipeImageView: View {
         self.privateRecordName = privateRecordName
         self.imageCacheIdentity = imageCacheIdentity
         self.reloadToken = reloadToken
+        self.height = height
 
         // A card image is already visible at the moment this view is pushed.
         // Reuse it immediately, then replace it with the hero-sized decode in

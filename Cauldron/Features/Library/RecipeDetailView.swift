@@ -13,6 +13,7 @@ struct RecipeDetailView: View {
         subsystem: "com.cauldron",
         category: "RecipeDetail"
     )
+    let compactHero: Bool
     let initialRecipe: Recipe
     let dependencies: DependencyContainer
 
@@ -68,7 +69,7 @@ struct RecipeDetailView: View {
     let sharedAt: Date?
     let explicitHighlightedStepIndex: Int?
 
-    init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil, highlightedStepIndex: Int? = nil) {
+    init(recipe: Recipe, dependencies: DependencyContainer, sharedBy: User? = nil, sharedAt: Date? = nil, highlightedStepIndex: Int? = nil, compactHero: Bool = false) {
         let snapshot = dependencies.libraryPresentationStore.recipeSnapshot(for: recipe)
         let seededRecipe = snapshot?.recipe ?? recipe
         let seededSharedBy = sharedBy ?? snapshot?.sharedBy
@@ -77,6 +78,7 @@ struct RecipeDetailView: View {
             ?? dependencies.libraryPresentationStore.recipeRelation(for: recipe)
             ?? Self.initialRelation(for: recipe)
 
+        self.compactHero = compactHero
         self.initialRecipe = seededRecipe
         self.dependencies = dependencies
         self.sharedBy = seededSharedBy
@@ -234,7 +236,8 @@ struct RecipeDetailView: View {
                                 HeroRecipeImageView(
                                     recipe: recipe,
                                     recipeImageService: dependencies.recipeImageService,
-                                    reloadToken: imageRefreshID
+                                    reloadToken: imageRefreshID,
+                                    height: compactHero ? min(220, proxy.size.width * 0.6) : nil
                                 )
                                     .backgroundExtensionEffect(isEnabled: shouldApplyBackgroundExtensionEffect)
                                     .ignoresSafeArea(edges: .top)
@@ -246,7 +249,9 @@ struct RecipeDetailView: View {
                     }
                 }
                 .onAppear {
-                    if let stepIndex = highlightedStepIndex {
+                    // Only an explicit Cook Mode route requests a jump into the method.
+                    // Browsing this recipe from Search should still begin at its header.
+                    if let stepIndex = explicitHighlightedStepIndex {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             withAnimation(.easeInOut(duration: 0.5)) {
                                 scrollProxy.scrollTo("step-\(stepIndex)", anchor: .center)
@@ -259,6 +264,7 @@ struct RecipeDetailView: View {
 
         }
         .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
+            if !compactHero {
             HStack {
                 Spacer()
 
@@ -284,8 +290,21 @@ struct RecipeDetailView: View {
                 .padding(.trailing, 20)
                 .padding(.bottom, 16)
             }
+            }
+        }
+        .toolbar {
+            if compactHero {
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Cook", systemImage: "frying.pan") {
+                        handleCookButtonTap()
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.cauldronOrange)
+                }
+            }
         }
         .background(Color.appBackground.ignoresSafeArea())
+        .recipeOnscreenContext(recipe)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {

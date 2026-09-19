@@ -5,6 +5,33 @@ import XCTest
 
 @MainActor
 final class RecipeIntentEntityTests: XCTestCase {
+    func testSystemRebuildSurvivesCoalescedRefresh() {
+        let owner = UUID()
+        var queue = RecipeSpotlightReconciliationQueue()
+        XCTAssertTrue(queue.enqueue(.rebuild(ownerID: owner)))
+        XCTAssertFalse(queue.enqueue(.full(ownerID: owner, recipes: [])))
+        guard case .rebuild(let retainedOwner) = queue.takeNext()?.request else {
+            return XCTFail("Refresh must not erase a system rebuild")
+        }
+        XCTAssertEqual(retainedOwner, owner)
+    }
+
+    func testNewAccountSupersedesPendingRebuild() {
+        var queue = RecipeSpotlightReconciliationQueue()
+        _ = queue.enqueue(.rebuild(ownerID: UUID()))
+        _ = queue.enqueue(.accountBoundary(ownerID: nil))
+        guard case .accountBoundary(let owner) = queue.takeNext()?.request else {
+            return XCTFail("Account boundary must win")
+        }
+        XCTAssertNil(owner)
+    }
+
+    func testRemoteThumbnailsAreNotDonated() {
+        let entity = RecipeIntentEntity(id: UUID(), title: "Soup", totalMinutes: 20,
+            thumbnailURL: URL(string: "https://example.com/private-image"))
+        XCTAssertNil(entity.attributeSet.thumbnailURL)
+    }
+
     func testAccountIdentityVerificationGateDeniesAccessUntilCurrentRevisionCompletes() {
         var gate = AccountIdentityVerificationGate()
         let launchToken = gate.token

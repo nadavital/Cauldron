@@ -16,6 +16,9 @@ struct RecipeReviewPresentation: View {
     var sourceDescription: String?
     var attributionName: String?
     var showsHeroImage = true
+    var heroHeight: CGFloat? = nil
+    var stacksSections = false
+    var usesCompactHeader = false
 
     private var hasHeroImage: Bool {
         showsHeroImage && RecipeDetailDisplayPolicy.hasHeroImage(recipe)
@@ -26,12 +29,13 @@ struct RecipeReviewPresentation: View {
             if hasHeroImage {
                 HeroRecipeImageView(
                     recipe: recipe,
-                    recipeImageService: dependencies.recipeImageService
+                    recipeImageService: dependencies.recipeImageService,
+                    height: heroHeight
                 )
             }
 
             GlassEffectContainer(spacing: 2) {
-                if horizontalSizeClass == .regular {
+                if horizontalSizeClass == .regular && !stacksSections {
                     regularContent
                 } else {
                     compactContent
@@ -74,12 +78,17 @@ struct RecipeReviewPresentation: View {
         }
     }
 
+    @ViewBuilder
     private var header: some View {
+        if usesCompactHeader {
+            RecipeReviewCompactHeader(recipe: recipe, dependencies: dependencies)
+        } else {
         RecipeReviewHeaderSection(
             recipe: recipe,
             sourceDescription: sourceDescription,
             attributionName: attributionName
         )
+        }
     }
 
     @ViewBuilder
@@ -200,5 +209,31 @@ private struct RecipeReviewHeaderSection: View {
         .appPageChrome()
         .navigationTitle("Preview Recipe")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct RecipeReviewCompactHeader: View {
+    let recipe: Recipe
+    let dependencies: DependencyContainer
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            RecipeImageView(thumbnailForRecipe: recipe, recipeImageService: dependencies.recipeImageService)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(recipe.title)
+                    .font(.title2.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text([recipe.displayTime, recipe.yields].compactMap { $0 }.joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if !recipe.tags.isEmpty {
+                    Text(recipe.tags.map(\.name).joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
     }
 }

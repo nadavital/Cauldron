@@ -14,6 +14,8 @@ struct RecipeImportPreviewView: View {
     let importedRecipe: Recipe
     let dependencies: DependencyContainer
     let sourceInfo: String
+    let sourceText: String?
+    let sourceImage: UIImage?
     let destinationRecipeID: UUID?
     let onSave: () async -> Bool
 
@@ -26,12 +28,16 @@ struct RecipeImportPreviewView: View {
         importedRecipe: Recipe,
         dependencies: DependencyContainer,
         sourceInfo: String,
+        sourceText: String? = nil,
+        sourceImage: UIImage? = nil,
         destinationRecipeID: UUID? = nil,
         onSave: @escaping () async -> Bool = { true }
     ) {
         self.importedRecipe = importedRecipe
         self.dependencies = dependencies
         self.sourceInfo = sourceInfo
+        self.sourceText = sourceText
+        self.sourceImage = sourceImage
         self.destinationRecipeID = destinationRecipeID
         self.onSave = onSave
         self._editedRecipe = State(initialValue: importedRecipe)
@@ -39,13 +45,10 @@ struct RecipeImportPreviewView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                RecipeReviewPresentation(
-                    recipe: editedRecipe,
-                    dependencies: dependencies,
-                    sourceDescription: sourceInfo
-                )
-            }
+            ImportReviewWorkspace(
+                recipe: editedRecipe, dependencies: dependencies,
+                sourceInfo: sourceInfo, sourceText: sourceText, sourceImage: sourceImage
+            )
             .appPageChrome()
             .navigationTitle("Preview Recipe")
             .navigationBarTitleDisplayMode(.inline)

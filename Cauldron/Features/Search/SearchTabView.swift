@@ -6,13 +6,16 @@
 //
 
 import SwiftUI
+import AppIntents
 import os
 
 /// Search tab - search across all recipes and browse by category
 struct SearchTabView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var viewModel: SearchTabViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
     @State private var searchText = ""
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var searchMode: SearchMode = .recipes
     @State private var searchHistory: SearchHistoryStore
     @State private var showingProfileSheet = false
@@ -20,6 +23,7 @@ struct SearchTabView: View {
     @Namespace private var recipeTransition
     let isActive: Bool
     let screenshotDetailRecipe: Recipe?
+    let screenshotSearchQuery: String?
 
     enum SearchMode: String, CaseIterable {
         case recipes = "Recipes"
@@ -32,13 +36,15 @@ struct SearchTabView: View {
         dependencies: DependencyContainer,
         navigationPath: Binding<NavigationPath>,
         isActive: Bool = true,
-        screenshotDetailRecipe: Recipe? = nil
+        screenshotDetailRecipe: Recipe? = nil,
+        screenshotSearchQuery: String? = nil
     ) {
         _viewModel = State(initialValue: SearchTabViewModel(dependencies: dependencies))
         _searchHistory = State(initialValue: SearchHistoryStore(ownerID: CurrentUserSession.shared.userId))
         _navigationPath = navigationPath
         self.isActive = isActive
         self.screenshotDetailRecipe = screenshotDetailRecipe
+        self.screenshotSearchQuery = screenshotSearchQuery
     }
 
     var body: some View {
@@ -75,6 +81,10 @@ struct SearchTabView: View {
         .task {
             searchHistory.selectOwner(currentUserSession.userId)
             await viewModel.loadDataIfNeeded()
+            if let screenshotSearchQuery, searchText.isEmpty {
+                searchText = screenshotSearchQuery
+                interpretSubmittedSearch()
+            }
         }
         .onChange(of: currentUserSession.userId) { _, userID in
             searchHistory.selectOwner(userID)
@@ -111,6 +121,7 @@ struct SearchTabView: View {
         }
         .onSubmit(of: .search) {
             recordCurrentRecipeSearch()
+            interpretSubmittedSearch()
         }
     }
 
@@ -126,7 +137,7 @@ struct SearchTabView: View {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
                 .navigationDestination(for: Recipe.self) { recipe in
-                    RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                    RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies, compactHero: horizontalSizeClass == .regular)
                         .navigationTransition(.zoom(sourceID: recipe.id, in: recipeTransition))
                 }
                 .navigationDestination(for: User.self) { user in
@@ -146,12 +157,12 @@ struct SearchTabView: View {
     }
 
     private var splitView: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             searchContent
                 .navigationTitle("Search")
                 .toolbarTitleDisplayMode(.inlineLarge)
                 .toolbar { searchToolbar }
-                .navigationSplitViewColumnWidth(min: 320, ideal: 360, max: 420)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
                 .refreshable {
                     await viewModel.loadData(forceRefreshPublicRecipes: true)
                 }
@@ -161,14 +172,15 @@ struct SearchTabView: View {
                     if let screenshotDetailRecipe {
                         RecipeDetailView(
                             recipe: screenshotDetailRecipe,
-                            dependencies: viewModel.dependencies
+                            dependencies: viewModel.dependencies,
+                            compactHero: horizontalSizeClass == .regular
                         )
                     } else {
                         splitDetailPlaceholder
                     }
                 }
                     .navigationDestination(for: Recipe.self) { recipe in
-                        RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies)
+                        RecipeDetailView(recipe: recipe, dependencies: viewModel.dependencies, compactHero: horizontalSizeClass == .regular)
                     }
                     .navigationDestination(for: User.self) { user in
                         UserProfileView(user: user, dependencies: viewModel.dependencies)
@@ -183,6 +195,7 @@ struct SearchTabView: View {
                         VisualRecipeSearchResultsView(route: route, dependencies: viewModel.dependencies)
                     }
             }
+            .navigationSplitViewColumnWidth(min: 300, ideal: 440)
         }
         .navigationSplitViewStyle(.balanced)
         .searchable(
@@ -207,7 +220,7 @@ struct SearchTabView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     if searchMode == .recipes {
-                        if searchText.isEmpty && viewModel.selectedCategories.isEmpty {
+                        if searchText.isEmpty && viewModel.selectedCategories.isEmpty && !viewModel.hasActiveRefinements {
                             // Show categories when not searching and no filters
                             categoriesView
                         } else {
@@ -227,15 +240,34 @@ struct SearchTabView: View {
     }
 
     private var splitDetailPlaceholder: some View {
-        AppStateView(
-            kind: .empty(systemImage: searchMode == .recipes ? "fork.knife" : "person.2"),
-            titleText: .verbatim(
-                searchMode == .recipes ? "Select a Recipe" : "Select a Person"
-            ),
-            messageText: .verbatim(
-                searchMode == .recipes ? "Choose a recipe to view its details." : "Choose a person to view their profile."
-            )
-        )
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                Text(searchMode == .recipes ? "Find your next meal" : "Find your people")
+                    .font(Theme.Typography.screenTitle)
+                Text(searchMode == .recipes
+                     ? "Choose a result to explore its ingredients and method here. Your search stays alongside it."
+                     : "Choose a person to view their profile.")
+                    .foregroundStyle(.secondary)
+                if searchMode == .recipes {
+                    Text("Try a search")
+                        .font(.headline)
+                    ForEach(["dinners under 30 minutes", "pasta without mushrooms", "breakfast under 15 minutes"], id: \.self) { query in
+                        Button {
+                            searchText = query
+                            interpretSubmittedSearch()
+                        } label: {
+                            Label(query, systemImage: "magnifyingglass")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
+                        }
+                        .buttonStyle(.glass)
+                    }
+                }
+            }
+            .padding(Theme.Spacing.xl)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+        }
         .appPageChrome()
     }
 
@@ -338,6 +370,15 @@ struct SearchTabView: View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             let results = viewModel.displayedRecipeResults
 
+            if !activeRefinementSummary.isEmpty {
+                Text(activeRefinementSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Active filters: \(activeRefinementSummary)")
+            }
+            refinementBar
+
             if RuntimeEnvironment.forceSkeletonLoading || (viewModel.isLoading && viewModel.recipeSearchResults.isEmpty) {
                 RecipeRowSkeletonList()
             } else if viewModel.recipeSearchResults.isEmpty {
@@ -349,8 +390,6 @@ struct SearchTabView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.Spacing.xxl)
             } else {
-                refinementBar
-
                 if results.isEmpty {
                     EmptyStateView(
                         title: "No Matches",
@@ -367,9 +406,10 @@ struct SearchTabView: View {
                     ForEach(results) { group in
                         Button {
                             recordCurrentRecipeSearch()
-                            navigationPath.append(group.primaryRecipe)
+                            selectRecipe(group.primaryRecipe)
                         } label: {
                             SearchRecipeGroupRow(group: group, dependencies: viewModel.dependencies)
+                                .recipeOnscreenContext(group.primaryRecipe)
                         }
                         .buttonStyle(PressableScaleStyle())
                         .matchedTransitionSource(id: group.primaryRecipe.id, in: recipeTransition)
@@ -377,6 +417,29 @@ struct SearchTabView: View {
                 }
             }
         }
+    }
+
+    private func selectRecipe(_ recipe: Recipe) {
+        if horizontalSizeClass == .regular && !RuntimeEnvironment.prefersDesktopWorkspace {
+            navigationPath = NavigationPath([recipe])
+        } else {
+            navigationPath.append(recipe)
+        }
+    }
+
+    private func interpretSubmittedSearch() {
+        guard searchMode == .recipes else { return }
+        let interpretation = RecipeSearchInterpretation(searchText)
+        guard interpretation.hasFilters else { return }
+        if let time = interpretation.time { viewModel.timeFilter = time }
+        if let excluded = interpretation.excludedIngredients {
+            viewModel.excludedIngredientsText = excluded
+        }
+        if let category = interpretation.category {
+            viewModel.selectedCategories.insert(category)
+        }
+        searchText = interpretation.text
+        viewModel.updateRecipeSearch(interpretation.text)
     }
 
     private func recordCurrentRecipeSearch() {
@@ -390,64 +453,26 @@ struct SearchTabView: View {
         searchHistory.record(query)
     }
 
-    /// Time filter + sort controls shown above recipe results.
     private var refinementBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: Theme.Spacing.sm) {
-                HStack(spacing: Theme.Spacing.sm) {
-                    Menu {
-                        Picker("Time", selection: $viewModel.timeFilter) {
-                            ForEach(RecipeTimeFilter.allCases) { filter in
-                                Text(filter.label).tag(filter)
-                            }
-                        }
-                    } label: {
-                        refinementChip(
-                            title: viewModel.timeFilter == .any ? "Time" : viewModel.timeFilter.label,
-                            systemImage: "clock",
-                            isActive: viewModel.timeFilter != .any
-                        )
-                    }
+        SearchRefinementsView(model: viewModel, editIngredients: {
+            showingIngredientFilters = true
+        }, clear: {
+            viewModel.clearRefinements()
+            viewModel.selectedCategories.removeAll()
+            viewModel.updateRecipeSearch(searchText)
+        })
+    }
 
-                    Button {
-                        showingIngredientFilters = true
-                    } label: {
-                        refinementChip(
-                            title: ingredientFilterLabel,
-                            systemImage: "carrot",
-                            isActive: hasIngredientFilters
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Menu {
-                        Picker("Sort", selection: $viewModel.sortOrder) {
-                            ForEach(RecipeSortOrder.allCases) { order in
-                                Text(order.label).tag(order)
-                            }
-                        }
-                    } label: {
-                        refinementChip(
-                            title: viewModel.sortOrder == .relevance ? "Sort" : viewModel.sortOrder.label,
-                            systemImage: "arrow.up.arrow.down",
-                            isActive: viewModel.sortOrder != .relevance
-                        )
-                    }
-
-                    if viewModel.hasActiveRefinements {
-                        IconActionButton(
-                            "Clear filters",
-                            systemImage: "xmark",
-                            style: .glass,
-                            tint: .secondary
-                        ) {
-                            withAnimation(Theme.Animation.snappy) { viewModel.clearRefinements() }
-                        }
-                    }
-                }
-            }
+    private var activeRefinementSummary: String {
+        var parts = viewModel.selectedCategories.map(\.displayName).sorted()
+        if viewModel.timeFilter != .any { parts.append(viewModel.timeFilter.label) }
+        if !viewModel.requiredIngredientsText.trimmed.isEmpty {
+            parts.append("Includes \(viewModel.requiredIngredientsText)")
         }
-        .contentMargins(.horizontal, 1, for: .scrollContent)
+        if !viewModel.excludedIngredientsText.trimmed.isEmpty {
+            parts.append("Without \(viewModel.excludedIngredientsText)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var hasIngredientFilters: Bool {
@@ -460,7 +485,11 @@ struct SearchTabView: View {
             viewModel.requiredIngredientsText,
             viewModel.excludedIngredientsText,
         ].filter { !$0.trimmed.isEmpty }.count
-        return filterCount == 0 ? "Ingredients" : "Ingredients · \(filterCount)"
+        if filterCount == 0 { return "Ingredients" }
+        if viewModel.requiredIngredientsText.trimmed.isEmpty {
+            return "Without \(viewModel.excludedIngredientsText)"
+        }
+        return "Ingredients · \(filterCount)"
     }
 
     private var ingredientFiltersSheet: some View {
@@ -541,23 +570,6 @@ struct SearchTabView: View {
         }
     }
 
-    private func refinementChip(title: String, systemImage: String, isActive: Bool) -> some View {
-        HStack(spacing: Theme.Spacing.xxs) {
-            Image(systemName: systemImage)
-            Text(title)
-            Image(systemName: "chevron.down")
-                .font(.caption2.weight(.semibold))
-        }
-        .font(.subheadline)
-        .foregroundStyle(isActive ? Color.cauldronOrange : Color.primary)
-        .padding(.horizontal, Theme.Spacing.sm)
-        .padding(.vertical, Theme.Spacing.xs)
-        .glassEffect(
-            isActive ? .regular.tint(Color.cauldronOrange.opacity(0.25)) : .regular,
-            in: Capsule()
-        )
-    }
-    
     private var peopleSearchView: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             if searchText.isEmpty {

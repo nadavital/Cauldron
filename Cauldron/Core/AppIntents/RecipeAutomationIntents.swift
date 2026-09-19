@@ -111,13 +111,17 @@ struct AddRecipeIngredientsToGroceriesIntent: AppIntent {
 }
 
 struct QueueRecipeURLImportIntent: AppIntent {
-    static var title: LocalizedStringResource = "Import Recipe from URL"
+    static var title: LocalizedStringResource = "Save Recipe from Webpage"
     static var description = IntentDescription("Add a webpage to Cauldron's durable Import Inbox for review.")
 
-    @Parameter(title: "Recipe URL")
+    @Parameter(title: "Recipe URL", inputConnectionBehavior: .connectToPreviousIntentResult)
     var url: URL
 
     init() {}
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Save recipe from \(\.$url)")
+    }
 
     init(url: URL) {
         self.url = url

@@ -181,7 +181,8 @@ class DependencyContainer: ObservableObject {
         persistenceRecoveryReport: PersistenceRecoveryReport? = nil,
         allowsUnverifiedArchiveRestore: Bool = false,
         collectionImageManager: CollectionImageManagerV2? = nil,
-        timerManager: TimerManager? = nil
+        timerManager: TimerManager? = nil,
+        enablesCloudImport: Bool = true
     ) {
         self.modelContainer = modelContainer
         self.persistenceRecoveryReport = persistenceRecoveryReport
@@ -364,7 +365,11 @@ class DependencyContainer: ObservableObject {
         // ============================================================
 
         // Parsers
-        self.textParser = TextRecipeParser(lineClassifier: recipeLineClassificationService)
+        self.textParser = TextRecipeParser(
+            lineClassifier: recipeLineClassificationService,
+            importStructurer: enablesCloudImport && !RuntimeEnvironment.isRunningTests && !RuntimeEnvironment.isSimulatorQAMode
+                ? PCCRecipeImportStructurer() : nil
+        )
         self.htmlParser = HTMLRecipeParser(
             extractor: ModelImportTextExtractor(),
             textParser: textParser
@@ -458,7 +463,8 @@ class DependencyContainer: ObservableObject {
                 requestNotificationPermission: false,
                 schedulesNotifications: false,
                 notificationScheduler: NoopTimerNotificationScheduler()
-            )
+            ),
+            enablesCloudImport: false
         )
     }
     

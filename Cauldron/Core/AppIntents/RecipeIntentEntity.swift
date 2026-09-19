@@ -9,6 +9,7 @@ struct RecipeIntentEntity: IndexedEntity, Identifiable, Sendable, Transferable {
     static var defaultQuery = RecipeIntentEntityQuery()
 
     let id: UUID
+    let thumbnailURL: URL?
 
     @Property(title: "Title", indexingKey: \.title)
     var title: String
@@ -63,6 +64,7 @@ struct RecipeIntentEntity: IndexedEntity, Identifiable, Sendable, Transferable {
         }
         attributes.metadataModificationDate = updatedAt
         attributes.contentCreationDate = createdAt
+        attributes.thumbnailURL = thumbnailURL
         attributes.userCreated = true
         attributes.userOwned = true
         if let totalMinutes {
@@ -89,9 +91,11 @@ struct RecipeIntentEntity: IndexedEntity, Identifiable, Sendable, Transferable {
         updatedAt: Date = .distantPast,
         createdAt: Date = .distantPast,
         creatorName: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        thumbnailURL: URL? = nil
     ) {
         self.id = id
+        self.thumbnailURL = thumbnailURL?.isFileURL == true ? thumbnailURL : nil
         self.title = title
         self.ingredientNames = ingredientNames
         self.instructions = instructions
@@ -121,7 +125,8 @@ struct RecipeIntentEntity: IndexedEntity, Identifiable, Sendable, Transferable {
             updatedAt: recipe.updatedAt,
             createdAt: recipe.createdAt,
             creatorName: recipe.originalCreatorName,
-            notes: recipe.notes
+            notes: recipe.notes,
+            thumbnailURL: recipe.imageURL
         )
     }
 
@@ -487,3 +492,17 @@ final class RecipeIntentProvider {
         return true
     }
 }
+
+#if canImport(AppIntents, _version: 301.0)
+@available(iOS 27.0, macOS 27.0, macCatalyst 27.0, *)
+extension RecipeIntentEntityQuery: IndexedEntityQuery {
+    func reindexEntities(for identifiers: [UUID], indexDescription: CSSearchableIndexDescription) async throws {
+        // Reconcile the complete owned set so deletions and account changes are included.
+        try await RecipeSpotlightIndexer.shared.rebuildForSystemRequest()
+    }
+
+    func reindexAllEntities(indexDescription: CSSearchableIndexDescription) async throws {
+        try await RecipeSpotlightIndexer.shared.rebuildForSystemRequest()
+    }
+}
+#endif

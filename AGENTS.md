@@ -43,6 +43,7 @@ Guidance for coding agents working in this repository.
   - Launch Debug builds with `--cauldron-simulator-qa` or `CAULDRON_SIMULATOR_QA=1` to use in-memory social/import/offline mock data and suppress CloudKit startup sync for repeatable visual smoke checks.
   - Add `--cauldron-desktop-workspace` to preview the iPhone/iPad-on-Mac single-workspace layout in an iPad simulator.
   - Debug-only `--cauldron-pcc-smoke-test` runs a fixed, non-personal prompt through the production generation service without opening the library. It reports the selected route and completion in the UI and `cauldron-pcc-smoke.json` under the app's temporary directory; cloud success requires no local fallback. A signed Catalyst build can verify real PCC access when no iPhone is connected.
+  - Debug-only `--cauldron-pcc-import-smoke-test` verifies fixed-source section extraction through the production PCC import service without opening the library; results are written to `cauldron-pcc-import-smoke.json` in the app temporary directory.
   - `DependencyContainer.preview()` uses nonpersistent timers and a no-op notification scheduler so previews and rendering tests do not restore or cancel system timer notifications.
 
 ## Current Product Priorities
@@ -52,8 +53,11 @@ Guidance for coding agents working in this repository.
 - Favor practical incremental changes over broad refactors unless requested
 
 ## Critical Features And Behaviors
+- Search interprets supported time, meal, and exclusion phrases locally on submission into editable filters; unknown wording stays literal. Keep split-view result selection from accumulating a detail navigation stack.
+- Spotlight system rebuild callbacks use `RecipeSpotlightIndexer`'s serialized queue and verified-account boundary. Only saved, currently owned recipes expose onscreen App Entity context; thumbnails must be local file URLs.
 - Import quality is core product value:
-  - Model-backed parser + shared import pipeline should stay consistent across URL, text, and share-extension entry points.
+  - Model-backed parser + shared import pipeline should stay consistent across URL, text, and share-extension entry points. PCC import structuring uses source-line references with validated section headings; never use recipe-generation output to replace source quantities or instructions. Unavailable/quota/error/invalid plans fall back to local parsing. Preview/test containers disable live cloud import.
+  - The Save Recipe from Webpage App Intent durably queues a URL for review. Safari onscreen voice import uses a personal shortcut with Receive What’s On Screen enabled; an App Shortcut phrase alone does not provide Safari context.
   - Parser behavior changes should keep parity/regression tests green.
   - Share-extension handoffs must be persisted into `RecipeImportInboxStore` before the cross-process transport item is acknowledged; dismissal is not completion.
 - Social sharing is a core workflow:

@@ -6,6 +6,8 @@ struct ModelRecipeAssembler: Sendable {
         let index: Int
         let text: String
         let label: RecipeLineLabel
+        var grounded: Bool = false
+        var section: String? = nil
     }
 
     struct SectionItems: Sendable {
@@ -126,6 +128,18 @@ struct ModelRecipeAssembler: Sendable {
                 let noteLine = normalizeNoteText(tipsRemainder)
                 if !noteLine.isEmpty {
                     notes.append(noteLine)
+                }
+                continue
+            }
+
+            if row.grounded {
+                switch row.label {
+                case .ingredient: addIngredient(text, sectionName: row.section)
+                case .step:
+                    for line in splitNumberedSteps(text) { addStep(line, sectionName: row.section) }
+                case .note: notes.append(normalizeNoteText(text))
+                case .title: if title.isEmpty { title = text }
+                case .header, .junk: break
                 }
                 continue
             }

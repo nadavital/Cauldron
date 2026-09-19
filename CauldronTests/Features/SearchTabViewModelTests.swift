@@ -20,6 +20,38 @@ final class SearchTabViewModelTests: XCTestCase {
         SearchTabViewModel(dependencies: DependencyContainer.preview())
     }
 
+    func testNaturalSearchExtractsEditableConstraints() {
+        let result = RecipeSearchInterpretation("chicken dinners under 30 minutes without mushrooms and olives")
+        XCTAssertEqual(result.text, "chicken")
+        XCTAssertEqual(result.time, .under30)
+        XCTAssertEqual(result.category, .dinner)
+        XCTAssertEqual(result.excludedIngredients, "mushrooms, olives")
+    }
+
+    func testUnknownConstraintIsNotConsumedAsAnIngredient() {
+        let result = RecipeSearchInterpretation("soup without mushrooms under 45 minutes")
+        XCTAssertNil(result.excludedIngredients)
+        XCTAssertEqual(result.text, "soup without mushrooms under 45 minutes")
+    }
+
+    func testUnrecognizedSearchIsPreserved() {
+        let result = RecipeSearchInterpretation("cozy soup under 45 minutes")
+        XCTAssertEqual(result.text, "cozy soup under 45 minutes")
+        XCTAssertFalse(result.hasFilters)
+    }
+
+    func testIngredientNamesAreNotMatchedAsCategories() {
+        let result = RecipeSearchInterpretation("snackable chickpeas")
+        XCTAssertNil(result.category)
+        XCTAssertEqual(result.text, "snackable chickpeas")
+    }
+
+    func testFilterOnlySearchHasEmptyLiteralQuery() {
+        let result = RecipeSearchInterpretation("UNDER 15 MINUTES")
+        XCTAssertEqual(result.text, "")
+        XCTAssertEqual(result.time, .under15)
+    }
+
     // MARK: - Category Selection
 
     func testToggleCategorySelectsUnselectedCategory() {

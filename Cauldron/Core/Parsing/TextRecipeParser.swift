@@ -62,12 +62,15 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
     private let lineClassifier: RecipeLineClassifying
     private let modelAssembler: ModelRecipeAssembler
     private let modelConfidenceThreshold: Double
+    private let importStructurer: (any RecipeImportStructuring)?
 
     init(
         lineClassifier: RecipeLineClassifying = RecipeLineClassificationService(),
         modelConfidenceThreshold: Double = 0.72,
-        modelAssembler: ModelRecipeAssembler = ModelRecipeAssembler()
+        modelAssembler: ModelRecipeAssembler = ModelRecipeAssembler(),
+        importStructurer: (any RecipeImportStructuring)? = nil
     ) {
+        self.importStructurer = importStructurer
         self.lineClassifier = lineClassifier
         self.modelConfidenceThreshold = modelConfidenceThreshold
         self.modelAssembler = modelAssembler
@@ -146,11 +149,31 @@ actor TextRecipeParser: RecipeParser, ModelRecipeTextParsing {
             return ModelRecipeAssembler.Row(index: index, text: line, label: fallbackHeuristicLabel(for: line))
         }
 
-        let assembled = modelAssembler.assemble(
+        var assembled = modelAssembler.assemble(
             rows: rows,
             sourceURL: sourceURL,
             sourceTitle: sourceTitle
         )
+
+        if let importStructurer {
+            do {
+                if let plan = try await importStructurer.structure(lines: effectiveLines),
+                   let groundedRows = plan.validatedRows(source: effectiveLines, baseline: rows) {
+                    let candidate = modelAssembler.assemble(rows: groundedRows, sourceURL: sourceURL, sourceTitle: sourceTitle)
+                    // Coverage and source-reference validation protect content; counts can shrink
+                    // legitimately when a local false ingredient becomes a section heading.
+                    if !candidate.ingredients.isEmpty, !candidate.steps.isEmpty {
+                        assembled = candidate
+                    }
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Offline, quota, model refusal, or malformed output: retain the existing parser.
+                try Task.checkCancellation()
+            }
+        }
+        try Task.checkCancellation()
 
         var title = assembled.title
         var ingredients = assembled.ingredients

@@ -7,6 +7,7 @@
 
 import AppIntents
 import SwiftUI
+import AppIntents
 import AudioToolbox
 
 /// Step-by-step cooking mode view
@@ -82,6 +83,7 @@ struct CookModeView: View {
             }
         }
         .background(Color.appBackground.ignoresSafeArea())
+        .recipeOnscreenContext(recipe)
         .navigationTitle(recipe.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

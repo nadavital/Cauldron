@@ -46,6 +46,12 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         FeatureRow(
+                            symbol: "magnifyingglass",
+                            title: "Search with room to explore",
+                            detail: "Keep results beside a recipe, turn phrases like ‘under 30 minutes’ into filters, and compare imported recipes with their original source."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
                             symbol: "rectangle.split.2x1",
                             title: "Room to cook",
                             detail: "Flexible recipe layouts, a cooking workspace that adapts to iPhone Duo, and ingredient checklists that remember your progress."
@@ -55,8 +61,8 @@ struct WhatsNewView: View {
                         if #available(iOS 27.0, macCatalyst 27.0, *) {
                             FeatureRow(
                                 symbol: "cloud",
-                                title: "More capable recipe generation",
-                                detail: "Generate recipes with Apple Intelligence on Private Cloud Compute when available, with on-device fallback."
+                                title: "More capable recipe intelligence",
+                                detail: "Generate recipes and organize imported recipe sections with Private Cloud Compute when available. Imports preserve source text and fall back to local parsing."
                             )
                             Divider().padding(.leading, 44)
                         }
@@ -76,7 +82,7 @@ struct WhatsNewView: View {
                         FeatureRow(
                             symbol: "waveform",
                             title: "Cook with Siri",
-                            detail: "Ask Siri to find a recipe or start Cook Mode without hunting through the app."
+                            detail: "Find recipes, start Cook Mode, or use a personal shortcut to send Safari pages to your Import Inbox. Find setup help in Import Recipe."
                         )
                         Divider().padding(.leading, 44)
                         FeatureRow(

@@ -32,7 +32,7 @@ struct ContentView: View {
     // When you ship a bug fix, leave this unchanged so no splash appears.
     /// Independent content gate so material release-note changes can be shown
     /// even when they ship within the same marketing version.
-    static let whatsNewContentVersion = "2.0-duo-cloud"
+    static let whatsNewContentVersion = "2.0-duo-search-import"
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
@@ -952,7 +952,15 @@ private struct ScreenshotSceneView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if ["search_results", "import_review", "generate_recipe", "siri_import"].contains(scene) {
+            sceneContent
+        } else {
+            NavigationStack { sceneContent }
+        }
+    }
+
+    @ViewBuilder
+    private var sceneContent: some View {
             switch scene {
             case "recipe_view":
                 if let recipe = featuredRecipe {
@@ -962,6 +970,17 @@ private struct ScreenshotSceneView: View {
                 }
             case "generate_recipe":
                 AIRecipeGeneratorView(dependencies: dependencies, screenshotPreview: true)
+            case "siri_import":
+                SiriImportHelpView()
+            case "import_review":
+                if let recipe = featuredRecipe {
+                    RecipeImportPreviewView(
+                        importedRecipe: recipe,
+                        dependencies: dependencies,
+                        sourceInfo: "Imported from text",
+                        sourceText: RecipeIntentEntity(recipe: recipe).siriContext
+                    )
+                }
             case "search_results":
                 if let recipe = featuredRecipe {
                     ScreenshotSearchResultsScene(
@@ -1002,7 +1021,6 @@ private struct ScreenshotSceneView: View {
             default:
                 MainTabView(dependencies: dependencies, preloadedData: preloadedData)
             }
-        }
     }
 }
 
@@ -1016,7 +1034,8 @@ private struct ScreenshotSearchResultsScene: View {
         SearchTabView(
             dependencies: dependencies,
             navigationPath: $navigationPath,
-            screenshotDetailRecipe: recipe
+            screenshotDetailRecipe: recipe,
+            screenshotSearchQuery: "dinners without mushrooms"
         )
     }
 }

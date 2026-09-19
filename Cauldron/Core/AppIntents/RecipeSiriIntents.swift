@@ -148,8 +148,8 @@ struct CauldronAppShortcuts: AppShortcutsProvider {
         )
         AppShortcut(
             intent: QueueRecipeURLImportIntent(),
-            phrases: ["Import a recipe URL into \(.applicationName)"],
-            shortTitle: "Import Recipe URL",
+            phrases: ["Import a recipe URL into \(.applicationName)", "Save a webpage to \(.applicationName)"],
+            shortTitle: "Save Webpage",
             systemImageName: "link.badge.plus"
         )
         AppShortcut(
