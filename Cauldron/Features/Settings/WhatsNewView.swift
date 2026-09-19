@@ -46,6 +46,12 @@ struct WhatsNewView: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         FeatureRow(
+                            symbol: "rectangle.split.2x1",
+                            title: "Room to cook",
+                            detail: "Flexible recipe layouts, a cooking workspace that adapts to iPhone Duo, and ingredient checklists on every screen size."
+                        )
+                        Divider().padding(.leading, 44)
+                        FeatureRow(
                             symbol: "sparkles",
                             title: "A calmer Cauldron",
                             detail: "Cleaner navigation and recipe views across iPhone, iPad, and Mac."

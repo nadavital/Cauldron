@@ -11,6 +11,8 @@ import UIKit
 /// View for importing recipes
 struct ImporterView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var compactMethodPicker = false
     @State private var viewModel: ImporterViewModel
     @State private var previewContext: PreviewContext?
     @State private var hasTriggeredAutoImport = false
@@ -60,7 +62,7 @@ struct ImporterView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
                 ScrollView {
                     GlassEffectContainer(spacing: 2) {
                         VStack(spacing: Theme.Spacing.lg) {
@@ -88,15 +90,19 @@ struct ImporterView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, Theme.Spacing.xxl)
                     .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.bottom, 110)
                 }
                 .appPageChrome()
-
+                .scrollDismissesKeyboard(.interactively)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if viewModel.canImport || viewModel.isLoading {
                     generateActionButton
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .onGeometryChange(for: Bool.self) { proxy in
+                proxy.size.width < 360
+            } action: { compactMethodPicker = $0 }
             .animation(Theme.Animation.spring, value: viewModel.canImport)
             .animation(Theme.Animation.spring, value: viewModel.isLoading)
             .navigationTitle("Import Recipe")
@@ -183,7 +189,7 @@ struct ImporterView: View {
         }
         .frame(maxWidth: 520)
         .padding(.horizontal, Theme.Spacing.md)
-        .padding(.bottom, Theme.Spacing.xxl)
+        .padding(.vertical, Theme.Spacing.md)
     }
 
     private var generateActionTitle: String {
@@ -210,16 +216,22 @@ struct ImporterView: View {
     private var importTypePicker: some View {
         AppCard(style: .glass) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Label("Import Method", systemImage: "arrow.triangle.branch")
-                    .font(.headline)
-
-                Picker("Import Type", selection: $viewModel.importType) {
-                    Label("URL", systemImage: "link").tag(ImportType.url)
-                    Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
-                    Label("Image", systemImage: "photo.on.rectangle").tag(ImportType.image)
+                if compactMethodPicker || dynamicTypeSize.isAccessibilitySize {
+                    importMethodSelection.pickerStyle(.menu)
+                } else {
+                    Text("Import Method")
+                        .font(.headline)
+                    importMethodSelection.pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
+        }
+    }
+
+    private var importMethodSelection: some View {
+        Picker("Import Method", selection: $viewModel.importType) {
+            Label("URL", systemImage: "link").tag(ImportType.url)
+            Label("Text", systemImage: "text.justifyleft").tag(ImportType.text)
+            Label("Image", systemImage: "photo.on.rectangle").tag(ImportType.image)
         }
     }
 
@@ -259,7 +271,7 @@ struct ImporterView: View {
                     Button {
                         pasteURLFromClipboard()
                     } label: {
-                        Label("Paste URL from Clipboard", systemImage: "doc.on.clipboard")
+                        Label("Paste Link", systemImage: "doc.on.clipboard")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)

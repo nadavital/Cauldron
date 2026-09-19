@@ -419,35 +419,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return nil
     }
 
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        if RuntimeEnvironment.isRunningTests {
-            return
-        }
-
-        AppLogger.general.info("🔵 AppDelegate: applicationDidBecomeActive")
-
-        // Check for pending share metadata
-        Task {
-            if let metadata = await PendingShareManager.shared.consumePendingMetadata() {
-                AppLogger.general.info("🔵 AppDelegate: Processing pending share metadata")
-                await MainActor.run {
-                    NotificationCenter.default.post(
-                        name: .acceptCloudKitShare,
-                        object: metadata
-                    )
-                }
-            }
-        }
-
-        // Update badge count when app becomes active
-        Task { @MainActor in
-            let dependencies = DependencyContainer.shared
-            // Update badge count based on current pending requests
-            dependencies.connectionManager.updateBadgeCount()
-            AppLogger.general.info("📛 Badge count refreshed on app activation")
-        }
-    }
-
     func application(
         _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,
@@ -475,6 +446,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 // Scene Delegate for handling URLs in SwiftUI lifecycle
 class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        if RuntimeEnvironment.isRunningTests {
+            return
+        }
+
+        AppLogger.general.info("🔵 SceneDelegate: sceneDidBecomeActive")
+
+        // Check for pending share metadata
+        Task {
+            if let metadata = await PendingShareManager.shared.consumePendingMetadata() {
+                AppLogger.general.info("🔵 SceneDelegate: Processing pending share metadata")
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: .acceptCloudKitShare,
+                        object: metadata
+                    )
+                }
+            }
+        }
+
+        // Update badge count when app becomes active
+        Task { @MainActor in
+            let dependencies = DependencyContainer.shared
+            // Update badge count based on current pending requests
+            dependencies.connectionManager.updateBadgeCount()
+            AppLogger.general.info("📛 Badge count refreshed on app activation")
+        }
+    }
+
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard !RuntimeEnvironment.isRunningTests else {
             return

@@ -70,6 +70,8 @@ Guidance for coding agents working in this repository.
 - Large-screen experience is intentional:
   - iPad layouts are first-class, not stretched iPhone views.
   - Mac app behavior is intentionally supported via Mac Catalyst target configuration.
+  - iPhone supports portrait and both landscape orientations. Use container geometry and size classes, not device-model or main-screen assumptions; Search and Friends keep their mobile navigation containers alive through resizing.
+  - Cook Mode and generated-recipe previews use native arrangements on iOS 27.1, with adaptive fallbacks. Cook Mode keeps the current instruction above a control pane with swipeable Up Next/Ingredients references, step navigation, and timers. Decorative backgrounds span the reserved hinge region while interactive content respects it. Guard Duo-only APIs with both SwiftUI SDK module-version checks and runtime availability so the Xcode 26.6 release path remains buildable. Cooking state and timers remain owned by their existing services.
 - Offline-first sync reliability matters:
   - `CauldronPersistenceSchema` is the single source of truth for the shipping SwiftData model set; full-container tests and recovery probes must use it rather than duplicating the schema.
   - Portable library restores are idempotent newest-wins merges: stable IDs are retained unless a foreign-owner or deletion-history collision requires deterministic remapping, ownership is rebound to the signed-in account, CloudKit record metadata is cleared, and absent destination recipes are not restored as collection memberships.

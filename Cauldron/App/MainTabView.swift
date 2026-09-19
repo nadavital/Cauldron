@@ -290,17 +290,16 @@ struct MainTabView: View {
     private var tabScaffoldWithAccessory: some View {
         if #available(iOS 26.1, macCatalyst 26.1, *) {
             tabScaffold
-                // On iPad, this enables the native sidebar-based tab presentation.
-                // On iPhone, it keeps standard tab bar behavior.
+                // Native tabs adapt between compact bars and roomy sidebars.
                 .tabViewStyle(.sidebarAdaptable)
+                .modifier(AdaptiveTabPlacement())
                 .tabBarMinimizeBehavior(.onScrollDown)
                 .tabViewBottomAccessory(isEnabled: isCookModeActive) {
                     cookModeAccessory
                 }
         } else {
             tabScaffold
-                // On iPad, this enables the native sidebar-based tab presentation.
-                // On iPhone, it keeps standard tab bar behavior.
+                // Native tabs adapt between compact bars and roomy sidebars.
                 .tabViewStyle(.sidebarAdaptable)
                 .tabBarMinimizeBehavior(.onScrollDown)
                 .tabViewBottomAccessory {
@@ -831,6 +830,21 @@ struct MainTabView: View {
 
         sidebarCollections.insert(insertedCollection, at: 0)
         sidebarCollections.sort { $0.updatedAt > $1.updatedAt }
+    }
+}
+
+private struct AdaptiveTabPlacement: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.0, macCatalyst 27.0, *) {
+            content.defaultTabBarPlacement(.sidebar)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 

@@ -32,7 +32,7 @@ struct ContentView: View {
     // When you ship a bug fix, leave this unchanged so no splash appears.
     /// Independent content gate so material release-note changes can be shown
     /// even when they ship within the same marketing version.
-    static let whatsNewContentVersion = "2.0"
+    static let whatsNewContentVersion = "2.0-duo"
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
@@ -1039,28 +1039,37 @@ private struct ScreenshotLiveActivityLauncher: View {
     }
 }
 
-private struct ScreenshotCookModeScene: View {
+struct ScreenshotCookModeScene: View {
     let recipe: Recipe
     let coordinator: CookModeCoordinator
     let dependencies: DependencyContainer
+    @State private var hasPreparedSession = false
 
     var body: some View {
-        CookModeView(
-            recipe: recipe,
-            coordinator: coordinator,
-            dependencies: dependencies
-        )
-        .onAppear {
-            if coordinator.currentRecipe?.id != recipe.id || coordinator.totalSteps == 0 {
-                coordinator.currentRecipe = recipe
-                coordinator.currentStepIndex = 0
-                coordinator.totalSteps = recipe.steps.count
-                coordinator.sessionStartTime = Date()
-                coordinator.isActive = true
+        RecipeDetailView(recipe: recipe, dependencies: dependencies)
+            .fullScreenCover(isPresented: Binding(
+                get: { coordinator.showFullScreen },
+                set: { coordinator.showFullScreen = $0 }
+            )) {
+                NavigationStack {
+                    CookModeView(recipe: recipe, coordinator: coordinator, dependencies: dependencies)
+                }
             }
-        }
+            .onAppear {
+                guard !hasPreparedSession else { return }
+                hasPreparedSession = true
+                if coordinator.currentRecipe?.id != recipe.id || coordinator.totalSteps == 0 {
+                    coordinator.currentRecipe = recipe
+                    coordinator.currentStepIndex = 0
+                    coordinator.totalSteps = recipe.steps.count
+                    coordinator.sessionStartTime = Date()
+                    coordinator.isActive = true
+                }
+                coordinator.expandToFullScreen()
+            }
     }
 }
+
 #endif
 
 #Preview {

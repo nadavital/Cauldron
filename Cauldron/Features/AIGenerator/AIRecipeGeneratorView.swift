@@ -12,6 +12,8 @@ import FoundationModels
 /// View for generating recipes using Apple Intelligence
 struct AIRecipeGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: AIRecipeGeneratorViewModel
     @FocusState private var isPromptFocused: Bool
     @State private var isAvailable: Bool = false
@@ -49,6 +51,7 @@ struct AIRecipeGeneratorView: View {
         #if DEBUG
         if screenshotPreview {
             model.seedScreenshotPreview()
+            _isAvailable = State(initialValue: true)
         }
         #endif
         _viewModel = State(initialValue: model)
@@ -56,47 +59,8 @@ struct AIRecipeGeneratorView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                GlassEffectContainer(spacing: Theme.Spacing.md) {
-                    VStack(spacing: Theme.Spacing.xl) {
-                        if !isAvailable {
-                            AIUnavailableCard()
-                        } else {
-                            if isBusyOrDone {
-                                generationStatusStrip
-                            } else {
-                                promptCard
-                                categoriesSection
-                            }
-
-                            if let partial = viewModel.partialRecipe {
-                                AIRecipePreview(partial: partial)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                            } else if let recipe = viewModel.generatedRecipe {
-                                AICompletedRecipePreview(recipe: recipe)
-                                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                            }
-
-                            if let error = viewModel.errorMessage {
-                                AIErrorCard(error: error)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, Theme.Spacing.xl)
-                .padding(.horizontal, Theme.Spacing.md)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: viewModel.partialRecipe == nil)
-            }
-            .onTapGesture {
-                isPromptFocused = false
-            }
-
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                AIRecipePrimaryActionBar(
-                    state: viewModel.primaryActionState(isAvailable: isAvailable),
-                    action: performPrimaryAction
-                )
+            GeometryReader { proxy in
+                generationWorkspace(availableWidth: proxy.size.width)
             }
             .background {
                 AnimatedMeshGradient()
@@ -113,8 +77,134 @@ struct AIRecipeGeneratorView: View {
                 }
             }
             .task {
-                isAvailable = await viewModel.checkAvailability() || RuntimeEnvironment.forceAIGeneratorUI
+                if hasPreview {
+                    isAvailable = true
+                } else {
+                    isAvailable = await viewModel.checkAvailability() || RuntimeEnvironment.forceAIGeneratorUI
+                }
             }
+        }
+    }
+
+    private var hasPreview: Bool {
+        viewModel.partialRecipe != nil || viewModel.generatedRecipe != nil
+    }
+
+    @ViewBuilder
+    private func generationWorkspace(availableWidth: CGFloat) -> some View {
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.1, macCatalyst 27.1, *),
+           horizontalSizeClass == .regular, !dynamicTypeSize.isAccessibilitySize,
+           isAvailable, hasPreview {
+            ArrangementView {
+                previewPane
+            } secondary: {
+                generationContextPane
+            }
+            .arrangementViewStyle(.split)
+        } else {
+            fallbackWorkspace(availableWidth: availableWidth)
+        }
+        #else
+        fallbackWorkspace(availableWidth: availableWidth)
+        #endif
+    }
+
+    @ViewBuilder
+    private func fallbackWorkspace(availableWidth: CGFloat) -> some View {
+        if isAvailable, hasPreview,
+           RecipeReadingLayout.usesColumns(availableWidth: availableWidth, accessibilityText: dynamicTypeSize.isAccessibilitySize) {
+            HStack(spacing: 0) {
+                previewPane
+                Divider()
+                generationContextPane
+                    .frame(width: RecipeReadingLayout.workbenchWidth(availableWidth: availableWidth))
+            }
+        } else {
+            ScrollView {
+                GlassEffectContainer(spacing: Theme.Spacing.md) {
+                    VStack(spacing: Theme.Spacing.xl) {
+                        if !isAvailable {
+                            AIUnavailableCard()
+                        } else {
+                            if isBusyOrDone {
+                                generationStatusStrip
+                            } else {
+                                promptCard
+                                categoriesSection
+                            }
+                            recipePreview
+                            generationError
+                        }
+                    }
+                }
+                .frame(maxWidth: 720)
+                .padding(Theme.Spacing.md)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) { primaryAction }
+        }
+    }
+
+    private var previewPane: some View {
+        ScrollView {
+            GlassEffectContainer(spacing: Theme.Spacing.md) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    recipePreview
+                    generationError
+                }
+            }
+            .frame(maxWidth: 720)
+            .padding(Theme.Spacing.lg)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var generationContextPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                generationStatusStrip
+                Text("Your request")
+                    .font(.headline)
+                Text(promptSummary)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if viewModel.hasSelectedCategories {
+                    Text(viewModel.selectedCategoriesSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 560, alignment: .leading)
+            .padding(Theme.Spacing.lg)
+            .frame(maxWidth: .infinity)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { primaryAction }
+        .background(Color.appBackground.opacity(0.7))
+    }
+
+    private var primaryAction: some View {
+        AIRecipePrimaryActionBar(
+            state: viewModel.primaryActionState(isAvailable: isAvailable),
+            action: performPrimaryAction
+        )
+    }
+
+    @ViewBuilder
+    private var recipePreview: some View {
+        if let partial = viewModel.partialRecipe {
+            AIRecipePreview(partial: partial)
+        } else if let recipe = viewModel.generatedRecipe {
+            AICompletedRecipePreview(recipe: recipe)
+        }
+    }
+
+    @ViewBuilder
+    private var generationError: some View {
+        if let error = viewModel.errorMessage {
+            AIErrorCard(error: error)
         }
     }
 
@@ -287,7 +377,7 @@ struct AIRecipeGeneratorView: View {
                     .lineLimit(1)
             }
 
-            Spacer()
+            .layoutPriority(1)
 
             if viewModel.generatedRecipe != nil && !viewModel.isGenerating {
                 Button {

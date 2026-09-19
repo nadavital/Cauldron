@@ -31,11 +31,11 @@ struct FriendsDesktopRouteState {
 
 /// Friends tab - showing shared recipes and connections
 struct FriendsTabView: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Bindable private var viewModel = FriendsTabViewModel.shared
     @ObservedObject private var userSession = CurrentUserSession.shared
     @State private var navigationPath = NavigationPath()
     @State private var sidebarSelection: FriendsTabDestination?
+    @State private var preferredCompactColumn: NavigationSplitViewColumn = .detail
     @State private var desktopRouteState = FriendsDesktopRouteState()
     @State private var showingProfileSheet = false
     @State private var showingPeopleSearch = false
@@ -81,6 +81,10 @@ struct FriendsTabView: View {
             viewModel.configure(dependencies: dependencies)
             await viewModel.loadSharedRecipes()
         }
+        .onChange(of: sidebarSelection) { _, _ in
+            navigationPath = NavigationPath()
+            preferredCompactColumn = .detail
+        }
         .onChange(of: userSession.userId) { _, _ in
             navigationPath = NavigationPath()
             sidebarSelection = nil
@@ -114,10 +118,8 @@ struct FriendsTabView: View {
     private var contentView: some View {
         if RuntimeEnvironment.prefersDesktopWorkspace {
             desktopView
-        } else if horizontalSizeClass == .regular {
-            regularView
         } else {
-            compactView
+            regularView
         }
     }
 
@@ -183,32 +185,14 @@ struct FriendsTabView: View {
         }
     }
 
-    private var compactView: some View {
-        NavigationStack(path: $navigationPath) {
-            combinedFeedSection
-                .navigationTitle("Friends")
-                .toolbarTitleDisplayMode(.inlineLarge)
-                .toolbar { friendsToolbar }
-                .refreshable {
-                    await refreshFriendsContent()
-                }
-                .navigationDestination(for: FriendsTabDestination.self) { destination in
-                    switch destination {
-                    case .connections:
-                        ConnectionsView(dependencies: dependencies)
-                    case .profile(let user):
-                        UserProfileView(user: user, dependencies: dependencies)
-                    }
-                }
-        }
-    }
-
     private var regularView: some View {
-        NavigationSplitView {
+        NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
             List(selection: $sidebarSelection) {
                 Section("Friends") {
                     Button {
                         sidebarSelection = nil
+                        navigationPath = NavigationPath()
+                        preferredCompactColumn = .detail
                     } label: {
                         Label("Shared Recipes", systemImage: "book.fill")
                     }
@@ -318,11 +302,10 @@ struct FriendsTabView: View {
     private func handleConnectionsNavigation() {
         if RuntimeEnvironment.prefersDesktopWorkspace {
             desktopRouteState.select(.connections)
-        } else if horizontalSizeClass == .regular {
-            sidebarSelection = .connections
         } else {
             navigationPath = NavigationPath()
-            navigationPath.append(FriendsTabDestination.connections)
+            sidebarSelection = .connections
+            preferredCompactColumn = .detail
         }
     }
 
@@ -354,11 +337,10 @@ struct FriendsTabView: View {
         if RuntimeEnvironment.prefersDesktopWorkspace {
             desktopRouteState.path = NavigationPath()
             desktopRouteState.path.append(FriendsTabDestination.profile(user))
-        } else if horizontalSizeClass == .regular {
-            sidebarSelection = .profile(user)
         } else {
             navigationPath = NavigationPath()
-            navigationPath.append(FriendsTabDestination.profile(user))
+            sidebarSelection = .profile(user)
+            preferredCompactColumn = .detail
         }
     }
 

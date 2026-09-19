@@ -12,7 +12,6 @@ import os
 struct SearchTabView: View {
     @State private var viewModel: SearchTabViewModel
     @StateObject private var currentUserSession = CurrentUserSession.shared
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var searchText = ""
     @State private var searchMode: SearchMode = .recipes
     @State private var searchHistory: SearchHistoryStore
@@ -42,20 +41,15 @@ struct SearchTabView: View {
         self.screenshotDetailRecipe = screenshotDetailRecipe
     }
 
-    private var isRegularWidth: Bool {
-        // Both Catalyst and the iPhone/iPad app running on Apple silicon Macs
-        // already have the app's primary sidebar. A nested Search split view
-        // wastes the remaining window on another sidebar and placeholder pane.
-        !RuntimeEnvironment.prefersDesktopWorkspace && horizontalSizeClass == .regular
-    }
-
     var body: some View {
         Group {
             if isActive {
-                if isRegularWidth {
-                    splitView
-                } else {
+                if RuntimeEnvironment.prefersDesktopWorkspace {
                     compactView
+                } else {
+                    // Keep one navigation container alive while folding/resizing.
+                    // NavigationSplitView owns its compact presentation.
+                    splitView
                 }
             } else {
                 Color.clear

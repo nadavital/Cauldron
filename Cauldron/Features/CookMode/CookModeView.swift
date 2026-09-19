@@ -17,9 +17,14 @@ struct CookModeView: View {
 
     @ObservedObject private var timerManager: TimerManager
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.dismiss) private var dismiss
     @State private var showingAllTimers = false
+    @State private var referencePage = 0
+    @State private var showingIngredients = false
+    @State private var showingIngredientSheet = false
     @State private var showingEndSessionAlert = false
     @State private var checkedIngredientIDs: Set<UUID> = []
     @State private var experiencePreferences: ExperiencePreferences
@@ -59,13 +64,13 @@ struct CookModeView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Progress bar
-            ProgressView(value: coordinator.progress)
-                .tint(Color.cauldronOrange)
+            if !isRegularWidthLayout {
+                ProgressView(value: coordinator.progress)
+                    .tint(Color.cauldronOrange)
+            }
 
-            if isRegularWidthLayout {
-                regularWidthContent
-            } else {
-                compactContent
+            GeometryReader { proxy in
+                cookingContent(availableWidth: proxy.size.width)
             }
         }
         .background(Color.appBackground.ignoresSafeArea())
@@ -77,77 +82,30 @@ struct CookModeView: View {
                     coordinator.minimizeToBackground()
                 }
             }
-
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Section("Cooking") {
-                        NavigationLink {
-                            RecipeDetailView(
-                                recipe: recipe,
-                                dependencies: dependencies,
-                                highlightedStepIndex: coordinator.currentStepIndex
-                            )
-                        } label: {
-                            Label("View Full Recipe", systemImage: "book.fill")
-                        }
-
-                        Button {
-                            showingAllTimers = true
-                        } label: {
-                            Label("Timers (\(timerManager.activeTimers.count))", systemImage: "timer")
-                        }
-                    }
-
-                    Section("Recipe") {
-                        Picker("Servings", selection: Binding(
-                            get: { experiencePreferences.recipeScaleFactor },
-                            set: { experiencePreferences.recipeScaleFactor = $0 }
-                        )) {
-                            Text("½×").tag(0.5)
-                            Text("1×").tag(1.0)
-                            Text("2×").tag(2.0)
-                            Text("3×").tag(3.0)
-                        }
-
-                        Picker("Units", selection: Binding(
-                            get: { experiencePreferences.recipeUnitSystem },
-                            set: { experiencePreferences.recipeUnitSystem = $0 }
-                        )) {
-                            ForEach(UnitSystem.allCases) { system in
-                                Text(system.label).tag(system)
-                            }
-                        }
-                    }
-
-                    Section("Display") {
-                        cookModeSettingsMenu
-                    }
-
-                    Section {
-                        Button(role: .destructive) {
-                            showingEndSessionAlert = true
-                        } label: {
-                            Label("End Cooking", systemImage: "xmark.circle")
-                        }
-                    }
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "ellipsis.circle")
-
-                        // Timer badge
-                        if !timerManager.activeTimers.isEmpty {
-                            Circle()
-                                .fill(Color.cauldronOrange)
-                                .frame(width: 8, height: 8)
-                                .offset(x: 4, y: -4)
-                        }
-                    }
-                }
+                CookModeDisplayControls(preferences: experiencePreferences)
+                    .labelStyle(.iconOnly)
             }
         }
         .sheet(isPresented: $showingAllTimers) {
             AllTimersView(timerManager: timerManager)
                 .appSheetSizing(.standard)
+        }
+        .sheet(isPresented: $showingIngredientSheet) {
+            NavigationStack {
+                ScrollView {
+                    ingredientChecklistSection.padding()
+                }
+                .navigationTitle("Ingredients")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", systemImage: "checkmark") {
+                            showingIngredientSheet = false
+                        }
+                    }
+                }
+            }
+            .appSheetSizing(.standard)
         }
         .alert("End Cooking Session?", isPresented: $showingEndSessionAlert) {
             Button("Cancel", role: .cancel) {}
@@ -174,6 +132,70 @@ struct CookModeView: View {
         horizontalSizeClass == .regular
     }
 
+    private var controlPanelBackground: some View {
+        GeometryReader { proxy in
+            recipeArtwork
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .blur(radius: 60)
+                .overlay {
+                    (colorScheme == .dark ? Color.black : Color.appBackground)
+                        .opacity(colorScheme == .dark ? 0.78 : 0.84)
+                }
+                .clipped()
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var recipeArtwork: some View {
+        RecipeImageView(
+            imageURL: recipe.imageURL, size: .hero, showPlaceholderText: false,
+            recipeImageService: dependencies.recipeImageService,
+            recipeId: recipe.id, ownerId: recipe.ownerId,
+            privateRecordName: recipe.cloudRecordName,
+            imageCacheIdentity: recipe.imageModifiedAt.map(RecipeImageView.cacheIdentity)
+        )
+    }
+
+    @ViewBuilder
+    private func cookingContent(availableWidth: CGFloat) -> some View {
+        // Runtime guards alone cannot compile these APIs with the shipping SDK.
+        #if canImport(SwiftUI, _version: 8.0.85)
+        if #available(iOS 27.1, macCatalyst 27.1, *), isRegularWidthLayout {
+            ArrangementView {
+                readingPane
+            } secondary: {
+                workbenchPanel
+            }
+            .arrangementViewStyle(.split)
+            // The split layout reserves the hinge for content. Paint behind the
+            // entire arrangement so that region does not expose a blank band.
+            .background(controlPanelBackground.ignoresSafeArea(.container))
+        } else {
+            fallbackCookingContent(availableWidth: availableWidth)
+        }
+        #else
+        fallbackCookingContent(availableWidth: availableWidth)
+        #endif
+    }
+
+    @ViewBuilder
+    private func fallbackCookingContent(availableWidth: CGFloat) -> some View {
+        if RecipeReadingLayout.usesColumns(
+            availableWidth: availableWidth,
+            accessibilityText: dynamicTypeSize.isAccessibilitySize
+        ) {
+            HStack(spacing: 0) {
+                readingPane
+                Divider()
+                workbenchPanel
+                    .frame(width: RecipeReadingLayout.workbenchWidth(availableWidth: availableWidth))
+                    .background(controlPanelBackground.ignoresSafeArea(.container, edges: .bottom))
+            }
+        } else {
+            compactContent
+        }
+    }
+
     private var compactContent: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -181,6 +203,10 @@ struct CookModeView: View {
                     stepProgressBadge
                     stepContent
                     timersSection
+                    DisclosureGroup("Ingredients", isExpanded: $showingIngredients) {
+                        ingredientChecklistSection
+                            .padding(.top, Theme.Spacing.sm)
+                    }
                 }
                 .padding(.top, Theme.Spacing.md)
                 .padding(.horizontal, Theme.Spacing.md)
@@ -188,39 +214,41 @@ struct CookModeView: View {
             }
 
             navigationControls
+            cookingOptionsMenu
+                .padding(.bottom, Theme.Spacing.md)
         }
     }
 
-    private var regularWidthContent: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
+    private var readingPane: some View {
+        GeometryReader { proxy in
+            // Size follows the pane, never the instruction's text length.
+            let instructionHeight = min(180, max(120, proxy.size.height * 0.36))
+            ZStack(alignment: .bottom) {
                 ScrollView {
-                    VStack(spacing: 0) {
-                        recipeVisualHeader
-                            .overlay(alignment: .bottom) {
-                                stepProgressBadge
-                                    .padding(.horizontal, 24)
-                                    .offset(y: 22)
-                            }
-                        VStack(spacing: 28) {
-                            stepContent
-                        }
-                        .padding(.top, 38)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                    }
+                    recipeArtwork
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .backgroundExtensionEffect()
                 }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollEdgeEffectStyle(.soft, for: .top)
 
-                Spacer(minLength: 0)
-                navigationControls
+                GlassEffectContainer {
+                    ScrollView {
+                        stepContent
+                            .padding(20)
+                    }
+                    .id(coordinator.currentStepIndex)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
+                    .frame(width: proxy.size.width, height: instructionHeight)
+                    .glassEffect(.regular, in: Rectangle())
+                    .accessibilityIdentifier("cookInstructionPanel")
+                }
             }
-
-            Divider()
-
-            workbenchPanel
-                .frame(width: 360)
-                .background(Color.cauldronSecondaryBackground)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var stepProgressBadge: some View {
@@ -245,48 +273,15 @@ struct CookModeView: View {
         .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 
-    private var recipeVisualHeader: some View {
-        RecipeImageView(
-            imageURL: recipe.imageURL,
-            size: .preview,
-            showPlaceholderText: false,
-            recipeImageService: dependencies.recipeImageService,
-            recipeId: recipe.id,
-            ownerId: recipe.ownerId,
-            privateRecordName: recipe.cloudRecordName,
-            imageCacheIdentity: recipe.imageModifiedAt.map(RecipeImageView.cacheIdentity)
-        )
-        .frame(height: isRegularWidthLayout ? 300 : 230)
-        .overlay(alignment: .bottom) {
-            LinearGradient(
-                colors: [
-                    Color.appBackground.opacity(0),
-                    Color.appBackground.opacity(0.5),
-                    Color.appBackground
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 200)
-            .allowsHitTesting(false)
-        }
-        .backgroundExtensionEffect(isEnabled: isRegularWidthLayout)
-        .ignoresSafeArea(edges: .top)
-        .clipped()
-    }
-
     private var stepContent: some View {
         Group {
             if let currentStep = coordinator.currentStep {
                 Text(currentStep.text)
                     .font(experiencePreferences.largerStepText ? .title : .title3)
-                    .multilineTextAlignment(.center)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(20)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.cauldronSecondaryBackground)
-                    .cornerRadius(Theme.Radius.large)
-                    .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -371,13 +366,140 @@ struct CookModeView: View {
         }
     }
 
-    private var workbenchPanel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                ingredientChecklistSection
-                timerWorkbenchSection
+    private var cookingOptionsMenu: some View {
+        Menu {
+            Section("Cooking") {
+                Button("Ingredients", systemImage: "checklist") {
+                    showingIngredientSheet = true
+                }
+
+                NavigationLink {
+                    RecipeDetailView(
+                        recipe: recipe,
+                        dependencies: dependencies,
+                        highlightedStepIndex: coordinator.currentStepIndex
+                    )
+                } label: {
+                    Label("View Full Recipe", systemImage: "book.fill")
+                }
+
+                Button {
+                    showingAllTimers = true
+                } label: {
+                    Label("Timers (\(timerManager.activeTimers.count))", systemImage: "timer")
+                }
             }
-            .padding(20)
+
+            Section("Recipe") {
+                Picker("Servings", selection: Binding(
+                    get: { experiencePreferences.recipeScaleFactor },
+                    set: { experiencePreferences.recipeScaleFactor = $0 }
+                )) {
+                    Text("½×").tag(0.5)
+                    Text("1×").tag(1.0)
+                    Text("2×").tag(2.0)
+                    Text("3×").tag(3.0)
+                }
+
+
+            }
+
+            Section("Display") {
+                cookModeSettingsMenu
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showingEndSessionAlert = true
+                } label: {
+                    Label("End Cooking", systemImage: "xmark.circle")
+                }
+            }
+        } label: {
+            Label("Options", systemImage: "slider.horizontal.3")
+        }
+        .buttonStyle(.glass)
+        .controlSize(.large)
+        .accessibilityLabel("Cooking options")
+    }
+
+    private var workbenchPanel: some View {
+        GeometryReader { proxy in
+            GlassEffectContainer(spacing: 12) {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("Step \(coordinator.currentStepIndex + 1) of \(coordinator.totalSteps)")
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                        Spacer()
+                        Button("End Session", systemImage: "xmark.circle", role: .destructive) {
+                            showingEndSessionAlert = true
+                        }
+                        .font(.subheadline)
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
+                    }
+
+                    TabView(selection: $referencePage) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(coordinator.isLastStep ? "FINAL STEP" : "UP NEXT")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            if recipe.steps.indices.contains(coordinator.currentStepIndex + 1) {
+                                Text(recipe.steps[coordinator.currentStepIndex + 1].text)
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(6)
+                            } else {
+                                Text("You're on the final instruction.")
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.bottom, 32)
+                        .tag(0)
+
+                        ScrollView {
+                            ingredientChecklistSection
+                                .padding(.bottom, 32)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .tag(1)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .always))
+                    .indexViewStyle(.page(backgroundDisplayMode: .always))
+                    .frame(maxHeight: .infinity)
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("cookReferencePager")
+
+                    CookModeActiveTimerSummary(timerManager: timerManager) {
+                        showingAllTimers = true
+                    }
+
+                    HStack(spacing: 16) {
+                        QuickTimerButton(timerManager: timerManager, recipeName: recipe.title,
+                                         stepIndex: coordinator.currentStepIndex,
+                                         isWorkbenchControl: true, suggestedTimers: unstartedCurrentStepTimers)
+                        CookModeServingsMenu(preferences: experiencePreferences)
+                        NavigationLink {
+                            RecipeDetailView(recipe: recipe, dependencies: dependencies,
+                                             highlightedStepIndex: coordinator.currentStepIndex)
+                        } label: {
+                            Label("Full Recipe", systemImage: "book")
+                        }
+                    }
+                    .buttonStyle(CookModeControlTileStyle(height: 60))
+                    .font(.subheadline.weight(.medium))
+
+                    HStack(spacing: 16) {
+                        previousStepButton
+                        nextStepButton
+                    }
+                }
+                .padding(20)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
         }
     }
 
@@ -434,80 +556,6 @@ struct CookModeView: View {
         }
     }
 
-    private var timerWorkbenchSection: some View {
-        let pendingTimers = unstartedCurrentStepTimers
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Timers")
-                    .font(.headline)
-                Spacer()
-                if !timerManager.activeTimers.isEmpty {
-                    Text("\(timerManager.activeTimers.count) active")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if timerManager.activeTimers.isEmpty && pendingTimers.isEmpty {
-                Text("No active timers")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !timerManager.activeTimers.isEmpty {
-                ForEach(timerManager.activeTimers) { activeTimer in
-                    ImprovedTimerRowView(timer: activeTimer, timerManager: timerManager)
-                }
-            }
-
-            if !pendingTimers.isEmpty {
-                Text("Current Step Timers")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .padding(.top, timerManager.activeTimers.isEmpty ? 0 : 4)
-
-                ForEach(Array(pendingTimers.enumerated()), id: \.element.id) { _, timerSpec in
-                    Button {
-                        timerManager.startTimer(
-                            spec: timerSpec,
-                            stepIndex: coordinator.currentStepIndex,
-                            recipeName: recipe.title
-                        )
-                        Task { await RecipeIntentDonation.recordTimerStarted(timerSpec) }
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(timerSpec.label)
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text(timerSpec.displayDuration)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "play.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(Color.cauldronOrange)
-                        }
-                        .padding(12)
-                        .background(Color.cauldronBackground, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            QuickTimerButton(
-                timerManager: timerManager,
-                recipeName: recipe.title,
-                stepIndex: coordinator.currentStepIndex
-            )
-            .padding(.top, 2)
-        }
-    }
-
     private var unstartedCurrentStepTimers: [TimerSpec] {
         guard let currentStep = coordinator.currentStep else { return [] }
         let stepActiveTimers = timerManager.activeTimers.filter { $0.stepIndex == coordinator.currentStepIndex }
@@ -528,48 +576,67 @@ struct CookModeView: View {
         }
     }
 
-    /// Celebratory overlay shown when the cook finishes the last step.
     private var navigationControls: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                Button {
-                    coordinator.previousStep()
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
-                .controlSize(.extraLarge)
-                .disabled(coordinator.isFirstStep)
-
-                Button {
-                    if coordinator.isLastStep {
-                        if experiencePreferences.timerHaptics {
-                            Haptics.success()
-                        }
-                        coordinator.endSession()
-                    } else {
-                        coordinator.nextStep()
+        GlassEffectContainer(spacing: 24) {
+            ViewThatFits(in: .horizontal) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    HStack(spacing: 24) {
+                        previousStepButton
+                        nextStepButton
                     }
-                } label: {
-                    HStack {
-                        Text(coordinator.isLastStep ? "Done" : "Next")
-                            .fontWeight(.semibold)
-                        Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
-                    }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.extraLarge)
-                .tint(.cauldronOrange)
+                VStack(spacing: 20) {
+                    previousStepButton
+                    nextStepButton
+                }
             }
         }
-        .padding()
+        .frame(maxWidth: 560)
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.md)
+        .frame(maxWidth: .infinity)
         .animation(
             shouldReduceMotion ? nil : Theme.Animation.snappy,
             value: coordinator.currentStepIndex
         )
+    }
+
+    private var previousStepButton: some View {
+        Button {
+            coordinator.previousStep()
+        } label: {
+            Label("Back", systemImage: "chevron.left")
+                .fontWeight(.semibold)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity, minHeight: 32)
+        }
+        .buttonStyle(CookModeControlTileStyle(height: isRegularWidthLayout ? 80 : 52))
+        .controlSize(.extraLarge)
+        .disabled(coordinator.isFirstStep)
+    }
+
+    private var nextStepButton: some View {
+        Button {
+            if coordinator.isLastStep {
+                if experiencePreferences.timerHaptics {
+                    Haptics.success()
+                }
+                coordinator.endSession()
+            } else {
+                coordinator.nextStep()
+            }
+        } label: {
+            HStack {
+                Text(coordinator.isLastStep ? "Done" : "Next")
+                    .fontWeight(.semibold)
+                Image(systemName: coordinator.isLastStep ? "checkmark" : "chevron.right")
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, minHeight: 32)
+        }
+        .buttonStyle(CookModeControlTileStyle(height: isRegularWidthLayout ? 80 : 52, isPrimary: true))
+        .controlSize(.extraLarge)
+        .tint(.cauldronOrange)
     }
 
     private var cookModeSettingsMenu: some View {
@@ -597,6 +664,108 @@ struct CookModeView: View {
                     set: { experiencePreferences.timerSounds = $0 }
                 ))
             }
+        }
+    }
+}
+
+
+private struct CookModeControlTileStyle: ButtonStyle {
+    var height: CGFloat = 72
+    var isPrimary = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, minHeight: height)
+            .foregroundStyle(isPrimary ? Color.white : Color.primary)
+            .glassEffect(
+                isPrimary ? .regular.tint(.cauldronOrange).interactive() : .regular.interactive(),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.35)
+    }
+}
+
+private struct CookModeServingsMenu: View {
+    @Bindable var preferences: ExperiencePreferences
+
+    private var multiplier: String {
+        preferences.recipeScaleFactor == 0.5
+            ? "½×"
+            : "\(preferences.recipeScaleFactor.formatted(.number.precision(.fractionLength(0...1))))×"
+    }
+
+    var body: some View {
+        Menu {
+            Picker("Servings", selection: $preferences.recipeScaleFactor) {
+                Text("½×").tag(0.5)
+                Text("1×").tag(1.0)
+                Text("2×").tag(2.0)
+                Text("3×").tag(3.0)
+            }
+        } label: {
+            Label("Servings \(multiplier)", systemImage: "person.2")
+        }
+        .accessibilityValue(multiplier)
+    }
+}
+
+private struct CookModeDisplayControls: View {
+    @Bindable var preferences: ExperiencePreferences
+
+    var body: some View {
+        Menu {
+            Toggle("Keep Screen Awake", isOn: $preferences.keepScreenAwake)
+            Toggle("Larger Step Text", isOn: $preferences.largerStepText)
+            Toggle("Reduce Motion", isOn: $preferences.reduceMotion)
+            Section("Timer Feedback") {
+                Toggle("Haptics", isOn: $preferences.timerHaptics)
+                Toggle("Sounds", isOn: $preferences.timerSounds)
+            }
+        } label: {
+            Label("Accessibility", systemImage: "accessibility")
+        }
+    }
+}
+
+private struct CookModeActiveTimerSummary: View {
+    @ObservedObject var timerManager: TimerManager
+    let showAllTimers: () -> Void
+
+    var body: some View {
+        if let timer = timerManager.activeTimers.first {
+            HStack(spacing: 12) {
+                Image(systemName: "timer").foregroundStyle(Color.cauldronOrange)
+                Text(timer.spec.label)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                if timerManager.activeTimers.count > 1 {
+                    Button("+\(timerManager.activeTimers.count - 1)", action: showAllTimers)
+                        .accessibilityLabel("Show all \(timerManager.activeTimers.count) timers")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                Spacer(minLength: 0)
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let seconds = max(0, timerManager.getRemainingTime(id: timer.id))
+                    Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(Color.cauldronOrange)
+                }
+                Button(timer.isRunning ? "Pause timer" : "Resume timer",
+                       systemImage: timer.isRunning ? "pause.fill" : "play.fill") {
+                    if timer.isRunning { timerManager.pauseTimer(id: timer.id) }
+                    else { timerManager.resumeTimer(id: timer.id) }
+                }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                Button("Stop timer", systemImage: "stop.fill") {
+                    timerManager.stopTimer(id: timer.id)
+                }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+            .frame(height: 44)
         }
     }
 }

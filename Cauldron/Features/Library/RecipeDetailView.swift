@@ -18,6 +18,7 @@ struct RecipeDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State var recipe: Recipe
     @State var showingEditSheet = false
     @State var showSessionConflictAlert = false
@@ -185,36 +186,28 @@ struct RecipeDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private var compactRecipeContent: some View {
-        GlassEffectContainer(spacing: 2) {
-            VStack(alignment: .leading, spacing: 20) {
-                recipeHeaderSection
-                notesSection
-                ingredientsSection
-                stepsSection
-                nutritionSection
-                relatedSection
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, hasHeroImage ? 0 : 20)
-        .padding(.bottom, 100)
-    }
+    private func recipeContent(availableWidth: CGFloat) -> some View {
+        let usesColumns = RecipeReadingLayout.usesColumns(
+            availableWidth: availableWidth,
+            accessibilityText: dynamicTypeSize.isAccessibilitySize
+        )
+        let columns = usesColumns
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 20))
 
-    @ViewBuilder
-    private var regularRecipeContent: some View {
-        GlassEffectContainer(spacing: 2) {
+        return GlassEffectContainer(spacing: 2) {
             VStack(alignment: .leading, spacing: 20) {
                 recipeHeaderSection
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(alignment: .top, spacing: 20) {
+                // Keep the same content identity as the display or window resizes.
+                // This is a scrolling document, not a fold-displaced arrangement.
+                columns {
                     VStack(alignment: .leading, spacing: 20) {
                         ingredientsSection
                         notesSection
                     }
-                    .frame(maxWidth: 430, alignment: .leading)
+                    .frame(maxWidth: usesColumns ? 430 : .infinity, alignment: .leading)
 
                     stepsSection
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -224,9 +217,9 @@ struct RecipeDetailView: View {
                 relatedSection
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, usesColumns ? 20 : 16)
         .padding(.top, hasHeroImage ? 0 : 20)
-        .padding(.bottom, 100)
+        .padding(.bottom, 20)
         .frame(maxWidth: 1_080, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -247,11 +240,7 @@ struct RecipeDetailView: View {
                                     .ignoresSafeArea(edges: .top)
                             }
 
-                            if horizontalSizeClass == .regular {
-                                regularRecipeContent
-                            } else {
-                                compactRecipeContent
-                            }
+                            recipeContent(availableWidth: proxy.size.width)
                         }
                         .frame(width: proxy.size.width, alignment: .leading)
                     }
@@ -268,6 +257,8 @@ struct RecipeDetailView: View {
             }
             .ignoresSafeArea(edges: hasHeroImage ? .top : [])
 
+        }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
             HStack {
                 Spacer()
 

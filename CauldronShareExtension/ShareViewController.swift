@@ -203,8 +203,8 @@ final class ShareViewController: UIViewController {
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
-            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            headerStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
+            headerStack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            headerStack.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
 
             logoImageView.widthAnchor.constraint(equalToConstant: 32),
             logoImageView.heightAnchor.constraint(equalToConstant: 32),
@@ -227,8 +227,8 @@ final class ShareViewController: UIViewController {
             imageGradientView.bottomAnchor.constraint(equalTo: previewImageView.bottomAnchor),
             imageGradientView.heightAnchor.constraint(equalToConstant: 220),
 
-            primaryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            primaryButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            primaryButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            primaryButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
             primaryButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             primaryButton.heightAnchor.constraint(equalToConstant: 50)
         ])
