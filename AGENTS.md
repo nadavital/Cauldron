@@ -27,6 +27,7 @@ Guidance for coding agents working in this repository.
   - `xcodebuild test -scheme Cauldron -destination 'platform=macOS,variant=Mac Catalyst,name=My Mac' -configuration Debug CODE_SIGNING_ALLOWED=NO`
 - Firebase functions and Firestore rules tests (Node 22 + Java 21):
   - `cd firebase/functions && npm ci && npm test`
+  - Sanitizer/web tests use `--test-timeout=15000` and natural process exit; verify all 76 test results are reported.
 - Firebase production dependency audit:
   - `cd firebase/functions && npm run audit:production`
 - Hosted public sharing contract:
